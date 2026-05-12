@@ -877,3 +877,130 @@ void preload_visible_tracks(int start, int end) {
         }
     }
 }
+
+char g_current_album_cover_path[MAX_PATH_LEN] = "";
+int g_current_album_cover_valid = 0;
+
+static pthread_mutex_t g_album_cover_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void cleanup_album_cover_cache(void) {
+    pthread_mutex_lock(&g_album_cover_mutex);
+    if (g_current_album_cover_valid && g_current_album_cover_path[0] != '\0') {
+        unlink(g_current_album_cover_path);
+        g_current_album_cover_path[0] = '\0';
+        g_current_album_cover_valid = 0;
+    }
+    pthread_mutex_unlock(&g_album_cover_mutex);
+}
+
+int extract_album_cover(const char *audio_path, char *output_path, size_t output_size) {
+    if (!audio_path || !output_path || output_size == 0) {
+        return -1;
+    }
+
+    AVFormatContext *fmt_ctx = NULL;
+    if (avformat_open_input(&fmt_ctx, audio_path, NULL, NULL) != 0) {
+        return -1;
+    }
+
+    if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    int cover_stream_idx = -1;
+    for (unsigned int i = 0; i < fmt_ctx->nb_streams; i++) {
+        if (fmt_ctx->streams[i]->disposition & AV_DISPOSITION_ATTACHED_PIC) {
+            cover_stream_idx = (int)i;
+            break;
+        }
+    }
+
+    if (cover_stream_idx < 0) {
+        AVDictionaryEntry *entry = av_dict_get(fmt_ctx->metadata, "metadata_block_picture", NULL, 0);
+        if (!entry) {
+            entry = av_dict_get(fmt_ctx->metadata, "APIC", NULL, 0);
+        }
+        if (!entry) {
+            avformat_close_input(&fmt_ctx);
+            return -1;
+        }
+    }
+
+    char temp_path[MAX_PATH_LEN];
+    snprintf(temp_path, sizeof(temp_path), "%sXXXXXX.jpg", ALBUM_COVER_TEMP_PREFIX);
+    int fd = mkstemps(temp_path, 4);
+    if (fd < 0) {
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+    close(fd);
+
+    int ret = -1;
+
+    if (cover_stream_idx >= 0) {
+        AVStream *stream = fmt_ctx->streams[cover_stream_idx];
+        AVPacket *pkt = &stream->attached_pic;
+
+        if (pkt && pkt->size > 0) {
+            FILE *fp = fopen(temp_path, "wb");
+            if (fp) {
+                size_t written = fwrite(pkt->data, 1, pkt->size, fp);
+                fclose(fp);
+                if (written == (size_t)pkt->size) {
+                    ret = 0;
+                }
+            }
+        }
+    }
+
+    avformat_close_input(&fmt_ctx);
+
+    if (ret == 0) {
+        snprintf(output_path, output_size, "%s", temp_path);
+    } else {
+        unlink(temp_path);
+    }
+
+    return ret;
+}
+
+int get_current_album_cover_path(char *path, size_t path_size) {
+    if (!path || path_size == 0) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_album_cover_mutex);
+    if (g_current_album_cover_valid && g_current_album_cover_path[0] != '\0') {
+        snprintf(path, path_size, "%s", g_current_album_cover_path);
+        pthread_mutex_unlock(&g_album_cover_mutex);
+        return 0;
+    }
+    pthread_mutex_unlock(&g_album_cover_mutex);
+
+    return -1;
+}
+
+void update_album_cover_for_track(const char *track_path) {
+    if (!track_path || track_path[0] == '\0') {
+        return;
+    }
+
+    cleanup_album_cover_cache();
+
+    // 清空字符画缓存，以便新歌曲加载时重新生成
+    g_braille_art_buffer[0] = '\0';
+    g_album_cover_size = 0;
+
+    char temp_path[MAX_PATH_LEN];
+    if (extract_album_cover(track_path, temp_path, sizeof(temp_path)) == 0) {
+        pthread_mutex_lock(&g_album_cover_mutex);
+        snprintf(g_current_album_cover_path, sizeof(g_current_album_cover_path), "%s", temp_path);
+        g_current_album_cover_valid = 1;
+        pthread_mutex_unlock(&g_album_cover_mutex);
+    }
+}
+
+void reset_album_cover_cache(void) {
+    cleanup_album_cover_cache();
+}

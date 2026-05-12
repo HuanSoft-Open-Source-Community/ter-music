@@ -72,6 +72,9 @@ typedef enum {
 #define VISUALIZER_BAND_COUNT 64
 #define MAX_CACHE_SIZE 100
 
+#define MAX_ALBUM_COVER_CACHE 10
+#define ALBUM_COVER_TEMP_PREFIX "/tmp/ter-music-cover-"
+
 typedef struct {
     char path[MAX_PATH_LEN];
     char title[MAX_META_LEN];
@@ -163,6 +166,7 @@ typedef struct {
     int show_lyrics_panel;
     int default_loop_mode;
     float default_playback_speed;
+    int show_album_cover;
 } AppConfig;
 
 typedef struct {
@@ -282,5 +286,17 @@ void update_rainbow_colors(void);
 int get_track_metadata(int index, Track *out);
 void preload_visible_tracks(int start, int end);
 void clear_metadata_cache(void);
+
+int extract_album_cover(const char *audio_path, char *output_path, size_t output_size);
+int get_current_album_cover_path(char *path, size_t path_size);
+void cleanup_album_cover_cache(void);
+void update_album_cover_for_track(const char *track_path);
+void reset_album_cover_cache(void);
+
+extern char g_current_album_cover_path[MAX_PATH_LEN];
+extern int g_current_album_cover_valid;
+
+extern char g_braille_art_buffer[];
+extern int g_album_cover_size;
 
 #endif
