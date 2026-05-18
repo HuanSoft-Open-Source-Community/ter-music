@@ -13,6 +13,7 @@
 #include "../include/lyrics.h"
 #include "../include/menu_views.h"
 #include "../include/remote.h"
+#include "../include/crypto.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -580,6 +581,7 @@ void init_default_config(void) {
     g_app_config.default_loop_mode = LOOP_OFF;
     g_app_config.default_playback_speed = 1.0f;
     g_app_config.show_album_cover = 1;
+    g_app_config.config_version = 0;
     g_app_config.remote_connection_count = 0;
     memset(g_app_config.remote_connections, 0, sizeof(g_app_config.remote_connections));
 }
@@ -742,6 +744,23 @@ void load_config(void) {
         }
     }
 
+    g_app_config.config_version = (int)extract_json_int(json, "config_version");
+
+    if (g_app_config.config_version < 1) {
+        for (int ri = 0; ri < MAX_REMOTE_CONNECTIONS; ri++) {
+            g_app_config.remote_connections[ri].password[0] = '\0';
+        }
+    } else {
+        for (int ri = 0; ri < MAX_REMOTE_CONNECTIONS; ri++) {
+            if (g_app_config.remote_connections[ri].password[0]) {
+                char decrypted[256];
+                crypto_decrypt(g_app_config.remote_connections[ri].password, decrypted, sizeof(decrypted));
+                strncpy(g_app_config.remote_connections[ri].password, decrypted,
+                        sizeof(g_app_config.remote_connections[ri].password) - 1);
+            }
+        }
+    }
+
     free(json);
 }
 
@@ -794,6 +813,7 @@ void save_config(void) {
     fprintf(f, "  \"default_playback_speed\": %.2f,\n", g_app_config.default_playback_speed);
     fprintf(f, "  \"show_album_cover\": %d,\n", g_app_config.show_album_cover);
 
+    fprintf(f, "  \"config_version\": 1,\n");
     fprintf(f, "  \"remote_connection_count\": %d,\n", g_app_config.remote_connection_count);
     for (int ri = 0; ri < g_app_config.remote_connection_count && ri < MAX_REMOTE_CONNECTIONS; ri++) {
         const RemoteConnectionConfig *rc = &g_app_config.remote_connections[ri];
@@ -806,7 +826,9 @@ void save_config(void) {
         fprintf(f, "  \"remote_%d_port\": %d,\n", ri, rc->port);
         escape_json_string(rc->username, escaped, sizeof(escaped));
         fprintf(f, "  \"remote_%d_username\": \"%s\",\n", ri, escaped);
-        escape_json_string(rc->password, escaped, sizeof(escaped));
+        char encrypted[512];
+        crypto_encrypt(rc->password, encrypted, sizeof(encrypted));
+        escape_json_string(encrypted, escaped, sizeof(escaped));
         fprintf(f, "  \"remote_%d_password\": \"%s\",\n", ri, escaped);
         escape_json_string(rc->private_key_path, escaped, sizeof(escaped));
         fprintf(f, "  \"remote_%d_private_key_path\": \"%s\",\n", ri, escaped);

@@ -189,6 +189,7 @@ typedef struct {
     int default_loop_mode;
     float default_playback_speed;
     int show_album_cover;
+    int config_version;
     RemoteConnectionConfig remote_connections[MAX_REMOTE_CONNECTIONS];
     int remote_connection_count;
 } AppConfig;

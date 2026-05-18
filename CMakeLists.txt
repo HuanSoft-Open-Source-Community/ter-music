@@ -85,6 +85,7 @@ add_executable(${PROJECT_NAME}
     src/lyrics.c
     src/media_session.c
     src/menu_views.c
+    src/crypto.c
     src/braille_art.c
     src/image_loader.c
     src/remote.c
