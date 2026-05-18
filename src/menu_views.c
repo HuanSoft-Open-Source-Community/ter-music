@@ -2514,6 +2514,48 @@ static void remote_start_browse(int conn_idx) {
     rerender_remote_view();
 }
 
+static void remote_refresh_connection(void) {
+    if (g_remote_selected_conn < 0 || g_remote_selected_conn >= g_app_config.remote_connection_count) return;
+    const RemoteConnectionConfig *conn = &g_app_config.remote_connections[g_remote_selected_conn];
+
+    if (g_remote_entries) {
+        remote_free_entries(g_remote_entries, g_remote_entry_count);
+        g_remote_entries = NULL;
+    }
+    g_remote_entry_count = 0;
+    g_remote_entry_offset = 0;
+
+    show_status_message(menu_text("正在连接...", "Connecting..."));
+    render_settings_content();
+    refresh();
+
+    RemoteDirEntry *entries = NULL;
+    int count = 0;
+    int ret = remote_list_directory(conn, conn->base_path, &entries, &count);
+    if (entries) remote_free_entries(entries, count);
+
+    if (ret < 0) {
+        const char *err = remote_strerror();
+        if (err && err[0]) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "%s%s%s",
+                     menu_text("刷新失败：", "Refresh failed: "), err,
+                     menu_text("  ← 按任意键继续", "  ← Press any key"));
+            show_status_message(buf);
+        } else {
+            show_status_message(menu_text("刷新失败  ← 按任意键继续", "Refresh failed  ← Press any key"));
+        }
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s %d %s",
+                 menu_text("连接成功，共", "Connection OK, found"),
+                 count,
+                 menu_text("个条目", "entries"));
+        show_status_message(buf);
+    }
+    render_settings_content();
+}
+
 static void remote_load_playlist(void) {
     if (g_remote_selected_conn < 0) return;
     const RemoteConnectionConfig *conn = &g_app_config.remote_connections[g_remote_selected_conn];
@@ -2803,10 +2845,12 @@ static void render_remote_content(void) {
 
         const char *actions[] = {
             menu_text("浏览目录", "Browse Folder"),
+            menu_text("加载此目录到播放列表", "Load to Playlist"),
+            menu_text("刷新连接", "Refresh Connection"),
             menu_text("编辑连接", "Edit Connection"),
             menu_text("删除连接", "Delete Connection")
         };
-        int action_count = 3;
+        int action_count = 5;
 
         for (int i = 0; i < action_count; i++) {
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
@@ -2934,12 +2978,12 @@ static void handle_remote_content_input(int ch) {
         switch (ch) {
             case KEY_UP:
                 g_remote_selected--;
-                if (g_remote_selected < 0) g_remote_selected = 2;
+                if (g_remote_selected < 0) g_remote_selected = 4;
                 render_settings_content();
                 break;
             case KEY_DOWN:
                 g_remote_selected++;
-                if (g_remote_selected > 2) g_remote_selected = 0;
+                if (g_remote_selected > 4) g_remote_selected = 0;
                 render_settings_content();
                 break;
             case 10:
@@ -2947,8 +2991,16 @@ static void handle_remote_content_input(int ch) {
                 if (g_remote_selected == 0) {
                     remote_start_browse(g_remote_selected_conn);
                 } else if (g_remote_selected == 1) {
-                    remote_start_edit(g_remote_selected_conn);
+                    if (g_remote_selected_conn >= 0 && g_remote_selected_conn < g_app_config.remote_connection_count) {
+                        const RemoteConnectionConfig *c = &g_app_config.remote_connections[g_remote_selected_conn];
+                        strncpy(g_remote_current_path, c->base_path, sizeof(g_remote_current_path) - 1);
+                        remote_load_playlist();
+                    }
                 } else if (g_remote_selected == 2) {
+                    remote_refresh_connection();
+                } else if (g_remote_selected == 3) {
+                    remote_start_edit(g_remote_selected_conn);
+                } else if (g_remote_selected == 4) {
                     remote_delete_connection(g_remote_selected_conn);
                 }
                 break;
