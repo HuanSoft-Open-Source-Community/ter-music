@@ -292,6 +292,7 @@ int main(int argc, char *argv[]) {
     int used_fallback = 0;
     int attempted_resume_load = 0;
     int resumed_playback = 0;
+    int opened_single_file = 0;
     char final_path[MAX_PATH_LEN] = "";
 
     int temp_loaded = load_temp_playlist();
@@ -365,6 +366,9 @@ int main(int argc, char *argv[]) {
                 if (load_startup_playlist(expanded_path, final_path, sizeof(final_path))) {
                     log_info("main", "Local path loaded: '%s', final_path='%s'", expanded_path, final_path);
                     loaded = 1;
+                    if (S_ISREG(s.st_mode)) {
+                        opened_single_file = 1;
+                    }
                 } else {
                     log_warn("main", "Failed to load local path: '%s'", expanded_path);
                     const char *error_msg = S_ISREG(s.st_mode)
@@ -477,8 +481,9 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if (!resumed_playback && g_app_config.auto_play_on_start && playlist_count() > 0) {
-            log_info("main", "Auto-playing first track (auto_play_on_start)");
+        if (!resumed_playback && playlist_count() > 0 &&
+            (g_app_config.auto_play_on_start || opened_single_file)) {
+            log_info("main", "Auto-playing first track");
             play_audio(0);
         }
         if (attempted_resume_load &&
