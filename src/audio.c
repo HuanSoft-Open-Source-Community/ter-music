@@ -74,6 +74,11 @@ static int g_visualizer_peaks[VISUALIZER_BAND_COUNT] = {0};
 static uint64_t g_visualizer_last_update_ms = 0;
 static uint64_t g_visualizer_last_analysis_ms = 0;
 
+int g_audio_sample_rate = 0;
+int g_audio_bit_rate = 0;
+int g_audio_bit_depth = 0;
+char g_audio_codec_name[32] = "";
+
 #define VISUALIZER_ANALYSIS_SIZE 128
 #define VISUALIZER_UPDATE_INTERVAL_MS 40ULL
 
@@ -1962,6 +1967,27 @@ void *play_audio_thread(void *arg) {
     output_channels = (input_channels == 1) ? 1 : 2;
     // 使用原始采样率，倍速通过 atempo 滤镜实现
     output_sample_rate = codec_ctx->sample_rate > 0 ? codec_ctx->sample_rate : 44100;
+
+    // 提取音频技术信息供 UI 显示，覆盖旧数据
+    // 使用 codec_ctx 而非 codec_par，因为 avcodec_open2 后才填充完整
+    g_audio_sample_rate = codec_ctx->sample_rate > 0 ? codec_ctx->sample_rate : 0;
+    g_audio_bit_rate = (codec_ctx->bit_rate > 0) ? codec_ctx->bit_rate :
+                       (codec_par->bit_rate > 0) ? codec_par->bit_rate : 0;
+    // FLAC 等 VBR 格式的比特率常为 0，从文件大小/时长推算平均比特率
+    if (g_audio_bit_rate <= 0 && g_total_duration > 0 && fmt_ctx && fmt_ctx->pb) {
+        int64_t file_size = avio_size(fmt_ctx->pb);
+        if (file_size > 0) {
+            g_audio_bit_rate = (int)((file_size * 8) / g_total_duration);
+        }
+    }
+    if (codec_ctx->bits_per_raw_sample > 0) {
+        g_audio_bit_depth = codec_ctx->bits_per_raw_sample;
+    } else {
+        int bytes = av_get_bytes_per_sample(codec_ctx->sample_fmt);
+        g_audio_bit_depth = bytes > 0 ? bytes * 8 : 0;
+    }
+    snprintf(g_audio_codec_name, sizeof(g_audio_codec_name), "%s", codec->name);
+
     log_debug("audio", "Audio stream: rate=%d, channels=%d, codec=%s, duration=%ds",
               output_sample_rate, output_channels,
               codec ? codec->name : "unknown",
@@ -2152,6 +2178,12 @@ cleanup:
     g_play_thread_finished = 1;
     g_play_state = PLAY_STATE_STOPPED;
     g_current_play_index = -1;
+
+    // 清理音频技术信息（新曲目开始时由提取代码重新填充）
+    g_audio_sample_rate = 0;
+    g_audio_bit_rate = 0;
+    g_audio_bit_depth = 0;
+    g_audio_codec_name[0] = '\0';
 
     if (followup_index >= 0 && g_pending_playback_index < 0) {
         g_pending_playback_index = followup_index;
@@ -2423,6 +2455,10 @@ void stop_audio() {
     g_seek_request = 0;
     g_play_state = PLAY_STATE_STOPPED;
     g_current_play_index = -1;
+    g_audio_sample_rate = 0;
+    g_audio_bit_rate = 0;
+    g_audio_bit_depth = 0;
+    g_audio_codec_name[0] = '\0';
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
 

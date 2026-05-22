@@ -1779,7 +1779,7 @@ void render_playlist_content() {
             if (g_album_cover_enabled && g_app_config.show_album_cover &&
                 get_current_album_cover_path(cover_path, sizeof(cover_path)) == 0) {
                 // 根据窗口宽度计算合适的封面大小
-                int min_info_width = 40;  // 左侧信息栏最小宽度
+                int min_info_width = 52;  // 左侧信息栏最小宽度（两列各约26字符）
                 int max_cover_size = 12;  // 最大封面大小（字符高度）
                 int min_cover_size = 5;   // 最小封面大小
 
@@ -1819,28 +1819,69 @@ void render_playlist_content() {
                 }
             }
 
-            // 计算左侧信息栏宽度
+            // 计算左侧两栏宽度（左栏=元数据，中栏=音频技术信息，右栏=专辑封面）
             int info_width = show_cover ? cover_start_col - 4 : w - 4;
-            int title_width = info_width * 2 / 5;
-            int artist_width = info_width * 2 / 5;
-            int album_width = info_width * 1 / 5;
+            int col_width = info_width / 2;       // 左栏和中栏等宽
+            int left_col_x = 2;                    // 左栏起始列
+            int center_col_x = 2 + col_width;     // 中栏起始列
 
-            // 截断过长的字符串
+            // 截断左栏文本（元数据）
             char truncated_title[MAX_META_LEN];
             char truncated_artist[MAX_META_LEN];
             char truncated_album[MAX_META_LEN];
 
-            format_display_text(truncated_title, sizeof(truncated_title), t.title, title_width - 1, 0);
-            format_display_text(truncated_artist, sizeof(truncated_artist), t.artist, artist_width - 1, 0);
-            format_display_text(truncated_album, sizeof(truncated_album), t.album, album_width - 1, 0);
+            format_display_text(truncated_title, sizeof(truncated_title), t.title, col_width - 1, 0);
+            format_display_text(truncated_artist, sizeof(truncated_artist), t.artist, col_width - 1, 0);
+            format_display_text(truncated_album, sizeof(truncated_album), t.album, col_width - 1, 0);
 
-            mvwprintw(win_playlist, status_line + 1, 2, "%s%s",
+            // 左栏：元数据（5行）
+            mvwprintw(win_playlist, status_line + 1, left_col_x, "%s%s",
                       ui_text("状态：", "State: "), status_msg);
-            mvwprintw(win_playlist, status_line + 2, 2, "%s%s",
+            mvwprintw(win_playlist, status_line + 2, left_col_x, "%s%s",
                       ui_text("循环：", "Loop: "), get_loop_mode_str());
-            mvwprintw(win_playlist, status_line + 3, 2, "%s%s", ui_text("标题：", "Title: "), truncated_title);
-            mvwprintw(win_playlist, status_line + 4, 2, "%s%s", ui_text("艺术家：", "Artist: "), truncated_artist);
-            mvwprintw(win_playlist, status_line + 5, 2, "%s%s", ui_text("专辑：", "Album: "), truncated_album);
+            mvwprintw(win_playlist, status_line + 3, left_col_x, "%s%s",
+                      ui_text("标题：", "Title: "), truncated_title);
+            mvwprintw(win_playlist, status_line + 4, left_col_x, "%s%s",
+                      ui_text("艺术家：", "Artist: "), truncated_artist);
+            mvwprintw(win_playlist, status_line + 5, left_col_x, "%s%s",
+                      ui_text("专辑：", "Album: "), truncated_album);
+
+            // 中栏：音频技术信息（5行）
+            char rate_str[32] = "--";
+            char depth_str[32] = "--";
+            char bitrate_str[32] = "--";
+            char codec_display[32] = "--";
+
+            if (g_audio_sample_rate > 0) {
+                snprintf(rate_str, sizeof(rate_str), "%dHz", g_audio_sample_rate);
+            }
+            if (g_audio_bit_depth > 0) {
+                snprintf(depth_str, sizeof(depth_str), "%dbit", g_audio_bit_depth);
+            }
+            if (g_audio_bit_rate > 0) {
+                snprintf(bitrate_str, sizeof(bitrate_str), "%dkbps", g_audio_bit_rate / 1000);
+            }
+            if (g_audio_codec_name[0] != '\0') {
+                // 转大写首字母以显示更友好的名称
+                char upper[32];
+                int ci = 0;
+                for (; g_audio_codec_name[ci] && ci < (int)sizeof(upper) - 1; ci++) {
+                    upper[ci] = (ci == 0) ? toupper((unsigned char)g_audio_codec_name[ci])
+                                          : g_audio_codec_name[ci];
+                }
+                upper[ci] = '\0';
+                snprintf(codec_display, sizeof(codec_display), "%s", upper);
+            }
+
+            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s%s",
+                      ui_text("采样率：", "Sample Rate: "), rate_str);
+            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s%s",
+                      ui_text("位深：", "Bit Depth: "), depth_str);
+            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s%s",
+                      ui_text("比特率：", "Bitrate: "), bitrate_str);
+            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s%s",
+                      ui_text("编码：", "Codec: "), codec_display);
+            // 第5行留空
 
             // 绘制专辑封面字符画
             if (show_cover) {
@@ -1857,6 +1898,9 @@ void render_playlist_content() {
                 }
             }
         } else {
+             int col_width = (w - 4) / 2;
+             int center_col_x = 2 + col_width;
+             // 左栏：元数据
              mvwprintw(win_playlist, status_line + 1, 2, "%s%s",
                        ui_text("状态：", "State: "), status_msg);
              mvwprintw(win_playlist, status_line + 2, 2, "%s%s",
@@ -1864,6 +1908,11 @@ void render_playlist_content() {
              mvwprintw(win_playlist, status_line + 3, 2, "%s--", ui_text("标题：", "Title: "));
              mvwprintw(win_playlist, status_line + 4, 2, "%s--", ui_text("艺术家：", "Artist: "));
              mvwprintw(win_playlist, status_line + 5, 2, "%s--", ui_text("专辑：", "Album: "));
+             // 中栏：技术信息占位
+             mvwprintw(win_playlist, status_line + 1, center_col_x, "%s--", ui_text("采样率：", "Sample Rate: "));
+             mvwprintw(win_playlist, status_line + 2, center_col_x, "%s--", ui_text("位深：", "Bit Depth: "));
+             mvwprintw(win_playlist, status_line + 3, center_col_x, "%s--", ui_text("比特率：", "Bitrate: "));
+             mvwprintw(win_playlist, status_line + 4, center_col_x, "%s--", ui_text("编码：", "Codec: "));
         }
     }
     wrefresh(win_playlist);

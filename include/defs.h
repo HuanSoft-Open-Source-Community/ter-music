@@ -335,4 +335,9 @@ extern int g_current_album_cover_valid;
 extern char g_braille_art_buffer[];
 extern int g_album_cover_size;
 
+extern int g_audio_sample_rate;          // Hz, e.g. 44100
+extern int g_audio_bit_rate;             // bps, e.g. 320000
+extern int g_audio_bit_depth;            // bits, e.g. 16 or 24 (0 = unknown)
+extern char g_audio_codec_name[32];      // e.g. "flac", "mp3"
+
 #endif
