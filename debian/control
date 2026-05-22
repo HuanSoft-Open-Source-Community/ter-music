@@ -13,6 +13,7 @@ Build-Depends:
  libncursesw5-dev | libncurses-dev,
  libpulse-dev,
  libswresample-dev,
+ libswscale-dev,
  libpng-dev,
  libjpeg-dev,
  libcurl4-openssl-dev,
