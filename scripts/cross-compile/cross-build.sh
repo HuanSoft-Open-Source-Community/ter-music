@@ -158,6 +158,8 @@ else
     docker run --rm \
         -v "$SCRIPT_DIR":/workspace \
         --workdir /workspace \
+        -e HOST_UID=$(id -u) \
+        -e HOST_GID=$(id -g) \
         --privileged \
         "$IMAGE_NAME" \
         ./scripts/build/$SCRIPT -a "$TARGET_ARCH" "${BUILD_SCRIPT_ARGS[@]}"
