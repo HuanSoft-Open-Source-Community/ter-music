@@ -509,9 +509,9 @@ create_portable_package() {
 
     cp "${binary_source}/${binary_name}" "${portable_dir}/bin/"
 
-    if [ -d "${SCRIPT_DIR}/share" ]; then
-        cp -r "${SCRIPT_DIR}/data"/* "${portable_dir}/share/" 2>/dev/null || true
-    fi
+    mkdir -p "${portable_dir}/share/ter-music"
+    cp "${SCRIPT_DIR}/data/help-quickstart-zh.txt" "${portable_dir}/share/ter-music/" 2>/dev/null || true
+    cp "${SCRIPT_DIR}/data/help-quickstart-en.txt" "${portable_dir}/share/ter-music/" 2>/dev/null || true
 
     cat > "${portable_dir}/run.sh" << 'EOF'
 #!/bin/bash

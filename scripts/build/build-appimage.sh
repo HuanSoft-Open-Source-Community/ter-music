@@ -519,9 +519,9 @@ create_appdir() {
 
     cp "${binary_source}/${binary_name}" "${appdir}/usr/bin/"
 
-    if [ -d "${SCRIPT_DIR}/share" ]; then
-        cp -r "${SCRIPT_DIR}/data"/* "${appdir}/usr/share/" 2>/dev/null || true
-    fi
+    mkdir -p "${appdir}/usr/share/ter-music"
+    cp "${SCRIPT_DIR}/data/help-quickstart-zh.txt" "${appdir}/usr/share/ter-music/" 2>/dev/null || true
+    cp "${SCRIPT_DIR}/data/help-quickstart-en.txt" "${appdir}/usr/share/ter-music/" 2>/dev/null || true
 
     cat > "${appdir}/AppRun" << 'EOF'
 #!/bin/bash

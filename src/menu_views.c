@@ -3674,6 +3674,21 @@ static void help_load_file(void) {
     }
 
     if (!f) {
+        char exe_path[MAX_PATH_LEN];
+        ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+        if (len > 0) {
+            exe_path[len] = '\0';
+            char *dir = strrchr(exe_path, '/');
+            if (dir) {
+                *dir = '\0';
+                snprintf(path, sizeof(path), "%s/../share/ter-music/help-quickstart-%s.txt",
+                         exe_path, suffix);
+                f = fopen(path, "r");
+            }
+        }
+    }
+
+    if (!f) {
         snprintf(path, sizeof(path), "data/help-quickstart-%s.txt", suffix);
         f = fopen(path, "r");
     }
