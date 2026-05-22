@@ -112,7 +112,20 @@ ter-music Quick Start Guide
   Enable album cover display in Settings.
   Covers are rendered as braille dot art in the terminal.
 
-12. Tips & Tricks
+12. Info Bar & Audio Backend
+----------------------------
+  The bottom of the main view shows technical info for the current track:
+    Sample Rate: 44100Hz / 48000Hz etc.
+    Bit Depth: 16bit / 24bit
+    Bitrate: 320kbps / 1411kbps etc.
+    Codec: MP3 / FLAC / AAC etc.
+
+  In Settings -> Playback, you can switch the audio backend:
+    Auto (auto-detect)
+    PulseAudio
+    ALSA
+
+13. Tips & Tricks
 -----------------
   Press ? or h in the main view for keyboard shortcut help.
   The UI adapts automatically when the terminal is resized.

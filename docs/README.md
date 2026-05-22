@@ -59,8 +59,9 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🎯 **Multiple View Switching**: Quickly switch between settings, history, playlist and other views via F2-F7 function keys | <br /> |
 | ⚡ **Responsive UI**: 100 FPS refresh rate, smooth progress bar updates | <br /> |
 | 🔧 **CMake Build**: Modern build system, good cross-platform compatibility | <br /> |
-| 🔊 **PulseAudio Audio Backend**: Stable low-latency audio output | <br /> |
+| 🔊 **Audio Backend**: Supports PulseAudio and ALSA output, switchable at runtime | <br /> |
 | ⏩ **Playback Speed Control**: 6 levels of speed adjustment (0.75x-3.0x), switchable during playback | <br /> |
+| 📊 **Info Bar**: Displays sample rate, bit depth, bitrate and codec of current track | <br /> |
 | 🌐 **Remote Playback**: Play music via SMB/SFTP/FTP/WebDAV remote protocols | <br /> |
 | 🎨 **Album Cover**: Terminal album art display, toggleable in Settings | <br /> |
 
@@ -429,7 +430,7 @@ Menu: Options Menu
 
 #### Function Keys (Globally Available)
 
-**Function Keys (F1-F8)**
+**Function Keys (F1-F9)**
 
 | Key | Function |
 | ----------------- | ------------------ |
@@ -440,7 +441,8 @@ Menu: Options Menu
 | `F5` | Open favorites view |
 | `F6` | Open about view |
 | `F7` | Toggle language (Chinese/English) |
-| `F8` | Exit program |
+| `F8` | Help (this page) |
+| `F9` | Quit |
 
 **Alternative Number Keys (Enter within 3 seconds after Esc)**
 
@@ -453,7 +455,8 @@ Menu: Options Menu
 | `Esc` + `5` | Open favorites view |
 | `Esc` + `6` | Open about view |
 | `Esc` + `7` | Toggle language (Chinese/English) |
-| `Esc` + `8` | Exit program |
+| `Esc` + `8` | Help (this page) |
+| `Esc` + `9` | Quit |
 | `q` | Exit program |
 
 ### 5.5 Loop Mode Description
@@ -517,6 +520,8 @@ The configuration file is stored at `~/.config/ter-music/config.json`. The progr
 - `ui_language`: Interface language (0=Chinese, 1=English)
 - `volume_percent`: Default volume percentage (0-100)
 - `audio_latency_ms`: Output latency in milliseconds
+- `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA)
+- `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `remote_connections`: Saved remote server connections (SMB/SFTP/FTP/WebDAV)
 - Color theme configuration: Foreground and background colors for all UI elements
 
@@ -576,7 +581,8 @@ All user data is stored in the `~/.config/ter-music/` directory:
 | <br /> | `F1` | Return to main |
 | <br /> | `F2`-`F6` | Switch function view |
 | <br /> | `F7` | Toggle language |
-| <br /> | `F8` | Exit program |
+| <br /> | `F8` | Help |
+| <br /> | `F9` | Quit |
 | <br /> | `Esc` | Return to main |
 | **Focus** | `C` | Focus to control |
 | <br /> | `L` | Focus to list |
@@ -607,7 +613,7 @@ There are three ways to exit:
 
 - Press `q` in the main interface
 - Press `Ctrl+C` (the program will clean up correctly and exit)
-- Select "Exit" in the options menu (which is the `F8` key)
+- Select "Exit" in the options menu (which is the `F9` key)
 
 ## 6. Frequently Asked Questions
 
@@ -650,6 +656,10 @@ Ter-Music adopts a modular design, main modules include:
 - **image_loader.c**: Album cover image loading and processing (PNG/JPEG)
 - **braille_art.c**: Braille art rendering for album cover display in terminal
 - **media_session.c**: MPRIS D-Bus media session integration (optional)
+- **crypto.c**: Remote connection password encryption/decryption
+- **logger.c**: Logging subsystem
+- **search.c**: Async search with pinyin support
+- **scrollbar.c**: Reusable scrollbar module for UI panes
 - **defs.h**: Global definitions, data structure declarations
 
 ## 8. License
