@@ -18,7 +18,7 @@ scripts/
     ├── Dockerfile           # Docker 镜像定义（Debian 13 DEB + ARM64 交叉编译）
     ├── Dockerfile.deb       # Debian DEB 构建环境（支持 Debian 10/11/12/13）
     ├── Dockerfile.rpm       # Rocky Linux RPM 构建环境（支持 EL8/9/10）
-    ├── Dockerfile.static    # 静态链接 RPM 构建环境（Rocky Linux 8）
+    ├── Dockerfile.rpm-static    # 静态链接 RPM 构建环境（Rocky Linux 8）
     └── docker-compose.yml   # Docker Compose 配置
 ```
 
@@ -201,7 +201,7 @@ packaging/
 - 通过 `EL_VERSION` build arg 支持 EL8、EL9 和 EL10
 - 使用 USTC 镜像源加速国内构建
 
-### Dockerfile.static
+### Dockerfile.rpm-static
 
 用于静态链接构建，基于 Rocky Linux 8（glibc 2.28，兼容范围最广）。
 - 从源码编译 FFmpeg 7.1（仅音频解码器）

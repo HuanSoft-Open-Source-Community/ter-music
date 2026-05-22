@@ -862,8 +862,8 @@ main() {
         local dockerfile image_name build_args=()
         if [ "$use_static" = "true" ]; then
             log_info "进入容器构建模式（静态链接，单包兼容 EL8/9/10）..."
-            dockerfile="scripts/cross-compile/Dockerfile.static"
-            image_name="ter-music-static"
+            dockerfile="scripts/cross-compile/Dockerfile.rpm-static"
+            image_name="ter-music-rpm-static"
         else
             log_info "进入容器构建模式（Rocky Linux ${el_version}）..."
             dockerfile="scripts/cross-compile/Dockerfile.rpm"

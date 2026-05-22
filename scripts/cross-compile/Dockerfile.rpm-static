@@ -1,10 +1,10 @@
-# Dockerfile.static - Portable RPM build environment
+# Dockerfile.rpm-static - Portable RPM build environment
 # Builds a statically-linked binary compatible with EL8/9/10.
 # Based on rockylinux:8 for the oldest glibc (2.28) = widest compatibility.
 #
 # Usage:
-#   docker build -f scripts/cross-compile/Dockerfile.static -t ter-music-static .
-#   docker run --rm -v $(pwd):/workspace ter-music-static ./scripts/build/build-rpm.sh
+#   docker build -f scripts/cross-compile/Dockerfile.rpm-static -t ter-music-rpm-static .
+#   docker run --rm -v $(pwd):/workspace ter-music-rpm-static ./scripts/build/build-rpm.sh
 
 FROM rockylinux:8
 
