@@ -241,7 +241,10 @@ ll-cli run org.yxzl.ter-music
 
 ### 5. build-deb.sh - 构建 DEB 包
 将项目构建为标准的 Debian/Ubuntu DEB 包，适合 Debian、Ubuntu、Linux Mint、deepin 等基于 Debian 的发行版。
-**使用方法：**
+
+> **推荐使用**：建议优先使用 `--container` 或 `--static` 选项在 Docker 容器中构建，可以保证构建环境一致性，避免因宿主系统库版本差异导致的兼容性问题。
+
+**用法：**
 ```bash
 # 使用自动检测的版本号和架构构建 DEB
 ./build-deb.sh
@@ -252,8 +255,15 @@ ll-cli run org.yxzl.ter-music
 # 指定目标架构
 ./build-deb.sh -a arm64
 
-# 指定版本号和架构
-./build-deb.sh -v 1.4.1 -a arm64
+# 在 Docker 容器中构建（推荐，确保环境一致性）
+./build-deb.sh --container
+./build-deb.sh --container --debian-version 10   # 指定 Debian 版本
+
+# 静态链接 FFmpeg，单包兼容 Debian 10/11/12/13+
+./build-deb.sh --static
+
+# 同时生成源码包和 debuginfo 包
+./build-deb.sh --with-source --with-debuginfo
 
 # 保留临时文件用于调试
 ./build-deb.sh --keep-temp
@@ -261,6 +271,12 @@ ll-cli run org.yxzl.ter-music
 # 显示帮助信息
 ./build-deb.sh --help
 ```
+**选项说明：**
+- `--container`：在 Docker 容器中构建，避免宿主系统库差异
+- `--debian-version VERSION`：指定 Debian 版本（10/11/12/13，默认 12），需配合 `--container`
+- `--static`：静态链接 FFmpeg，消除 soname 依赖，单包兼容多个 Debian 版本（自动使用 Debian 10 容器）
+- `--with-source`：同时生成源码包
+- `--with-debuginfo`：生成 debuginfo 包
 **支持的架构：**
 - amd64: Intel/AMD 64位
 - arm64: ARM 64位
@@ -268,21 +284,14 @@ ll-cli run org.yxzl.ter-music
 - loongarch64: 龙芯旧世界
 - sw64: 申威
 - mips64el: MIPS 64位小端
-
 **输出：**
 - DEB 包将输出到: `build/deb/<arch>/` 目录
-
 **安装：**
 ```bash
-sudo dpkg -i build/deb/ter-music_*_amd64.deb
+sudo dpkg -i build/deb/amd64/ter-music_*_amd64.deb
 # 如果缺少依赖，请运行：
 sudo apt install -f
 ```
-
-**优点：**
-- 标准 DEB 格式，适合 Debian/Ubuntu 系发行版
-- 自动处理依赖关系
-- 可通过 `apt` 工具管理安装和卸载
 
 ### 6. PKGBUILD - 构建 Arch Linux 包
 将项目构建为标准的 Arch Linux 包，适合 Arch Linux 和 Arch-based 发行版。
@@ -370,14 +379,20 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 ### build-deb.sh 依赖：
 - `dpkg-dev`
 - `fakeroot`
+- `devscripts`
 - `cmake`
 - `make`
 - `gcc`
-- `tar`
-- `libavfilter-dev`
-- `libswscale-dev`
+- `libncurses-dev`
+- `libpulse-dev`
+- `libcurl4-openssl-dev`
 - `libpng-dev`
 - `libjpeg-dev`
+- `libdbus-1-dev`
+- FFmpeg 开发库：`libavcodec-dev`、`libavformat-dev`、`libavutil-dev`、`libswresample-dev`、`libswscale-dev`、`libavfilter-dev`
+- Docker（容器或静态构建模式时必需）
+
+> **静态构建（`--static`）**：FFmpeg 在 Docker 容器中从源码编译，无需系统 FFmpeg dev 包。二进制文件静态链接 FFmpeg，动态链接其他系统库，单包兼容 Debian 10/11/12/13+。
 
 ### PKGBUILD 依赖：
 - `base-devel`
@@ -470,14 +485,31 @@ docker-compose -f docker-compose.cross.yml run --rm cross-build ./build-deb.sh -
 - 使用 USTC 镜像源加速国内构建
 - 搭配 `build-rpm.sh --container` 使用
 
-### Dockerfile.static — 静态链接构建
+### Dockerfile.rpm-static — RPM 静态链接构建
 
 基于 Rocky Linux 8（glibc 2.28，兼容最广），从源码编译 FFmpeg 7.1 静态库。
-- 仅含音频解码器，最小化配置（`--disable-everything --enable-decoder=...`）
+- 仅含音频解码器，最小化配置（`--disable-everything`）
 - 静态链接 FFmpeg，动态链接其他系统库（soname 在 EL 版本间稳定）
 - 生成的 RPM 单包兼容 RHEL 8/9/10，无 FFmpeg soname 依赖
 - 使用 USTC 镜像源加速国内构建
 - 搭配 `build-rpm.sh --static` 使用
+
+### Dockerfile.deb — Debian DEB 容器构建
+
+用于在 Docker 容器中构建 DEB 包，支持 Debian 10/11/12/13 多个版本。
+- 通过 `DEBIAN_VERSION` build arg 选择 Debian 版本（默认 12）
+- Debian 10 使用阿里云归档镜像（buster EOL），11+ 使用 USTC 镜像
+- 安装完整的构建工具链和 FFmpeg 开发库
+- 搭配 `build-deb.sh --container` 使用
+
+### Dockerfile.deb-static — DEB 静态链接构建
+
+基于 Debian 10（glibc 2.28，兼容最广），从源码编译 FFmpeg 7.1 静态库。
+- 仅含音频解码器，最小化配置（`--disable-everything`）
+- 静态链接 FFmpeg，动态链接其他系统库（soname 在 Debian 版本间稳定）
+- 生成的 DEB 单包兼容 Debian 10/11/12/13+，无 FFmpeg soname 依赖
+- 使用阿里云归档镜像加速国内构建
+- 搭配 `build-deb.sh --static` 使用
 
 ### 方式二：在主机上直接交叉编译
 
