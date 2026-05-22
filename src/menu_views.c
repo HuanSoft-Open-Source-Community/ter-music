@@ -3665,8 +3665,13 @@ static void help_load_file(void) {
     char path[MAX_PATH_LEN];
     FILE *f = NULL;
 
-    snprintf(path, sizeof(path), "/usr/share/ter-music/help-quickstart-%s.txt", suffix);
+    snprintf(path, sizeof(path), "/usr/local/share/ter-music/help-quickstart-%s.txt", suffix);
     f = fopen(path, "r");
+
+    if (!f) {
+        snprintf(path, sizeof(path), "/usr/share/ter-music/help-quickstart-%s.txt", suffix);
+        f = fopen(path, "r");
+    }
 
     if (!f) {
         snprintf(path, sizeof(path), "data/help-quickstart-%s.txt", suffix);
