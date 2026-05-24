@@ -1127,6 +1127,10 @@ static int audio_backend_prepare_stream(int sample_rate, int channels) {
 
 static void audio_backend_cleanup_stream(void) {
     if (pulse_loaded && g_active_backend == AUDIO_BACKEND_PULSE && pa_s) {
+        // Uncork stream if paused, prevents potential hang on disconnect
+        if (P.stream_is_corked(pa_s)) {
+            P.stream_cork(pa_s, 0, NULL, NULL);
+        }
         P.stream_disconnect(pa_s);
         P.stream_unref(pa_s);
         pa_s = NULL;
@@ -1178,7 +1182,10 @@ static int audio_backend_write_samples(const int32_t *samples, int frame_count) 
             if (!g_play_thread_running) {
                 return 0;
             }
-            P.mainloop_iterate(pa_ml, 1, NULL);
+            // 使用非阻塞模式，防止 stream 被 cork 后永久阻塞
+            // cork 后无事件到达，blocking 的 mainloop_iterate 永不返回
+            P.mainloop_iterate(pa_ml, 0, NULL);
+            usleep(1000);
         }
 
         if (!pa_s || P.stream_get_state(pa_s) != PA_STREAM_READY) {
@@ -1515,7 +1522,7 @@ void reap_finished_playback_thread(void) {
     int should_join = 0;
 
     pthread_mutex_lock(&g_play_mutex);
-    if (g_play_thread_finished) {
+    if (g_play_thread_active && g_play_thread_finished) {
         thread_to_join = g_play_thread;
         g_play_thread_finished = 0;
         should_join = 1;
@@ -1534,7 +1541,7 @@ void process_pending_playback_action(void) {
     int pending_index = -1;
 
     pthread_mutex_lock(&g_play_mutex);
-    if (g_pending_playback_index >= 0) {
+    if (g_pending_playback_index >= 0 && !g_play_thread_active) {
         pending_index = g_pending_playback_index;
         g_pending_playback_index = -1;
     }
@@ -2121,7 +2128,7 @@ cleanup:
         }
     }
     cleanup_atempo_filter(&g_atempo_filter);
-    
+
     audio_backend_cleanup_stream();
 
     if (pcm_queue_initialized) {
@@ -2247,6 +2254,8 @@ void play_audio(int index) {
     }
 
     if (g_play_thread_active) {
+        int was_paused = (g_play_state == PLAY_STATE_PAUSED);
+
         log_debug("audio", "Pending play_audio(%d) - thread already active, scheduling switch", index);
         g_pending_playback_index = index;
         g_play_thread_running = 0;
@@ -2254,7 +2263,35 @@ void play_audio(int index) {
         g_play_state = PLAY_STATE_STOPPED;
 
         pthread_mutex_unlock(&g_play_mutex);
+
+        // 线程可能卡在 audio_backend_write_samples 的 PulseAudio mainloop 阻塞等待中
+        // (stream 被 cork 后无事件到达，mainloop_iterate 永远不返回)
+        // 发送 condvar 信号对该状态无效，必须先 uncork stream 唤醒 PA mainloop
+        audio_backend_resume_stream();
         signal_playback_thread();
+
+        if (was_paused) {
+            // 暂停状态的线程应能快速退出，直接等待它结束
+            // 然后立即启动新曲目，避免依赖异步 pending 的重入问题
+            for (int i = 0; i < 50; i++) {
+                reap_finished_playback_thread();
+                pthread_mutex_lock(&g_play_mutex);
+                if (!g_play_thread_active) {
+                    g_pending_playback_index = -1;
+                    g_current_play_index = index;
+                    g_play_thread_active = 1;
+                    g_play_thread_running = 1;
+                    g_play_thread_finished = 0;
+                    g_play_state = PLAY_STATE_STOPPED;
+                    pthread_mutex_unlock(&g_play_mutex);
+                    goto start_playback;
+                }
+                pthread_mutex_unlock(&g_play_mutex);
+                usleep(10000);
+            }
+            log_warn("audio", "Paused thread did not exit within 500ms, falling back to async switch");
+        }
+
         request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
         return;
     }
@@ -2268,6 +2305,7 @@ void play_audio(int index) {
 
     pthread_mutex_unlock(&g_play_mutex);
 
+start_playback:
     // 远程音频缓存：下载到本地 /tmp 后再播放，确保 seek 正常
     char local_audio_path[MAX_PATH_LEN] = "";
     char local_lyrics_path[MAX_PATH_LEN] = "";
