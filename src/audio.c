@@ -2305,7 +2305,7 @@ void play_audio(int index) {
 
     pthread_mutex_unlock(&g_play_mutex);
 
-start_playback:
+start_playback: {
     // 远程音频缓存：下载到本地 /tmp 后再播放，确保 seek 正常
     char local_audio_path[MAX_PATH_LEN] = "";
     char local_lyrics_path[MAX_PATH_LEN] = "";
@@ -2419,6 +2419,7 @@ start_playback:
     log_info("audio", "Now playing: '%s' - '%s' (idx=%d)", track.title, track.artist, index);
     render_playlist_content();
     request_ui_refresh(UI_DIRTY_CONTROLS);
+    }
 }
 
 /**

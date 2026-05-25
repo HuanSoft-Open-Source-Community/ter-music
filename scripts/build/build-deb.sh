@@ -252,28 +252,8 @@ build_via_dpkg() {
         log_error "项目缺少 debian/ 目录"
         return 1
     fi
+    rm -rf "${source_dir}/debian"
     cp -a "${SCRIPT_DIR}/debian" "${source_dir}/debian"
-
-    # Step 4: For static builds, patch debian/rules to add -DSTATIC_LINKING=ON
-    if [ "$static_build" = "true" ]; then
-        log_info "启用静态链接模式（仅 FFmpeg 静态）..."
-        sed -i 's|-DCMAKE_BUILD_TYPE=Release|-DCMAKE_BUILD_TYPE=Release -DSTATIC_LINKING=ON|' \
-            "${source_dir}/debian/rules"
-        # Remove FFmpeg dev packages from Build-Depends (static libs provided via pkg-config)
-        sed -i '/^ libavcodec-dev,$/d; /^ libavfilter-dev,$/d; /^ libavformat-dev,$/d; /^ libavutil-dev,$/d; /^ libswresample-dev,$/d; /^ libswscale-dev,$/d' \
-            "${source_dir}/debian/control"
-        # Fix CMakeLists.txt: save/restore CMAKE_FIND_LIBRARY_SUFFIXES around FFmpeg block
-        # so .a preference doesn't leak to ncurses/pthread find_library calls (prevents
-        # _dl_pagesize and libtinfo undefined reference errors)
-        sed -i '/^    set(CMAKE_FIND_LIBRARY_SUFFIXES /i\    set(_saved_find_library_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")' \
-            "${source_dir}/CMakeLists.txt"
-        # sed append order: the LAST sed's text appears CLOSEST after the match line
-        # So unset runs first in time → its text ends up last → correct: set restore before unset
-        sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    unset(_saved_find_library_suffixes)' \
-            "${source_dir}/CMakeLists.txt"
-        sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    set(CMAKE_FIND_LIBRARY_SUFFIXES "${_saved_find_library_suffixes}")' \
-            "${source_dir}/CMakeLists.txt"
-    fi
 
     # Step 5: Update changelog if version differs
     cd "${source_dir}"
@@ -281,34 +261,71 @@ build_via_dpkg() {
     changelog_version=$(dpkg-parsechangelog -SVersion 2>/dev/null | cut -d- -f1 || echo "")
     if [ -n "$changelog_version" ] && [ "$version" != "$changelog_version" ]; then
         log_info "更新 changelog 版本: $changelog_version -> $version"
-        dch -v "${version}-1" "Automated build: version ${version}" \
-            --force-distribution --no-auto-nmu 2>/dev/null || \
-        log_warn "dch 更新版本失败，使用原有 changelog"
+        dch -v "${version}-1" "Automated build: version ${version}"             --force-distribution --no-auto-nmu 2>/dev/null ||         log_warn "dch 更新版本失败，使用原有 changelog"
     fi
 
-    # Step 5: Set DEB_BUILD_OPTIONS
+    # Step 6: Phase 1 — generate source package (BEFORE static patches)
+    # Source package captures clean upstream to avoid dpkg-source detecting
+    # modifications from static linking patches against the .orig.tar.gz
+    if [ "$build_source" = "true" ]; then
+        log_info "Phase 1: 生成源码包..."
+        local src_dpkg_args=(--build=source --no-sign)
+
+        if [ -n "$target_arch" ] && is_cross_compiling "$target_arch" ]; then
+            local dpkg_arch
+            case "$target_arch" in
+                amd64)       dpkg_arch="amd64" ;;
+                arm64)       dpkg_arch="arm64" ;;
+                loong64)     dpkg_arch="loong64" ;;
+                loongarch64) dpkg_arch="loongarch64" ;;
+                sw64)        dpkg_arch="sw64" ;;
+                mips64el)    dpkg_arch="mips64el" ;;
+                *)           dpkg_arch="$target_arch" ;;
+            esac
+            src_dpkg_args+=(--host-arch "$dpkg_arch")
+        fi
+
+        if ! dpkg-buildpackage "${src_dpkg_args[@]}"; then
+            log_error "源码包构建失败"
+            return 1
+        fi
+        log_info "源码包生成完成"
+    fi
+
+    # Step 7: For static builds, patch debian/rules to add -DSTATIC_LINKING=ON
+    # These patches modify CMakeLists.txt (upstream file), so they must be applied
+    # AFTER source package generation to avoid dpkg-source detecting changes
+    if [ "$static_build" = "true" ]; then
+        log_info "启用静态链接模式（仅 FFmpeg 静态）..."
+        sed -i 's|-DCMAKE_BUILD_TYPE=Release|-DCMAKE_BUILD_TYPE=Release -DSTATIC_LINKING=ON|'             "${source_dir}/debian/rules"
+        # Remove FFmpeg dev packages from Build-Depends (static libs provided via pkg-config)
+        sed -i '/^ libavcodec-dev,$/d; /^ libavfilter-dev,$/d; /^ libavformat-dev,$/d; /^ libavutil-dev,$/d; /^ libswresample-dev,$/d; /^ libswscale-dev,$/d'             "${source_dir}/debian/control"
+        # Fix CMakeLists.txt: save/restore CMAKE_FIND_LIBRARY_SUFFIXES around FFmpeg block
+        # so .a preference doesn't leak to ncurses/pthread find_library calls (prevents
+        # _dl_pagesize and libtinfo undefined reference errors)
+        sed -i '/^    set(CMAKE_FIND_LIBRARY_SUFFIXES /i\    set(_saved_find_library_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")'             "${source_dir}/CMakeLists.txt"
+        # sed append order: the LAST sed's text appears CLOSEST after the match line
+        # So unset runs first in time → its text ends up last → correct: set restore before unset
+        sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    unset(_saved_find_library_suffixes)'             "${source_dir}/CMakeLists.txt"
+        sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    set(CMAKE_FIND_LIBRARY_SUFFIXES "${_saved_find_library_suffixes}")'             "${source_dir}/CMakeLists.txt"
+    fi
+
+    # Step 8: Set DEB_BUILD_OPTIONS
     export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-} nocheck"
     if [ "$build_debuginfo" != "true" ]; then
         export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS} nostrip"
     fi
 
-    # Step 6: Set up cross-compilation environment
+    # Step 9: Set up cross-compilation environment
     if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
         setup_cross_compile_env "$target_arch"
     fi
 
-    # Step 7: Run dpkg-buildpackage
-    log_info "开始 dpkg-buildpackage..."
-    local dpkg_args=()
+    # Step 10: Phase 2 — build binary package (with static patches applied)
+    log_info "Phase 2: 构建二进制包..."
+    local bin_dpkg_args=(--build=binary --no-sign)
 
-    if [ "$build_source" = "true" ]; then
-        dpkg_args+=(--build=full)
-    else
-        dpkg_args+=(--build=binary)
-    fi
-    dpkg_args+=(--no-sign)
-
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
+    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch" ]; then
         local dpkg_arch
         case "$target_arch" in
             amd64)       dpkg_arch="amd64" ;;
@@ -319,12 +336,12 @@ build_via_dpkg() {
             mips64el)    dpkg_arch="mips64el" ;;
             *)           dpkg_arch="$target_arch" ;;
         esac
-        dpkg_args+=(--host-arch "$dpkg_arch")
+        bin_dpkg_args+=(--host-arch "$dpkg_arch")
         log_info "交叉编译模式: $(uname -m) -> $dpkg_arch"
     fi
 
-    if ! dpkg-buildpackage "${dpkg_args[@]}"; then
-        log_error "dpkg-buildpackage 构建失败"
+    if ! dpkg-buildpackage "${bin_dpkg_args[@]}"; then
+        log_error "二进制包构建失败"
         return 1
     fi
 
