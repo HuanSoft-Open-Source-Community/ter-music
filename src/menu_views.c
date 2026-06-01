@@ -740,9 +740,16 @@ void load_history(void) {
     }
     
     free(json);
+
+    /* If SQLite has history data, prefer it over JSON */
+    if (library_is_available() && library_history_get_count() > 0) {
+        g_play_history.count = 0;
+        g_play_history.count = library_history_get_all(g_play_history.entries, MAX_HISTORY_COUNT);
+    }
 }
 
 void save_history(void) {
+    /* Always write JSON as backup (for downgrade compatibility) */
     /* Atomic write: write to temp file first, then rename */
     char tmp_path[MAX_PATH_LEN];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", history_file);
@@ -842,9 +849,16 @@ void load_favorites(void) {
     }
     
     free(json);
+
+    /* If SQLite has favorites data, prefer it over JSON */
+    if (library_is_available() && library_favorites_get_count() > 0) {
+        g_favorites.count = 0;
+        g_favorites.count = library_favorites_get_all(g_favorites.tracks, MAX_FAVORITES_COUNT);
+    }
 }
 
 void save_favorites(void) {
+    /* Always write JSON as backup (for downgrade compatibility) */
     /* Atomic write: write to temp file first, then rename */
     char tmp_path[MAX_PATH_LEN];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", favorites_file);
@@ -1084,9 +1098,28 @@ void load_all_playlists(void) {
     }
     
     closedir(dir);
+
+    /* If SQLite has playlist data, prefer it over JSON */
+    if (library_is_available() && library_playlist_get_count() > 0) {
+        g_playlist_manager.count = 0;
+        int ids[50];
+        char names[50][MAX_PLAYLIST_NAME_LEN];
+        int pl_count = library_playlist_get_all(ids, names, 50);
+        for (int i = 0; i < pl_count && i < MAX_PLAYLISTS_COUNT; i++) {
+            UserPlaylist *pl = &g_playlist_manager.playlists[g_playlist_manager.count];
+            pl->db_id = ids[i];
+            strncpy(pl->name, names[i], MAX_PLAYLIST_NAME_LEN - 1);
+            pl->name[MAX_PLAYLIST_NAME_LEN - 1] = '\0';
+            pl->track_count = library_playlist_get_tracks(ids[i], pl->tracks, MAX_TRACKS);
+            pl->created_time = 0;
+            pl->modified_time = 0;
+            g_playlist_manager.count++;
+        }
+    }
 }
 
 void save_all_playlists(void) {
+    /* Always write JSON as backup (for downgrade compatibility) */
     for (int i = 0; i < g_playlist_manager.count; i++) {
         UserPlaylist *pl = &g_playlist_manager.playlists[i];
 
@@ -1473,22 +1506,29 @@ void render_menu_hint_bar(void) {
 int create_user_playlist(const char *name) {
     if (!name || strlen(name) == 0) return -1;
     if (g_playlist_manager.count >= MAX_PLAYLISTS_COUNT) return -2;
-    
+
     UserPlaylist *pl = &g_playlist_manager.playlists[g_playlist_manager.count];
     memset(pl, 0, sizeof(UserPlaylist));
-    
+
     strncpy(pl->name, name, MAX_PLAYLIST_NAME_LEN - 1);
     pl->created_time = time(NULL);
     pl->modified_time = pl->created_time;
-    
+
+    if (library_is_available())
+        pl->db_id = library_playlist_create(name);
+
     g_playlist_manager.count++;
     save_all_playlists();
-    
+
     return 0;
 }
 
 int delete_user_playlist(int index) {
     if (index < 0 || index >= g_playlist_manager.count) return -1;
+
+    /* Delete from SQLite first */
+    if (library_is_available() && g_playlist_manager.playlists[index].db_id > 0)
+        library_playlist_delete(g_playlist_manager.playlists[index].db_id);
     
     char filename[MAX_PLAYLIST_NAME_LEN + 8];
     char safe_name[MAX_PLAYLIST_NAME_LEN];
@@ -1526,6 +1566,9 @@ int rename_user_playlist(int index, const char *new_name) {
 
     UserPlaylist *pl = &g_playlist_manager.playlists[index];
 
+    if (library_is_available() && pl->db_id > 0)
+        library_playlist_rename(pl->db_id, new_name);
+
     char old_filename[MAX_PLAYLIST_NAME_LEN + 8];
     char safe_old_name[MAX_PLAYLIST_NAME_LEN];
     int j = 0;
@@ -1550,43 +1593,59 @@ int rename_user_playlist(int index, const char *new_name) {
     pl->name[MAX_PLAYLIST_NAME_LEN - 1] = '\0';
     pl->modified_time = time(NULL);
 
-    save_all_playlists();
+    if (!library_is_available())
+        save_all_playlists();
     return 0;
 }
 
 int add_track_to_playlist(int playlist_idx, Track *track) {
     if (playlist_idx < 0 || playlist_idx >= g_playlist_manager.count) return -1;
     if (!track) return -2;
-    
+
     UserPlaylist *pl = &g_playlist_manager.playlists[playlist_idx];
     if (pl->track_count >= MAX_TRACKS) return -3;
-    
+
     for (int i = 0; i < pl->track_count; i++) {
         if (strcmp(pl->tracks[i].path, track->path) == 0) {
             return 0;
         }
     }
-    
+
     pl->tracks[pl->track_count] = *track;
     pl->track_count++;
     pl->modified_time = time(NULL);
-    
+
+    if (library_is_available() && pl->db_id > 0) {
+        library_scan_file(track->path);
+        library_playlist_add_track(pl->db_id, track->path);
+    }
+
     save_all_playlists();
     return 0;
 }
 
 int remove_track_from_playlist(int playlist_idx, int track_idx) {
     if (playlist_idx < 0 || playlist_idx >= g_playlist_manager.count) return -1;
-    
+
     UserPlaylist *pl = &g_playlist_manager.playlists[playlist_idx];
     if (track_idx < 0 || track_idx >= pl->track_count) return -2;
-    
+
+    /* Capture the path before removal for SQLite deletion */
+    char removed_path[MAX_PATH_LEN] = "";
+    if (library_is_available() && pl->db_id > 0) {
+        strncpy(removed_path, pl->tracks[track_idx].path, MAX_PATH_LEN - 1);
+        removed_path[MAX_PATH_LEN - 1] = '\0';
+    }
+
     for (int i = track_idx; i < pl->track_count - 1; i++) {
         pl->tracks[i] = pl->tracks[i + 1];
     }
     pl->track_count--;
     pl->modified_time = time(NULL);
-    
+
+    if (library_is_available() && pl->db_id > 0 && removed_path[0])
+        library_playlist_remove_track_by_path(pl->db_id, removed_path);
+
     save_all_playlists();
     return 0;
 }
@@ -1602,6 +1661,49 @@ void init_all_persistent_data(void) {
     load_all_playlists();
     /* Initialize SQLite library database (optional — library mode may not be available) */
     library_init();
+
+    /* ── JSON → SQLite migration ─────────────────────────────────────
+     * If JSON files have data but SQLite tables are empty, migrate now.
+     * JSON files are never deleted — they serve as backup for rollback. */
+    if (!library_is_available())
+        return;
+
+    /* Migrate favorites */
+    if (g_favorites.count > 0 && library_favorites_get_count() == 0) {
+        log_info("menu_views", "Migrating %d favorites to SQLite", g_favorites.count);
+        for (int i = 0; i < g_favorites.count; i++) {
+            library_scan_file(g_favorites.tracks[i].path);
+            library_favorites_add(g_favorites.tracks[i].path);
+        }
+        log_info("menu_views", "Favorites migration complete");
+    }
+
+    /* Migrate play history */
+    if (g_play_history.count > 0 && library_history_get_count() == 0) {
+        log_info("menu_views", "Migrating %d history entries to SQLite", g_play_history.count);
+        for (int i = 0; i < g_play_history.count; i++) {
+            library_scan_file(g_play_history.entries[i].path);
+            library_history_add(g_play_history.entries[i].path, 0);
+        }
+        log_info("menu_views", "History migration complete");
+    }
+
+    /* Migrate user playlists */
+    if (g_playlist_manager.count > 0 && library_playlist_get_count() == 0) {
+        log_info("menu_views", "Migrating %d playlists to SQLite", g_playlist_manager.count);
+        for (int i = 0; i < g_playlist_manager.count; i++) {
+            UserPlaylist *pl = &g_playlist_manager.playlists[i];
+            library_playlist_create(pl->name);
+            /* After creation it's the newest playlist; we need its ID.
+             * Simplified: rely on sequential IDs. */
+            for (int k = 0; k < pl->track_count; k++) {
+                library_scan_file(pl->tracks[k].path);
+                /* playlist_id = i+1 (SQLite autoincrement starting at 1) */
+                library_playlist_add_track(i + 1, pl->tracks[k].path);
+            }
+        }
+        log_info("menu_views", "Playlists migration complete");
+    }
 }
 
 void show_status_message(const char *msg) {
@@ -1681,22 +1783,27 @@ void render_menu_sidebar(int selected_idx, const char **items, int item_count) {
 void add_history_entry(Track *track) {
     if (!track || g_play_history.count >= MAX_HISTORY_COUNT) return;
     log_debug("menu_views", "add_history_entry: '%s' - '%s'", track->title, track->artist);
-    
+
     if (g_play_history.count > 0) {
-        memmove(&g_play_history.entries[1], &g_play_history.entries[0], 
+        memmove(&g_play_history.entries[1], &g_play_history.entries[0],
                 sizeof(HistoryEntry) * (g_play_history.count));
     }
-    
+
     strncpy(g_play_history.entries[0].path, track->path, MAX_PATH_LEN - 1);
     strncpy(g_play_history.entries[0].title, track->title, MAX_META_LEN - 1);
     strncpy(g_play_history.entries[0].artist, track->artist, MAX_META_LEN - 1);
     g_play_history.entries[0].play_time = time(NULL);
-    
+
     g_play_history.count++;
     if (g_play_history.count > MAX_HISTORY_COUNT) {
         g_play_history.count = MAX_HISTORY_COUNT;
     }
-    
+
+    /* Persist to SQLite and JSON */
+    if (library_is_available()) {
+        library_scan_file(track->path);
+        library_history_add(track->path, 0);
+    }
     save_history();
 }
 
@@ -1717,24 +1824,38 @@ int add_to_favorites(Track *track) {
     strncpy(g_favorites.tracks[g_favorites.count].album, track->album, MAX_META_LEN - 1);
     
     g_favorites.count++;
+
+    /* Persist to SQLite */
+    if (library_is_available()) {
+        library_scan_file(track->path);
+        library_favorites_add(track->path);
+    }
+
     save_favorites();
-    
     return 0;
 }
 
 int remove_from_favorites(int index) {
+    char removed_path[MAX_PATH_LEN];
     if (index < 0 || index >= g_favorites.count) {
         return -1;
     }
-    
+
+    strncpy(removed_path, g_favorites.tracks[index].path, MAX_PATH_LEN - 1);
+    removed_path[MAX_PATH_LEN - 1] = '\0';
+
     if (index < g_favorites.count - 1) {
         memmove(&g_favorites.tracks[index], &g_favorites.tracks[index + 1],
                 sizeof(Track) * (g_favorites.count - index - 1));
     }
-    
+
     g_favorites.count--;
+
+    /* Persist to SQLite */
+    if (library_is_available())
+        library_favorites_remove(removed_path);
+
     save_favorites();
-    
     return 0;
 }
 

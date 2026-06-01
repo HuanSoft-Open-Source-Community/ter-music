@@ -242,6 +242,7 @@ int library_favorites_has(const char *track_path);
 /* ========== Play History (SQLite-backed) ========== */
 
 void library_history_add(const char *track_path, int position);
+int library_history_get_count(void);
 int library_history_get_all(HistoryEntry *entries, int max_entries);
 
 /* ========== User Playlists (SQLite-backed) ========== */
@@ -253,6 +254,7 @@ int library_playlist_get_count(void);
 int library_playlist_get_all(int *out_ids, char (*names)[MAX_PLAYLIST_NAME_LEN], int max);
 int library_playlist_add_track(int playlist_id, const char *track_path);
 int library_playlist_remove_track(int playlist_id, int position);
+int library_playlist_remove_track_by_path(int playlist_id, const char *track_path);
 int library_playlist_get_tracks(int playlist_id, Track *tracks, int max_tracks);
 
 /* ========== Statistics ========== */

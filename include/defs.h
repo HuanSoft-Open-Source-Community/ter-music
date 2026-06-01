@@ -44,7 +44,8 @@ typedef enum {
     VIEW_PLAYLIST = 3,
     VIEW_FAVORITES = 4,
     VIEW_INFO = 5,
-    VIEW_HELP = 6
+    VIEW_HELP = 6,
+    VIEW_LIBRARY = 7
 } ViewMode;
 
 typedef enum {
@@ -74,6 +75,32 @@ typedef enum {
 #define MAX_TRACKS 1000
 #define MAX_META_LEN 256
 #define MAX_SEARCH_KEY_LEN (MAX_META_LEN * 8)
+
+/* Library browsing sub-views */
+typedef enum {
+    LIBRARY_HOME = 0,
+    LIBRARY_ARTISTS,
+    LIBRARY_ARTIST_ALBUMS,
+    LIBRARY_ALBUMS,
+    LIBRARY_GENRES,
+    LIBRARY_GENRE_TRACKS,
+    LIBRARY_ALBUM_TRACKS,
+    LIBRARY_ALL_TRACKS,
+    LIBRARY_SEARCH_RESULTS
+} LibraryViewMode;
+
+/* Library browsing state */
+typedef struct {
+    int active;
+    LibraryViewMode view;
+    int selected_index;
+    int scroll_offset;
+    int item_count;
+    int available;
+    char filter_artist[MAX_META_LEN];
+    char filter_album[MAX_META_LEN];
+    char filter_genre[MAX_META_LEN];
+} LibraryState;
 #define MAX_SEARCH_RESULTS 1000
 
 #define MAX_HISTORY_COUNT 100
@@ -142,6 +169,7 @@ typedef struct {
 } Favorites;
 
 typedef struct {
+    int db_id;                       /* SQLite rowid (0 = not persisted) */
     char name[MAX_PLAYLIST_NAME_LEN];
     Track tracks[MAX_TRACKS];
     int track_count;
@@ -282,6 +310,7 @@ extern int g_active_backend;
 
 extern SearchState g_search_state;
 extern pthread_mutex_t g_search_mutex;
+extern LibraryState g_library_state;
 extern SortState g_sort_state;
 extern float g_playback_speed;
 

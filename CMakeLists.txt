@@ -109,6 +109,7 @@ add_executable(${PROJECT_NAME}
     src/config_xml.c
     src/config_migration.c
     src/library.c
+    src/library_browser.c
 )
 
 # 包含头文件目录

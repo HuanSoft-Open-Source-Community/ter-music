@@ -1422,6 +1422,18 @@ void library_history_add(const char *track_path, int position) {
     pthread_mutex_unlock(&g_library_mutex);
 }
 
+int library_history_get_count(void) {
+    if (!library_is_available()) return 0;
+    pthread_mutex_lock(&g_library_mutex);
+    sqlite3_stmt *stmt = NULL;
+    sqlite3_prepare_v2(g_db, "SELECT COUNT(*) FROM play_history", -1, &stmt, NULL);
+    int count = 0;
+    if (stmt && sqlite3_step(stmt) == SQLITE_ROW) count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_library_mutex);
+    return count;
+}
+
 int library_history_get_all(HistoryEntry *entries, int max_entries) {
     if (!library_is_available() || !entries || max_entries <= 0) return 0;
     pthread_mutex_lock(&g_library_mutex);
@@ -1467,9 +1479,10 @@ int library_playlist_create(const char *name) {
     sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now);
     sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now);
     int rc = sqlite3_step(stmt);
+    sqlite3_int64 rowid = (rc == SQLITE_DONE) ? sqlite3_last_insert_rowid(g_db) : 0;
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(&g_library_mutex);
-    return (rc == SQLITE_DONE) ? 0 : -1;
+    return (rc == SQLITE_DONE) ? (int)rowid : -1;
 }
 
 int library_playlist_delete(int playlist_id) {
@@ -1584,6 +1597,31 @@ int library_playlist_remove_track(int playlist_id, int position) {
         -1, &stmt, NULL);
     sqlite3_bind_int(stmt, 1, playlist_id);
     sqlite3_bind_int(stmt, 2, position);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    /* Update playlists.modified_at */
+    sqlite3_prepare_v2(g_db,
+        "UPDATE playlists SET modified_at = ? WHERE id = ?",
+        -1, &stmt, NULL);
+    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)time(NULL));
+    sqlite3_bind_int(stmt, 2, playlist_id);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    pthread_mutex_unlock(&g_library_mutex);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int library_playlist_remove_track_by_path(int playlist_id, const char *track_path) {
+    if (!library_is_available() || !track_path) return -1;
+    pthread_mutex_lock(&g_library_mutex);
+    sqlite3_stmt *stmt = NULL;
+    sqlite3_prepare_v2(g_db,
+        "DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_path = ?",
+        -1, &stmt, NULL);
+    sqlite3_bind_int(stmt, 1, playlist_id);
+    sqlite3_bind_text(stmt, 2, track_path, -1, SQLITE_STATIC);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 

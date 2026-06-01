@@ -3,6 +3,7 @@
 #include "../include/lyrics.h"
 #include "../include/menu_views.h"
 #include "../include/library.h"
+#include "../include/library_browser.h"
 #include "../include/braille_art.h"
 #include "../include/search.h"
 #include "../include/scrollbar.h"
@@ -1667,6 +1668,12 @@ void render_playlist_content() {
         return;
     }
 
+    // 图书馆浏览模式：完全替代播放列表渲染
+    if (g_library_state.active) {
+        render_library_content();
+        return;
+    }
+
     // 拍摄搜索状态快照，保证渲染一致性
     int snap_active, snap_in_progress, snap_count, snap_selected, snap_progress;
     int snap_indices[MAX_SEARCH_RESULTS];
@@ -2644,6 +2651,14 @@ void run_event_loop() {
                 render_playlist_content(); // 重绘列表以高亮选中项
                 continue;
             }
+        }
+
+        // 音乐库浏览模式切换 (M键)
+        if (ch == 'M') {
+            library_browser_toggle();
+            render_playlist_content();
+            render_controls();
+            continue;
         }
 
         // 歌词光标模式切换 (D键)
