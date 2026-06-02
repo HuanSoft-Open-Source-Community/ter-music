@@ -16,10 +16,13 @@
  * @date 2026-06-01
  */
 
-#include "../include/library_browser.h"
-#include "../include/library.h"
-#include "../include/search.h"
-#include "../include/logger.h"
+#include "library/browser/browser.h"
+#include "library/library.h"
+#include "search/search.h"
+#include "playlist/playlist.h"
+#include "audio/audio.h"
+#include "ui/ui.h"
+#include "logger/logger.h"
 #include <ncursesw/ncurses.h>
 #include <string.h>
 #include <stdlib.h>

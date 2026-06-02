@@ -1,6 +1,6 @@
-#include "../include/search.h"
-#include "../include/menu_views.h"
-#include "../include/media_session.h"
+#include "search/search.h"
+#include "ui/menus.h"
+#include "media/session.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

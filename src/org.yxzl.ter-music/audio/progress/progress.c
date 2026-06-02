@@ -1,4 +1,4 @@
-#include "../include/progress.h"
+#include "audio/progress/progress.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-#include "../include/crypto.h"
+#include "config/crypto.h"
 #include <string.h>
 #include <stdio.h>
 

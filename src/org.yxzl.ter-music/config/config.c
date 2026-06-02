@@ -16,10 +16,10 @@
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 
-#include "defs.h"
-#include "config_schema.h"
-#include "crypto.h"
-#include "logger.h"
+#include "types.h"
+#include "config/schema.h"
+#include "config/crypto.h"
+#include "logger/logger.h"
 
 /* ── Forward declarations of internal helpers ─────────────────────── */
 

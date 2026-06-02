@@ -1,7 +1,11 @@
-#include "../include/defs.h"
-#include "../include/search.h"
-#include "../include/pinyin_table.h"
-#include "../include/remote.h"
+#include "types.h"
+#include "playlist/playlist.h"
+#include "config/config.h"
+#include "search/search.h"
+#include "pinyin_table.h"
+#include "remote/remote.h"
+#include "playlist/ape_tag.h"
+#include "ui/braille/braille_art.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

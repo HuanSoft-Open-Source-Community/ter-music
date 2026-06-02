@@ -17,11 +17,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "defs.h"
-#include "config_schema.h"
-#include "config_xml.h"
-#include "menu_views.h"
-#include "logger.h"
+#include "types.h"
+#include "config/schema.h"
+#include "config/config.h"
+#include "ui/menus.h"
+#include "logger/logger.h"
 
 /* ── Public API ───────────────────────────────────────────────────── */
 

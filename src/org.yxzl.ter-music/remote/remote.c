@@ -1,4 +1,4 @@
-#include "../include/remote.h"
+#include "remote/remote.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

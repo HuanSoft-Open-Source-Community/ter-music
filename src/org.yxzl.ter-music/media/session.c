@@ -1,5 +1,9 @@
-#include "../include/defs.h"
-#include "../include/media_session.h"
+#include "types.h"
+#include <ncursesw/ncurses.h>
+#include "audio/audio.h"
+#include "playlist/playlist.h"
+#include "ui/ui.h"
+#include "media/session.h"
 
 #include <math.h>
 #include <stdio.h>

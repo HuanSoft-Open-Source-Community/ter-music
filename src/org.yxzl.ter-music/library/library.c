@@ -16,9 +16,11 @@
  * @date 2026-06-01
  */
 
-#include "../include/library.h"
-#include "../include/logger.h"
-#include "../include/search.h"
+#include "library/library.h"
+#include "logger/logger.h"
+#include "search/search.h"
+#include "playlist/playlist.h"
+#include "search/search.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
