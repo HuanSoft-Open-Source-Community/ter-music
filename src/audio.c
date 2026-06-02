@@ -74,6 +74,7 @@ static int pw_stream_connecting = 0;  /* 阻止 process 过早回调 */
 static int pw_channels = 2;
 static int pw_sample_rate = 44100;
 static int pw_write_underrun = 0;
+static volatile int pw_stream_destroying = 0;
 static pthread_mutex_t pw_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int g_active_backend = AUDIO_BACKEND_AUTO;
@@ -959,7 +960,7 @@ static void pw_stream_on_state_changed(void *userdata,
         pw_stream_ready = 1;
         pw_stream_connecting = 0;
     } else if (state == PW_STREAM_STATE_ERROR) {
-        fprintf(stderr, "PipeWire stream error: %s\n", error ? error : "unknown");
+        log_warn("audio", "PipeWire stream error: %s", error ? error : "unknown");
         pw_stream_ready = 0;
         pw_stream_connecting = 0;
     }
@@ -970,19 +971,28 @@ static void pw_stream_on_state_changed(void *userdata,
 static void pw_stream_on_process(void *userdata) {
     (void)userdata;
 
+    /*
+     * 安全访问 pw_s：全程持锁读取连接标志和流指针。
+     * pw_cleanup_stream_locked() 在销毁流前会设置 pw_stream_destroying = 1，
+     * 并调用 stream_set_active(0) 阻止新回调。已进入本回调的旧流指针 s 将在
+     * 释放 pw_state_mutex 后继续使用，但此时 stream_destroy() 会等待当前回调
+     * 返回后才真正释放流内存 —— 因此 s 在回调全程有效。
+     */
     pthread_mutex_lock(&pw_state_mutex);
     int still_connecting = pw_stream_connecting;
+    int destroying = pw_stream_destroying;
+    struct pw_stream *s = pw_s;
     pthread_mutex_unlock(&pw_state_mutex);
-    if (still_connecting) return;
+    if (still_connecting || destroying || !s) return;
 
     struct pw_buffer *buf = NULL;
-    if (PW.stream_dequeue_buffer(pw_s, &buf) < 0 || !buf) {
+    if (PW.stream_dequeue_buffer(s, &buf) < 0 || !buf) {
         return;
     }
 
     struct spa_buffer *spa_buf = buf->buffer;
     if (spa_buf->n_datas < 1) {
-        PW.stream_queue_buffer(pw_s, buf);
+        PW.stream_queue_buffer(s, buf);
         return;
     }
 
@@ -997,7 +1007,7 @@ static void pw_stream_on_process(void *userdata) {
         data->chunk->offset = 0;
         data->chunk->stride = (uint32_t)(pw_channels * (int)sizeof(int32_t));
         data->chunk->size = (uint32_t)max_bytes;
-        PW.stream_queue_buffer(pw_s, buf);
+        PW.stream_queue_buffer(s, buf);
         pw_write_underrun = 1;
         return;
     }
@@ -1006,7 +1016,7 @@ static void pw_stream_on_process(void *userdata) {
     data->chunk->stride = (uint32_t)(pw_channels * (int)sizeof(int32_t));
     data->chunk->size = (uint32_t)copied;
 
-    PW.stream_queue_buffer(pw_s, buf);
+    PW.stream_queue_buffer(s, buf);
 }
 
 static void pw_stream_on_param_changed(void *userdata, uint32_t id, const struct spa_pod *param) {
@@ -1027,11 +1037,39 @@ static const struct pw_stream_events pw_stream_callbacks = {
     .io_changed = NULL,
 };
 
+/*
+ * 轻量探测：仅检查 PipeWire 守护进程是否可达。
+ * 不创建流、不启动 RT 线程，因此可在 init_audio_device() 中安全调用，
+ * 不会引发 stream_destroy 时的竞态 SIGSEGV。
+ * 返回 0 表示可达，-1 表示失败。
+ */
+static int pw_probe_backend(void) {
+    struct pw_thread_loop *loop = NULL;
+    struct pw_context *ctx = NULL;
+    struct pw_core *core = NULL;
+
+    loop = PW.thread_loop_new("ter-music-probe", NULL);
+    if (!loop) return -1;
+
+    ctx = PW.context_new(PW.thread_loop_get_loop(loop), NULL, 0);
+    if (!ctx) { PW.thread_loop_destroy(loop); return -1; }
+
+    core = PW.context_connect(ctx, NULL, 0);
+    if (!core) { PW.context_destroy(ctx); PW.thread_loop_destroy(loop); return -1; }
+
+    /* 可达 — 清理局部资源后返回成功 */
+    PW.core_disconnect(core);
+    PW.context_destroy(ctx);
+    PW.thread_loop_destroy(loop);
+    return 0;
+}
+
 static int pw_prepare_stream(int sample_rate, int channels) {
     pw_channels = channels;
     pw_sample_rate = sample_rate;
     pw_stream_ready = 0;
     pw_stream_connecting = 1;
+    pw_stream_destroying = 0;
     pw_write_underrun = 0;
     pw_ring_reset();
 
@@ -1092,7 +1130,7 @@ static int pw_prepare_stream(int sample_rate, int channels) {
     /* 连接流 */
     uint32_t flags = PW_STREAM_FLAG_AUTOCONNECT |
                      PW_STREAM_FLAG_MAP_BUFFERS |
-                     PW_STREAM_FLAG_RT_PROCESS;
+                     PW_STREAM_FLAG_DONT_RECONNECT;
     if (PW.stream_connect(pw_s, PW_DIRECTION_OUTPUT, 0, flags, params, 1) < 0) {
         update_controls_status(audio_text("无法连接 PipeWire 流", "Cannot connect PW stream"));
         PW.stream_destroy(pw_s); pw_s = NULL;
@@ -1119,51 +1157,151 @@ static int pw_prepare_stream(int sample_rate, int channels) {
     while (timeout_ms > 0) {
         pthread_mutex_lock(&pw_state_mutex);
         int ready = pw_stream_ready;
+        int err = 0;
+        if (!ready && !pw_stream_connecting && pw_s) {
+            /* 如果不再连接且未就绪，说明流已进入错误状态 */
+            const char *e = NULL;
+            PW.stream_get_state(pw_s, &e);
+            if (e && e[0] != '\0') err = 1;
+        }
         pthread_mutex_unlock(&pw_state_mutex);
         if (ready) break;
+        if (err) {
+            timeout_ms = 0;
+            break;
+        }
         usleep(1000);
         timeout_ms--;
     }
 
     pthread_mutex_lock(&pw_state_mutex);
     int is_ready = pw_stream_ready;
-    pthread_mutex_unlock(&pw_state_mutex);
+    /* 二次验证：等待一小段时间，捕获流就绪后又迅速进入 ERROR 的竞态。
+     * 在无输出节点的 PipeWire 环境中，流可能从 PAUSED 快速进入 ERROR
+     * （"no target node available"），导致 probe 返回 0 但实际上不可用。 */
+    if (is_ready && pw_s) {
+        int verify_ms = 300;
+        pthread_mutex_unlock(&pw_state_mutex);
+        while (verify_ms > 0) {
+            const char *err_str = NULL;
+            enum pw_stream_state st = PW.stream_get_state(pw_s, &err_str);
+            if (st == PW_STREAM_STATE_ERROR) {
+                is_ready = 0;
+                log_warn("audio", "PipeWire post-check: stream error: %s",
+                         err_str ? err_str : "unknown");
+                break;
+            }
+            if (st == PW_STREAM_STATE_STREAMING) {
+                break;
+            }
+            usleep(1000);
+            verify_ms--;
+        }
+        /* 300ms 后仍非 STREAMING -> 判定无输出节点 */
+        if (pw_s) {
+            const char *err_str = NULL;
+            enum pw_stream_state fs = PW.stream_get_state(pw_s, &err_str);
+            if (fs != PW_STREAM_STATE_STREAMING && fs != PW_STREAM_STATE_ERROR) {
+                log_warn("audio", "PipeWire stream stuck at PAUSED (no target node?)");
+                is_ready = 0;
+            }
+        }
+    } else {
+        pthread_mutex_unlock(&pw_state_mutex);
+    }
 
     if (!is_ready) {
         update_controls_status(audio_text("PipeWire 流未就绪", "PW stream not ready"));
-        PW.thread_loop_stop(pw_loop);
-        PW.stream_destroy(pw_s); pw_s = NULL;
-        PW.core_disconnect(pw_core); pw_core = NULL;
-        PW.context_destroy(pw_ctx); pw_ctx = NULL;
-        PW.thread_loop_destroy(pw_loop);
-        pw_loop = NULL; pw_mainloop = NULL;
-        return -1;
+        goto pw_cleanup_and_fail;
     }
 
     return 0;
+
+pw_cleanup_and_fail:
+    /* 与 pw_cleanup_stream_locked 同样策略：只停循环、不调 PW 销毁 */
+    pthread_mutex_lock(&pw_state_mutex);
+    pw_stream_destroying = 1;
+    pthread_mutex_unlock(&pw_state_mutex);
+
+    if (pw_loop) {
+        PW.thread_loop_lock(pw_loop);
+    }
+    if (pw_s) {
+        PW.stream_set_active(pw_s, 0);
+    }
+    if (pw_loop) {
+        PW.thread_loop_unlock(pw_loop);
+    }
+    if (pw_loop) {
+        PW.thread_loop_stop(pw_loop);
+    }
+
+    pthread_mutex_lock(&pw_state_mutex);
+    pw_s = NULL;
+    pw_core = NULL;
+    pw_ctx = NULL;
+    pw_loop = NULL;
+    pw_mainloop = NULL;
+    pw_stream_ready = 0;
+    pw_stream_connecting = 0;
+    pthread_mutex_unlock(&pw_state_mutex);
+    pw_ring_reset();
+    return -1;
 }
 
 static void pw_cleanup_stream_locked(void) {
+    if (!pw_s && !pw_core && !pw_loop) {
+        /* 没有活动资源 — 仅复位标志 */
+        pw_stream_ready = 0;
+        pw_stream_connecting = 0;
+        pw_ring_reset();
+        return;
+    }
+
+    /*
+     * PipeWire 1.6.0 workaround：屏蔽所有 pw_stream_destroy /
+     * pw_core_disconnect / pw_context_destroy 调用。
+     *
+     * PipeWire 1.6.0 的 pw_stream_destroy 存在 use-after-free 缺陷：
+     * 内部 impl vtbl destroy 先释放了 impl 内存，随后外层公共代码访问
+     * pw_stream+0x70 处已释放的链表节点，导致 SIGSEGV。
+     *
+     * 无论通过什么路径（直接 pw_stream_destroy、经 pw_core_disconnect
+     * → pw_proxy_destroy、或经 pw_context_destroy → 内部递归清理）
+     * 最终都会走到有问题的代码路径。
+     *
+     * 解决：只停线程循环（保证现场回调不再触发），然后丢弃指针。
+     * 不调用任何 PW 销毁函数。资源在进程退出时由 OS 回收。
+     * 下一次 pw_prepare_stream() 会创建全新的 loop/ctx/core/stream。
+     */
+    pthread_mutex_lock(&pw_state_mutex);
+    pw_stream_destroying = 1;
+    pthread_mutex_unlock(&pw_state_mutex);
+
+    if (pw_loop) {
+        PW.thread_loop_lock(pw_loop);
+    }
     if (pw_s) {
-        PW.thread_loop_stop(pw_loop);
-        PW.stream_destroy(pw_s);
-        pw_s = NULL;
-    }
-    if (pw_core) {
-        PW.core_disconnect(pw_core);
-        pw_core = NULL;
-    }
-    if (pw_ctx) {
-        PW.context_destroy(pw_ctx);
-        pw_ctx = NULL;
+        PW.stream_set_active(pw_s, 0);
     }
     if (pw_loop) {
-        PW.thread_loop_destroy(pw_loop);
-        pw_loop = NULL;
-        pw_mainloop = NULL;
+        PW.thread_loop_unlock(pw_loop);
     }
+
+    /* 停线程循环（锁外），弃置所有 PW 资源 */
+    if (pw_loop) {
+        PW.thread_loop_stop(pw_loop);
+    }
+
+    pthread_mutex_lock(&pw_state_mutex);
+    pw_s = NULL;
+    pw_core = NULL;
+    pw_ctx = NULL;
+    pw_loop = NULL;
+    pw_mainloop = NULL;
     pw_stream_ready = 0;
     pw_stream_connecting = 0;
+    pthread_mutex_unlock(&pw_state_mutex);
     pw_ring_reset();
 }
 
@@ -1172,13 +1310,12 @@ static void pw_cleanup_stream(void) {
 }
 
 static void pw_flush_stream(void) {
-    if (pw_s) {
-        pthread_mutex_lock(&pw_state_mutex);
-        int ready = pw_stream_ready;
-        pthread_mutex_unlock(&pw_state_mutex);
-        if (ready) {
-            PW.stream_flush(pw_s, 0);
-        }
+    pthread_mutex_lock(&pw_state_mutex);
+    struct pw_stream *s = pw_s;
+    int ready = pw_stream_ready;
+    pthread_mutex_unlock(&pw_state_mutex);
+    if (ready && s) {
+        PW.stream_flush(s, 0);
     }
     pw_ring_reset();
 }
@@ -1190,6 +1327,13 @@ static void pw_sync_volume(int volume);
 
 static int pw_write_samples(const int32_t *samples, int frame_count) {
     if (!samples || frame_count <= 0) return 0;
+
+    /* 检查流是否仍健康（"no target node" 等错误会清此标志） */
+    pthread_mutex_lock(&pw_state_mutex);
+    int stream_ok = pw_stream_ready;
+    pthread_mutex_unlock(&pw_state_mutex);
+    if (!stream_ok) return -1;
+
     int bytes = frame_count * pw_channels * (int)sizeof(int32_t);
     int total_written = 0;
 
@@ -1200,6 +1344,11 @@ static int pw_write_samples(const int32_t *samples, int frame_count) {
         int written = pw_ring_write((const uint8_t *)samples + total_written, chunk);
         if (written <= 0) {
             if (!g_play_thread_running) return 0;
+            /* 等待时再次检查流健康 */
+            pthread_mutex_lock(&pw_state_mutex);
+            stream_ok = pw_stream_ready;
+            pthread_mutex_unlock(&pw_state_mutex);
+            if (!stream_ok) return -1;
             usleep(1000);
             continue;
         }
@@ -1210,25 +1359,28 @@ static int pw_write_samples(const int32_t *samples, int frame_count) {
 
 static void pw_pause_stream(void) {
     pthread_mutex_lock(&pw_state_mutex);
+    struct pw_stream *s = pw_s;
     int ready = pw_stream_ready;
     pthread_mutex_unlock(&pw_state_mutex);
-    if (ready) PW.stream_set_active(pw_s, 0);
+    if (ready && s) PW.stream_set_active(s, 0);
 }
 
 static void pw_resume_stream(void) {
     pthread_mutex_lock(&pw_state_mutex);
+    struct pw_stream *s = pw_s;
     int ready = pw_stream_ready;
     pthread_mutex_unlock(&pw_state_mutex);
-    if (ready) PW.stream_set_active(pw_s, 1);
+    if (ready && s) PW.stream_set_active(s, 1);
 }
 
 static void pw_sync_volume(int volume) {
     pthread_mutex_lock(&pw_state_mutex);
+    struct pw_stream *s = pw_s;
     int ready = pw_stream_ready;
     pthread_mutex_unlock(&pw_state_mutex);
-    if (ready) {
+    if (ready && s) {
         float vol_linear = (float)volume / 100.0f;
-        PW.stream_set_control(pw_s, PW_STREAM_CONTROL_VOLUME, 0, vol_linear);
+        PW.stream_set_control(s, PW_STREAM_CONTROL_VOLUME, vol_linear);
     }
 }
 
@@ -1588,6 +1740,35 @@ void persist_playback_session_state(void) {
     save_config();
 }
 
+static int pulse_ensure_connected(void) {
+    if (pa_connected && pa_ml && pa_ctx) return 0;  /* 已连接 */
+    if (!pulse_loaded) return -1;
+
+    if (!pa_ml) {
+        pa_ml = P.mainloop_new();
+        if (!pa_ml) return -1;
+    }
+    if (!pa_ctx) {
+        pa_ctx = P.context_new(P.mainloop_get_api(pa_ml), APP_NAME);
+        if (!pa_ctx) { P.mainloop_free(pa_ml); pa_ml = NULL; return -1; }
+        P.context_connect(pa_ctx, NULL, PA_CONTEXT_NOFLAGS, NULL);
+    }
+    /* 等待连接就绪 */
+    int timeout = 500;
+    while (timeout > 0) {
+        int state = P.context_get_state(pa_ctx);
+        if (state == PA_CONTEXT_READY) { pa_connected = 1; return 0; }
+        if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) break;
+        P.mainloop_iterate(pa_ml, 1, NULL);
+        timeout--;
+    }
+    /* 连接失败，清理 */
+    if (pa_ctx) { P.context_disconnect(pa_ctx); P.context_unref(pa_ctx); pa_ctx = NULL; }
+    if (pa_ml) { P.mainloop_free(pa_ml); pa_ml = NULL; }
+    pa_connected = 0;
+    return -1;
+}
+
 static int audio_backend_prepare_stream(int sample_rate, int channels) {
     g_output_sample_rate = sample_rate;
     g_output_channels = channels;
@@ -1672,7 +1853,26 @@ static int audio_backend_prepare_stream(int sample_rate, int channels) {
     }
 
     if (pipewire_loaded && g_active_backend == AUDIO_BACKEND_PIPEWIRE) {
-        return pw_prepare_stream(sample_rate, channels);
+        if (pw_prepare_stream(sample_rate, channels) == 0)
+            return 0;
+        /* PipeWire 流未就绪（如无输出节点），退回到其他后端 */
+        log_warn("audio", "PipeWire backend failed, falling back to next backend");
+        pw_cleanup_stream_locked();  /* 清理 PW 侧残存资源 */
+        if (pulse_loaded) {
+            if (pulse_ensure_connected() < 0) {
+                log_warn("audio", "PulseAudio init failed, cannot fall back");
+            } else {
+                g_active_backend = AUDIO_BACKEND_PULSE;
+                log_info("audio", "Falling back to PulseAudio backend");
+                return audio_backend_prepare_stream(sample_rate, channels);
+            }
+        }
+        if (alsa_loaded) {
+            g_active_backend = AUDIO_BACKEND_ALSA;
+            alsa_ready = 1;
+            return audio_backend_prepare_stream(sample_rate, channels);
+        }
+        return -1;
     }
 
     update_controls_status(audio_text("没有可用的音频后端", "No audio backend available"));
@@ -1913,16 +2113,14 @@ void init_audio_device() {
     if (g_active_backend == AUDIO_BACKEND_AUTO || g_active_backend == AUDIO_BACKEND_PIPEWIRE) {
         if (pipewire_loaded) {
             log_info("audio", "Trying PipeWire backend");
-            if (pw_prepare_stream(44100, 2) == 0) {
-                /* 快速测试成功后立即清理，实际流在 play_audio_thread 中创建 */
-                pw_cleanup_stream();
+            /* 轻量探测：只检验守护进程可达，不创建流、不启动 RT 线程 */
+            if (pw_probe_backend() == 0) {
                 g_active_backend = AUDIO_BACKEND_PIPEWIRE;
                 log_info("audio", "PipeWire backend selected");
                 printf("%s\n", audio_text("当前使用 PipeWire 音频后端", "Using PipeWire backend"));
                 return;
             }
             /* 连接失败 — 清理并回退 */
-            pw_cleanup_stream();
             pipewire_unload();
             pipewire_loaded = 0;
             log_info("audio", "PipeWire connection failed, falling back");
@@ -2650,6 +2848,10 @@ void *play_audio_thread(void *arg) {
         goto cleanup;
     }
 
+    /* PipeWire 后端需要显式激活流使其从 PAUSED 进入 STREAMING。
+     * PulseAudio/ALSA 不需要此步骤（它们使用 push 模型）。 */
+    audio_backend_resume_stream();
+
     audio_backend_sync_volume(1);
 
     progress_tracker_init(output_sample_rate);
@@ -2876,7 +3078,10 @@ void play_audio(int index) {
         // 线程可能卡在 audio_backend_write_samples 的 PulseAudio mainloop 阻塞等待中
         // (stream 被 cork 后无事件到达，mainloop_iterate 永远不返回)
         // 发送 condvar 信号对该状态无效，必须先 uncork stream 唤醒 PA mainloop
-        audio_backend_resume_stream();
+        // 注意：此问题仅 PulseAudio 有；ALSA 有超时机制，PipeWire 使用非阻塞 ring buffer
+        if (g_active_backend == AUDIO_BACKEND_PULSE) {
+            audio_backend_resume_stream();
+        }
         signal_playback_thread();
 
         if (was_paused) {

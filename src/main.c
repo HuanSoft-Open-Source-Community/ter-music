@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <unistd.h>
+#include <execinfo.h>
 
 extern void init_ncurses();
 extern void create_layout();
@@ -29,6 +30,11 @@ void crash_handler(int sig) {
     endwin();
     cleanup_temp_playlist();
     fprintf(stderr, "致命错误：收到信号 %d\n", sig);
+    fprintf(stderr, "Backtrace:\n");
+    void *bt[48];
+    int n = backtrace(bt, 48);
+    backtrace_symbols_fd(bt, n, STDERR_FILENO);
+    fprintf(stderr, "\n");
     exit(1);
 }
 
