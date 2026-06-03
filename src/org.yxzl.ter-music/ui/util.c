@@ -79,11 +79,12 @@ const char *settings_sidebar_items[] = {
     "颜色主题",
     "默认路径",
     "播放设置",
+    "播放模式",
     "快捷键",
     "远程设备",
     "← 返回"  /* ← 返回 */
 };
-const int SETTINGS_ITEM_COUNT = 6;
+const int SETTINGS_ITEM_COUNT = 7;
 
 const char *history_sidebar_items[] = {
     "目录历史",
@@ -124,6 +125,7 @@ const char *settings_sidebar_items_ascii[] = {
     "Theme",
     "Default Path",
     "Playback",
+    "Play Mode",
     "Hotkeys",
     "Remote Devices",
     "<- Back"

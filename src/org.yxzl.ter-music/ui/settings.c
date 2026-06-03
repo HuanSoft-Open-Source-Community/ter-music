@@ -12,6 +12,7 @@
 
 #include "types.h"
 #include "audio/audio.h"
+#include "audio/play_queue.h"
 #include "ui/dialog.h"
 #include "ui/ui.h"
 #include "ui/menus.h"
@@ -65,12 +66,14 @@ static const char *settings_options[] = {
     "默认音量",
     "输出时延",
     "显示歌词面板",
-    "默认循环模式",
+    "默认播放模式",
     "默认倍速",
     "显示专辑图片",
     "歌词对齐方式",
     "音频后端",
-    "排序方式"
+    "排序方式",
+    "高级播放模式",
+    "默认播放模式"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -93,14 +96,16 @@ static const char *settings_options_ascii[] = {
     "Default Volume",
     "Output Latency",
     "Show Lyrics Panel",
-    "Default Loop Mode",
+    "Default Play Mode",
     "Default Speed",
     "Show Album Cover",
     "Lyrics Alignment",
     "Audio Backend",
-    "Sort Mode"
+    "Sort Mode",
+    "Advanced Play Modes",
+    "Default Play Mode"
 };
-#define SETTINGS_OPTION_COUNT 26
+#define SETTINGS_OPTION_COUNT 28
 
 enum {
     SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
@@ -123,12 +128,14 @@ enum {
     SETTINGS_IDX_VOLUME              = 17,
     SETTINGS_IDX_LATENCY             = 18,
     SETTINGS_IDX_SHOW_LYRICS         = 19,
-    SETTINGS_IDX_DEFAULT_LOOP        = 20,
+    SETTINGS_IDX_DEFAULT_PLAY_MODE   = 20,
     SETTINGS_IDX_DEFAULT_SPEED       = 21,
     SETTINGS_IDX_SHOW_ALBUM_COVER    = 22,
     SETTINGS_IDX_LYRICS_ALIGNMENT    = 23,
     SETTINGS_IDX_AUDIO_BACKEND       = 24,
-    SETTINGS_IDX_SORT_MODE           = 25
+    SETTINGS_IDX_SORT_MODE           = 25,
+    SETTINGS_IDX_ADVANCED_PLAY_MODES = 26,
+    SETTINGS_IDX_DEFAULT_PLAY_MODE2  = 27
 };
 
 typedef struct {
@@ -165,10 +172,14 @@ static const int settings_playback_option_indices[] = {
     SETTINGS_IDX_SHOW_LYRICS,
     SETTINGS_IDX_SHOW_ALBUM_COVER,
     SETTINGS_IDX_LYRICS_ALIGNMENT,
-    SETTINGS_IDX_DEFAULT_LOOP,
     SETTINGS_IDX_DEFAULT_SPEED,
     SETTINGS_IDX_AUDIO_BACKEND,
     SETTINGS_IDX_SORT_MODE
+};
+
+static const int settings_playmode_option_indices[] = {
+    SETTINGS_IDX_DEFAULT_PLAY_MODE,
+    SETTINGS_IDX_ADVANCED_PLAY_MODES
 };
 
 /* Reset settings view state (called from menus.c on view switch) */
@@ -193,6 +204,9 @@ static SettingsSectionSpec get_settings_section_spec_for_sidebar(int sidebar_idx
         case 2:
             return (SettingsSectionSpec){settings_playback_option_indices,
                 (int)(sizeof(settings_playback_option_indices) / sizeof(settings_playback_option_indices[0]))};
+        case 3:
+            return (SettingsSectionSpec){settings_playmode_option_indices,
+                (int)(sizeof(settings_playmode_option_indices) / sizeof(settings_playmode_option_indices[0]))};
         default:
             return (SettingsSectionSpec){NULL, 0};
     }
@@ -321,17 +335,15 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         }
         snprintf(line, line_size, "%s%s%s",
                  current_settings_options[option_index], separator, align_str);
-    } else if (option_index == SETTINGS_IDX_DEFAULT_LOOP) {
-        const char *loop_mode_str;
-        switch (g_app_config.default_loop_mode) {
-            case LOOP_OFF:    loop_mode_str = menu_text("关闭", "Off"); break;
-            case LOOP_SINGLE: loop_mode_str = menu_text("单曲", "Single"); break;
-            case LOOP_LIST:   loop_mode_str = menu_text("列表", "List"); break;
-            case LOOP_RANDOM: loop_mode_str = menu_text("随机", "Random"); break;
-            default:          loop_mode_str = menu_text("关闭", "Off");
-        }
+    } else if (option_index == SETTINGS_IDX_DEFAULT_PLAY_MODE) {
+        const char *mode_str = play_mode_display_name(
+            (PlayMode)g_app_config.default_play_mode, use_english_ui());
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator, loop_mode_str);
+                 current_settings_options[option_index], separator, mode_str);
+    } else if (option_index == SETTINGS_IDX_ADVANCED_PLAY_MODES) {
+        snprintf(line, line_size, "%s%s%s",
+                 current_settings_options[option_index], separator,
+                 menu_bool_text(g_app_config.advanced_play_modes_enabled));
     } else if (option_index == SETTINGS_IDX_DEFAULT_SPEED) {
         snprintf(line, line_size, "%s%s%.2fx",
                  current_settings_options[option_index], separator,
@@ -490,7 +502,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
         return;
     }
 
-    extern LoopMode g_loop_mode;
     extern float g_playback_speed;
 
     switch (option_index) {
@@ -544,18 +555,22 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             }
             save_config();
             break;
-        case SETTINGS_IDX_DEFAULT_LOOP:
+        case SETTINGS_IDX_DEFAULT_PLAY_MODE:
             if (delta < 0) {
-                g_app_config.default_loop_mode = (g_app_config.default_loop_mode - 1 + 4) % 4;
+                g_app_config.default_play_mode = (g_app_config.default_play_mode - 1 + PLAY_MODE_COUNT) % PLAY_MODE_COUNT;
             } else if (delta > 0) {
-                g_app_config.default_loop_mode = (g_app_config.default_loop_mode + 1) % 4;
+                g_app_config.default_play_mode = (g_app_config.default_play_mode + 1) % PLAY_MODE_COUNT;
             } else {
-                g_app_config.default_loop_mode = (g_app_config.default_loop_mode + 1) % 4;
+                g_app_config.default_play_mode = (g_app_config.default_play_mode + 1) % PLAY_MODE_COUNT;
             }
             save_config();
-            g_loop_mode = g_app_config.default_loop_mode;
-            show_status_message(menu_text("默认循环模式已更新，当前会话已应用",
-                                          "Default loop mode updated, applied to current session"));
+            g_play_mode = (PlayMode)g_app_config.default_play_mode;
+            show_status_message(menu_text("默认播放模式已更新，当前会话已应用",
+                                          "Default play mode updated, applied to current session"));
+            break;
+        case SETTINGS_IDX_ADVANCED_PLAY_MODES:
+            g_app_config.advanced_play_modes_enabled = !g_app_config.advanced_play_modes_enabled;
+            save_config();
             break;
         case SETTINGS_IDX_DEFAULT_SPEED: {
             static float speed_ratios[] = {0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
@@ -641,7 +656,8 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_SHOW_LYRICS ||
         g_settings_current_option == SETTINGS_IDX_SHOW_ALBUM_COVER ||
         g_settings_current_option == SETTINGS_IDX_LYRICS_ALIGNMENT ||
-        g_settings_current_option == SETTINGS_IDX_DEFAULT_LOOP ||
+        g_settings_current_option == SETTINGS_IDX_DEFAULT_PLAY_MODE ||
+        g_settings_current_option == SETTINGS_IDX_ADVANCED_PLAY_MODES ||
         g_settings_current_option == SETTINGS_IDX_DEFAULT_SPEED ||
         g_settings_current_option == SETTINGS_IDX_SORT_MODE) {
         adjust_or_toggle_settings_option(g_settings_current_option, 0);
@@ -1472,7 +1488,13 @@ void render_settings_content(void)
         mvprintw(start_y, content_start_x, "%s",
                  menu_text("语言可用 ENTER 切换，时延会在下次播放时生效",
                            "Press Enter to toggle language; latency applies on next playback"));
-    } else if (g_menu_selected_idx == 3) {  /* 快捷键 */
+    } else if (g_menu_selected_idx == 3) {  /* 播放模式 (NEW) */
+        mvprintw(start_y, content_start_x, "%s",
+                 menu_text("播放模式：↑/↓ 选择，+/ - 调整，ENTER 切换，←/TAB 返回菜单",
+                           "Play Mode: Up/Down select, +/- adjust, Enter toggle, Left/Tab back"));
+        start_y += 2;
+        render_settings_option_group(start_y, content_start_x, max_y, spec);
+    } else if (g_menu_selected_idx == 4) {  /* 快捷键 */
         mvprintw(start_y, content_start_x, "%s",
                  menu_text("快捷键说明：←/TAB 返回菜单",
                            "Hotkeys: Left/Tab back"));
@@ -1491,7 +1513,7 @@ void render_settings_content(void)
                  menu_text("+ / -：调整音量", "+ / -: Adjust volume"));
         mvprintw(start_y++, content_start_x, "%s",
                  menu_text(", / .：快退 / 快进", ", / .: Seek backward / forward"));
-    } else if (g_menu_selected_idx == 4) {  /* 远程设备 */
+    } else if (g_menu_selected_idx == 5) {  /* 远程设备 */
         render_remote_content();
     } else {
         mvprintw(start_y, content_start_x, "%s",
@@ -1521,7 +1543,7 @@ static void rerender_settings_view(void)
 void handle_settings_input(int ch)
 {
     /* Remote section handles its own input when content-focused */
-    if (g_menu_selected_idx == 4 && g_focus_area == FOCUS_CONTENT) {
+    if (g_menu_selected_idx == 5 && g_focus_area == FOCUS_CONTENT) {
         handle_remote_content_input(ch);
         return;
     }

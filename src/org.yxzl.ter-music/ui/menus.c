@@ -212,7 +212,8 @@ void init_default_config(void)
     g_app_config.volume_percent        = 100;
     g_app_config.audio_latency_ms      = 80;
     g_app_config.show_lyrics_panel     = 1;
-    g_app_config.default_loop_mode     = LOOP_OFF;
+    g_app_config.default_play_mode     = PLAY_MODE_SEQUENTIAL;
+    g_app_config.advanced_play_modes_enabled = 0;
     g_app_config.default_playback_speed = 1.0f;
     g_app_config.show_album_cover      = 1;
     g_app_config.lyrics_alignment      = 0;
@@ -282,7 +283,7 @@ void reload_config(void)
     load_config();
     apply_color_theme();
     request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
-    g_loop_mode = g_app_config.default_loop_mode;
+    g_play_mode = (PlayMode)g_app_config.default_play_mode;
     show_status_message("配置已重新加载 / Config reloaded");
 }
 
@@ -825,7 +826,7 @@ void init_all_persistent_data(void)
     ensure_config_dir_exists();
     load_config();
     apply_color_theme();
-    g_loop_mode = g_app_config.default_loop_mode;
+    g_play_mode = (PlayMode)g_app_config.default_play_mode;
 
     library_init();
 

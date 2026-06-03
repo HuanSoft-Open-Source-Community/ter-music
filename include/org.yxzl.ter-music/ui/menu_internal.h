@@ -139,6 +139,13 @@ void reset_help_view(void);
 void help_free_lines(void);
 
 /* ============================================================
+ * Popup state (defined in controls.c)
+ * ============================================================ */
+
+extern PopupState g_popup;
+int handle_popup_input(int ch);
+
+/* ============================================================
  * Remote settings (defined in settings.c)
  * ============================================================ */
 
