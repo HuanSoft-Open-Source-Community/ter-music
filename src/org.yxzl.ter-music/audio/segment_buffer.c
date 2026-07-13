@@ -202,6 +202,11 @@ int segment_pool_free_slot(const SegmentPool *pool)
 {
     if (!pool) return -1;
 
+    /* If current slot itself is invalid, return it first so Phase 3 can fill it.
+     * This prevents getting stuck when the current slot was never decoded. */
+    if (!pool->slots[pool->current_slot].is_valid)
+        return pool->current_slot;
+
     /* Look for the first invalid slot, starting from farthest from current */
     for (int offset = 1; offset < SEGMENT_POOL_SIZE; offset++) {
         int idx = (pool->current_slot + offset) % SEGMENT_POOL_SIZE;

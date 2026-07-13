@@ -236,7 +236,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
                                           int use_resampler,
                                           int *decoder_draining,
                                           int *decoder_finished,
-                                          int cue_offset)
+                                          int cue_offset  /* CUE sub-track offset; added to target_position for absolute file seek */)
 {
     extern pthread_mutex_t g_seek_mutex;
     extern int g_seek_request;
@@ -818,11 +818,56 @@ void *play_audio_thread(void *arg)
         log_info("audio", "Using preloaded data for index=%d (%d segments)", index, n);
         g_preload_data.valid = 0;
         preload_data_reset(&g_preload_data);
+    } else if (g_preload_data.valid) {
+        /* Preload data exists but was rejected — log why for diagnostics */
+        if (g_preload_data.track_index != index)
+            log_debug("audio", "Preload skipped: track_index mismatch (preloaded=%d, current=%d)",
+                      g_preload_data.track_index, index);
+        else if (g_preload_data.sample_rate != output_sample_rate ||
+                 g_preload_data.channels != output_channels)
+            log_debug("audio", "Preload skipped: format mismatch (sr=%d/%d, ch=%d/%d)",
+                      g_preload_data.sample_rate, output_sample_rate,
+                      g_preload_data.channels, output_channels);
+        else if (g_playback_speed < 0.99f || g_playback_speed > 1.01f)
+            log_debug("audio", "Preload skipped: speed=%.2f (need ~1.0)", (double)g_playback_speed);
     }
     pthread_mutex_unlock(&g_preload_data.lock);
 
+    /* If preloaded data was consumed, advance the decoder past the preloaded
+     * frames so Phase 3 doesn't re-decode the same audio from position 0.
+     * Without this, the fresh decoder (opened at line 649) is at position 0
+     * and would re-decode the first 15 seconds into slots 1 and 2. */
+    if (used_preload) {
+        int preloaded_frames = 0;
+        for (int s = 0; s < SEGMENT_POOL_SIZE && seg_pool.slots[s].is_valid; s++)
+            preloaded_frames += seg_pool.slots[s].frame_count;
+
+        if (preloaded_frames > 0) {
+            int skip_seconds = preloaded_frames / output_sample_rate;
+            if (skip_seconds > 0 && skip_seconds < g_total_duration) {
+                AVRational tb = fmt_ctx->streams[audio_stream_index]->time_base;
+                int64_t ts = av_rescale_q(skip_seconds, (AVRational){1, 1}, tb);
+                int seek_ret = av_seek_frame(fmt_ctx, audio_stream_index, ts, AVSEEK_FLAG_ANY);
+                if (seek_ret >= 0) {
+                    avcodec_flush_buffers(codec_ctx);
+                    if (swr_ctx) swr_init(swr_ctx);
+                    if (packet) av_packet_unref(packet);
+                    decoder_draining = 0;
+                    decoder_finished = 0;
+                    log_debug("audio", "Advanced decoder past preloaded %d frames (%ds) for index=%d",
+                              preloaded_frames, skip_seconds, index);
+                } else {
+                    log_warn("audio", "Failed to advance decoder past preloaded %ds for index=%d",
+                             skip_seconds, index);
+                }
+            }
+        }
+    }
+
     /* ── If no preload, decode first segment(s) normally ── */
-    if (!used_preload) {
+    /* For CUE tracks (cue_offset > 0): skip position-0 decode entirely;
+     * the CUE seek block below will seek to the correct offset and decode. */
+    if (!used_preload && cue_offset == 0) {
         int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
         for (int s = 0; s < SEGMENT_POOL_SIZE && !decoder_finished; s++) {
             int seg_id = s;
@@ -843,6 +888,11 @@ void *play_audio_thread(void *arg)
         }
         seg_pool.current_slot = 0;
         seg_pool.current_segment_id = 0;
+    } else if (!used_preload && cue_offset > 0) {
+        /* CUE track: pool was initialised in segment_pool_init(), slots are empty.
+         * current_slot/current_segment_id are already 0 from init.
+         * The CUE seek below will seek and decode the first segment. */
+        log_debug("audio", "CUE track index=%d offset=%ds — skipping position-0 decode, will seek directly", index, cue_offset);
     }
 
     /* Handle initial seek (e.g. from speed change restart) */
@@ -853,6 +903,9 @@ void *play_audio_thread(void *arg)
     }
 
     /* Handle initial CUE offset seek — seek to absolute file position */
+    /* Note: if g_seek_request is set (initial_seek_position > 0), the CUE seek is
+     * deferred to Phase 2's handle_seek_request_in_decoder(), which also adds cue_offset.
+     * This ensures CUE offset is always applied, whether via direct seek or via Phase 2. */
     if (cue_offset > 0 && !g_seek_request) {
         AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
         int64_t target_ts = av_rescale_q(cue_offset, (AVRational){1, 1}, time_base);
@@ -893,7 +946,8 @@ void *play_audio_thread(void *arg)
                                     seg_id,
                                     (decoder_finished || seg_id >= seg_pool.total_segments - 1));
 
-            log_debug("audio", "CUE offset seek to %ds (index=%d)", cue_offset, index);
+            log_debug("audio", "CUE offset seek to %ds (index=%d) — decoded segment=%d frames, finished=%d",
+                      cue_offset, index, seg_pool.slots[seg_pool.current_slot].frame_count, decoder_finished);
         } else {
             log_warn("audio", "CUE offset seek failed for position %d", cue_offset);
         }
@@ -993,6 +1047,26 @@ void *play_audio_thread(void *arg)
         Segment *cur = segment_pool_current(&seg_pool);
         if (!cur) {
             if (decoder_finished) { reached_end_of_stream = 1; break; }
+            /* Current slot invalid but decoder not finished: try to recover by
+             * advancing to the next valid slot if one exists. This prevents
+             * getting stuck when a slot was never filled (e.g. decoder_finished
+             * triggered during Phase 3 fill before all slots were ready). */
+            {   /* scan for any valid slot other than current */
+                int recovered = 0;
+                for (int s = 0; s < SEGMENT_POOL_SIZE; s++) {
+                    if (seg_pool.slots[s].is_valid && s != seg_pool.current_slot) {
+                        log_debug("audio", "Recovering: advancing from invalid slot %d to valid slot %d",
+                                  seg_pool.current_slot, s);
+                        seg_pool.current_slot = s;
+                        seg_pool.current_segment_id = seg_pool.slots[s].segment_id;
+                        recovered = 1;
+                        break;
+                    }
+                }
+                if (!recovered) {
+                    log_debug("audio", "Recovery failed: no valid slots — waiting for decode");
+                }
+            }
             continue;
         }
 
