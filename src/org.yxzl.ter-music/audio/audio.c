@@ -350,7 +350,7 @@ void set_play_mode(PlayMode mode)
     }
     g_app_config.default_play_mode = g_play_mode;
     save_config();
-    render_controls();
+    request_ui_refresh(UI_DIRTY_CONTROLS);
 }
 
 void cycle_play_mode(void)
@@ -363,7 +363,7 @@ void cycle_play_mode(void)
     }
     g_app_config.default_play_mode = g_play_mode;
     save_config();
-    render_controls();
+    request_ui_refresh(UI_DIRTY_CONTROLS);
 }
 
 void toggle_playback_speed(void)
@@ -377,7 +377,7 @@ void toggle_playback_speed(void)
     char msg[64];
     snprintf(msg, sizeof(msg), "%s: %.2fx", use_english_ui() ? "Speed" : "倍速", (double)g_playback_speed);
     update_controls_status(msg);
-    render_controls();
+    request_ui_refresh(UI_DIRTY_CONTROLS);
     apply_playback_speed_change();
 }
 
@@ -724,7 +724,7 @@ start_playback:
     update_controls_status(msg);
     add_history_entry(&track);
     log_info("audio", "Now playing: '%s' - '%s' (idx=%d)", track.title, track.artist, index);
-    render_playlist_content();
+    request_ui_refresh(UI_DIRTY_PLAYLIST);
     request_ui_refresh(UI_DIRTY_CONTROLS);
     }
 }
@@ -750,7 +750,7 @@ void pause_audio(void)
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
     progress_tracker_on_pause();
-    render_playlist_content();
+    request_ui_refresh(UI_DIRTY_PLAYLIST);
 }
 
 void resume_audio(void)
@@ -770,7 +770,7 @@ void resume_audio(void)
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
     progress_tracker_on_resume();
-    render_playlist_content();
+    request_ui_refresh(UI_DIRTY_PLAYLIST);
     update_progress_bar();
     update_lyrics_display();
 }
@@ -864,7 +864,7 @@ void seek_audio(double position)
         pthread_mutex_unlock(&g_play_mutex);
         if (progress_tracker_is_ready()) progress_tracker_seek(int_position);
         update_progress_bar();
-        render_controls();
+        request_ui_refresh(UI_DIRTY_CONTROLS);
         return;
     }
 
@@ -876,8 +876,8 @@ void seek_audio(double position)
     signal_playback_thread();
 
     update_progress_bar();
-    render_controls();
-    render_playlist_content();
+    request_ui_refresh(UI_DIRTY_CONTROLS);
+    request_ui_refresh(UI_DIRTY_PLAYLIST);
     update_lyrics_display();
     media_session_notify_seek((uint64_t)g_current_position * 1000ULL);
 }
