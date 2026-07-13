@@ -11,6 +11,7 @@
 #include "types.h"
 #include "ui/ui.h"
 #include "ui/menus.h"
+#include "ui/menu_internal.h"
 #include "config/config.h"
 #include <ncursesw/ncurses.h>
 #include <stdio.h>
@@ -152,14 +153,17 @@ void create_layout(void)
 
     // 1. 播放列表窗口 (左上)
     win_playlist = newwin(playlist_height, main_width, 1, 1);
-    box(win_playlist, 0, 0);
-    mvwprintw(win_playlist, 0, 2, "%s", ui_text(" 播放列表 ", " Playlist "));
+    wattron(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    rounded_box(win_playlist);
+    wattroff(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     wbkgd(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    mvwprintw(win_playlist, 0, 2, "%s", ui_text(" 播放列表 ", " Playlist "));
     wrefresh(win_playlist);
 
     // 2. 控制栏窗口 (左下)
     win_controls = newwin(controls_height, main_width, 1 + playlist_height, 1);
-    box(win_controls, 0, 0);
+    wattron(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
+    rounded_box(win_controls);
     const char *focus_hint = g_control_focus
         ? ui_text("[控件焦点]", "[Ctrl Focus]")
         : ui_text("[列表焦点]", "[List Focus]");
@@ -173,8 +177,9 @@ void create_layout(void)
              ui_text("[C:控件]", "[C:Ctrl]"),
              ui_text("[L:列表]", "[L:List]"),
              focus_hint);
-    mvwprintw(win_controls, 0, 2, " %s %s", controls_header, lyric_hint);
+    wattroff(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
     wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
+    mvwprintw(win_controls, 0, 2, " %s %s", controls_header, lyric_hint);
     wrefresh(win_controls);
 
     // 3. 歌词侧栏窗口 (右侧)
@@ -182,9 +187,11 @@ void create_layout(void)
         int lyrics_height = max_y - 3;
         if (lyrics_height < 3) lyrics_height = 3;
         win_lyrics = newwin(lyrics_height, lyrics_width, 1, 1 + main_width);
-        box(win_lyrics, 0, 0);
-        mvwprintw(win_lyrics, 0, 2, "%s", ui_text(" 歌词 ", " Lyrics "));
+        wattron(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
+        rounded_box(win_lyrics);
+        wattroff(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
         wbkgd(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
+        mvwprintw(win_lyrics, 0, 2, "%s", ui_text(" 歌词 ", " Lyrics "));
         mvwprintw(win_lyrics, 2, 2, "%s", ui_text("未加载歌词。", "No lyrics loaded."));
         wrefresh(win_lyrics);
     } else {
@@ -195,15 +202,17 @@ void create_layout(void)
     if (g_app_config.show_lyrics_panel && lyrics_width > 0) {
         int vline_len = max_y - 3;
         if (vline_len < 1) vline_len = 1;
-        mvvline(1, 1 + main_width, ACS_VLINE, vline_len);
+        for (int i = 0; i < vline_len; i++)
+            mvaddstr(1 + i, 1 + main_width, "\xe2\x94\x82"); /* │ */
     }
 
     int hline_len = main_width;
     if (hline_len < 1) hline_len = 1;
-    mvhline(1 + playlist_height, 1, ACS_HLINE, hline_len);
+    for (int i = 0; i < hline_len; i++)
+        mvaddstr(1 + playlist_height, 1 + i, "\xe2\x94\x80"); /* ─ */
 
     if (g_app_config.show_lyrics_panel && lyrics_width > 0) {
-        mvaddch(1 + playlist_height, 1 + main_width, ACS_PLUS);
+        mvaddstr(1 + playlist_height, 1 + main_width, "\xe2\x94\xbc"); /* ┼ */
     }
 
     refresh();

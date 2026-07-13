@@ -18,7 +18,7 @@ extern "C" {
 
 /* ── Version identifiers ──────────────────────────────────────────── */
 #define CONFIG_XML_VERSION          "2.2"
-#define CONFIG_CURRENT_VERSION      3
+#define CONFIG_CURRENT_VERSION      4
 #define CONFIG_MIN_SUPPORTED_VER    2
 
 /* ── Root element ─────────────────────────────────────────────────── */

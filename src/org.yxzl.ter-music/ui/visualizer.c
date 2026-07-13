@@ -73,8 +73,19 @@ static void render_album_cover(void)
     if (optimal_size < BRAILLE_MIN_SIZE) return;
 
     int cover_char_width = optimal_size * 2;
+
+    /* constrain to window width: start_col(0) + cover + 4 cols gap ≤ w */
+    int start_col = 0;
+    int max_cover_width = w - start_col - 4;
+    if (cover_char_width > max_cover_width) {
+        cover_char_width = max_cover_width;
+        if (cover_char_width < BRAILLE_MIN_SIZE * 2) return;
+        optimal_size = cover_char_width / 2;
+        if (optimal_size < BRAILLE_MIN_SIZE) return;
+    }
+
     int min_spectrum_width = 20;
-    if (w - cover_char_width - 4 < min_spectrum_width) return;
+    if (w - cover_char_width - start_col - 4 < min_spectrum_width) return;
 
     char cover_path[MAX_PATH_LEN];
     if (get_current_album_cover_path(cover_path, sizeof(cover_path)) != 0) return;
@@ -93,7 +104,6 @@ static void render_album_cover(void)
     int line_count = get_braille_art_lines(g_braille_art_buffer, lines, BRAILLE_MAX_SIZE);
 
     int start_row = viz_top;
-    int start_col = 2;
 
     for (int i = 0; i < line_count && i < optimal_size; i++) {
         if (start_row + i < viz_bottom) {
@@ -120,9 +130,10 @@ static void clear_visualizer_area(void)
 
     int separator_row = viz_top - 1;
     if (separator_row > button_row && separator_row < h - 1) {
-        mvwhline(win_controls, separator_row, 1, ACS_HLINE, w - 2);
-        mvwaddch(win_controls, separator_row, 0, ACS_VLINE);
-        mvwaddch(win_controls, separator_row, w - 1, ACS_VLINE);
+        for (int x = 1; x < w - 1; x++)
+            mvwaddstr(win_controls, separator_row, x, "\xe2\x94\x80"); /* ─ */
+        mvwaddstr(win_controls, separator_row, 0, "\xe2\x94\x82");     /* │ */
+        mvwaddstr(win_controls, separator_row, w - 1, "\xe2\x94\x82"); /* │ */
     }
 
     for (int row = viz_top; row <= viz_bottom; row++) {

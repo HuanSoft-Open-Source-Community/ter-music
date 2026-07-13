@@ -816,14 +816,18 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
 static int sel_color_count(void)
 {
     if (!has_colors() || COLORS <= 0) return 0;
-    if (COLORS >= 256) return 24;
-    if (COLORS >= 16)  return 16;
-    if (COLORS >= 8)   return 8;
-    return COLORS;  /* 2…7 — only whatever the terminal supports */
+    int base;
+    if (COLORS >= 256) base = 24;
+    else if (COLORS >= 16)  base = 16;
+    else if (COLORS >= 8)   base = 8;
+    else base = COLORS;
+    return base + 1;  /* +1 for transparent (-1) */
 }
 
 static int sel_color_val(int i)
 {
+    if (i == 0) return -1;  /* transparent */
+    i--;  /* shift: remaining colors map to old indices */
     if (i < 8) return i;
     if (i < 16) return 8 + (i - 8);
     static const int cube[] = {208,130,198,93,37,75,203,118};
@@ -937,7 +941,7 @@ static void close_sel_menu(int apply)
                     int n = sel_color_count();
                     for (int j = 0; j < n; j++) {
                         int v = sel_color_val(j);
-                        if (v == paired) continue;
+                        if (v == paired && v != -1) continue;
                         if (idx == g_sel_idx) {
                             *cv[g_sel_src] = v;
                             break;
@@ -1042,7 +1046,7 @@ static void open_sel_menu(int option_index)
                 int n = sel_color_count();
                 for (int i = 0; i < n; i++) {
                     int v = sel_color_val(i);
-                    if (v == paired) continue;
+                    if (v == paired && v != -1) continue;
                     if (v == current) cur = count;
                     count++;
                 }
@@ -1174,7 +1178,7 @@ static void create_sel_window(void)
                     int n = sel_color_count();
                     for (int j = 0; j < n; j++) {
                         int v = sel_color_val(j);
-                        if (v == paired) continue;
+                        if (v == paired && v != -1) continue;
                         if (idx == i) {
                             snprintf(opts[i], 48, "%s (%d)", menu_color_name(v), v);
                             break;
@@ -1304,7 +1308,7 @@ static void draw_sel_menu(void)
                     int nc = sel_color_count();
                     for (int j = 0; j < nc; j++) {
                         int v = sel_color_val(j);
-                        if (v == paired) continue;
+                        if (v == paired && v != -1) continue;
                         if (idx == i) {
                             snprintf(opts[i], 48, "%s (%d)", menu_color_name(v), v);
                             break;
@@ -1321,7 +1325,7 @@ static void draw_sel_menu(void)
 
     /* Border and title: use highlight color pair */
     wattron(g_sel_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
-    box(g_sel_win, 0, 0);
+    rounded_box(g_sel_win);
 
     /* Title */
     const char *title = "";

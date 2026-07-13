@@ -53,6 +53,8 @@ void show_status_message(const char *msg);
 const char *get_status_message(void);
 time_t get_status_message_time(void);
 
+void rounded_box(WINDOW *win);
+
 /* ============================================================
  * Global variable declarations (defined in util.c)
  * ============================================================ */

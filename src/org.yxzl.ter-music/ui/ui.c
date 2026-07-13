@@ -143,6 +143,7 @@ static void ensure_utf8_locale(void)
     for (int i = 0; fallbacks[i] != NULL; i++) {
         if (setlocale(LC_ALL, fallbacks[i]) && locale_uses_utf8()) return;
     }
+
     setlocale(LC_CTYPE, "");
 }
 
@@ -190,6 +191,7 @@ size_t utf8_next_char(const char *src, wchar_t *wc_out, int *width_out)
         if (width_out) *width_out = 0;
         return 0;
     }
+
     int width = wcwidth(wc);
     if (width < 0) width = 1;
     if (wc_out)   *wc_out = wc;
@@ -248,6 +250,7 @@ void init_ncurses(void)
         fflush(stdout);
     }
 
+
     initscr();
     cbreak();
     noecho();
@@ -258,13 +261,18 @@ void init_ncurses(void)
 
     if (has_colors()) {
         start_color();
-        init_pair(COLOR_PAIR_BORDER,    COLOR_CYAN,   COLOR_BLACK);
-        init_pair(COLOR_PAIR_PLAYLIST,  COLOR_WHITE,  COLOR_BLACK);
-        init_pair(COLOR_PAIR_CONTROLS,  COLOR_YELLOW, COLOR_BLACK);
-        init_pair(COLOR_PAIR_LYRICS,    COLOR_GREEN,  COLOR_BLACK);
-        init_pair(COLOR_PAIR_SIDEBAR,   COLOR_CYAN,   COLOR_BLACK);
-        init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK,  COLOR_WHITE);
+        use_default_colors();  /* enable -1 (COLOR_DEFAULT) for transparent bg support */
+        assume_default_colors(-1, -1);  /* pair 0 also uses terminal defaults */
+        init_pair(COLOR_PAIR_BORDER,    COLOR_CYAN,   -1);  /* transparent bg */
+        init_pair(COLOR_PAIR_PLAYLIST,  COLOR_WHITE,  -1);
+        init_pair(COLOR_PAIR_CONTROLS,  COLOR_YELLOW, -1);
+        init_pair(COLOR_PAIR_LYRICS,    COLOR_GREEN,  -1);
+        init_pair(COLOR_PAIR_SIDEBAR,   COLOR_CYAN,   -1);
+    init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK,  COLOR_WHITE);
     }
+
+        bkgdset(' ' | COLOR_PAIR(0));  /* transparent bg via border pair */
+        clear();
 }
 
 /* ============================================================
@@ -722,7 +730,7 @@ void run_event_loop(void)
                         int max_y, max_x;
                         getmaxyx(stdscr, max_y, max_x);
                         WINDOW *win_win = newwin(max_y - 4, max_x - 4, 2, 2);
-                        box(win_win, 0, 0);
+                        rounded_box(win_win);
                         mvwprintw(win_win, 0, 2, "%s", ui_text(" 选择歌单 ", " Select Playlist "));
                         wbkgd(win_win, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
@@ -897,7 +905,7 @@ void run_event_loop(void)
                 int pw = 60, ph = n + 4;
                 int px = (mx - pw) / 2, py = (my - ph) / 2;
                 WINDOW *w = newwin(ph, pw, py, px);
-                box(w, 0, 0);
+                rounded_box(w);
                 mvwprintw(w, 0, 2, "%s", ui_text(" 播放历史 ", " Play History "));
                 int sel = 0, off = 0;
                 while (1) {
@@ -939,6 +947,7 @@ void run_event_loop(void)
             }
         }
     }
+
 }
 
 /* ============================================================
@@ -958,6 +967,7 @@ void cleanup(void)
     } else {
         pthread_mutex_unlock(&g_search_mutex);
     }
+
 
     persist_playback_session_state();
     stop_audio();
@@ -1018,6 +1028,7 @@ void check_konami_input(int ch)
         matched = 1;
     }
 
+
     if (matched) {
         g_konami_input_pos++;
         g_konami_last_time = now;
@@ -1032,6 +1043,7 @@ void check_konami_input(int ch)
             g_konami_last_time = now;
         }
     }
+
 }
 
 void toggle_rainbow_mode(void)
@@ -1046,20 +1058,22 @@ void toggle_rainbow_mode(void)
         update_controls_status(use_english_ui() ? "Rainbow mode disabled" : "彩虹模式已关闭");
     } else {
         memcpy(&g_saved_theme, &g_app_config.theme, sizeof(ColorTheme));
-        g_app_config.theme.border_bg    = COLOR_BLACK;
-        g_app_config.theme.playlist_bg  = COLOR_BLACK;
-        g_app_config.theme.controls_bg  = COLOR_BLACK;
-        g_app_config.theme.lyrics_bg    = COLOR_BLACK;
-        g_app_config.theme.sidebar_bg   = COLOR_BLACK;
-        g_app_config.theme.highlight_bg = COLOR_BLACK;
+        g_app_config.theme.border_bg    = -1;
+        g_app_config.theme.playlist_bg  = -1;
+        g_app_config.theme.controls_bg  = -1;
+        g_app_config.theme.lyrics_bg    = -1;
+        g_app_config.theme.sidebar_bg   = -1;
+        g_app_config.theme.highlight_bg = -1;
         g_rainbow_color_offset = 0;
         update_rainbow_colors();
         g_rainbow_mode_enabled = 1;
         update_controls_status(use_english_ui() ? "Konami code! Rainbow mode enabled" : "康娜米！彩虹模式已启用");
     }
 
+
     if (g_current_view == VIEW_MAIN) {
         create_layout();
         request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
     }
+
 }

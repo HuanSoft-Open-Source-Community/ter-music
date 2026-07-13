@@ -143,7 +143,7 @@ void update_progress_bar(void)
 
     int time_width = 13;
     int percent_width = 4;
-    int padding = 4;
+    int padding = 6;
     int progress_bar_width = w - time_width - percent_width - padding - 4;
     if (progress_bar_width < 10) progress_bar_width = 10;
     int progress_start_col = 2 + time_width + 1;
@@ -165,8 +165,8 @@ void update_progress_bar(void)
 
     if (is_progress_selected) wattroff(win_controls, A_REVERSE | A_BOLD);
 
-    mvwaddch(win_controls, progress_row, 0, ACS_VLINE);
-    mvwaddch(win_controls, progress_row, w - 1, ACS_VLINE);
+    mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
+    mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
 
     wrefresh(win_controls);
 

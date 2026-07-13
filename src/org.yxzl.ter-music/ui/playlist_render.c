@@ -152,7 +152,8 @@ void render_playlist_content(void)
     pthread_mutex_unlock(&g_search_mutex);
 
     werase(win_playlist);
-    box(win_playlist, 0, 0);
+    wattron(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    rounded_box(win_playlist);
 
     char title_buf[128];
     if (snap_in_progress) {
@@ -172,6 +173,7 @@ void render_playlist_content(void)
     } else {
         mvwprintw(win_playlist, 0, 2, "%s", ui_text(" 播放列表 ", " Playlist "));
     }
+    wattroff(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     wbkgd(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
     int h, w;
@@ -325,7 +327,8 @@ void render_playlist_content(void)
 
         // Status bar
         int status_line = h - 7;
-        mvwhline(win_playlist, status_line, 1, ACS_HLINE, w - 2);
+        for (int x = 1; x < w - 1; x++)
+            mvwaddstr(win_playlist, status_line, x, "\xe2\x94\x80"); /* ─ */
 
         char status_msg[MAX_META_LEN];
         switch (g_play_state) {
@@ -380,7 +383,7 @@ void render_playlist_content(void)
                     }
                     if (g_braille_art_buffer[0] != '\0') {
                         show_cover = 1;
-                        cover_start_col = w - cover_char_width - 2;
+                        cover_start_col = w - cover_char_width - 3;
                     }
                 }
             }

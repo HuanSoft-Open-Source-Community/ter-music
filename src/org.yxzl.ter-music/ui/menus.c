@@ -194,17 +194,17 @@ void init_default_config(void)
     }
 
     g_app_config.theme.playlist_fg   = COLOR_WHITE;
-    g_app_config.theme.playlist_bg   = COLOR_BLACK;
+    g_app_config.theme.playlist_bg   = -1;  /* transparent */
     g_app_config.theme.controls_fg   = COLOR_YELLOW;
-    g_app_config.theme.controls_bg   = COLOR_BLACK;
+    g_app_config.theme.controls_bg   = -1;  /* transparent */
     g_app_config.theme.lyrics_fg     = COLOR_GREEN;
-    g_app_config.theme.lyrics_bg     = COLOR_BLACK;
+    g_app_config.theme.lyrics_bg     = -1;  /* transparent */
     g_app_config.theme.sidebar_fg    = COLOR_CYAN;
-    g_app_config.theme.sidebar_bg    = COLOR_BLACK;
+    g_app_config.theme.sidebar_bg    = -1;  /* transparent */
     g_app_config.theme.highlight_fg  = COLOR_BLACK;
     g_app_config.theme.highlight_bg  = COLOR_WHITE;
     g_app_config.theme.border_fg     = COLOR_CYAN;
-    g_app_config.theme.border_bg     = COLOR_BLACK;
+    g_app_config.theme.border_bg     = -1;  /* transparent */
 
     g_app_config.auto_play_on_start    = 0;
     g_app_config.remember_last_path    = 1;
@@ -234,7 +234,7 @@ void apply_color_theme(void)
 
     int max_c = COLORS - 1;
     if (max_c < 0) max_c = 7;
-#define CLR(v) ((v) < 0 ? 0 : (v) > max_c ? max_c : (v))
+#define CLR(v) ((v) == -1 ? -1 : (v) < 0 ? 0 : (v) > max_c ? max_c : (v))
 
     init_pair(COLOR_PAIR_PLAYLIST,  CLR(g_app_config.theme.playlist_fg),  CLR(g_app_config.theme.playlist_bg));
     init_pair(COLOR_PAIR_CONTROLS,  CLR(g_app_config.theme.controls_fg),  CLR(g_app_config.theme.controls_bg));
@@ -252,26 +252,45 @@ void load_config(void)
 
     /* Try native XML format first */
     init_default_config();
+    int loaded = 0;
     if (config_load_from_xml(config_file, &g_app_config) == 0) {
-        g_playback_speed = g_app_config.default_playback_speed;
-        return;
+        loaded = 1;
     }
 
     /* XML not found — check for old JSON config needing migration */
-    if (config_needs_migration()) {
+    if (!loaded && config_needs_migration()) {
         log_info("menu_views", "Performing v1 (JSON) → v2 (XML) migration");
         if (config_migrate_v1_to_v2() == 0) {
             if (config_load_from_xml(config_file, &g_app_config) == 0) {
-                g_playback_speed = g_app_config.default_playback_speed;
                 log_info("menu_views", "Migration successful, config loaded");
-                return;
+                loaded = 1;
             }
         }
-        log_warn("menu_views", "Migration attempted but failed to load migrated config");
+        if (!loaded)
+            log_warn("menu_views", "Migration attempted but failed to load migrated config");
     }
 
-    /* Nothing worked — stick with defaults already set by init_default_config */
-    log_debug("menu_views", "No valid config found, using defaults");
+    if (!loaded) {
+        /* Nothing worked — stick with defaults already set by init_default_config */
+        log_debug("menu_views", "No valid config found, using defaults");
+    }
+
+    /* Migrate old configs (version < 3): change bg=0 (old COLOR_BLACK default)
+     * to -1 (COLOR_DEFAULT / transparent) for all background color fields. */
+    if (g_app_config.config_version < 4) {
+        log_info("menu_views", "Migrating config v%d → v4: bg=0 → -1 (transparent)",
+                 g_app_config.config_version);
+        #define MIGRATE_BG(field) if ((field) == 0) (field) = -1
+        MIGRATE_BG(g_app_config.theme.playlist_bg);
+        MIGRATE_BG(g_app_config.theme.controls_bg);
+        MIGRATE_BG(g_app_config.theme.lyrics_bg);
+        MIGRATE_BG(g_app_config.theme.sidebar_bg);
+        MIGRATE_BG(g_app_config.theme.border_bg);
+        #undef MIGRATE_BG
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+
     g_playback_speed = g_app_config.default_playback_speed;
 }
 
@@ -873,17 +892,20 @@ void render_menu_frame(const char *title)
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
 
+        bkgdset(' ' | COLOR_PAIR(0));  /* transparent bg */
     clear();
 
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
-    box(stdscr, 0, 0);
+    rounded_box(stdscr);
     mvprintw(0, 2, " %s ", resolve_menu_title(title));
-    attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
 
     int menu_width = max_x / 4;
-    mvvline(1, menu_width, ACS_VLINE, max_y - 3);
-    mvaddch(1, menu_width, ACS_TTEE);
-    mvaddch(max_y - 3, menu_width, ACS_BTEE);
+    int vline_len = max_y - 3;
+    if (vline_len < 1) vline_len = 1;
+    for (int i = 0; i < vline_len; i++)
+        mvaddstr(1 + i, menu_width, "\xe2\x94\x82"); /* │ */
+    mvaddstr(1, menu_width, "\xe2\x94\xac");          /* ┬ U+252C */
+    mvaddstr(max_y - 3, menu_width, "\xe2\x94\xb4");  /* ┴ U+2534 */
 
     if (strlen(get_status_message()) > 0 && (time(NULL) - get_status_message_time()) < 3) {
         attron(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
@@ -903,12 +925,13 @@ void render_menu_sidebar(int selected_idx, const char **items, int item_count)
     int start_y = 2;
     items = resolve_sidebar_items(items);
 
-    attron(COLOR_PAIR(COLOR_PAIR_SIDEBAR));
-
+    /* clear sidebar area with A_NORMAL (no color pair → transparent) */
     for (int y = start_y; y < max_y - 2; y++) {
         mvhline(y, 1, ' ', menu_width - 1);
     }
 
+    /* draw sidebar text items with color pair */
+    attron(COLOR_PAIR(COLOR_PAIR_SIDEBAR));
     for (int i = 0; i < item_count && (start_y + i) < max_y - 2; i++) {
         if (i == selected_idx && g_focus_area == FOCUS_SIDEBAR) {
             attron(A_REVERSE);
@@ -918,7 +941,6 @@ void render_menu_sidebar(int selected_idx, const char **items, int item_count)
             mvprintw(start_y + i, 2, "%s", items[i]);
         }
     }
-
     attroff(COLOR_PAIR(COLOR_PAIR_SIDEBAR));
     refresh();
 }
@@ -928,14 +950,23 @@ void render_menu_hint_bar(void)
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
 
+    short fg, bg;
+    pair_content(COLOR_PAIR_BORDER, &fg, &bg);
+    log_info("hint_bar", "called: max_y=%d max_x=%d pair=%d fg=%d bg=%d theme_border_fg=%d theme_border_bg=%d",
+             max_y, max_x, COLOR_PAIR_BORDER, (int)fg, (int)bg,
+             (int)g_app_config.theme.border_fg, (int)g_app_config.theme.border_bg);
+
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
-    mvhline(max_y - 1, 0, ' ', max_x);
+    for (int x = 0; x < max_x; x++)
+        mvaddch(max_y - 1, x, ' ');
     mvprintw(max_y - 1, 2, "%s",
              use_english_ui()
                  ? "F1:Home  F2:Settings  F3:History  F4:Playlists  F5:Favorites  F6:Info  F7:Lang  F8:Help  F9:Quit"
                  : "F1:主页  F2:设置  F3:历史  F4:歌单  F5:收藏  F6:信息  F7:中/EN  F8:帮助  F9:退出");
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
     refresh();
+
+    log_info("hint_bar", "rendered: row=%d len=%d", max_y - 1, max_x);
 }
 
 /* ============================================================

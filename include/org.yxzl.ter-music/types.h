@@ -166,7 +166,7 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 3
+#define CONFIG_CURRENT_VERSION 4
 
 typedef struct {
     char path[MAX_PATH_LEN];

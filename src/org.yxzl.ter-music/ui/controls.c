@@ -399,7 +399,7 @@ static void render_controls_popup(void)
 
     /* Step 2 — draw border and title with HIGHLIGHT color pair */
     wattrset(popup_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
-    box(popup_win, 0, 0);
+    rounded_box(popup_win);
 
     const char *title = "";
     switch (g_popup.type) {
@@ -520,7 +520,8 @@ void render_controls(void)
     if (!win_controls) return;
 
     werase(win_controls);
-    box(win_controls, 0, 0);
+    wattron(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
+    rounded_box(win_controls);
 
     const char *focus_hint = g_control_focus
         ? ui_text("[控件焦点]", "[Ctrl Focus]")
@@ -537,8 +538,9 @@ void render_controls(void)
              ui_text("[Tab:切换]", "[Tab:View]"),
              focus_hint);
     mvwprintw(win_controls, 0, 2, " %s %s", controls_header, lyric_hint);
-    wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
 
+    wattroff(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
+    wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
     int h, w;
     getmaxyx(win_controls, h, w);
 
@@ -571,7 +573,7 @@ void render_controls(void)
 
             int time_width = 13;
             int percent_width = 4;
-            int padding = 4;
+            int padding = 6;
             int progress_bar_width = w - time_width - percent_width - padding - 4;
             if (progress_bar_width < 10) progress_bar_width = 10;
 
@@ -592,8 +594,8 @@ void render_controls(void)
             mvwprintw(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
             mvwprintw(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
 
-            mvwaddch(win_controls, progress_row, 0, ACS_VLINE);
-            mvwaddch(win_controls, progress_row, w - 1, ACS_VLINE);
+            mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
+            mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
 
             if (is_progress_selected) wattroff(win_controls, A_REVERSE | A_BOLD);
         }

@@ -69,6 +69,35 @@ time_t get_status_message_time(void)
 }
 
 /* ============================================================
+ * rounded_box — draw a rounded-corner border using Unicode
+ * box-drawing characters (╭ ╮ ╰ ╯ ─ │)
+ * ============================================================ */
+void rounded_box(WINDOW *win)
+{
+    int h, w;
+    getmaxyx(win, h, w);
+    if (h < 2 || w < 2) return;
+
+    /* corners */
+    mvwaddstr(win, 0, 0, "\xe2\x95\xad");          /* ╭ U+256D */
+    mvwaddstr(win, 0, w - 1, "\xe2\x95\xae");      /* ╮ U+256E */
+    mvwaddstr(win, h - 1, 0, "\xe2\x95\xb0");      /* ╰ U+2570 */
+    mvwaddstr(win, h - 1, w - 1, "\xe2\x95\xaf");  /* ╯ U+256F */
+
+    /* horizontal lines */
+    for (int x = 1; x < w - 1; x++) {
+        mvwaddstr(win, 0, x, "\xe2\x94\x80");       /* ─ U+2500 */
+        mvwaddstr(win, h - 1, x, "\xe2\x94\x80");   /* ─ U+2500 */
+    }
+
+    /* vertical lines */
+    for (int y = 1; y < h - 1; y++) {
+        mvwaddstr(win, y, 0, "\xe2\x94\x82");       /* │ U+2502 */
+        mvwaddstr(win, y, w - 1, "\xe2\x94\x82");   /* │ U+2502 */
+    }
+}
+
+/* ============================================================
  * Sidebar item arrays
  *
  * Declared extern in menu_internal.h so all view modules can
@@ -199,6 +228,8 @@ const char *menu_bool_text(int enabled)
 const char *menu_color_name(int color_value)
 {
     const char **names = use_english_ui() ? color_names_ascii : color_names;
+    if (color_value == -1)
+        return menu_text("透明", "Transparent");
     if (color_value >= 0 && color_value < 16)
         return names[color_value];
     switch (color_value) {

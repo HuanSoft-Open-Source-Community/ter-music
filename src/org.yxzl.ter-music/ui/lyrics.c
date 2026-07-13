@@ -2,6 +2,7 @@
 #include "types.h"
 #include "audio/audio.h"
 #include "ui/ui.h"
+#include "ui/menu_internal.h"
 #include "config/config.h"
 #include "ui/scrollbar.h"
 #include "remote/remote.h"
@@ -400,9 +401,10 @@ static int render_corner_spectrum(int h, int w) {
 
     int separator_row = graph_bottom + 1;
     if (separator_row < h - 1) {
-        mvwhline(win_lyrics, separator_row, 1, ACS_HLINE, w - 2);
-        mvwaddch(win_lyrics, separator_row, 0, ACS_VLINE);
-        mvwaddch(win_lyrics, separator_row, w - 1, ACS_VLINE);
+        for (int x = 1; x < w - 1; x++)
+            mvwaddstr(win_lyrics, separator_row, x, "\xe2\x94\x80"); /* ─ */
+        mvwaddstr(win_lyrics, separator_row, 0, "\xe2\x94\x82");     /* │ */
+        mvwaddstr(win_lyrics, separator_row, w - 1, "\xe2\x94\x82"); /* │ */
         return separator_row + 1;
     }
 
@@ -1358,16 +1360,18 @@ void render_lyrics(void) {
     
     // 清空窗口
     werase(win_lyrics);
+    wattron(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
     
     // 重绘边框和标题
-    box(win_lyrics, 0, 0);
+    rounded_box(win_lyrics);
     if (g_lyric_cursor_mode) {
         mvwprintw(win_lyrics, 0, 2, "%s", lyric_text(" [定位] 歌词 ", " [Seek] Lyrics "));
     } else {
         mvwprintw(win_lyrics, 0, 2, "%s", lyric_text(" 歌词 ", " Lyrics "));
     }
-    wbkgd(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
     
+    wattroff(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
+    wbkgd(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
     pthread_mutex_lock(&g_lyrics.lock);
     
     if (!g_lyrics.has_lyrics || g_lyrics.count == 0) {
