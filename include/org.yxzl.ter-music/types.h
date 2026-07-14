@@ -110,6 +110,7 @@ typedef enum {
 #define CONTROL_COUNT 8
 #define MAX_PATH_LEN 512
 #define MAX_TRACKS 1000
+#define MAX_TREE_NODES 5000
 
 typedef struct {
     int indices[MAX_TRACKS];
@@ -190,6 +191,22 @@ typedef struct {
     int cue_offset;
     int cue_track_number;
 } CachedTrack;
+
+/* ── Tree browsing types ── */
+typedef enum {
+    TREE_NODE_FILE      = 0,
+    TREE_NODE_DIRECTORY = 1
+} TreeNodeType;
+
+typedef struct {
+    TreeNodeType type;
+    char name[MAX_META_LEN];          /* display name (file/dir basename) */
+    char full_path[MAX_PATH_LEN];     /* absolute path */
+    int depth;                        /* indentation level (0 = root) */
+    int expanded;                     /* 1 = showing children, 0 = collapsed (directories only) */
+    int parent_index;                 /* index into tree_nodes[], -1 for root */
+    int track_index;                  /* index into Playlist.tracks[]; -1 for directories */
+} TreeNode;
 
 typedef struct {
     char path[MAX_PATH_LEN];
@@ -308,6 +325,13 @@ typedef struct {
     int cache_count;
     int cue_offsets[MAX_TRACKS];        /* per-track CUE offset in seconds (0 if not CUE) */
     int cue_track_numbers[MAX_TRACKS];  /* per-track CUE track number (0 if not CUE) */
+
+    /* ── Tree browsing fields ── */
+    int tree_mode;                           /* 1 = tree browsing enabled */
+    TreeNode tree_nodes[MAX_TREE_NODES];     /* all tree nodes (files + dirs) */
+    int tree_node_count;                     /* how many tree_nodes are valid */
+    int visible_indices[MAX_TREE_NODES];     /* map visible line → tree_nodes index */
+    int visible_count;                       /* how many visible nodes */
 } Playlist;
 
 typedef struct {

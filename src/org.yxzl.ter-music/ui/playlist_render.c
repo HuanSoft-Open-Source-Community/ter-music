@@ -182,6 +182,10 @@ void render_playlist_content(void)
     int playlist_total = playlist_count();
     int playlist_loaded = playlist_is_loaded();
 
+    int tree_active = playlist_tree_is_active() &&
+                      g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER &&
+                      !snap_active && !snap_in_progress;
+
     int total_tracks, current_selected;
     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
         total_tracks = g_play_queue.count;
@@ -193,7 +197,11 @@ void render_playlist_content(void)
         total_tracks = 0;
         current_selected = 0;
     } else {
-        total_tracks = playlist_total;
+        if (tree_active) {
+            total_tracks = playlist_visible_count();
+        } else {
+            total_tracks = playlist_total;
+        }
         current_selected = g_selected_index;
     }
 
@@ -220,25 +228,109 @@ void render_playlist_content(void)
                 start_idx = g_selected_index - visible_lines + 1;
         }
 
-        if (g_sort_state.active && !snap_active) {
+        if (tree_active) {
+            /* Preload metadata for file nodes in the visible tree range */
+            int loaded = 0;
+            Track tmp;
+            for (int vi = start_idx; vi < start_idx + visible_lines && vi < total_tracks && loaded < 2; vi++) {
+                int track_idx = get_visible_node_track_index(vi);
+                if (track_idx >= 0) {
+                    get_track_metadata(track_idx, &tmp);
+                    loaded++;
+                }
+            }
+        } else if (g_sort_state.active && !snap_active) {
             int loaded = 0;
             Track tmp;
             for (int vi = start_idx; vi < start_idx + visible_lines && vi < total_tracks && loaded < 2; vi++) {
                 get_track_metadata(g_sort_state.sorted_indices[vi], &tmp);
                 loaded++;
             }
-        } else {
+        } else if (!tree_active) {
             preload_visible_tracks(start_idx, start_idx + visible_lines - 1);
         }
-
-        int prefix_width = 0;
-        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
-            prefix_width = 5;  /* " 100." — max 4 digits + '.' */
 
         for (int i = 0; i < visible_lines && (start_idx + i) < total_tracks; i++) {
             int idx = start_idx + i;
             int actual_idx = idx;
             Track t;
+
+            if (tree_active) {
+                /* ── Tree mode rendering ── */
+                int tree_idx = get_visible_node_tree_index(idx);
+                if (tree_idx < 0) continue;
+
+                int node_type = get_visible_node_type(idx);
+                int node_depth = get_tree_node_depth(tree_idx);
+                const char *node_name = get_tree_node_name(tree_idx);
+
+                /* Build indent string */
+                char indent[64];
+                int indent_len = node_depth * 2;
+                if (indent_len > 60) indent_len = 60;
+                memset(indent, ' ', indent_len);
+                indent[indent_len] = '\0';
+
+                if (node_type == TREE_NODE_DIRECTORY) {
+                    /* Directory node */
+                    int expanded = 0;
+                    playlist_lock();
+                    if (tree_idx >= 0 && tree_idx < g_playlist.tree_node_count)
+                        expanded = g_playlist.tree_nodes[tree_idx].expanded;
+                    playlist_unlock();
+
+                    char dir_line[MAX_PATH_LEN + 64];
+                    snprintf(dir_line, sizeof(dir_line), "%s%s %s/",
+                             indent, expanded ? "[-]" : "[+]", node_name);
+
+                    char truncated[MAX_PATH_LEN + 64];
+                    format_display_text(truncated, sizeof(truncated), dir_line, w - 4, 0);
+
+                    int is_selected = (idx == g_selected_index && g_control_focus == 0);
+                    int attrs = A_NORMAL;
+                    if (is_selected) attrs |= A_REVERSE;
+                    if (attrs != A_NORMAL) wattron(win_playlist, attrs);
+                    mvwprintw(win_playlist, i + 1, 2, "%s", truncated);
+                    if (attrs != A_NORMAL) wattroff(win_playlist, attrs);
+                } else {
+                    /* File node */
+                    actual_idx = get_visible_node_track_index(idx);
+                    if (actual_idx < 0) continue;
+                    get_track_metadata(actual_idx, &t);
+
+                    char display_title[MAX_META_LEN];
+                    if (t.cue_offset > 0 && t.cue_track_number > 0)
+                        snprintf(display_title, sizeof(display_title), "[CUE] %s", t.title);
+                    else
+                        snprintf(display_title, sizeof(display_title), "%s", t.title);
+
+                    int avail = w - 4 - indent_len;
+                    int title_width  = avail * 3 / 5;
+                    int artist_width = avail * 2 / 5;
+                    if (title_width  < 2) title_width  = 2;
+                    if (artist_width < 2) artist_width = 2;
+
+                    char truncated_title[MAX_META_LEN];
+                    char truncated_artist[MAX_META_LEN];
+                    format_display_text(truncated_title, sizeof(truncated_title), display_title, title_width - 1, 1);
+                    format_display_text(truncated_artist, sizeof(truncated_artist), t.artist, artist_width - 1, 1);
+
+                    int is_selected = (idx == g_selected_index && g_control_focus == 0);
+                    int is_now_playing = (actual_idx == g_current_play_index &&
+                                          g_play_state != PLAY_STATE_STOPPED);
+                    int attrs = A_NORMAL;
+                    if (is_selected) attrs |= A_REVERSE;
+                    if (is_now_playing) attrs |= A_BOLD;
+                    if (attrs != A_NORMAL) wattron(win_playlist, attrs);
+                    mvwprintw(win_playlist, i + 1, 2, "%s %s %s",
+                              indent, truncated_title, truncated_artist);
+                    if (attrs != A_NORMAL) wattroff(win_playlist, attrs);
+                }
+            } else {
+                /* ── Flat mode rendering ── */
+                int prefix_width = 0;
+                if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
+                    prefix_width = 5;
 
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
                 actual_idx = g_play_queue.indices[idx];
@@ -304,6 +396,7 @@ void render_playlist_content(void)
                               truncated_title, truncated_artist);
             }
             if (attrs != A_NORMAL) wattroff(win_playlist, attrs);
+            } /* end flat mode */
         }
 
         if (total_tracks == 0) {
@@ -343,6 +436,11 @@ void render_playlist_content(void)
             int index = g_current_play_index >= 0 ? g_current_play_index : g_selected_index;
             if (g_sort_state.active && !snap_active && g_current_play_index < 0) {
                 index = g_sort_state.sorted_indices[g_selected_index];
+            }
+            /* Tree mode: translate visible index to track index */
+            if (tree_active && g_current_play_index < 0) {
+                int ti = get_visible_node_track_index(g_selected_index);
+                if (ti >= 0) index = ti;
             }
             if (index < 0) index = 0;
             if (index >= playlist_total) index = playlist_total - 1;

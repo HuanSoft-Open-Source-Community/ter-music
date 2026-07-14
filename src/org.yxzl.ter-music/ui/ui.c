@@ -560,7 +560,8 @@ void run_event_loop(void)
                             render_playlist_content();
                         }
                     } else {
-                        if (g_selected_index < playlist_count() - 1) {
+                        int max_count = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
+                        if (g_selected_index < max_count - 1) {
                             g_selected_index++;
                             render_playlist_content();
                         }
@@ -572,7 +573,8 @@ void run_event_loop(void)
                             g_queue_selected_index++;
                         render_playlist_content();
                     } else if (!g_lyric_cursor_mode) {
-                        if (g_selected_index < playlist_count() - 1)
+                        int max_count = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
+                        if (g_selected_index < max_count - 1)
                             g_selected_index++;
                         render_playlist_content();
                     }
@@ -608,6 +610,25 @@ void run_event_loop(void)
                         play_audio(play_idx);
                         g_selected_index = play_idx;
                     } else {
+                        /* Tree mode: toggle directory expand, or play file */
+                        if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+                            && !g_search_state.active) {
+                            int node_type = get_visible_node_type(g_selected_index);
+                            if (node_type == TREE_NODE_DIRECTORY) {
+                                int tree_idx = get_visible_node_tree_index(g_selected_index);
+                                playlist_toggle_directory_expand(tree_idx);
+                                if (g_selected_index >= playlist_visible_count())
+                                    g_selected_index = playlist_visible_count() - 1;
+                                if (g_selected_index < 0) g_selected_index = 0;
+                                render_playlist_content();
+                                break;
+                            }
+                            /* File node: get real track index */
+                            int real_idx = get_visible_node_track_index(g_selected_index);
+                            if (real_idx >= 0)
+                                play_audio(real_idx);
+                            break;
+                        }
                         int play_idx = g_selected_index;
                         if (g_sort_state.active) play_idx = g_sort_state.sorted_indices[g_selected_index];
                         play_audio(play_idx);
@@ -621,6 +642,10 @@ void run_event_loop(void)
                             track_idx = g_search_state.result_indices[g_search_state.selected_index];
                         else if (g_sort_state.active)
                             track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                            track_idx = get_visible_node_track_index(g_selected_index);
+                            if (track_idx < 0) break;
+                        }
                         play_queue_insert_after(&g_play_queue, track_idx);
                         update_controls_status(ui_text("已插入到下一首", "Inserted next"));
                     }
@@ -636,6 +661,9 @@ void run_event_loop(void)
                             pthread_mutex_unlock(&g_search_mutex);
                         } else if (g_sort_state.active) {
                             track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                            track_idx = get_visible_node_track_index(g_selected_index);
+                            if (track_idx < 0) break;
                         }
                         get_track_metadata(track_idx, &t);
                         int result = add_to_favorites(&t);
@@ -709,6 +737,9 @@ void run_event_loop(void)
                             pthread_mutex_unlock(&g_search_mutex);
                         } else if (g_sort_state.active) {
                             track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                            track_idx = get_visible_node_track_index(g_selected_index);
+                            if (track_idx < 0) break;
                         }
                         play_queue_append(&g_play_queue, track_idx);
                         update_controls_status(ui_text("已添加到队列", "Added to queue"));
@@ -724,6 +755,9 @@ void run_event_loop(void)
                             pthread_mutex_unlock(&g_search_mutex);
                         } else if (g_sort_state.active) {
                             track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                            track_idx = get_visible_node_track_index(g_selected_index);
+                            if (track_idx < 0) break;
                         }
                         get_track_metadata(track_idx, &t);
 

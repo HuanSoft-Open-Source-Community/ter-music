@@ -314,6 +314,12 @@ void activate_current_control(void)
                     if (g_sort_state.active && g_current_play_index < 0) {
                         target_index = g_sort_state.sorted_indices[g_selected_index];
                     }
+                    /* Tree mode: translate visible index to track index */
+                    if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+                        && g_current_play_index < 0) {
+                        int ti = get_visible_node_track_index(g_selected_index);
+                        if (ti >= 0) target_index = ti;
+                    }
                     if (target_index >= 0 && target_index < playlist_total) {
                         play_audio(target_index);
                     }

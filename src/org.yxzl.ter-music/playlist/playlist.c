@@ -376,47 +376,389 @@ static int playlist_contains_track_in(const Playlist *playlist, const char *path
 static int load_cue_subtracks(Playlist *playlist, const char *cue_dir,
                                const char *audio_path);
 
-static int scan_playlist_directory_into(Playlist *playlist, const char *path, int append_mode) {
-    if (!playlist) {
-        return -1;
+static void rebuild_visible_list(Playlist *playlist);
+
+/* ── Recursive directory scanner (tree-mode) ── */
+
+static int scan_directory_recursive(Playlist *playlist, const char *path,
+                                     int depth, int parent_index, int append_mode) {
+    if (!playlist || playlist->tree_node_count >= MAX_TREE_NODES) {
+        return 0;
     }
 
     DIR *dir = opendir(path);
     if (!dir) {
-        return -1;
+        return 0;
     }
 
-    int before_count = playlist->count;
+    /* Create directory tree node */
+    int dir_node = playlist->tree_node_count++;
+    TreeNode *node = &playlist->tree_nodes[dir_node];
+    node->type = TREE_NODE_DIRECTORY;
+    node->depth = depth;
+    node->expanded = (depth == 0) ? 1 : 0;  /* root expanded; sub-dirs start collapsed */
+    node->parent_index = parent_index;
+    node->track_index = -1;
+
+    /* Extract directory basename */
+    const char *basename = strrchr(path, '/');
+    basename = basename ? basename + 1 : path;
+    snprintf(node->name, sizeof(node->name), "%s", basename);
+    snprintf(node->full_path, sizeof(node->full_path), "%s", path);
+
+    int added_tracks = 0;
     struct dirent *entry;
 
-    while ((entry = readdir(dir)) != NULL && playlist->count < MAX_TRACKS) {
-        if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-            char full_path[MAX_PATH_LEN];
-            snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+    /* First pass: collect entries for sorting */
+    char entry_names[4096][256]; /* reasonable max per directory */
+    int entry_types[4096];       /* 0=file, 1=dir */
+    int entry_count = 0;
 
-            if (!is_audio_file(entry->d_name)) {
-                continue;
+    while ((entry = readdir(dir)) != NULL && entry_count < 4096) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        /* Only collect audio files and directories */
+        int is_dir = 0;
+        if (entry->d_type == DT_DIR) {
+            is_dir = 1;
+        } else if (entry->d_type == DT_UNKNOWN) {
+            /* Fallback: stat() to determine type (needed on some filesystems) */
+            char check_path[MAX_PATH_LEN];
+            snprintf(check_path, sizeof(check_path), "%s/%s", path, entry->d_name);
+            struct stat st;
+            if (stat(check_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                is_dir = 1;
             }
+        }
+        if (is_dir) {
+            snprintf(entry_names[entry_count], sizeof(entry_names[0]), "%s", entry->d_name);
+            entry_types[entry_count] = 1;
+            entry_count++;
+        } else if ((entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) &&
+                   is_audio_file(entry->d_name)) {
+            snprintf(entry_names[entry_count], sizeof(entry_names[0]), "%s", entry->d_name);
+            entry_types[entry_count] = 0;
+            entry_count++;
+        }
+    }
+    closedir(dir);
+
+    /* Sort: directories first, then alphabetical within each group */
+    for (int i = 0; i < entry_count - 1; i++) {
+        for (int j = i + 1; j < entry_count; j++) {
+            int swap = 0;
+            if (entry_types[i] != entry_types[j]) {
+                /* Directories come first */
+                if (entry_types[j] == 1) swap = 1;
+            } else {
+                if (strcasecmp(entry_names[i], entry_names[j]) > 0) swap = 1;
+            }
+            if (swap) {
+                char tmp_name[256];
+                snprintf(tmp_name, sizeof(tmp_name), "%s", entry_names[i]);
+                snprintf(entry_names[i], sizeof(entry_names[0]), "%s", entry_names[j]);
+                snprintf(entry_names[j], sizeof(entry_names[0]), "%s", tmp_name);
+                int tmp_type = entry_types[i];
+                entry_types[i] = entry_types[j];
+                entry_types[j] = tmp_type;
+            }
+        }
+    }
+
+    /* Second pass: process sorted entries */
+    for (int i = 0; i < entry_count; i++) {
+        if (playlist->tree_node_count >= MAX_TREE_NODES) break;
+
+        char full_path[MAX_PATH_LEN];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry_names[i]);
+
+        if (entry_types[i] == 1) {
+            /* Sub-directory: recurse */
+            if (playlist->tree_node_count < MAX_TREE_NODES) {
+                int sub_tracks = scan_directory_recursive(playlist, full_path,
+                                                          depth + 1, dir_node, append_mode);
+                added_tracks += sub_tracks;
+            }
+        } else {
+            /* Audio file */
+            if (playlist->count >= MAX_TRACKS) continue;
 
             if (append_mode && playlist_contains_track_in(playlist, full_path)) {
                 continue;
             }
 
-            /* Check for matching CUE sheet — if found, add sub-tracks instead */
+            /* Check for matching CUE sheet */
             int cue_added = load_cue_subtracks(playlist, path, full_path);
-            if (cue_added > 0) continue;  /* skip raw file */
+            if (cue_added > 0) {
+                /* CUE sub-tracks were added — create file tree nodes for each */
+                int start_idx = playlist->count - cue_added;
+                for (int c = 0; c < cue_added; c++) {
+                    if (playlist->tree_node_count >= MAX_TREE_NODES) break;
+                    int file_node = playlist->tree_node_count++;
+                    TreeNode *fn = &playlist->tree_nodes[file_node];
+                    fn->type = TREE_NODE_FILE;
+                    fn->depth = depth + 1;
+                    fn->expanded = 0;
+                    fn->parent_index = dir_node;
+                    fn->track_index = start_idx + c;
+                    snprintf(fn->name, sizeof(fn->name), "%s", entry_names[i]);
+                    snprintf(fn->full_path, sizeof(fn->full_path), "%s", full_path);
+                }
+                added_tracks += cue_added;
+                continue;
+            }
 
-            /* No CUE — add raw audio file as before */
+            /* No CUE — add raw audio file */
             strncpy(playlist->tracks[playlist->count], full_path, MAX_PATH_LEN - 1);
             playlist->tracks[playlist->count][MAX_PATH_LEN - 1] = '\0';
             playlist->cue_offsets[playlist->count] = 0;
             playlist->cue_track_numbers[playlist->count] = 0;
+
+            /* Create file tree node */
+            int file_node = playlist->tree_node_count++;
+            TreeNode *fn = &playlist->tree_nodes[file_node];
+            fn->type = TREE_NODE_FILE;
+            fn->depth = depth + 1;
+            fn->expanded = 0;
+            fn->parent_index = dir_node;
+            fn->track_index = playlist->count;
+            snprintf(fn->name, sizeof(fn->name), "%s", entry_names[i]);
+            snprintf(fn->full_path, sizeof(fn->full_path), "%s", full_path);
+
             playlist->count++;
+            added_tracks++;
         }
     }
 
-    closedir(dir);
-    return playlist->count - before_count;
+    /* If directory contributed no tracks at all (empty or only empty subdirs),
+     * keep the directory node but mark it as having no useful children */
+    return added_tracks;
+}
+
+static int scan_playlist_directory_into(Playlist *playlist, const char *path, int append_mode) {
+    if (!playlist) {
+        return -1;
+    }
+
+    if (!playlist->tree_mode) {
+        /* Fallback: flat scan (should not normally be reached in tree mode) */
+        DIR *dir = opendir(path);
+        if (!dir) return -1;
+
+        int before_count = playlist->count;
+        struct dirent *entry;
+
+        while ((entry = readdir(dir)) != NULL && playlist->count < MAX_TRACKS) {
+            if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
+                char full_path[MAX_PATH_LEN];
+                snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+
+                if (!is_audio_file(entry->d_name)) continue;
+                if (append_mode && playlist_contains_track_in(playlist, full_path)) continue;
+
+                int cue_added = load_cue_subtracks(playlist, path, full_path);
+                if (cue_added > 0) continue;
+
+                strncpy(playlist->tracks[playlist->count], full_path, MAX_PATH_LEN - 1);
+                playlist->tracks[playlist->count][MAX_PATH_LEN - 1] = '\0';
+                playlist->cue_offsets[playlist->count] = 0;
+                playlist->cue_track_numbers[playlist->count] = 0;
+                playlist->count++;
+            }
+        }
+        closedir(dir);
+        return playlist->count - before_count;
+    }
+
+    /* Tree mode: recursive scan */
+    int before_count = playlist->count;
+    scan_directory_recursive(playlist, path, 0, -1, append_mode);
+    int added = playlist->count - before_count;
+
+    /* Rebuild visible index mapping */
+    rebuild_visible_list(playlist);
+
+    return added < 0 ? -1 : added;
+}
+
+/* ── Tree visible-list management ── */
+
+static int g_tree_sort_field = SORT_DEFAULT;
+
+static int tree_file_sort_comparator(const void *a, const void *b) {
+    int node_a = *(const int *)a;
+    int node_b = *(const int *)b;
+    int track_a = g_playlist.tree_nodes[node_a].track_index;
+    int track_b = g_playlist.tree_nodes[node_b].track_index;
+
+    Track ta, tb;
+    get_track_metadata(track_a, &ta);
+    get_track_metadata(track_b, &tb);
+
+    const char *fa, *fb;
+    switch (g_tree_sort_field) {
+        case SORT_TITLE:   fa = ta.title;  fb = tb.title;  break;
+        case SORT_ARTIST:  fa = ta.artist; fb = tb.artist; break;
+        case SORT_ALBUM:   fa = ta.album;  fb = tb.album;  break;
+        case SORT_FILENAME:
+            fa = strrchr(ta.path, '/'); fa = fa ? fa + 1 : ta.path;
+            fb = strrchr(tb.path, '/'); fb = fb ? fb + 1 : tb.path;
+            break;
+        default: return 0;
+    }
+
+    int cmp = strcasecmp(fa, fb);
+    if (cmp != 0) return cmp;
+    return track_a - track_b;
+}
+
+static void rebuild_visible_list(Playlist *playlist) {
+    playlist->visible_count = 0;
+
+    for (int i = 0; i < playlist->tree_node_count; i++) {
+        TreeNode *node = &playlist->tree_nodes[i];
+
+        /* A node is visible if all its ancestors are expanded */
+        int visible = 1;
+        int p = node->parent_index;
+        while (p >= 0 && p < playlist->tree_node_count) {
+            if (!playlist->tree_nodes[p].expanded) {
+                visible = 0;
+                break;
+            }
+            p = playlist->tree_nodes[p].parent_index;
+        }
+
+        if (visible && playlist->visible_count < MAX_TREE_NODES) {
+            playlist->visible_indices[playlist->visible_count++] = i;
+        }
+    }
+
+    /* When sorting is active, reorder file nodes within each directory group */
+    if (g_sort_state.active && playlist->visible_count > 1) {
+        g_tree_sort_field = g_app_config.sort_mode;
+        int vi = 0;
+        while (vi < playlist->visible_count) {
+            int node_idx = playlist->visible_indices[vi];
+            TreeNode *node = &playlist->tree_nodes[node_idx];
+
+            if (node->type == TREE_NODE_FILE) {
+                int parent = node->parent_index;
+                int group_start = vi;
+                int group_end = vi + 1;
+
+                /* Collect consecutive file nodes with the same parent */
+                while (group_end < playlist->visible_count) {
+                    int next_idx = playlist->visible_indices[group_end];
+                    if (playlist->tree_nodes[next_idx].type != TREE_NODE_FILE ||
+                        playlist->tree_nodes[next_idx].parent_index != parent)
+                        break;
+                    group_end++;
+                }
+
+                /* Sort this group of sibling file nodes */
+                if (group_end - group_start > 1) {
+                    qsort(&playlist->visible_indices[group_start],
+                          group_end - group_start, sizeof(int),
+                          tree_file_sort_comparator);
+                }
+
+                vi = group_end;
+            } else {
+                vi++;
+            }
+        }
+    }
+}
+
+/* ── Public tree API ── */
+
+int playlist_tree_is_active(void) {
+    int active = 0;
+    playlist_lock();
+    active = g_playlist.tree_mode && g_playlist.tree_node_count > 0;
+    playlist_unlock();
+    return active;
+}
+
+int playlist_visible_count(void) {
+    int vc = 0;
+    playlist_lock();
+    vc = g_playlist.visible_count;
+    playlist_unlock();
+    return vc;
+}
+
+int get_visible_node_tree_index(int visible_idx) {
+    int ti = -1;
+    playlist_lock();
+    if (visible_idx >= 0 && visible_idx < g_playlist.visible_count) {
+        ti = g_playlist.visible_indices[visible_idx];
+    }
+    playlist_unlock();
+    return ti;
+}
+
+int get_visible_node_type(int visible_idx) {
+    int type = TREE_NODE_FILE;
+    playlist_lock();
+    if (visible_idx >= 0 && visible_idx < g_playlist.visible_count) {
+        int ti = g_playlist.visible_indices[visible_idx];
+        if (ti >= 0 && ti < g_playlist.tree_node_count) {
+            type = g_playlist.tree_nodes[ti].type;
+        }
+    }
+    playlist_unlock();
+    return type;
+}
+
+int get_visible_node_track_index(int visible_idx) {
+    int track = -1;
+    playlist_lock();
+    if (visible_idx >= 0 && visible_idx < g_playlist.visible_count) {
+        int ti = g_playlist.visible_indices[visible_idx];
+        if (ti >= 0 && ti < g_playlist.tree_node_count) {
+            track = g_playlist.tree_nodes[ti].track_index;
+        }
+    }
+    playlist_unlock();
+    return track;
+}
+
+int get_tree_node_depth(int tree_idx) {
+    int d = 0;
+    playlist_lock();
+    if (tree_idx >= 0 && tree_idx < g_playlist.tree_node_count) {
+        d = g_playlist.tree_nodes[tree_idx].depth;
+    }
+    playlist_unlock();
+    return d;
+}
+
+const char *get_tree_node_name(int tree_idx) {
+    static char name[MAX_META_LEN];
+    name[0] = '\0';
+    playlist_lock();
+    if (tree_idx >= 0 && tree_idx < g_playlist.tree_node_count) {
+        snprintf(name, sizeof(name), "%s", g_playlist.tree_nodes[tree_idx].name);
+    }
+    playlist_unlock();
+    return name;
+}
+
+void playlist_toggle_directory_expand(int tree_idx) {
+    int should_rebuild = 0;
+    playlist_lock();
+    if (tree_idx >= 0 && tree_idx < g_playlist.tree_node_count &&
+        g_playlist.tree_nodes[tree_idx].type == TREE_NODE_DIRECTORY) {
+        g_playlist.tree_nodes[tree_idx].expanded = !g_playlist.tree_nodes[tree_idx].expanded;
+        should_rebuild = 1;
+    }
+    playlist_unlock();
+    if (should_rebuild) {
+        rebuild_visible_list(&g_playlist);
+    }
 }
 
 void decode_html_entities(char *str);
@@ -909,6 +1251,7 @@ int load_single_file(const char *file_path) {
     next->tracks[0][MAX_PATH_LEN - 1] = '\0';
     next->count = 1;
     next->is_loaded = 1;
+    next->tree_mode = 0;  /* single file: no tree */
     
     playlist_lock();
     g_playlist = *next;
@@ -954,6 +1297,7 @@ int load_playlist(const char *path) {
         return -1;
     }
 
+    next->tree_mode = 1;  /* enable tree browsing */
     int added = scan_playlist_directory_into(next, path, 0);
     if (added < 0) {
         free(next);
@@ -1003,6 +1347,7 @@ int append_playlist(const char *path) {
         return load_playlist(path);
     }
 
+    next->tree_mode = 1;  /* enable tree browsing */
     int added = scan_playlist_directory_into(next, path, 1);
     if (added < 0) {
         free(next);
@@ -1144,6 +1489,8 @@ void recompute_sort_order(void) {
 
     if (mode == SORT_DEFAULT || count <= 0) {
         g_sort_state.active = 0;
+        /* Rebuild visible list to restore default (unsorted) order in tree mode */
+        rebuild_visible_list(&g_playlist);
         request_ui_refresh(UI_DIRTY_PLAYLIST);
         return;
     }
@@ -1161,6 +1508,9 @@ void recompute_sort_order(void) {
     g_sort_comparison_field = mode;
     qsort(g_sort_state.sorted_indices, count, sizeof(int), sort_comparator);
     g_sort_state.active = 1;
+
+    /* Rebuild tree visible list to apply the new sort order */
+    rebuild_visible_list(&g_playlist);
 
     request_ui_refresh(UI_DIRTY_PLAYLIST);
 }

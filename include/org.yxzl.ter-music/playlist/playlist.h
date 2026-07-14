@@ -38,4 +38,14 @@ int  cue_get_track_number(int track_index);
 void cue_clear_sheet(void);
 int  cue_find_next_offset(int current_index);
 
+/* Tree browsing */
+int  playlist_tree_is_active(void);
+int  playlist_visible_count(void);
+int  get_visible_node_tree_index(int visible_idx);
+int  get_visible_node_type(int visible_idx);
+int  get_visible_node_track_index(int visible_idx);
+int  get_tree_node_depth(int tree_idx);
+const char *get_tree_node_name(int tree_idx);
+void playlist_toggle_directory_expand(int tree_idx);
+
 #endif

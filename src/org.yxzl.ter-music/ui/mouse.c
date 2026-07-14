@@ -96,6 +96,14 @@ int get_playlist_index_from_window_row(int window_y, int *display_index, int *ac
         return 1;
     }
 
+    /* Tree mode: index is a visible line, actual is the track index */
+    else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+        if (clicked_display_index < 0 || clicked_display_index >= playlist_visible_count()) return 0;
+        if (display_index) *display_index = clicked_display_index;
+        if (actual_index)  *actual_index = get_visible_node_track_index(clicked_display_index);
+        return 1;
+    }
+
     if (clicked_display_index < 0 || clicked_display_index >= playlist_count()) return 0;
     if (display_index) *display_index = clicked_display_index;
     if (actual_index)  *actual_index = clicked_display_index;
@@ -312,7 +320,24 @@ int handle_main_view_mouse_event(const MEVENT *event)
             }
         } else {
             g_selected_index = display_index;
-            play_audio(actual_index);
+            /* Tree mode: toggle directory or play file */
+            if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+                && !g_search_state.active) {
+                int node_type = get_visible_node_type(display_index);
+                if (node_type == TREE_NODE_DIRECTORY) {
+                    int tree_idx = get_visible_node_tree_index(display_index);
+                    playlist_toggle_directory_expand(tree_idx);
+                    if (g_selected_index >= playlist_visible_count())
+                        g_selected_index = playlist_visible_count() - 1;
+                    if (g_selected_index < 0) g_selected_index = 0;
+                    render_playlist_content();
+                    return 1;
+                }
+                int track_idx = get_visible_node_track_index(display_index);
+                if (track_idx >= 0) play_audio(track_idx);
+            } else {
+                play_audio(actual_index);
+            }
         }
         render_controls();
         return 1;
