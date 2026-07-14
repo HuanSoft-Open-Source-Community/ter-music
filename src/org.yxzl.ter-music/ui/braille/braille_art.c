@@ -156,13 +156,22 @@ int generate_braille_art_dynamic(const char *image_path,
         return -1;
     }
 
+    /* Defence in depth: reject unexpected huge dimensions even if the
+     * image loader somehow let them through (e.g. future codec changes). */
+    if (w <= 0 || h <= 0 || w > MAX_COVER_IMAGE_DIM || h > MAX_COVER_IMAGE_DIM) {
+        free(rgba);
+        return -1;
+    }
+
     int pixel_width = target_width * BRAILLE_CELL_W;
     int pixel_height = target_height * BRAILLE_CELL_H;
 
-    unsigned char *gray = malloc(w * h);
-    unsigned char *resized = malloc(pixel_width * pixel_height);
-    unsigned char *binary = malloc(pixel_width * pixel_height);
-    uint32_t *braille = malloc(target_width * target_height * sizeof(uint32_t));
+    /* Use size_t multiplication to prevent 32-bit overflow on the
+     * allocation size (belt-and-suspenders: loaders already cap dims). */
+    unsigned char *gray = malloc((size_t)w * (size_t)h);
+    unsigned char *resized = malloc((size_t)pixel_width * (size_t)pixel_height);
+    unsigned char *binary = malloc((size_t)pixel_width * (size_t)pixel_height);
+    uint32_t *braille = malloc((size_t)target_width * (size_t)target_height * sizeof(uint32_t));
 
     if (!gray || !resized || !binary || !braille) {
         free(rgba); free(gray); free(resized); free(binary); free(braille);

@@ -18,6 +18,11 @@ extern int g_album_cover_size;
 #define BRAILLE_MAX_SIZE 15
 #define BRAILLE_DEFAULT_THRESHOLD 128
 
+/* Maximum dimensions for album cover images before scaling.
+ * Covers are rendered as small braille art (max 30×60 pixels); anything
+ * beyond 4096×4096 wastes memory and may be a decompression-bomb attack. */
+#define MAX_COVER_IMAGE_DIM 4096
+
 int load_png_image(const char *filepath, unsigned char **rgba_out, int *w, int *h);
 int load_jpeg_image(const char *filepath, unsigned char **rgb_out, int *w, int *h);
 int load_image(const char *filepath, unsigned char **rgba_out, int *w, int *h);

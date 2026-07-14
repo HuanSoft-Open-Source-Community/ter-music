@@ -38,10 +38,20 @@ int load_png_image(const char *filepath, unsigned char **rgba_out, int *w, int *
 
     png_init_io(png, fp);
     png_set_sig_bytes(png, 8);
+
+    /* Reject decompression bombs before libpng allocates internally */
+    png_set_user_limits(png, MAX_COVER_IMAGE_DIM, MAX_COVER_IMAGE_DIM);
+
     png_read_info(png, info);
 
     *w = png_get_image_width(png, info);
     *h = png_get_image_height(png, info);
+
+    if (*w <= 0 || *h <= 0 || *w > MAX_COVER_IMAGE_DIM || *h > MAX_COVER_IMAGE_DIM) {
+        png_destroy_read_struct(&png, &info, NULL);
+        fclose(fp);
+        return -1;
+    }
     png_byte color_type = png_get_color_type(png, info);
     png_byte bit_depth = png_get_bit_depth(png, info);
 
@@ -123,6 +133,16 @@ int load_jpeg_image(const char *filepath, unsigned char **rgb_out, int *w, int *
     jpeg_create_decompress(&cinfo);
     jpeg_stdio_src(&cinfo, fp);
     jpeg_read_header(&cinfo, TRUE);
+
+    /* Reject decompression bombs before decompression allocates memory */
+    if (cinfo.image_width <= 0 || cinfo.image_height <= 0 ||
+        cinfo.image_width > MAX_COVER_IMAGE_DIM ||
+        cinfo.image_height > MAX_COVER_IMAGE_DIM) {
+        jpeg_destroy_decompress(&cinfo);
+        fclose(fp);
+        return -1;
+    }
+
     jpeg_start_decompress(&cinfo);
 
     *w = cinfo.output_width;

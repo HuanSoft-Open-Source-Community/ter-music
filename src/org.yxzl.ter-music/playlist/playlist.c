@@ -1836,6 +1836,17 @@ static int decode_image_to_jpeg(const unsigned char *data, int size,
         unlink(tmp_img);
         return -1;
     }
+
+    /* Reject decompression bombs before decoding */
+    if (codec_ctx->width <= 0 || codec_ctx->height <= 0 ||
+        codec_ctx->width > MAX_COVER_IMAGE_DIM ||
+        codec_ctx->height > MAX_COVER_IMAGE_DIM) {
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&img_ctx);
+        unlink(tmp_img);
+        return -1;
+    }
+
     if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
         avcodec_free_context(&codec_ctx);
         avformat_close_input(&img_ctx);
@@ -1859,6 +1870,12 @@ static int decode_image_to_jpeg(const unsigned char *data, int size,
         if (pkt->stream_index == vstream) {
             if (avcodec_send_packet(codec_ctx, pkt) == 0) {
                 if (avcodec_receive_frame(codec_ctx, frame) == 0) {
+                    /* Belt-and-suspenders: reject unexpected huge frames */
+                    if (frame->width <= 0 || frame->height <= 0 ||
+                        frame->width > MAX_COVER_IMAGE_DIM ||
+                        frame->height > MAX_COVER_IMAGE_DIM) {
+                        break;
+                    }
                     // 解码成功，转换为 RGB24
                     struct SwsContext *sws = sws_getContext(
                         frame->width, frame->height, frame->format,
@@ -1866,7 +1883,7 @@ static int decode_image_to_jpeg(const unsigned char *data, int size,
                         SWS_BILINEAR, NULL, NULL, NULL);
                     if (sws) {
                         unsigned char *rgb = malloc(
-                            frame->width * frame->height * 3);
+                            (size_t)frame->width * (size_t)frame->height * 3);
                         if (rgb) {
                             uint8_t *dst_slice[1] = { rgb };
                             int dst_stride[1] = { frame->width * 3 };
