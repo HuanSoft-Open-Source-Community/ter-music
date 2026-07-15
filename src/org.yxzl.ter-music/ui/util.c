@@ -268,6 +268,7 @@ const char **resolve_sidebar_items(const char **items)
     else if (items == favorites_sidebar_items) count = FAVORITES_ITEM_COUNT;
     else if (items == info_sidebar_items) count = INFO_ITEM_COUNT;
     else if (items == help_sidebar_items) count = HELP_ITEM_COUNT;
+    else if (items == language_sidebar_items) count = LANGUAGE_ITEM_COUNT;
     else return items;
 
     for (int i = 0; i < count && i < 16; i++) {
