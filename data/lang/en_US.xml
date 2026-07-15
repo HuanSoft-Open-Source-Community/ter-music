@@ -1,0 +1,449 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lang id="en_US" name="English (US)">
+
+  <!-- ===== General / Boolean ===== -->
+  <string key="general.yes">On</string>
+  <string key="general.no">Off</string>
+  <string key="general.on">ON</string>
+  <string key="general.off">OFF</string>
+  <string key="general.unknown">Unknown</string>
+  <string key="general.none">(none)</string>
+  <string key="general.transparent">Transparent</string>
+  <string key="general.not_set">(Not set)</string>
+  <string key="general.no_connection">(No connection)</string>
+  <string key="general.empty_dir">(Empty directory)</string>
+  <string key="general.loading">Loading...</string>
+  <string key="general.connecting">Connecting...</string>
+  <string key="general.back">&lt;- Back</string>
+
+  <!-- ===== App / Exit ===== -->
+  <string key="app.exit_clean">ter-music exited cleanly.</string>
+
+  <!-- ===== Sidebar items ===== -->
+  <string key="sidebar.settings.theme">Theme</string>
+  <string key="sidebar.settings.default_path">Default Path</string>
+  <string key="sidebar.settings.playback">Playback</string>
+  <string key="sidebar.settings.play_mode">Play Mode</string>
+  <string key="sidebar.settings.hotkeys">Hotkeys</string>
+  <string key="sidebar.settings.remote_devices">Remote Devices</string>
+  <string key="sidebar.settings.equalizer">Equalizer</string>
+
+  <string key="sidebar.history.folder_history">Folder History</string>
+  <string key="sidebar.history.clear_history">Clear History</string>
+
+  <string key="sidebar.playlist.all_playlists">All Playlists</string>
+  <string key="sidebar.playlist.new_playlist">New Playlist</string>
+
+  <string key="sidebar.favorites.all_favorites">All Favorites</string>
+
+  <string key="sidebar.info.about">About</string>
+  <string key="sidebar.info.repository">Repository</string>
+
+  <string key="sidebar.help.quick_start">Quick Start</string>
+
+  <!-- ===== Menu titles ===== -->
+  <string key="menu.settings">Settings [F2]</string>
+  <string key="menu.history">History [F3]</string>
+  <string key="menu.playlists">Playlists [F4]</string>
+  <string key="menu.favorites">Favorites [F5]</string>
+  <string key="menu.info">Info [F6]</string>
+  <string key="menu.help">Help [F8]</string>
+
+  <!-- ===== Menu hint bar ===== -->
+  <string key="menu.hint_bar">F1:Home  F2:Settings  F3:History  F4:Playlists  F5:Favorites  F6:Info  F7:Lang  F8:Help  F9:Quit</string>
+  <string key="menu.config_reloaded">Config reloaded</string>
+
+  <!-- ===== Settings view ===== -->
+  <string key="settings.playback.language">Press Enter to toggle language; latency applies on next playback</string>
+  <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
+  <string key="settings.color.select_hint">Theme: ↑/↓ select, → or ENTER adjust, ←/TAB back</string>
+  <string key="settings.color.auto_avoid_same">Foreground and background colors will automatically avoid being the same</string>
+  <string key="settings.path.hint">Default Path: ENTER to edit, ←/TAB back</string>
+  <string key="settings.path.tilde_hint">Supports paths starting with ~ for home directory</string>
+  <string key="settings.playback.hint">Playback: ↑/↓ select, ENTER to expand, ←/TAB back</string>
+  <string key="settings.play_mode.hint">Play Mode: ↑/↓ select, ENTER to expand, ←/TAB back</string>
+  <string key="settings.hotkeys.hint">Hotkeys: ←/TAB back</string>
+  <string key="settings.hotkeys.f1_f8">F1-F8: Views / language / quit</string>
+  <string key="settings.hotkeys.o_i">O / I: Open folder / append folder</string>
+  <string key="settings.hotkeys.c_l">C / L: Controls focus / list focus</string>
+  <string key="settings.hotkeys.d">D: Toggle lyric seek mode</string>
+  <string key="settings.hotkeys.space_enter">Space / Enter: Activate current action</string>
+  <string key="settings.hotkeys.plus_minus">+ / -: Adjust volume</string>
+  <string key="settings.hotkeys.comma_period">, / .: Seek backward / forward</string>
+  <string key="settings.hotkeys.return">Press Enter to return to the main view</string>
+
+  <string key="settings.input_path">Enter path: </string>
+  <string key="settings.invalid_path">Invalid path format</string>
+  <string key="settings.default_path_saved">Default startup path saved</string>
+  <string key="settings.latency_next_playback">Latency will take effect on next playback</string>
+  <string key="settings.play_mode_updated">Default play mode updated, applied to current session</string>
+  <string key="settings.speed_updated">Default speed updated</string>
+  <string key="settings.backend_next_startup">Audio backend will take effect on next startup</string>
+  <string key="settings.sort_applied">Sort mode applied</string>
+  <string key="settings.cue_saved">CUE encoding saved</string>
+  <string key="settings.eq_enabled">Equalizer enabled</string>
+  <string key="settings.eq_disabled">Equalizer disabled</string>
+  <string key="settings.saved">Settings saved</string>
+
+  <string key="settings.label.name">Name</string>
+  <string key="settings.label.protocol">Protocol</string>
+  <string key="settings.label.host">Host</string>
+  <string key="settings.label.port">Port</string>
+  <string key="settings.label.username">Username</string>
+  <string key="settings.label.password">Password</string>
+  <string key="settings.label.private_key">Private Key</string>
+  <string key="settings.label.base_path">Base Path</string>
+  <string key="settings.label.auto">Auto</string>
+  <string key="settings.label.default">Default</string>
+  <string key="settings.label.custom">Custom</string>
+
+  <!-- ===== Settings options ===== -->
+  <string key="settings.opt.color_theme">Color Theme</string>
+  <string key="settings.opt.default_path">Default Path</string>
+  <string key="settings.opt.language">Language</string>
+  <string key="settings.opt.volume">Volume</string>
+  <string key="settings.opt.latency">Latency</string>
+  <string key="settings.opt.show_lyrics">Show Lyrics</string>
+  <string key="settings.opt.lyrics_align">Lyrics Align</string>
+  <string key="settings.opt.play_mode">Play Mode</string>
+  <string key="settings.opt.default_speed">Default Speed</string>
+  <string key="settings.opt.cover_art">Album Cover</string>
+  <string key="settings.opt.seamless_preload">Seamless Preload</string>
+  <string key="settings.opt.audio_backend">Audio Backend</string>
+  <string key="settings.opt.sort_mode">Sort Mode</string>
+  <string key="settings.opt.cue_encoding">CUE Encoding</string>
+  <string key="settings.opt.auto_play">Auto Play</string>
+  <string key="settings.opt.remember_path">Remember Path</string>
+  <string key="settings.opt.clear_history">Clear History on Start</string>
+  <string key="settings.opt.resume_playback">Resume Playback</string>
+  <string key="settings.opt.advanced_modes">Advanced Modes</string>
+  <string key="settings.opt.playlist_fg">Playlist Foreground</string>
+  <string key="settings.opt.playlist_bg">Playlist Background</string>
+  <string key="settings.opt.controls_fg">Controls Foreground</string>
+  <string key="settings.opt.controls_bg">Controls Background</string>
+  <string key="settings.opt.lyrics_fg">Lyrics Foreground</string>
+  <string key="settings.opt.lyrics_bg">Lyrics Background</string>
+  <string key="settings.opt.sidebar_fg">Sidebar Foreground</string>
+  <string key="settings.opt.sidebar_bg">Sidebar Background</string>
+  <string key="settings.opt.highlight_fg">Highlight Foreground</string>
+  <string key="settings.opt.highlight_bg">Highlight Background</string>
+  <string key="settings.opt.border_fg">Border Foreground</string>
+  <string key="settings.opt.border_bg">Border Background</string>
+  <string key="settings.opt.enable_eq">Enable Equalizer</string>
+
+  <!-- ===== Play modes ===== -->
+  <string key="play_mode.seq">Sequential</string>
+  <string key="play_mode.single_repeat">Single Repeat</string>
+  <string key="play_mode.list_repeat">List Repeat</string>
+  <string key="play_mode.shuffle_once">Shuffle Once</string>
+  <string key="play_mode.shuffle_repeat">Shuffle Repeat</string>
+  <string key="play_mode.folder_seq">Folder Sequential</string>
+  <string key="play_mode.folder_repeat">Folder Repeat</string>
+  <string key="play_mode.folder_shuffle">Folder Shuffle</string>
+  <string key="play_mode.folder_shuffle_repeat">Folder Shuffle Repeat</string>
+  <string key="play_mode.album_seq">Album Sequential</string>
+  <string key="play_mode.album_repeat">Album Repeat</string>
+  <string key="play_mode.album_shuffle">Album Shuffle</string>
+  <string key="play_mode.album_shuffle_repeat">Album Shuffle Repeat</string>
+  <string key="play_mode.artist_seq">Artist Sequential</string>
+  <string key="play_mode.artist_repeat">Artist Repeat</string>
+  <string key="play_mode.artist_shuffle">Artist Shuffle</string>
+  <string key="play_mode.artist_shuffle_repeat">Artist Shuffle Repeat</string>
+  <string key="play_mode.short.seq">Seq</string>
+  <string key="play_mode.short.single_repeat">S-Rept</string>
+  <string key="play_mode.short.list_repeat">L-Rept</string>
+  <string key="play_mode.short.shuffle_once">Shuf</string>
+  <string key="play_mode.short.shuffle_repeat">Sh-Rept</string>
+  <string key="play_mode.short.folder_seq">Dir-Seq</string>
+  <string key="play_mode.short.folder_repeat">Dir-Rept</string>
+  <string key="play_mode.short.folder_shuffle">Dir-Shuf</string>
+  <string key="play_mode.short.folder_shuffle_repeat">Dir-ShRpt</string>
+  <string key="play_mode.short.album_seq">Alb-Seq</string>
+  <string key="play_mode.short.album_repeat">Alb-Rept</string>
+  <string key="play_mode.short.album_shuffle">Alb-Shuf</string>
+  <string key="play_mode.short.album_shuffle_repeat">Alb-ShRpt</string>
+  <string key="play_mode.short.artist_seq">Art-Seq</string>
+  <string key="play_mode.short.artist_repeat">Art-Rept</string>
+  <string key="play_mode.short.artist_shuffle">Art-Shuf</string>
+  <string key="play_mode.short.artist_shuffle_repeat">Art-ShRpt</string>
+
+  <!-- ===== Controls ===== -->
+  <string key="controls.playlist"> Playlist </string>
+  <string key="controls.lyrics"> Lyrics </string>
+  <string key="controls.controls_area">Controls</string>
+  <string key="controls.ctrl_focus">[Ctrl Focus]</string>
+  <string key="controls.list_focus">[List Focus]</string>
+  <string key="controls.space_run">[Space:Run]</string>
+  <string key="controls.c_ctrl">[C:Ctrl]</string>
+  <string key="controls.l_list">[L:List]</string>
+  <string key="controls.tab_view">[Tab:View]</string>
+  <string key="controls.d_exit_seek">[D:Exit Seek]</string>
+  <string key="controls.d_lyric_seek">[D:Lyric Seek]</string>
+
+  <!-- ===== Control labels ===== -->
+  <string key="controls.label.prev">Prev</string>
+  <string key="controls.label.play_pause">Play/Pause</string>
+  <string key="controls.label.next">Next</string>
+  <string key="controls.label.stop">Stop</string>
+  <string key="controls.label.loop">Loop</string>
+  <string key="controls.label.speed">Speed</string>
+  <string key="controls.label.volume">Volume</string>
+  <string key="controls.label.progress">Progress</string>
+
+  <!-- ===== Popup titles ===== -->
+  <string key="popup.play_mode"> Play Mode </string>
+  <string key="popup.speed"> Speed </string>
+  <string key="popup.volume"> Volume </string>
+  <string key="popup.color"> Color </string>
+  <string key="popup.lang"> Lang </string>
+  <string key="popup.backend"> Backend </string>
+  <string key="popup.sort"> Sort </string>
+  <string key="popup.align"> Align </string>
+  <string key="popup.cue_enc"> CUE Enc </string>
+
+  <!-- ===== Player status ===== -->
+  <string key="player.state">State: </string>
+  <string key="player.mode">Mode: </string>
+  <string key="player.title">Title: </string>
+  <string key="player.artist">Artist: </string>
+  <string key="player.album">Album: </string>
+  <string key="player.sample_rate">Sample Rate: </string>
+  <string key="player.bit_depth">Bit Depth: </string>
+  <string key="player.bitrate">Bitrate: </string>
+  <string key="player.codec">Codec: </string>
+  <string key="player.playing">Playing</string>
+  <string key="player.paused">Paused</string>
+  <string key="player.stopped">Stopped</string>
+  <string key="player.queue">Queue: </string>
+  <string key="player.play_queue">Play Queue</string>
+  <string key="player.mixed_queue">Mixed queue</string>
+  <string key="player.path">Path: </string>
+  <string key="player.volume_fmt">Volume: %d%%</string>
+  <string key="player.speed_fmt">Speed</string>
+
+  <!-- ===== Playlist view ===== -->
+  <string key="playlist.empty">Playlist is empty.</string>
+  <string key="playlist.press_o_i">Press 'O' to open a folder, 'I' to append a folder.</string>
+  <string key="playlist.no_audio">No audio files found here.</string>
+  <string key="playlist.queue_empty">Queue empty. Press 'a' to add from browser.</string>
+  <string key="playlist.searching">Searching...</string>
+  <string key="playlist.no_match">No matching tracks found.</string>
+  <string key="playlist.search_title"> Search Results </string>
+  <string key="playlist.search_progress"> Searching </string>
+  <string key="playlist.results_unit">found</string>
+
+  <!-- ===== Playlist management ===== -->
+  <string key="playlist_mgr.no_playlists">No playlists created yet.</string>
+  <string key="playlist_mgr.create_hint">Select "New Playlist" from the sidebar.</string>
+  <string key="playlist_mgr.playlists_fmt">Playlists (%d)</string>
+  <string key="playlist_mgr.track_count_fmt"> %s (%d tracks)</string>
+  <string key="playlist_mgr.playlist_tracks_fmt">Playlist: %s (%d tracks)</string>
+  <string key="playlist_mgr.empty_playlist">This playlist is empty.</string>
+  <string key="playlist_mgr.add_hint">Add tracks from the main view.</string>
+  <string key="playlist_mgr.hint_manage">ENTER: view tracks | D: delete playlist | R: rename</string>
+  <string key="playlist_mgr.hint_tracks">ENTER: play | D: remove from playlist | ESC: back</string>
+  <string key="playlist_mgr.input_name">Playlist name: </string>
+  <string key="playlist_mgr.created">Playlist created</string>
+  <string key="playlist_mgr.limit_reached">Playlist limit reached</string>
+  <string key="playlist_mgr.create_failed">Failed to create playlist</string>
+  <string key="playlist_mgr.deleted">Playlist deleted</string>
+  <string key="playlist_mgr.track_removed">Track removed</string>
+  <string key="playlist_mgr.rename_prompt">New name: </string>
+  <string key="playlist_mgr.renamed">Playlist renamed</string>
+  <string key="playlist_mgr.rename_failed">Failed to rename playlist</string>
+  <string key="playlist_mgr.track_not_in_queue">Track not in current queue</string>
+  <string key="playlist_mgr.select_playlist"> Select Playlist </string>
+  <string key="playlist_mgr.select_hint">Up/Down: select | ENTER: confirm | ESC: cancel</string>
+  <string key="playlist_mgr.added_to_playlist">Added to playlist</string>
+  <string key="playlist_mgr.playlist_full">Playlist is full</string>
+  <string key="playlist_mgr.already_in_playlist">Track already in playlist</string>
+  <string key="playlist_mgr.no_playlists_yet">No playlists yet, create one in F4 first</string>
+
+  <!-- ===== Favorites ===== -->
+  <string key="favorites.title_fmt">Favorites (%d)</string>
+  <string key="favorites.empty">No favorites yet.</string>
+  <string key="favorites.hint_f">Press 'F' in the main view to favorite.</string>
+  <string key="favorites.hint_manage">ENTER: play | D: remove from favorites</string>
+  <string key="favorites.removed">Removed from favorites</string>
+  <string key="favorites.added">Added to favorites</string>
+  <string key="favorites.exists_or_full">Favorite exists or list is full</string>
+
+  <!-- ===== History ===== -->
+  <string key="history.title_fmt">Folder History (%d)</string>
+  <string key="history.empty">No folder history yet.</string>
+  <string key="history.auto_record">Opened music folders will appear here.</string>
+  <string key="history.hint_manage">ENTER: replace playlist, 'A': append to queue</string>
+  <string key="history.hint_delete">'D': delete entry, 'C': clear all</string>
+  <string key="history.cleared">History cleared</string>
+  <string key="history.folder_loaded">Folder loaded</string>
+  <string key="history.no_audio_files">No audio files in this folder</string>
+  <string key="history.appended">Appended</string>
+  <string key="history.tracks_to_queue">tracks to queue</string>
+  <string key="history.no_new_files">No new audio files to append</string>
+  <string key="history.entry_removed">History entry removed</string>
+
+  <!-- ===== Info / About ===== -->
+  <string key="info.about_title">About</string>
+  <string key="info.name_fmt">Name: %s</string>
+  <string key="info.version_fmt">Version: %s</string>
+  <string key="info.authors_fmt">Authors: %s</string>
+  <string key="info.email_fmt">Email: %s</string>
+  <string key="info.summary">Summary:</string>
+  <string key="info.summary_line1">  An ncurses-based terminal music player.</string>
+  <string key="info.summary_line2">  Supports multiple audio formats via FFmpeg.</string>
+  <string key="info.summary_line3">  Provides playlists, favorites and lyrics display.</string>
+  <string key="info.repo_label">Repository:</string>
+  <string key="info.license">License: GPL v3</string>
+  <string key="info.read_only">This page is read-only.</string>
+
+  <!-- ===== Search ===== -->
+  <string key="search.prompt">Search: </string>
+  <string key="search.searching">Searching...</string>
+  <string key="search.completed">Search completed</string>
+  <string key="search.results_unit">results</string>
+  <string key="search.failed">Search failed</string>
+  <string key="search.empty_playlist">Playlist is empty</string>
+  <string key="search.cancelled">Search cancelled</string>
+
+  <!-- ===== Dialog ===== -->
+  <string key="dialog.append_folder">Append folder: </string>
+  <string key="dialog.folder_path">Folder path: </string>
+  <string key="dialog.path_invalid">Invalid path</string>
+  <string key="dialog.no_audio_found">No audio files found</string>
+  <string key="dialog.no_new_audio">No new audio files to append</string>
+
+  <!-- ===== Remote ===== -->
+  <string key="remote.list_failed">Cannot list remote directory</string>
+  <string key="remote.refresh_failed">Refresh failed: </string>
+  <string key="remote.press_any_key">  &lt;- Press any key</string>
+  <string key="remote.refresh_failed_short">Refresh failed  &lt;- Press any key</string>
+  <string key="remote.connection_ok">Connection OK, found</string>
+  <string key="remote.entries">entries</string>
+  <string key="remote.loaded">Loaded</string>
+  <string key="remote.tracks">tracks</string>
+  <string key="remote.no_audio_dir">No audio files in this directory</string>
+  <string key="remote.name_required">Name is required</string>
+  <string key="remote.host_required">Host is required</string>
+  <string key="remote.connections_full">Remote connections full</string>
+  <string key="remote.connection_saved">Connection saved</string>
+  <string key="remote.connection_deleted">Connection deleted</string>
+  <string key="remote.hint_nav">Remote: Up/Down select  ENTER manage  ESC back</string>
+  <string key="remote.saved_connections">Saved Connections</string>
+  <string key="remote.add_new">↓ Add New Connection</string>
+  <string key="remote.connection_fmt">Connection</string>
+  <string key="remote.browse_folder">Browse Folder</string>
+  <string key="remote.load_to_playlist">Load to Playlist</string>
+  <string key="remote.refresh_connection">Refresh Connection</string>
+  <string key="remote.edit_connection">Edit Connection</string>
+  <string key="remote.delete_connection">Delete Connection</string>
+  <string key="remote.hint_edit">Edit Connection (Up/Down select  ENTER edit  +/- protocol  S save  ESC cancel)</string>
+  <string key="remote.hint_add">Add Connection (Up/Down select  ENTER edit  +/- protocol  S save  ESC cancel)</string>
+  <string key="remote.hint_nav_edit">Up/Down:select  ENTER:edit  +/-:protocol  S:save  ESC:cancel</string>
+  <string key="remote.browsing">Browse</string>
+  <string key="remote.dir">dir</string>
+  <string key="remote.load_into_playlist">↓ Load into Playlist</string>
+  <string key="remote.hint_browse">Up/Down select  ENTER load  RIGHT enter dir  ESC back</string>
+
+  <!-- ===== Equalizer ===== -->
+  <string key="eq.title_enabled">Equalizer [Enabled]</string>
+  <string key="eq.title_disabled">Equalizer [Disabled]</string>
+  <string key="eq.hint">←/→ select     ↑/↓ adjust  ESC back  ENTER toggle</string>
+  <string key="eq.preampl">Pre-amp</string>
+
+  <!-- ===== Lyrics ===== -->
+  <string key="lyrics.not_loaded">No lyrics loaded.</string>
+  <string key="lyrics.seek_enabled">Lyric seek enabled</string>
+  <string key="lyrics.seek_disabled">Lyric seek disabled</string>
+  <string key="lyrics.no_position">No lyric position available</string>
+
+  <!-- ===== General status messages ===== -->
+  <string key="status.folder_loaded">Folder loaded</string>
+  <string key="status.appended">Appended</string>
+  <string key="status.tracks_unit">tracks</string>
+  <string key="status.added_to_queue">Added to queue</string>
+  <string key="status.queue_cleared">Queue cleared</string>
+  <string key="status.inserted_next">Inserted next</string>
+  <string key="status.search_cancelled">Search cancelled</string>
+  <string key="status.search_wait">Searching, please wait...</string>
+  <string key="status.switched_queue">Switched to Play Queue view</string>
+  <string key="status.switched_browser">Switched to File Browser view</string>
+  <string key="status.rainbow_off">Rainbow mode disabled</string>
+  <string key="status.rainbow_on">Konami code! Rainbow mode enabled</string>
+  <string key="status.seek_fmt">Seek to %02d:%02d</string>
+  <string key="status.volume_fmt">Volume: %d%%</string>
+
+  <!-- ===== Main CLI warnings ===== -->
+  <string key="main.warn.cannot_open">Warning: cannot open audio file</string>
+  <string key="main.warn.no_playable">Warning: the selected folder has no playable audio files</string>
+  <string key="main.warn.invalid_path">Warning: invalid path: %s</string>
+  <string key="main.cannot_open_skip">Cannot open audio file, skipping</string>
+  <string key="main.auto_detect">Auto-detected music folder in current directory: %s</string>
+  <string key="main.loaded_default">Loaded from default path: %s</string>
+  <string key="main.continue_default">Continuing with current directory and default paths...</string>
+  <string key="main.warn.no_audio_files">Warning: no audio files found</string>
+  <string key="main.warn.invalid_remote">Warning: invalid remote URL</string>
+
+  <!-- ===== Sort modes ===== -->
+  <string key="sort.title">Title</string>
+  <string key="sort.artist">Artist</string>
+  <string key="sort.album">Album</string>
+  <string key="sort.filename">Filename</string>
+
+  <!-- ===== Lyrics alignment ===== -->
+  <string key="align.left">Left</string>
+  <string key="align.center">Center</string>
+  <string key="align.right">Right</string>
+
+  <!-- ===== Color names ===== -->
+  <string key="color.black">Black</string>
+  <string key="color.red">Red</string>
+  <string key="color.green">Green</string>
+  <string key="color.yellow">Yellow</string>
+  <string key="color.blue">Blue</string>
+  <string key="color.magenta">Magenta</string>
+  <string key="color.cyan">Cyan</string>
+  <string key="color.white">White</string>
+  <string key="color.bright_black">Bright Black</string>
+  <string key="color.bright_red">Bright Red</string>
+  <string key="color.bright_green">Bright Green</string>
+  <string key="color.bright_yellow">Bright Yellow</string>
+  <string key="color.bright_blue">Bright Blue</string>
+  <string key="color.bright_magenta">Bright Magenta</string>
+  <string key="color.bright_cyan">Bright Cyan</string>
+  <string key="color.bright_white">Bright White</string>
+  <string key="color.orange">Orange</string>
+  <string key="color.brown">Brown</string>
+  <string key="color.pink">Pink</string>
+  <string key="color.purple">Purple</string>
+  <string key="color.teal">Teal</string>
+  <string key="color.sky_blue">Sky Blue</string>
+  <string key="color.coral">Coral</string>
+  <string key="color.lime">Lime</string>
+
+  <!-- ===== Language name (self-description) ===== -->
+  <string key="lang.name">English</string>
+
+  <!-- ===== Play history popup ===== -->
+  <string key="play_history.title"> Play History </string>
+  <string key="play_history.hint"> ENTER:Play ESC:Cancel </string>
+
+  <!-- ===== Seamless / misc ===== -->
+  <string key="settings.opt.seamless">Seamless Preload</string>
+  <string key="settings.enter_color">Enter color (0-255): </string>
+
+  <!-- ===== Language management view ===== -->
+  <string key="lang_mgr.title">Language Management</string>
+  <string key="lang_mgr.no_langs">(No languages available)</string>
+  <string key="lang_mgr.builtin">[Built-in]</string>
+  <string key="lang_mgr.user">[User]</string>
+  <string key="lang_mgr.hint">Up/Down: select  ENTER: switch  A: add  D: delete  ESC: back</string>
+  <string key="lang_mgr.actions">[ENTER]=Activate  [A]=Add pack  [D]=Delete  [ESC]=Back</string>
+  <string key="lang_mgr.add_prompt">Enter path to .xml language pack:</string>
+  <string key="lang_mgr.switched">Language switched</string>
+  <string key="lang_mgr.added">Language pack added</string>
+  <string key="lang_mgr.add_failed">Add failed: invalid or malformed file</string>
+  <string key="lang_mgr.deleted">Language pack deleted</string>
+  <string key="lang_mgr.delete_failed">Delete failed</string>
+  <string key="lang_mgr.cannot_delete_builtin">Cannot delete built-in languages</string>
+  <string key="settings.fg_bg_same">Foreground and background colors cannot be the same</string>
+</lang>

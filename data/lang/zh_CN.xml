@@ -1,0 +1,449 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lang id="zh_CN" name="中文（简体）">
+
+  <!-- ===== General / Boolean ===== -->
+  <string key="general.yes">是</string>
+  <string key="general.no">否</string>
+  <string key="general.on">开</string>
+  <string key="general.off">关</string>
+  <string key="general.unknown">未知</string>
+  <string key="general.none">(无)</string>
+  <string key="general.transparent">透明</string>
+  <string key="general.not_set">(未设置)</string>
+  <string key="general.no_connection">(无连接)</string>
+  <string key="general.empty_dir">(空目录)</string>
+  <string key="general.loading">正在加载...</string>
+  <string key="general.connecting">正在连接...</string>
+  <string key="general.back">← 返回</string>
+
+  <!-- ===== App / Exit ===== -->
+  <string key="app.exit_clean">ter-music 已正常退出。</string>
+
+  <!-- ===== Sidebar items ===== -->
+  <string key="sidebar.settings.theme">颜色主题</string>
+  <string key="sidebar.settings.default_path">默认路径</string>
+  <string key="sidebar.settings.playback">播放设置</string>
+  <string key="sidebar.settings.play_mode">播放模式</string>
+  <string key="sidebar.settings.hotkeys">快捷键</string>
+  <string key="sidebar.settings.remote_devices">远程设备</string>
+  <string key="sidebar.settings.equalizer">均衡器</string>
+
+  <string key="sidebar.history.folder_history">目录历史</string>
+  <string key="sidebar.history.clear_history">清空历史</string>
+
+  <string key="sidebar.playlist.all_playlists">全部歌单</string>
+  <string key="sidebar.playlist.new_playlist">新建歌单</string>
+
+  <string key="sidebar.favorites.all_favorites">全部收藏</string>
+
+  <string key="sidebar.info.about">关于</string>
+  <string key="sidebar.info.repository">仓库地址</string>
+
+  <string key="sidebar.help.quick_start">快速上手</string>
+
+  <!-- ===== Menu titles ===== -->
+  <string key="menu.settings">设置 [F2]</string>
+  <string key="menu.history">历史 [F3]</string>
+  <string key="menu.playlists">歌单 [F4]</string>
+  <string key="menu.favorites">收藏 [F5]</string>
+  <string key="menu.info">信息 [F6]</string>
+  <string key="menu.help">帮助 [F8]</string>
+
+  <!-- ===== Menu hint bar ===== -->
+  <string key="menu.hint_bar">F1:主页  F2:设置  F3:历史  F4:歌单  F5:收藏  F6:信息  F7:中/EN  F8:帮助  F9:退出</string>
+  <string key="menu.config_reloaded">配置已重新加载 / Config reloaded</string>
+
+  <!-- ===== Settings view ===== -->
+  <string key="settings.playback.language">语言可用 ENTER 切换，时延会在下次播放时生效</string>
+  <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
+  <string key="settings.color.select_hint">颜色主题：↑/↓ 选择，→或 ENTER 调整，←/TAB 返回菜单</string>
+  <string key="settings.color.auto_avoid_same">前景色和背景色会自动避免使用相同颜色</string>
+  <string key="settings.path.hint">默认路径：ENTER 编辑，←/TAB 返回菜单</string>
+  <string key="settings.path.tilde_hint">支持使用 ~ 开头的用户目录路径</string>
+  <string key="settings.playback.hint">播放设置：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单</string>
+  <string key="settings.play_mode.hint">播放模式：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单</string>
+  <string key="settings.hotkeys.hint">快捷键说明：←/TAB 返回菜单</string>
+  <string key="settings.hotkeys.f1_f8">F1-F8：切换页面 / 语言 / 退出</string>
+  <string key="settings.hotkeys.o_i">O / I：打开目录 / 追加目录</string>
+  <string key="settings.hotkeys.c_l">C / L：切换控件焦点与列表焦点</string>
+  <string key="settings.hotkeys.d">D：进入或退出歌词定位模式</string>
+  <string key="settings.hotkeys.space_enter">空格 / Enter：执行当前动作</string>
+  <string key="settings.hotkeys.plus_minus">+ / -：调整音量</string>
+  <string key="settings.hotkeys.comma_period">, / .：快退 / 快进</string>
+  <string key="settings.hotkeys.return">按 ENTER 返回主界面</string>
+
+  <string key="settings.input_path">输入路径：</string>
+  <string key="settings.invalid_path">路径格式无效</string>
+  <string key="settings.default_path_saved">默认启动路径已保存</string>
+  <string key="settings.latency_next_playback">输出时延将在下次播放生效</string>
+  <string key="settings.play_mode_updated">默认播放模式已更新，当前会话已应用</string>
+  <string key="settings.speed_updated">默认倍速已更新</string>
+  <string key="settings.backend_next_startup">音频后端将在下次启动时生效</string>
+  <string key="settings.sort_applied">排序方式已生效</string>
+  <string key="settings.cue_saved">CUE编码设置已保存</string>
+  <string key="settings.eq_enabled">均衡器已启用</string>
+  <string key="settings.eq_disabled">均衡器已禁用</string>
+  <string key="settings.saved">设置已保存</string>
+
+  <string key="settings.label.name">名称</string>
+  <string key="settings.label.protocol">协议</string>
+  <string key="settings.label.host">主机</string>
+  <string key="settings.label.port">端口</string>
+  <string key="settings.label.username">用户名</string>
+  <string key="settings.label.password">密码</string>
+  <string key="settings.label.private_key">私钥</string>
+  <string key="settings.label.base_path">基础路径</string>
+  <string key="settings.label.auto">自动</string>
+  <string key="settings.label.default">默认</string>
+  <string key="settings.label.custom">自定义</string>
+
+  <!-- ===== Settings options ===== -->
+  <string key="settings.opt.color_theme">颜色主题</string>
+  <string key="settings.opt.default_path">默认路径</string>
+  <string key="settings.opt.language">语言</string>
+  <string key="settings.opt.volume">音量</string>
+  <string key="settings.opt.latency">时延</string>
+  <string key="settings.opt.show_lyrics">显示歌词</string>
+  <string key="settings.opt.lyrics_align">歌词对齐</string>
+  <string key="settings.opt.play_mode">播放模式</string>
+  <string key="settings.opt.default_speed">默认倍速</string>
+  <string key="settings.opt.cover_art">专辑封面</string>
+  <string key="settings.opt.seamless_preload">无缝预加载</string>
+  <string key="settings.opt.audio_backend">音频后端</string>
+  <string key="settings.opt.sort_mode">排序方式</string>
+  <string key="settings.opt.cue_encoding">CUE编码</string>
+  <string key="settings.opt.auto_play">自动播放</string>
+  <string key="settings.opt.remember_path">记住路径</string>
+  <string key="settings.opt.clear_history">启动时清空历史</string>
+  <string key="settings.opt.resume_playback">恢复播放</string>
+  <string key="settings.opt.advanced_modes">高级模式</string>
+  <string key="settings.opt.playlist_fg">播放列表前景色</string>
+  <string key="settings.opt.playlist_bg">播放列表背景色</string>
+  <string key="settings.opt.controls_fg">控制区前景色</string>
+  <string key="settings.opt.controls_bg">控制区背景色</string>
+  <string key="settings.opt.lyrics_fg">歌词前景色</string>
+  <string key="settings.opt.lyrics_bg">歌词背景色</string>
+  <string key="settings.opt.sidebar_fg">侧边栏前景色</string>
+  <string key="settings.opt.sidebar_bg">侧边栏背景色</string>
+  <string key="settings.opt.highlight_fg">高亮前景色</string>
+  <string key="settings.opt.highlight_bg">高亮背景色</string>
+  <string key="settings.opt.border_fg">边框前景色</string>
+  <string key="settings.opt.border_bg">边框背景色</string>
+  <string key="settings.opt.enable_eq">启用均衡器</string>
+
+  <!-- ===== Play modes ===== -->
+  <string key="play_mode.seq">顺序播放</string>
+  <string key="play_mode.single_repeat">单曲循环</string>
+  <string key="play_mode.list_repeat">列表循环</string>
+  <string key="play_mode.shuffle_once">随机播放</string>
+  <string key="play_mode.shuffle_repeat">随机循环</string>
+  <string key="play_mode.folder_seq">文件夹顺序</string>
+  <string key="play_mode.folder_repeat">文件夹循环</string>
+  <string key="play_mode.folder_shuffle">文件夹随机</string>
+  <string key="play_mode.folder_shuffle_repeat">文件夹随机循环</string>
+  <string key="play_mode.album_seq">专辑顺序</string>
+  <string key="play_mode.album_repeat">专辑循环</string>
+  <string key="play_mode.album_shuffle">专辑随机</string>
+  <string key="play_mode.album_shuffle_repeat">专辑随机循环</string>
+  <string key="play_mode.artist_seq">艺术家顺序</string>
+  <string key="play_mode.artist_repeat">艺术家循环</string>
+  <string key="play_mode.artist_shuffle">艺术家随机</string>
+  <string key="play_mode.artist_shuffle_repeat">艺术家随机循环</string>
+  <string key="play_mode.short.seq">顺序</string>
+  <string key="play_mode.short.single_repeat">单曲</string>
+  <string key="play_mode.short.list_repeat">列表</string>
+  <string key="play_mode.short.shuffle_once">随机</string>
+  <string key="play_mode.short.shuffle_repeat">随机循</string>
+  <string key="play_mode.short.folder_seq">文顺序</string>
+  <string key="play_mode.short.folder_repeat">文循环</string>
+  <string key="play_mode.short.folder_shuffle">文随机</string>
+  <string key="play_mode.short.folder_shuffle_repeat">文随循</string>
+  <string key="play_mode.short.album_seq">专顺序</string>
+  <string key="play_mode.short.album_repeat">专循环</string>
+  <string key="play_mode.short.album_shuffle">专随机</string>
+  <string key="play_mode.short.album_shuffle_repeat">专随循</string>
+  <string key="play_mode.short.artist_seq">艺顺序</string>
+  <string key="play_mode.short.artist_repeat">艺循环</string>
+  <string key="play_mode.short.artist_shuffle">艺随机</string>
+  <string key="play_mode.short.artist_shuffle_repeat">艺随循</string>
+
+  <!-- ===== Controls ===== -->
+  <string key="controls.playlist">播放列表</string>
+  <string key="controls.lyrics">歌词</string>
+  <string key="controls.controls_area">控制区</string>
+  <string key="controls.ctrl_focus">[控件焦点]</string>
+  <string key="controls.list_focus">[列表焦点]</string>
+  <string key="controls.space_run">[空格:执行]</string>
+  <string key="controls.c_ctrl">[C:控件]</string>
+  <string key="controls.l_list">[L:列表]</string>
+  <string key="controls.tab_view">[Tab:切换]</string>
+  <string key="controls.d_exit_seek">[D:退出定位]</string>
+  <string key="controls.d_lyric_seek">[D:歌词定位]</string>
+
+  <!-- ===== Control labels ===== -->
+  <string key="controls.label.prev">上一曲</string>
+  <string key="controls.label.play_pause">播放/暂停</string>
+  <string key="controls.label.next">下一曲</string>
+  <string key="controls.label.stop">停止</string>
+  <string key="controls.label.loop">循环</string>
+  <string key="controls.label.speed">倍速</string>
+  <string key="controls.label.volume">音量</string>
+  <string key="controls.label.progress">进度</string>
+
+  <!-- ===== Popup titles ===== -->
+  <string key="popup.play_mode"> 播放模式 </string>
+  <string key="popup.speed"> 播放速度 </string>
+  <string key="popup.volume"> 音量 </string>
+  <string key="popup.color"> 颜色 </string>
+  <string key="popup.lang"> 语言 </string>
+  <string key="popup.backend"> 音频后端 </string>
+  <string key="popup.sort"> 排序方式 </string>
+  <string key="popup.align"> 对齐方式 </string>
+  <string key="popup.cue_enc"> CUE编码 </string>
+
+  <!-- ===== Player status ===== -->
+  <string key="player.state">状态：</string>
+  <string key="player.mode">模式：</string>
+  <string key="player.title">标题：</string>
+  <string key="player.artist">艺术家：</string>
+  <string key="player.album">专辑：</string>
+  <string key="player.sample_rate">采样率：</string>
+  <string key="player.bit_depth">位深：</string>
+  <string key="player.bitrate">比特率：</string>
+  <string key="player.codec">编码：</string>
+  <string key="player.playing">播放中</string>
+  <string key="player.paused">已暂停</string>
+  <string key="player.stopped">已停止</string>
+  <string key="player.queue">队列：</string>
+  <string key="player.play_queue">播放队列</string>
+  <string key="player.mixed_queue">多目录队列</string>
+  <string key="player.path">当前路径：</string>
+  <string key="player.volume_fmt">音量：%d%%</string>
+  <string key="player.speed_fmt">倍速</string>
+
+  <!-- ===== Playlist view ===== -->
+  <string key="playlist.empty">播放列表为空。</string>
+  <string key="playlist.press_o_i">按 'O' 打开目录，按 'I' 追加目录。</string>
+  <string key="playlist.no_audio">当前目录下没有音频文件。</string>
+  <string key="playlist.queue_empty">队列为空。按 'a' 从浏览视图添加曲目。</string>
+  <string key="playlist.searching">正在搜索...</string>
+  <string key="playlist.no_match">没有找到匹配的歌曲。</string>
+  <string key="playlist.search_title"> 搜索结果 </string>
+  <string key="playlist.search_progress"> 搜索中 </string>
+  <string key="playlist.results_unit">个</string>
+
+  <!-- ===== Playlist management ===== -->
+  <string key="playlist_mgr.no_playlists">还没有创建歌单。</string>
+  <string key="playlist_mgr.create_hint">请从左侧选择"新建歌单"。</string>
+  <string key="playlist_mgr.playlists_fmt">用户歌单（%d 个）</string>
+  <string key="playlist_mgr.track_count_fmt"> %s (%d 首)</string>
+  <string key="playlist_mgr.playlist_tracks_fmt">歌单：%s（%d 首）</string>
+  <string key="playlist_mgr.empty_playlist">这个歌单还是空的。</string>
+  <string key="playlist_mgr.add_hint">请从主界面把歌曲加入歌单。</string>
+  <string key="playlist_mgr.hint_manage">ENTER: 查看歌曲 | D: 删除歌单 | R: 重命名</string>
+  <string key="playlist_mgr.hint_tracks">ENTER: 播放 | D: 从歌单移除 | ESC: 返回</string>
+  <string key="playlist_mgr.input_name">输入歌单名称：</string>
+  <string key="playlist_mgr.created">歌单已创建</string>
+  <string key="playlist_mgr.limit_reached">歌单数量已达上限</string>
+  <string key="playlist_mgr.create_failed">创建歌单失败</string>
+  <string key="playlist_mgr.deleted">歌单已删除</string>
+  <string key="playlist_mgr.track_removed">歌曲已移除</string>
+  <string key="playlist_mgr.rename_prompt">输入新名称：</string>
+  <string key="playlist_mgr.renamed">歌单已重命名</string>
+  <string key="playlist_mgr.rename_failed">歌单重命名失败</string>
+  <string key="playlist_mgr.track_not_in_queue">当前播放列表中没有这首歌</string>
+  <string key="playlist_mgr.select_playlist"> 选择歌单 </string>
+  <string key="playlist_mgr.select_hint">↑/↓: 选择 | ENTER: 确认 | ESC: 取消</string>
+  <string key="playlist_mgr.added_to_playlist">已添加到歌单</string>
+  <string key="playlist_mgr.playlist_full">歌单已满</string>
+  <string key="playlist_mgr.already_in_playlist">歌曲已在歌单中</string>
+  <string key="playlist_mgr.no_playlists_yet">还没有歌单，请先到 F4 新建</string>
+
+  <!-- ===== Favorites ===== -->
+  <string key="favorites.title_fmt">收藏夹（%d 首）</string>
+  <string key="favorites.empty">还没有收藏。</string>
+  <string key="favorites.hint_f">在主界面按 'F' 可加入收藏。</string>
+  <string key="favorites.hint_manage">ENTER: 播放 | D: 移出收藏</string>
+  <string key="favorites.removed">已从收藏移除</string>
+  <string key="favorites.added">已添加到收藏</string>
+  <string key="favorites.exists_or_full">收藏已存在或已满</string>
+
+  <!-- ===== History ===== -->
+  <string key="history.title_fmt">目录历史（%d 个目录）</string>
+  <string key="history.empty">还没有目录历史。</string>
+  <string key="history.auto_record">打开音乐目录后会自动记录。</string>
+  <string key="history.hint_manage">按 ENTER 替换播放列表，按 'A' 追加到队列</string>
+  <string key="history.hint_delete">按 'D' 删除当前项，按 'C' 清空全部</string>
+  <string key="history.cleared">历史记录已清空</string>
+  <string key="history.folder_loaded">目录加载成功</string>
+  <string key="history.no_audio_files">目录中没有音频文件</string>
+  <string key="history.appended">已追加</string>
+  <string key="history.tracks_to_queue">首歌曲到队列</string>
+  <string key="history.no_new_files">目录中没有新的音频文件</string>
+  <string key="history.entry_removed">已删除历史项</string>
+
+  <!-- ===== Info / About ===== -->
+  <string key="info.about_title">关于</string>
+  <string key="info.name_fmt">名称：%s</string>
+  <string key="info.version_fmt">版本：%s</string>
+  <string key="info.authors_fmt">巨献：%s</string>
+  <string key="info.email_fmt">邮箱：%s</string>
+  <string key="info.summary">简介：</string>
+  <string key="info.summary_line1">  基于 ncurses 的终端音乐播放器。</string>
+  <string key="info.summary_line2">  通过 FFmpeg 支持多种音频格式。</string>
+  <string key="info.summary_line3">  提供歌单、收藏和歌词显示。</string>
+  <string key="info.repo_label">仓库地址：</string>
+  <string key="info.license">许可证：GPL v3</string>
+  <string key="info.read_only">这里的信息为只读。</string>
+
+  <!-- ===== Search ===== -->
+  <string key="search.prompt">搜索歌曲: </string>
+  <string key="search.searching">正在搜索...</string>
+  <string key="search.completed">搜索完成</string>
+  <string key="search.results_unit">个结果</string>
+  <string key="search.failed">搜索失败</string>
+  <string key="search.empty_playlist">播放列表为空，无法搜索</string>
+  <string key="search.cancelled">搜索已取消</string>
+
+  <!-- ===== Dialog ===== -->
+  <string key="dialog.append_folder">输入要追加的目录：</string>
+  <string key="dialog.folder_path">输入目录路径：</string>
+  <string key="dialog.path_invalid">路径无效</string>
+  <string key="dialog.no_audio_found">未找到音频文件</string>
+  <string key="dialog.no_new_audio">目录中没有新的音频文件</string>
+
+  <!-- ===== Remote ===== -->
+  <string key="remote.list_failed">无法列出远程目录</string>
+  <string key="remote.refresh_failed">刷新失败：</string>
+  <string key="remote.press_any_key">  ← 按任意键继续</string>
+  <string key="remote.refresh_failed_short">刷新失败  ← 按任意键继续</string>
+  <string key="remote.connection_ok">连接成功，共</string>
+  <string key="remote.entries">个条目</string>
+  <string key="remote.loaded">已加载</string>
+  <string key="remote.tracks">首歌曲</string>
+  <string key="remote.no_audio_dir">该目录没有音频文件</string>
+  <string key="remote.name_required">名称为必填项</string>
+  <string key="remote.host_required">主机地址为必填项</string>
+  <string key="remote.connections_full">远程连接已满</string>
+  <string key="remote.connection_saved">连接已保存</string>
+  <string key="remote.connection_deleted">连接已删除</string>
+  <string key="remote.hint_nav">远程设备：↑/↓ 选择 ENTER 管理  ESC 返回</string>
+  <string key="remote.saved_connections">已保存的连接</string>
+  <string key="remote.add_new">↓ 添加新连接</string>
+  <string key="remote.connection_fmt">连接</string>
+  <string key="remote.browse_folder">浏览目录</string>
+  <string key="remote.load_to_playlist">加载此目录到播放列表</string>
+  <string key="remote.refresh_connection">刷新连接</string>
+  <string key="remote.edit_connection">编辑连接</string>
+  <string key="remote.delete_connection">删除连接</string>
+  <string key="remote.hint_edit">编辑连接 (↑/↓ 选择 ENTER 编辑 +/- 协议 S 保存 ESC 取消)</string>
+  <string key="remote.hint_add">添加连接 (↑/↓ 选择 ENTER 编辑 +/- 协议 S 保存 ESC 取消)</string>
+  <string key="remote.hint_nav_edit">↑/↓:选择  ENTER:编辑  +/-:协议  S:保存  ESC:取消</string>
+  <string key="remote.browsing">浏览</string>
+  <string key="remote.dir">目录</string>
+  <string key="remote.load_into_playlist">↓ 加载此目录到播放列表</string>
+  <string key="remote.hint_browse">↑/↓ 选择  ENTER 加载  RIGHT 进入目录  ESC 返回</string>
+
+  <!-- ===== Equalizer ===== -->
+  <string key="eq.title_enabled">均衡器 [已启用]</string>
+  <string key="eq.title_disabled">均衡器 [已禁用]</string>
+  <string key="eq.hint">←/→ 选     ↑/↓ 调整  ESC 返回  ENTER 开关</string>
+  <string key="eq.preampl">预增益</string>
+
+  <!-- ===== Lyrics ===== -->
+  <string key="lyrics.not_loaded">未加载歌词。</string>
+  <string key="lyrics.seek_enabled">已进入歌词定位模式</string>
+  <string key="lyrics.seek_disabled">已退出歌词定位模式</string>
+  <string key="lyrics.no_position">当前没有可定位的歌词</string>
+
+  <!-- ===== General status messages ===== -->
+  <string key="status.folder_loaded">目录加载成功</string>
+  <string key="status.appended">已追加</string>
+  <string key="status.tracks_unit">首歌曲</string>
+  <string key="status.added_to_queue">已添加到队列</string>
+  <string key="status.queue_cleared">队列已清空</string>
+  <string key="status.inserted_next">已插入到下一首</string>
+  <string key="status.search_cancelled">搜索已取消</string>
+  <string key="status.search_wait">搜索中，请稍候...</string>
+  <string key="status.switched_queue">切换到播放队列视图</string>
+  <string key="status.switched_browser">切换到文件浏览视图</string>
+  <string key="status.rainbow_off">彩虹模式已关闭</string>
+  <string key="status.rainbow_on">康娜米！彩虹模式已启用</string>
+  <string key="status.seek_fmt">已跳转到 %02d:%02d</string>
+  <string key="status.volume_fmt">音量：%d%%</string>
+
+  <!-- ===== Main CLI warnings ===== -->
+  <string key="main.warn.cannot_open">警告：无法打开音频文件</string>
+  <string key="main.warn.no_playable">警告：指定目录中没有可播放的音频文件</string>
+  <string key="main.warn.invalid_path">警告：指定路径无效：%s</string>
+  <string key="main.cannot_open_skip">无法打开音频文件，跳过</string>
+  <string key="main.auto_detect">在当前目录自动检测到音乐文件夹：%s</string>
+  <string key="main.loaded_default">已从默认路径加载：%s</string>
+  <string key="main.continue_default">将继续尝试当前目录和默认启动路径...</string>
+  <string key="main.warn.no_audio_files">警告：没有找到音频文件</string>
+  <string key="main.warn.invalid_remote">警告：远程 URL 格式无效</string>
+
+  <!-- ===== Sort modes ===== -->
+  <string key="sort.title">标题</string>
+  <string key="sort.artist">艺术家</string>
+  <string key="sort.album">专辑</string>
+  <string key="sort.filename">文件名</string>
+
+  <!-- ===== Lyrics alignment ===== -->
+  <string key="align.left">居左</string>
+  <string key="align.center">居中</string>
+  <string key="align.right">居右</string>
+
+  <!-- ===== Color names ===== -->
+  <string key="color.black">黑色</string>
+  <string key="color.red">红色</string>
+  <string key="color.green">绿色</string>
+  <string key="color.yellow">黄色</string>
+  <string key="color.blue">蓝色</string>
+  <string key="color.magenta">洋红</string>
+  <string key="color.cyan">青色</string>
+  <string key="color.white">白色</string>
+  <string key="color.bright_black">亮黑(灰)</string>
+  <string key="color.bright_red">亮红</string>
+  <string key="color.bright_green">亮绿</string>
+  <string key="color.bright_yellow">亮黄</string>
+  <string key="color.bright_blue">亮蓝</string>
+  <string key="color.bright_magenta">亮洋红</string>
+  <string key="color.bright_cyan">亮青</string>
+  <string key="color.bright_white">亮白</string>
+  <string key="color.orange">橙</string>
+  <string key="color.brown">棕</string>
+  <string key="color.pink">粉</string>
+  <string key="color.purple">紫</string>
+  <string key="color.teal">青绿</string>
+  <string key="color.sky_blue">天蓝</string>
+  <string key="color.coral">珊瑚</string>
+  <string key="color.lime">石灰</string>
+
+  <!-- ===== Language name (self-description) ===== -->
+  <string key="lang.name">中文</string>
+
+  <!-- ===== Play history popup ===== -->
+  <string key="play_history.title"> 播放历史 </string>
+  <string key="play_history.hint"> ENTER:播放 ESC:取消 </string>
+
+  <!-- ===== Seamless / misc ===== -->
+  <string key="settings.opt.seamless">无缝预加载</string>
+  <string key="settings.enter_color">输入颜色值 (0-255): </string>
+
+  <!-- ===== Language management view ===== -->
+  <string key="lang_mgr.title">语言管理</string>
+  <string key="lang_mgr.no_langs">(无可用语言)</string>
+  <string key="lang_mgr.builtin">[内置]</string>
+  <string key="lang_mgr.user">[用户]</string>
+  <string key="lang_mgr.hint">↑/↓: 选择  ENTER: 切换  A: 添加  D: 删除  ESC: 返回</string>
+  <string key="lang_mgr.actions">[ENTER]=设为当前  [A]=添加语言包  [D]=删除  [ESC]=返回</string>
+  <string key="lang_mgr.add_prompt">输入语言包 XML 文件路径：</string>
+  <string key="lang_mgr.switched">语言已切换</string>
+  <string key="lang_mgr.added">语言包已添加</string>
+  <string key="lang_mgr.add_failed">添加失败：文件无效或格式错误</string>
+  <string key="lang_mgr.deleted">语言包已删除</string>
+  <string key="lang_mgr.delete_failed">删除失败</string>
+  <string key="lang_mgr.cannot_delete_builtin">内置语言不可删除</string>
+  <string key="settings.fg_bg_same">前景色和背景色不能相同</string>
+</lang>

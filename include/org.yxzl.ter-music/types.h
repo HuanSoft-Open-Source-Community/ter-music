@@ -91,10 +91,9 @@ typedef struct {
     void *popup_win;
 } PopupState;
 
-typedef enum {
-    UI_LANG_ZH = 0,
-    UI_LANG_EN = 1
-} UiLanguage;
+/* Legacy language IDs (migrated to string-based i18n) */
+#define UI_LANG_ZH 0
+#define UI_LANG_EN 1
 
 #define COLOR_PAIR_BORDER 1
 #define COLOR_PAIR_PLAYLIST 2
@@ -294,7 +293,7 @@ typedef struct {
     int clear_history_on_startup;
     int resume_last_playback;
     int last_played_position;
-    int ui_language;
+    char ui_language[32];   /* language ID, e.g. "zh_CN", "en_US" */
     int volume_percent;
     int audio_latency_ms;
     int show_lyrics_panel;

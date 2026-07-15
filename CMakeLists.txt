@@ -140,6 +140,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/playlist_view.c
     src/org.yxzl.ter-music/ui/info_view.c
     src/org.yxzl.ter-music/ui/help_view.c
+    src/org.yxzl.ter-music/i18n/i18n.c
     src/org.yxzl.ter-music/ui/lyrics.c
     src/org.yxzl.ter-music/ui/braille/braille_art.c
     src/org.yxzl.ter-music/ui/braille/image_loader.c
@@ -155,6 +156,7 @@ add_executable(${PROJECT_NAME}
 # 包含头文件目录
 target_include_directories(${PROJECT_NAME} PRIVATE
     include/org.yxzl.ter-music/
+    include/org.yxzl.ter-music/i18n/
     ${AVCODEC_INCLUDE_DIRS}
     ${AVFORMAT_INCLUDE_DIRS}
     ${SWRESAMPLE_INCLUDE_DIRS}
@@ -232,6 +234,7 @@ set(TER_MUSIC_DATA_DIR "${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}")
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     _GNU_SOURCE
     TER_MUSIC_DATA_DIR="${TER_MUSIC_DATA_DIR}"
+    TER_MUSIC_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 if(DBUS_FOUND)
@@ -265,6 +268,11 @@ install(FILES resources/icons/hicolor/scalable/apps/${PROJECT_NAME}.svg
 # 安装帮助文档
 install(FILES data/help-quickstart-zh.txt data/help-quickstart-en.txt
         DESTINATION share/ter-music
+)
+
+# Install language translation files
+install(FILES data/lang/zh_CN.xml data/lang/en_US.xml
+        DESTINATION share/ter-music/lang
 )
 
 # Uninstall target — removes files listed in install_manifest.txt

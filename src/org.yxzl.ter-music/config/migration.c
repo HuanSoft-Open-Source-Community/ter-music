@@ -142,8 +142,10 @@ int config_migrate_v1_to_v2(void)
         cfg.resume_last_playback = (int)extract_json_int(json, "resume_last_playback");
     if (strstr(json, "\"last_played_position\""))
         cfg.last_played_position = (int)extract_json_int(json, "last_played_position");
-    if (strstr(json, "\"ui_language\""))
-        cfg.ui_language = (int)extract_json_int(json, "ui_language");
+    if (strstr(json, "\"ui_language\"")) {
+        int legacy_lang = (int)extract_json_int(json, "ui_language");
+        strcpy(cfg.ui_language, (legacy_lang == 1) ? "en_US" : "zh_CN");
+    }
     if (strstr(json, "\"volume_percent\""))
         cfg.volume_percent = (int)extract_json_int(json, "volume_percent");
     if (strstr(json, "\"audio_latency_ms\""))

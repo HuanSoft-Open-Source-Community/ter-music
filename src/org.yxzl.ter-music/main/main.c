@@ -4,6 +4,7 @@
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
 #include "media/session.h"
@@ -316,6 +317,7 @@ int main(int argc, char *argv[]) {
     log_info("main", "ncurses initialized, terminal size: %dx%d", COLS, LINES);
 
     init_menu_views();
+    i18n_init(g_app_config.ui_language);
     set_volume_percent(g_app_config.volume_percent);
     
     if (g_app_config.clear_history_on_startup) {
