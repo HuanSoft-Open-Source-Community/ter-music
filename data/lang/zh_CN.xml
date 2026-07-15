@@ -131,6 +131,18 @@
   <string key="settings.opt.border_fg">边框前景色</string>
   <string key="settings.opt.border_bg">边框背景色</string>
   <string key="settings.opt.enable_eq">启用均衡器</string>
+  <string key="settings.opt.preampl">预增益</string>
+  <string key="settings.opt.eq_31hz">31 Hz</string>
+  <string key="settings.opt.eq_62hz">62 Hz</string>
+  <string key="settings.opt.eq_125hz">125 Hz</string>
+  <string key="settings.opt.eq_250hz">250 Hz</string>
+  <string key="settings.opt.eq_500hz">500 Hz</string>
+  <string key="settings.opt.eq_1khz">1 kHz</string>
+  <string key="settings.opt.eq_2khz">2 kHz</string>
+  <string key="settings.opt.eq_4khz">4 kHz</string>
+  <string key="settings.opt.eq_8khz">8 kHz</string>
+  <string key="settings.opt.eq_16khz">16 kHz</string>
+  <string key="settings.separator">: </string>
 
   <!-- ===== Play modes ===== -->
   <string key="play_mode.seq">顺序播放</string>
