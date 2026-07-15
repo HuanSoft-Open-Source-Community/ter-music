@@ -961,9 +961,7 @@ void render_menu_hint_bar(void)
     for (int x = 0; x < max_x; x++)
         mvaddch(max_y - 1, x, ' ');
     mvprintw(max_y - 1, 2, "%s",
-             use_english_ui()
-                 ? "F1:Home  F2:Settings  F3:History  F4:Playlists  F5:Favorites  F6:Info  F7:Lang  F8:Help  F9:Quit"
-                 : "F1:主页  F2:设置  F3:历史  F4:歌单  F5:收藏  F6:信息  F7:中/EN  F8:帮助  F9:退出");
+             i18n_get("menu.hint_bar"));
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
     refresh();
 
@@ -986,6 +984,7 @@ void switch_to_view(ViewMode view)
     reset_settings_view();
     reset_playlist_view();
     reset_help_view();
+    reset_language_view();
     g_history_content_offset  = 0;
     g_playlist_content_offset = 0;
     g_favorites_content_offset = 0;
@@ -1025,6 +1024,12 @@ void switch_to_view(ViewMode view)
             render_menu_frame(i18n_get("menu.help"));
             render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
             render_help_content();
+            render_menu_hint_bar();
+            break;
+        case VIEW_LANGUAGE:
+            render_menu_frame(i18n_get("menu.language"));
+            render_menu_sidebar(g_menu_selected_idx, language_sidebar_items, LANGUAGE_ITEM_COUNT);
+            render_language_content();
             render_menu_hint_bar();
             break;
         default:
@@ -1093,6 +1098,12 @@ void rerender_active_view(void)
             render_help_content();
             render_menu_hint_bar();
             break;
+        case VIEW_LANGUAGE:
+            render_menu_frame(i18n_get("menu.language"));
+            render_menu_sidebar(g_menu_selected_idx, language_sidebar_items, LANGUAGE_ITEM_COUNT);
+            render_language_content();
+            render_menu_hint_bar();
+            break;
         default:
             break;
     }
@@ -1120,7 +1131,7 @@ void handle_function_keys(int fkey)
         case KEY_F(4): switch_to_view(VIEW_PLAYLIST); break;
         case KEY_F(5): switch_to_view(VIEW_FAVORITES); break;
         case KEY_F(6): switch_to_view(VIEW_INFO); break;
-        case KEY_F(7): toggle_ui_language(); break;
+        case KEY_F(7): switch_to_view(VIEW_LANGUAGE); break;
         case KEY_F(8): switch_to_view(VIEW_HELP); break;
         case KEY_F(9):
             cleanup();
@@ -1163,6 +1174,7 @@ void handle_menu_input(int ch)
         case VIEW_FAVORITES: handle_favorites_input(ch); break;
         case VIEW_INFO:      handle_info_input(ch); break;
         case VIEW_HELP:      handle_help_input(ch); break;
+        case VIEW_LANGUAGE:  handle_language_input(ch); break;
         default: break;
     }
 }

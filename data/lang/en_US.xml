@@ -47,6 +47,7 @@
   <string key="menu.playlists">Playlists [F4]</string>
   <string key="menu.favorites">Favorites [F5]</string>
   <string key="menu.info">Info [F6]</string>
+  <string key="menu.language">Language [F7]</string>
   <string key="menu.help">Help [F8]</string>
 
   <!-- ===== Menu hint bar ===== -->

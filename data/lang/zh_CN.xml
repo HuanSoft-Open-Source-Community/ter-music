@@ -47,6 +47,7 @@
   <string key="menu.playlists">歌单 [F4]</string>
   <string key="menu.favorites">收藏 [F5]</string>
   <string key="menu.info">信息 [F6]</string>
+  <string key="menu.language">语言 [F7]</string>
   <string key="menu.help">帮助 [F8]</string>
 
   <!-- ===== Menu hint bar ===== -->

@@ -27,6 +27,7 @@ void render_history_content(void);
 void render_favorites_content(void);
 void render_info_content(void);
 void render_help_content(void);
+void render_language_content(void);
 void rerender_active_view(void);
 void render_playlist_manager_content(void);
 

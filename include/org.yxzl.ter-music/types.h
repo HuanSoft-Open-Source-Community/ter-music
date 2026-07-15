@@ -58,7 +58,8 @@ typedef enum {
     VIEW_FAVORITES = 4,
     VIEW_INFO = 5,
     VIEW_HELP = 6,
-    VIEW_LIBRARY = 7
+    VIEW_LIBRARY = 7,
+    VIEW_LANGUAGE = 8
 } ViewMode;
 
 typedef enum {

@@ -19,6 +19,7 @@ extern const char *playlist_sidebar_items[];
 extern const char *favorites_sidebar_items[];
 extern const char *info_sidebar_items[];
 extern const char *help_sidebar_items[];
+extern const char *language_sidebar_items[];
 
 extern const int SETTINGS_ITEM_COUNT;
 extern const int HISTORY_ITEM_COUNT;
@@ -26,6 +27,7 @@ extern const int PLAYLIST_ITEM_COUNT;
 extern const int FAVORITES_ITEM_COUNT;
 extern const int INFO_ITEM_COUNT;
 extern const int HELP_ITEM_COUNT;
+extern const int LANGUAGE_ITEM_COUNT;
 
 /* ============================================================
  * Text helper functions (defined in util.c)
@@ -119,6 +121,7 @@ void handle_playlist_input(int ch);
 void handle_favorites_input(int ch);
 void handle_info_input(int ch);
 void handle_help_input(int ch);
+void handle_language_input(int ch);
 
 /* ============================================================
  * View reset functions (called from menus.c switch_to_view)
@@ -127,6 +130,7 @@ void handle_help_input(int ch);
 void reset_settings_view(void);
 void reset_playlist_view(void);
 void reset_help_view(void);
+void reset_language_view(void);
 
 /* ============================================================
  * Help view lifecycle (defined in help_view.c)
