@@ -134,7 +134,8 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_CLEAR_HISTORY,   cfg->clear_history_on_startup);
         SAVE_INT(XML_PREF_RESUME_PLAYBACK, cfg->resume_last_playback);
         SAVE_INT(XML_PREF_LAST_POSITION,   cfg->last_played_position);
-        SAVE_INT(XML_PREF_LANGUAGE,        cfg->ui_language);
+        xmlNewChild(prefs, NULL, (const xmlChar *)XML_PREF_LANGUAGE,
+                    (const xmlChar *)cfg->ui_language);
         SAVE_INT(XML_PREF_VOLUME,          cfg->volume_percent);
         SAVE_INT(XML_PREF_AUDIO_LATENCY,   cfg->audio_latency_ms);
         SAVE_INT(XML_PREF_SHOW_LYRICS,     cfg->show_lyrics_panel);
@@ -291,7 +292,10 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->clear_history_on_startup = xml_get_int(prefs, XML_PREF_CLEAR_HISTORY, 0);
         cfg->resume_last_playback     = xml_get_int(prefs, XML_PREF_RESUME_PLAYBACK, 0);
         cfg->last_played_position     = xml_get_int(prefs, XML_PREF_LAST_POSITION, 0);
-        cfg->ui_language              = xml_get_int(prefs, XML_PREF_LANGUAGE, UI_LANG_ZH);
+        xml_get_string(prefs, XML_PREF_LANGUAGE,
+                       cfg->ui_language, sizeof(cfg->ui_language));
+        if (cfg->ui_language[0] == '\0')
+            strcpy(cfg->ui_language, "zh_CN");
         cfg->volume_percent           = xml_get_int(prefs, XML_PREF_VOLUME, 100);
         cfg->audio_latency_ms         = xml_get_int(prefs, XML_PREF_AUDIO_LATENCY, 80);
         cfg->show_lyrics_panel        = xml_get_int(prefs, XML_PREF_SHOW_LYRICS, 1);
@@ -498,8 +502,10 @@ static void clamp_config_values(AppConfig *cfg)
     if (cfg->last_played_position < 0)
         cfg->last_played_position = 0;
 
-    if (cfg->ui_language != UI_LANG_EN)
-        cfg->ui_language = UI_LANG_ZH;
+    if (cfg->ui_language[0] == '\0' ||
+        (strcmp(cfg->ui_language, "zh_CN") != 0 &&
+         strcmp(cfg->ui_language, "en_US") != 0))
+        strcpy(cfg->ui_language, "zh_CN");
 
     if (cfg->volume_percent < 0)   cfg->volume_percent = 0;
     if (cfg->volume_percent > 100) cfg->volume_percent = 100;

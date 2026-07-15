@@ -399,7 +399,7 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
     } else if (option_index == SETTINGS_IDX_LANGUAGE) {
         snprintf(line, line_size, "%s%s%s",
                  current_settings_options[option_index], separator,
-                 menu_language_name(g_app_config.ui_language));
+                 menu_language_name());
     } else if (option_index == SETTINGS_IDX_VOLUME) {
         snprintf(line, line_size, "%s%s%d%%",
                  current_settings_options[option_index], separator,
@@ -646,12 +646,14 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             break;
         case SETTINGS_IDX_LANGUAGE:
             if (delta < 0) {
-                g_app_config.ui_language = UI_LANG_ZH;
+                strcpy(g_app_config.ui_language, "zh_CN");
             } else if (delta > 0) {
-                g_app_config.ui_language = UI_LANG_EN;
+                strcpy(g_app_config.ui_language, "en_US");
             } else {
-                g_app_config.ui_language = (g_app_config.ui_language == UI_LANG_EN) ? UI_LANG_ZH : UI_LANG_EN;
+                strcpy(g_app_config.ui_language,
+                       strcmp(g_app_config.ui_language, "zh_CN") == 0 ? "en_US" : "zh_CN");
             }
+            i18n_reload(g_app_config.ui_language);
             save_config();
             break;
         case SETTINGS_IDX_VOLUME:
@@ -904,7 +906,9 @@ static void close_sel_menu(int apply)
                 break;
 
             case SETTINGS_IDX_LANGUAGE:
-                g_app_config.ui_language = g_sel_idx;
+                strcpy(g_app_config.ui_language,
+                       g_sel_idx == 1 ? "en_US" : "zh_CN");
+                i18n_reload(g_app_config.ui_language);
                 save_config();
                 break;
 
@@ -1007,7 +1011,8 @@ static void open_sel_menu(int option_index)
             break;
         case SETTINGS_IDX_LANGUAGE:
             count = 2;
-            cur   = g_app_config.ui_language;
+            cur   = (strcmp(g_app_config.ui_language, "en_US") == 0) ? 1 : 0;
+            break;
             break;
         case SETTINGS_IDX_VOLUME:
             count = 11; /* 0%,10%,…,100% */

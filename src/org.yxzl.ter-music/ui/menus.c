@@ -214,7 +214,7 @@ void init_default_config(void)
     g_app_config.last_played_position  = 0;
     g_app_config.last_played_folder_path[0] = '\0';
     g_app_config.last_played_track_path[0]  = '\0';
-    g_app_config.ui_language           = UI_LANG_ZH;
+    strcpy(g_app_config.ui_language, "zh_CN");
     g_app_config.volume_percent        = 100;
     g_app_config.audio_latency_ms      = 80;
     g_app_config.show_lyrics_panel     = 1;
@@ -1111,7 +1111,11 @@ void rerender_active_view(void)
 
 void toggle_ui_language(void)
 {
-    g_app_config.ui_language = (g_app_config.ui_language == UI_LANG_EN) ? UI_LANG_ZH : UI_LANG_EN;
+    if (strcmp(g_app_config.ui_language, "zh_CN") == 0)
+        strcpy(g_app_config.ui_language, "en_US");
+    else
+        strcpy(g_app_config.ui_language, "zh_CN");
+    i18n_reload(g_app_config.ui_language);
     save_config();
     help_free_lines();
     rerender_active_view();
