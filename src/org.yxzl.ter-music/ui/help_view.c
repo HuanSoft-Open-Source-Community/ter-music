@@ -10,6 +10,7 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/scrollbar.h"
@@ -65,7 +66,7 @@ static void help_load_file(void)
 
     help_free_lines();
 
-    const char *suffix = use_english_ui() ? "en" : "zh";
+    const char *suffix = i18n_current_lang();
     char path[MAX_PATH_LEN];
     FILE *f = NULL;
 
@@ -127,7 +128,7 @@ static void help_search_prompt(void)
     int search_row = max_y - 3;
 
     mvprintw(search_row, content_start_x, "%s",
-             use_english_ui() ? "Search: " : "搜索: ");
+             i18n_get("search.prompt"));
     int input_start_x = getcurx(stdscr);
     clrtoeol();
     refresh();
@@ -221,7 +222,7 @@ void render_help_content(void)
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
 
     mvprintw(start_y, content_start_x, "%s",
-             use_english_ui() ? "Help [F8]" : "帮助 [F8]");
+             i18n_get("menu.help"));
     mvprintw(start_y + 1, content_start_x, "========================================");
 
     for (int i = 0; i < visible_lines && (g_help_scroll_offset + i) < total_lines; i++) {
@@ -267,7 +268,7 @@ void render_help_content(void)
 
     char pos[64];
     snprintf(pos, sizeof(pos), "%s %d-%d / %d",
-             use_english_ui() ? "Line" : "行",
+             i18n_get("help.line"),
              g_help_scroll_offset + 1, display_end, total_lines);
 
     mvprintw(hint_row, content_start_x, "%s", hint);

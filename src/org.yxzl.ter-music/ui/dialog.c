@@ -6,6 +6,7 @@
 #include <ncursesw/ncurses.h>
 #include "ui/dialog.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "playlist/playlist.h"
 #include "audio/audio.h"
@@ -265,8 +266,8 @@ static void prompt_folder_input(int append_mode) {
     curs_set(1);
 
     const char *folder_prompt = append_mode
-        ? ui_text("输入要追加的目录：", "Append folder: ")
-        : ui_text("输入目录路径：", "Folder path: ");
+        ? i18n_get("dialog.append_folder")
+        : i18n_get("dialog.folder_path");
     char input_path[MAX_PATH_LEN];
     prompt_text_input(win_controls, 4, 2, folder_prompt,
                       input_path, sizeof(input_path), 1, 0, 0);
@@ -314,25 +315,25 @@ static void prompt_folder_input(int append_mode) {
                 if (append_mode && had_existing_playlist) {
                     char msg[64];
                     snprintf(msg, sizeof(msg), "%s %d %s",
-                             ui_text("已追加", "Appended"),
+                             i18n_get("status.appended"),
                              count,
-                             ui_text("首歌曲", "tracks"));
+                             i18n_get("status.tracks_unit"));
                     update_controls_status(msg);
                 } else {
-                    update_controls_status(ui_text("目录加载成功", "Folder loaded"));
+                    update_controls_status(i18n_get("status.folder_loaded"));
                 }
                 render_playlist_content();
             } else {
                 if (append_mode) {
-                    update_controls_status(ui_text("目录中没有新的音频文件", "No new audio files to append"));
+                    update_controls_status(i18n_get("dialog.no_new_audio"));
                 } else {
-                    update_controls_status(ui_text("未找到音频文件", "No audio files found"));
+                    update_controls_status(i18n_get("dialog.no_audio_found"));
                     reset_playlist_state();
                 }
                 render_playlist_content();
             }
         } else {
-            update_controls_status(ui_text("路径无效", "Invalid path"));
+            update_controls_status(i18n_get("dialog.path_invalid"));
             if (!append_mode) {
                 stop_audio();
                 reset_playlist_state();

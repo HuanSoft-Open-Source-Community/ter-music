@@ -18,6 +18,7 @@
 #include "audio/play_queue.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "config/config.h"
 #include "media/session.h"
 #include "ui/menus.h"
@@ -39,6 +40,8 @@
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/version.h>
+
+extern ViewMode g_current_view;
 
 #ifndef DT_REG
 #define DT_REG 8
@@ -314,7 +317,7 @@ void set_volume_percent(int volume)
         g_app_config.volume_percent = clamped;
         save_config();
         char msg[64];
-        snprintf(msg, sizeof(msg), use_english_ui() ? "Volume: %d%%" : "音量：%d%%", clamped);
+        snprintf(msg, sizeof(msg), i18n_get("status.volume_fmt"), clamped);
         update_controls_status(msg);
         request_ui_refresh(UI_DIRTY_CONTROLS);
         signal_playback_thread();
@@ -331,7 +334,7 @@ void adjust_volume(int delta) {
 
 const char *get_play_mode_str(void)
 {
-    return play_mode_display_name(g_play_mode, use_english_ui());
+    return play_mode_display_name(g_play_mode, 0);
 }
 
 PlayMode get_play_mode(void)
@@ -375,7 +378,7 @@ void toggle_playback_speed(void)
     g_app_config.default_playback_speed = g_playback_speed;
     save_config();
     char msg[64];
-    snprintf(msg, sizeof(msg), "%s: %.2fx", use_english_ui() ? "Speed" : "倍速", (double)g_playback_speed);
+    snprintf(msg, sizeof(msg), "%s: %.2fx", i18n_get("controls.label.speed"), (double)g_playback_speed);
     update_controls_status(msg);
     request_ui_refresh(UI_DIRTY_CONTROLS);
     apply_playback_speed_change();
@@ -713,7 +716,7 @@ start_playback:
     signal_playback_thread();
 
     load_lyrics(local_lyrics_path[0] ? local_lyrics_path : track_path);
-    render_lyrics();
+    if (g_current_view == VIEW_MAIN) render_lyrics();
     update_album_cover_for_track(local_audio_path[0] ? local_audio_path : track_path);
 
     Track track;

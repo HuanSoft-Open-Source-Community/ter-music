@@ -16,6 +16,7 @@
 #include "audio/play_queue.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
 #include <stdio.h>
@@ -297,7 +298,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
 
             char msg[64];
             snprintf(msg, sizeof(msg),
-                     use_english_ui() ? "Seek to %02d:%02d" : "已跳转到 %02d:%02d",
+                     i18n_get("status.seek_fmt"),
                      target_position / 60, target_position % 60);
             update_controls_status(msg);
         }

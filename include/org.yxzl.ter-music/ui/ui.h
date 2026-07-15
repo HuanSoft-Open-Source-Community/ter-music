@@ -67,7 +67,7 @@ void get_visualizer_snapshot(int *levels, int *peaks, int max_levels, uint64_t *
 void apply_color_theme(void);
 int use_ascii_fallback_ui(void);
 int use_english_ui(void);
-const char *ui_text(const char *utf8, const char *ascii);
+const char *ui_text(const char *key, const char *unused);
 void check_konami_input(int ch);
 void toggle_rainbow_mode(void);
 void update_rainbow_colors(void);

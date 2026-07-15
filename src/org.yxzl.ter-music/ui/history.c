@@ -12,6 +12,7 @@
 #include "audio/audio.h"
 #include "ui/dialog.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "config/config.h"
@@ -39,16 +40,16 @@ void render_history_content(void)
     attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
     mvprintw(start_y, content_start_x,
-             use_english_ui() ? "Folder History (%d)" : "目录历史（%d 个目录）",
+             i18n_get("history.title_fmt"),
              g_dir_history.count);
     mvprintw(start_y + 1, content_start_x, "----------------------------------------");
     start_y += 3;
 
     if (g_dir_history.count == 0) {
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("还没有目录历史。", "No folder history yet."));
+                 i18n_get("history.empty"));
         mvprintw(start_y + 1, content_start_x, "%s",
-                 menu_text("打开音乐目录后会自动记录。", "Opened music folders will appear here."));
+                 i18n_get("history.auto_record"));
     } else {
         int visible_lines = max_y - start_y - 2;
 
@@ -87,11 +88,9 @@ void render_history_content(void)
 
         int bottom_y = max_y - 3;
         mvprintw(bottom_y, content_start_x, "%s",
-                 menu_text("按 ENTER 替换播放列表，按 'A' 追加到队列",
-                           "Press Enter to replace, 'A' to append"));
+                 i18n_get("history.hint_manage"));
         mvprintw(bottom_y + 1, content_start_x, "%s",
-                 menu_text("按 'D' 删除当前项，按 'C' 清空全部",
-                           "Press 'D' to delete, 'C' to clear all"));
+                 i18n_get("history.hint_delete"));
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
@@ -161,7 +160,7 @@ void handle_history_input(int ch)
                 } else if (g_menu_selected_idx == 1) {
                     clear_dir_history();
                     g_content_selected_idx = 0;
-                    show_status_message(menu_text("历史记录已清空", "History cleared"));
+                    show_status_message(i18n_get("history.cleared"));
                     render_menu_frame("历史 [F3]");
                     render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
                     render_history_content();
@@ -182,9 +181,9 @@ void handle_history_input(int ch)
                         g_selected_index = 0;
                         add_dir_history_entry(path);
                         exit_current_view();
-                        show_status_message(menu_text("目录加载成功", "Folder loaded"));
+                        show_status_message(i18n_get("status.folder_loaded"));
                     } else {
-                        show_status_message(menu_text("目录中没有音频文件", "No audio files in this folder"));
+                        show_status_message(i18n_get("history.no_audio"));
                         render_history_content();
                     }
                 }
@@ -210,11 +209,11 @@ void handle_history_input(int ch)
                     }
                     char msg[96];
                     snprintf(msg, sizeof(msg), "%s %d %s",
-                             menu_text("已追加", "Appended"), count,
-                             menu_text("首歌曲到队列", "tracks to queue"));
+                             i18n_get("status.appended"), count,
+                             i18n_get("history.tracks_to_queue"));
                     show_status_message(msg);
                 } else {
-                    show_status_message(menu_text("目录中没有新的音频文件", "No new audio files to append"));
+                    show_status_message(i18n_get("dialog.no_new_audio"));
                     render_history_content();
                 }
             }
@@ -241,7 +240,7 @@ void handle_history_input(int ch)
                     g_content_selected_idx = g_dir_history.count - 1;
                 }
 
-                show_status_message(menu_text("已删除历史项", "History entry removed"));
+                show_status_message(i18n_get("history.entry_removed"));
                 render_history_content();
             }
             break;
@@ -251,7 +250,7 @@ void handle_history_input(int ch)
             if (g_focus_area == FOCUS_CONTENT) {
                 clear_dir_history();
                 g_content_selected_idx = 0;
-                show_status_message(menu_text("历史记录已清空", "History cleared"));
+                show_status_message(i18n_get("history.cleared"));
                 render_history_content();
             }
             break;

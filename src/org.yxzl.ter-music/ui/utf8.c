@@ -6,6 +6,7 @@
 #include <ncursesw/ncurses.h>
 #include "ui/ui.h"
 #include "config/config.h"
+#include "i18n/i18n.h"
 #include <string.h>
 
 extern int g_ascii_fallback_ui;
@@ -18,7 +19,9 @@ int use_ascii_fallback_ui(void) {
 }
 
 int use_english_ui(void) {
-    return g_ascii_fallback_ui || g_app_config.ui_language == UI_LANG_EN;
+    if (g_ascii_fallback_ui) return 1;
+    const char *lang = i18n_current_lang();
+    return (strcmp(lang, "zh_CN") != 0);
 }
 int utf8_str_truncate(char *dest, const char *src, int max_cols) {
     if (!dest || !src || max_cols <= 0) {

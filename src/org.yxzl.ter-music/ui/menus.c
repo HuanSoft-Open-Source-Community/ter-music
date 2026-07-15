@@ -20,6 +20,7 @@
 #include "ui/dialog.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
 #include "search/search.h"
@@ -1021,7 +1022,7 @@ void switch_to_view(ViewMode view)
             render_menu_hint_bar();
             break;
         case VIEW_HELP:
-            render_menu_frame(use_english_ui() ? "Help [F8]" : "帮助 [F8]");
+            render_menu_frame(i18n_get("menu.help"));
             render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
             render_help_content();
             render_menu_hint_bar();
@@ -1087,7 +1088,7 @@ void rerender_active_view(void)
             render_menu_hint_bar();
             break;
         case VIEW_HELP:
-            render_menu_frame(use_english_ui() ? "Help [F8]" : "帮助 [F8]");
+            render_menu_frame(i18n_get("menu.help"));
             render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
             render_help_content();
             render_menu_hint_bar();
@@ -1123,7 +1124,7 @@ void handle_function_keys(int fkey)
         case KEY_F(8): switch_to_view(VIEW_HELP); break;
         case KEY_F(9):
             cleanup();
-            printf("%s\n", menu_text("ter-music 已正常退出。", "ter-music exited cleanly."));
+            printf("%s\n", i18n_get("app.exit_clean"));
             exit(0);
             break;
         default: break;

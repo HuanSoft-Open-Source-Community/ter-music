@@ -12,6 +12,7 @@
 #include "audio/audio.h"
 #include "ui/dialog.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "config/config.h"
@@ -50,17 +51,16 @@ void render_playlist_manager_content(void)
 
     if (g_playlist_view_mode == 0) {
         mvprintw(start_y, content_start_x,
-                 use_english_ui() ? "Playlists (%d)" : "用户歌单（%d 个）",
+                 i18n_get("playlist_mgr.playlists_fmt"),
                  g_playlist_manager.count);
         mvprintw(start_y + 1, content_start_x, "----------------------------------------");
         start_y += 3;
 
         if (g_playlist_manager.count == 0) {
             mvprintw(start_y, content_start_x, "%s",
-                     menu_text("还没有创建歌单。", "No playlists created yet."));
+                     i18n_get("playlist_mgr.no_playlists"));
             mvprintw(start_y + 1, content_start_x, "%s",
-                     menu_text("请从左侧选择\"新建歌单\"。",
-                               "Choose 'New Playlist' on the left."));
+                     i18n_get("playlist_mgr.create_hint"));
         } else {
             int visible_lines = max_y - start_y - 2;
 
@@ -72,20 +72,19 @@ void render_playlist_manager_content(void)
                 if (i == g_content_selected_idx && g_focus_area == FOCUS_CONTENT) {
                     attron(A_REVERSE);
                     mvprintw(start_y + i, content_start_x,
-                             use_english_ui() ? " %s (%d tracks)" : " %s (%d 首)",
+                             i18n_get("playlist_mgr.track_count_fmt"),
                              display_name, pl->track_count);
                     attroff(A_REVERSE);
                 } else {
                     mvprintw(start_y + i, content_start_x,
-                             use_english_ui() ? " %s (%d tracks)" : " %s (%d 首)",
+                             i18n_get("playlist_mgr.track_count_fmt"),
                              display_name, pl->track_count);
                 }
             }
 
             int bottom_y = max_y - 3;
             mvprintw(bottom_y, content_start_x, "%s",
-                     menu_text("ENTER: 查看歌曲 | D: 删除歌单 | R: 重命名",
-                               "Enter: View tracks | D: Delete | R: Rename"));
+                     i18n_get("playlist_mgr.hint_manage"));
         }
     } else {
         if (g_playlist_selected_playlist >= 0 &&
@@ -93,17 +92,16 @@ void render_playlist_manager_content(void)
             UserPlaylist *pl = &g_playlist_manager.playlists[g_playlist_selected_playlist];
 
             mvprintw(start_y, content_start_x,
-                     use_english_ui() ? "Playlist: %s (%d tracks)" : "歌单：%s（%d 首）",
+                     i18n_get("playlist_mgr.playlist_tracks_fmt"),
                      pl->name, pl->track_count);
             mvprintw(start_y + 1, content_start_x, "----------------------------------------");
             start_y += 3;
 
             if (pl->track_count == 0) {
                 mvprintw(start_y, content_start_x, "%s",
-                         menu_text("这个歌单还是空的。", "This playlist is empty."));
+                         i18n_get("playlist_mgr.playlist_empty"));
                 mvprintw(start_y + 1, content_start_x, "%s",
-                         menu_text("请从主界面把歌曲加入歌单。",
-                                   "Add tracks from the main view."));
+                         i18n_get("playlist_mgr.add_hint"));
             } else {
                 int visible_lines = max_y - start_y - 2;
 
@@ -144,8 +142,7 @@ void render_playlist_manager_content(void)
 
                 int bottom_y = max_y - 3;
                 mvprintw(bottom_y, content_start_x, "%s",
-                         menu_text("ENTER: 播放 | D: 从歌单移除 | ESC: 返回",
-                                   "Enter: Play | D: Remove | Esc: Back"));
+                         i18n_get("playlist_mgr.hint_tracks"));
             }
         }
     }
@@ -260,7 +257,7 @@ void handle_playlist_input(int ch)
                     getmaxyx(stdscr, max_y, max_x);
                     int menu_width = max_x / 4;
 
-                    const char *create_prompt = menu_text("输入歌单名称：", "Playlist name: ");
+                    const char *create_prompt = i18n_get("playlist_mgr.create_prompt");
                     char name[MAX_PLAYLIST_NAME_LEN];
                     prompt_text_input(stdscr, max_y - 2, menu_width + 2,
                                       create_prompt, name, sizeof(name), 1, 0, 0);
@@ -271,11 +268,11 @@ void handle_playlist_input(int ch)
                     if (strlen(name) > 0) {
                         int result = create_user_playlist(name);
                         if (result == 0) {
-                            show_status_message(menu_text("歌单已创建", "Playlist created"));
+                            show_status_message(i18n_get("playlist_mgr.created"));
                         } else if (result == -2) {
-                            show_status_message(menu_text("歌单数量已达上限", "Playlist limit reached"));
+                            show_status_message(i18n_get("playlist_mgr.limit_reached"));
                         } else {
-                            show_status_message(menu_text("创建歌单失败", "Failed to create playlist"));
+                            show_status_message(i18n_get("playlist_mgr.create_failed"));
                         }
                     }
 
@@ -307,8 +304,7 @@ void handle_playlist_input(int ch)
                                 play_audio(found);
                                 exit_current_view();
                             } else {
-                                show_status_message(menu_text("当前播放列表中没有这首歌",
-                                                              "Track not found in current playlist"));
+                                show_status_message(i18n_get("playlist_mgr.track_not_in_queue"));
                             }
                         }
                     }
@@ -326,7 +322,7 @@ void handle_playlist_input(int ch)
                         if (g_content_selected_idx >= g_playlist_manager.count) {
                             g_content_selected_idx = g_playlist_manager.count - 1;
                         }
-                        show_status_message(menu_text("歌单已删除", "Playlist deleted"));
+                        show_status_message(i18n_get("playlist_mgr.deleted"));
                         render_playlist_manager_content();
                     }
                 } else {
@@ -338,7 +334,7 @@ void handle_playlist_input(int ch)
                         if (g_content_selected_idx >= pl->track_count) {
                             g_content_selected_idx = pl->track_count - 1;
                         }
-                        show_status_message(menu_text("歌曲已移除", "Track removed"));
+                        show_status_message(i18n_get("playlist_mgr.track_removed"));
                         render_playlist_manager_content();
                     }
                 }
@@ -357,7 +353,7 @@ void handle_playlist_input(int ch)
                     getmaxyx(stdscr, max_y, max_x);
                     int menu_width = max_x / 4;
 
-                    const char *rename_prompt = menu_text("输入新名称：", "New name: ");
+                    const char *rename_prompt = i18n_get("playlist_mgr.rename_prompt");
                     char new_name[MAX_PLAYLIST_NAME_LEN];
                     prompt_text_input(stdscr, max_y - 2, menu_width + 2,
                                       rename_prompt, new_name, sizeof(new_name), 1, 0, 0);
@@ -368,9 +364,9 @@ void handle_playlist_input(int ch)
                     if (strlen(new_name) > 0) {
                         int result = rename_user_playlist(g_content_selected_idx, new_name);
                         if (result == 0) {
-                            show_status_message(menu_text("歌单已重命名", "Playlist renamed"));
+                            show_status_message(i18n_get("playlist_mgr.renamed"));
                         } else {
-                            show_status_message(menu_text("歌单重命名失败", "Failed to rename playlist"));
+                            show_status_message(i18n_get("playlist_mgr.rename_failed"));
                         }
                     }
 

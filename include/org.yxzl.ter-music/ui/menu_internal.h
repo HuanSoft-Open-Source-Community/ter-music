@@ -14,17 +14,11 @@
  * ============================================================ */
 
 extern const char *settings_sidebar_items[];
-extern const char *settings_sidebar_items_ascii[];
 extern const char *history_sidebar_items[];
-extern const char *history_sidebar_items_ascii[];
 extern const char *playlist_sidebar_items[];
-extern const char *playlist_sidebar_items_ascii[];
 extern const char *favorites_sidebar_items[];
-extern const char *favorites_sidebar_items_ascii[];
 extern const char *info_sidebar_items[];
-extern const char *info_sidebar_items_ascii[];
 extern const char *help_sidebar_items[];
-extern const char *help_sidebar_items_ascii[];
 
 extern const int SETTINGS_ITEM_COUNT;
 extern const int HISTORY_ITEM_COUNT;
@@ -37,10 +31,10 @@ extern const int HELP_ITEM_COUNT;
  * Text helper functions (defined in util.c)
  * ============================================================ */
 
-const char *menu_text(const char *utf8, const char *ascii);
+const char *menu_text(const char *key, const char *unused);
 const char *menu_bool_text(int enabled);
 const char *menu_color_name(int color_value);
-const char *menu_language_name(int language);
+const char *menu_language_name(void);
 void sanitize_ascii_menu_text(char *dest, size_t dest_size, const char *src);
 const char **resolve_sidebar_items(const char **items);
 const char *resolve_menu_title(const char *title);

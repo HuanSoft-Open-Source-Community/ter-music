@@ -23,6 +23,7 @@
 #include "config/crypto.h"
 #include "playlist/playlist.h"
 #include "playlist/encoding.h"
+#include "i18n/i18n.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,48 +63,48 @@ extern int   g_speed_count;
  * ============================================================ */
 
 static const char *settings_options[] = {
-    "播放列表前景色",
-    "播放列表背景色",
-    "控制区前景色",
-    "控制区背景色",
-    "歌词前景色",
-    "歌词背景色",
-    "侧边栏前景色",
-    "侧边栏背景色",
-    "高亮前景色",
-    "高亮背景色",
-    "边框前景色",
-    "边框背景色",
-    "默认启动路径",
-    "启动后自动播放",
-    "记住上次路径",
-    "启动时清空历史",
-    "界面语言",
-    "默认音量",
-    "输出时延",
-    "显示歌词面板",
-    "默认播放模式",
-    "默认倍速",
-    "显示专辑图片",
-    "歌词对齐方式",
-    "音频后端",
-    "排序方式",
-    "高级播放模式",
-    "默认播放模式",
-    "无缝预加载下一曲",
-    "CUE字符编码",
-    "启用均衡器",
-    "预增益",
-    "31 Hz",
-    "62 Hz",
-    "125 Hz",
-    "250 Hz",
-    "500 Hz",
-    "1 kHz",
-    "2 kHz",
-    "4 kHz",
-    "8 kHz",
-    "16 kHz"
+    "settings.color.playlist_fg",
+    "settings.color.playlist_bg",
+    "settings.color.controls_fg",
+    "settings.color.controls_bg",
+    "settings.color.lyrics_fg",
+    "settings.color.lyrics_bg",
+    "settings.color.sidebar_fg",
+    "settings.color.sidebar_bg",
+    "settings.color.highlight_fg",
+    "settings.color.highlight_bg",
+    "settings.color.border_fg",
+    "settings.color.border_bg",
+    "settings.opt.startup_path",
+    "settings.opt.auto_play",
+    "settings.opt.remember_last_path",
+    "settings.opt.clear_history",
+    "settings.opt.language",
+    "settings.opt.default_volume",
+    "settings.opt.latency",
+    "settings.opt.show_lyrics",
+    "settings.opt.default_play_mode",
+    "settings.opt.default_speed",
+    "settings.opt.show_album_art",
+    "settings.opt.lyrics_align",
+    "settings.opt.audio_backend",
+    "settings.opt.sort_mode",
+    "settings.opt.adv_play_mode",
+    "settings.opt.default_play_mode",
+    "settings.opt.preload_next",
+    "settings.opt.cue_encoding",
+    "settings.opt.enable_eq",
+    "settings.opt.preampl",
+    "settings.opt.eq_31hz",
+    "settings.opt.eq_62hz",
+    "settings.opt.eq_125hz",
+    "settings.opt.eq_250hz",
+    "settings.opt.eq_500hz",
+    "settings.opt.eq_1khz",
+    "settings.opt.eq_2khz",
+    "settings.opt.eq_4khz",
+    "settings.opt.eq_8khz",
+    "settings.opt.eq_16khz"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -353,9 +354,9 @@ static int is_valid_path(const char *path)
 
 static void format_settings_option_line(int option_index, char *line, size_t line_size)
 {
-    const char **current_settings_options = use_english_ui() ? settings_options_ascii : settings_options;
-    const char *separator = use_english_ui() ? ": " : "：";
-    const char *unset_label = use_english_ui() ? "(Not set)" : "(未设置)";
+    const char **current_settings_options = settings_options;
+    const char *separator = i18n_get("settings.separator");
+    const char *unset_label = i18n_get("general.not_set");
 
     int *color_values[] = {
         &g_app_config.theme.playlist_fg,
@@ -422,9 +423,9 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
     } else if (option_index == SETTINGS_IDX_LYRICS_ALIGNMENT) {
         const char *align_str;
         switch (g_app_config.lyrics_alignment) {
-            case 1: align_str = use_english_ui() ? "Center" : "居中"; break;
-            case 2: align_str = use_english_ui() ? "Right" : "居右"; break;
-            default: align_str = use_english_ui() ? "Left" : "居左";
+            case 1: align_str = i18n_get("align.center"); break;
+            case 2: align_str = i18n_get("align.right"); break;
+            default: align_str = i18n_get("align.left");
         }
         snprintf(line, line_size, "%s%s%s",
                  current_settings_options[option_index], separator, align_str);
@@ -444,36 +445,36 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
     } else if (option_index == SETTINGS_IDX_AUDIO_BACKEND) {
         const char *backend_str;
         switch (g_app_config.audio_backend) {
-            case AUDIO_BACKEND_AUTO:     backend_str = menu_text("自动", "Auto"); break;
+            case AUDIO_BACKEND_AUTO:     backend_str = i18n_get("general.auto"); break;
             case AUDIO_BACKEND_PULSE:    backend_str = "PulseAudio"; break;
             case AUDIO_BACKEND_ALSA:     backend_str = "ALSA"; break;
             case AUDIO_BACKEND_PIPEWIRE: backend_str = "PipeWire"; break;
-            default:                     backend_str = menu_text("自动", "Auto");
+            default:                     backend_str = i18n_get("general.auto");
         }
         snprintf(line, line_size, "%s%s%s",
                  current_settings_options[option_index], separator, backend_str);
     } else if (option_index == SETTINGS_IDX_SORT_MODE) {
         const char *sort_str;
         switch (g_app_config.sort_mode) {
-            case SORT_DEFAULT:  sort_str = menu_text("默认", "Default"); break;
-            case SORT_TITLE:    sort_str = menu_text("标题", "Title"); break;
-            case SORT_ARTIST:   sort_str = menu_text("艺术家", "Artist"); break;
-            case SORT_ALBUM:    sort_str = menu_text("专辑", "Album"); break;
-            case SORT_FILENAME: sort_str = menu_text("文件名", "Filename"); break;
-            default:            sort_str = menu_text("默认", "Default");
+            case SORT_DEFAULT:  sort_str = i18n_get("sort.default"); break;
+            case SORT_TITLE:    sort_str = i18n_get("sort.title"); break;
+            case SORT_ARTIST:   sort_str = i18n_get("sort.artist"); break;
+            case SORT_ALBUM:    sort_str = i18n_get("sort.album"); break;
+            case SORT_FILENAME: sort_str = i18n_get("sort.filename"); break;
+            default:            sort_str = i18n_get("sort.default");
         }
         snprintf(line, line_size, "%s%s%s",
                  current_settings_options[option_index], separator, sort_str);
     } else if (option_index == SETTINGS_IDX_CUE_ENCODING) {
         const char *enc_str;
         switch (g_app_config.cue_encoding) {
-            case CUE_ENCODING_AUTO:      enc_str = menu_text("自动", "Auto"); break;
+            case CUE_ENCODING_AUTO:      enc_str = i18n_get("general.auto"); break;
             case CUE_ENCODING_UTF8:      enc_str = "UTF-8"; break;
             case CUE_ENCODING_GB18030:   enc_str = "GB18030"; break;
             case CUE_ENCODING_GBK:       enc_str = "GBK"; break;
             case CUE_ENCODING_BIG5:      enc_str = "BIG5"; break;
             case CUE_ENCODING_SHIFT_JIS: enc_str = "Shift-JIS"; break;
-            default:                     enc_str = menu_text("自动", "Auto"); break;
+            default:                     enc_str = i18n_get("general.auto"); break;
         }
         snprintf(line, line_size, "%s%s%s",
                  current_settings_options[option_index], separator, enc_str);
@@ -592,7 +593,7 @@ static void edit_default_startup_path(void)
     getmaxyx(stdscr, max_y, max_x);
     int menu_width = max_x / 4;
 
-    const char *path_prompt = menu_text("输入路径：", "Enter path: ");
+    const char *path_prompt = i18n_get("settings.path.prompt");
     char input_path[MAX_PATH_LEN];
     prompt_text_input(stdscr, max_y - 2, menu_width + 2,
                       path_prompt, input_path, sizeof(input_path), 1, 0, 0);
@@ -602,7 +603,7 @@ static void edit_default_startup_path(void)
 
     if (strlen(input_path) > 0) {
         if (!is_valid_path(input_path)) {
-            show_status_message(menu_text("路径格式无效", "Invalid path format"));
+            show_status_message(i18n_get("settings.path.invalid"));
             return;
         }
         if (input_path[0] == '~') {
@@ -615,7 +616,7 @@ static void edit_default_startup_path(void)
             g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
         }
         save_config();
-        show_status_message(menu_text("默认启动路径已保存", "Default startup path saved"));
+        show_status_message(i18n_get("settings.path.saved"));
     }
 }
 
@@ -662,8 +663,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             if (delta == 0) delta = 1;
             g_app_config.audio_latency_ms = clamp_latency_ms(g_app_config.audio_latency_ms + delta * 10);
             save_config();
-            show_status_message(menu_text("输出时延将在下次播放生效",
-                                          "Output latency applies on next playback"));
+            show_status_message(i18n_get("settings.opt.latency_hint"));
             break;
         case SETTINGS_IDX_SHOW_LYRICS:
             g_app_config.show_lyrics_panel = !g_app_config.show_lyrics_panel;
@@ -695,8 +695,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             }
             save_config();
             g_play_mode = (PlayMode)g_app_config.default_play_mode;
-            show_status_message(menu_text("默认播放模式已更新，当前会话已应用",
-                                          "Default play mode updated, applied to current session"));
+            show_status_message(i18n_get("settings.play_mode.updated"));
             break;
         case SETTINGS_IDX_ADVANCED_PLAY_MODES:
             g_app_config.advanced_play_modes_enabled = !g_app_config.advanced_play_modes_enabled;
@@ -722,7 +721,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             save_config();
             char msg[64];
             snprintf(msg, sizeof(msg), "%s: %.2fx",
-                     menu_text("默认倍速已更新", "Default speed updated"),
+                     i18n_get("settings.speed.updated"),
                      (double)g_app_config.default_playback_speed);
             show_status_message(msg);
             break;
@@ -753,8 +752,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             } while (attempts < count);
             g_app_config.audio_backend = options[next];
             save_config();
-            show_status_message(menu_text("音频后端将在下次启动时生效",
-                                          "Audio backend will take effect on next restart"));
+            show_status_message(i18n_get("settings.backend.hint"));
             break;
         }
         case SETTINGS_IDX_SORT_MODE:
@@ -765,7 +763,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             }
             save_config();
             recompute_sort_order();
-            show_status_message(menu_text("排序方式已生效", "Sort mode applied"));
+            show_status_message(i18n_get("settings.sort.applied"));
             break;
         case SETTINGS_IDX_CUE_ENCODING:
             if (delta < 0) {
@@ -774,15 +772,15 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                 g_app_config.cue_encoding = (g_app_config.cue_encoding + 1) % CUE_ENCODING_COUNT;
             }
             save_config();
-            show_status_message(menu_text("CUE编码设置已保存", "CUE encoding saved"));
+            show_status_message(i18n_get("settings.cue.saved"));
             break;
         case SETTINGS_IDX_EQ_ENABLED:
             g_app_config.eq_enabled = !g_app_config.eq_enabled;
             eq_set_enabled(g_app_config.eq_enabled);
             save_config();
             show_status_message(g_app_config.eq_enabled
-                ? menu_text("均衡器已启用", "Equalizer enabled")
-                : menu_text("均衡器已禁用", "Equalizer disabled"));
+                ? i18n_get("eq.enabled")
+                : i18n_get("eq.disabled"));
             break;
         case SETTINGS_IDX_EQ_PREAMP:
             if (delta == 0) delta = 1;
@@ -851,8 +849,7 @@ static void close_sel_menu(int apply)
                 g_app_config.default_play_mode = g_sel_idx;
                 save_config();
                 g_play_mode = (PlayMode)g_app_config.default_play_mode;
-                show_status_message(menu_text("默认播放模式已更新，当前会话已应用",
-                                              "Default play mode updated, applied to current session"));
+                show_status_message(i18n_get("settings.play_mode.updated"));
                 break;
 
             case SETTINGS_IDX_DEFAULT_SPEED:
@@ -863,7 +860,7 @@ static void close_sel_menu(int apply)
                 {
                     char msg[64];
                     snprintf(msg, sizeof(msg), "%s: %.2fx",
-                             menu_text("默认倍速已更新", "Default speed updated"),
+                             i18n_get("settings.speed.updated"),
                              (double)g_app_config.default_playback_speed);
                     show_status_message(msg);
                 }
@@ -884,8 +881,7 @@ static void close_sel_menu(int apply)
                     idx++;
                 }
                 save_config();
-                show_status_message(menu_text("音频后端将在下次启动时生效",
-                                              "Audio backend will take effect on next restart"));
+                show_status_message(i18n_get("settings.backend.hint"));
                 break;
             }
 
@@ -893,13 +889,13 @@ static void close_sel_menu(int apply)
                 g_app_config.sort_mode = g_sel_idx;
                 save_config();
                 recompute_sort_order();
-                show_status_message(menu_text("排序方式已生效", "Sort mode applied"));
+                show_status_message(i18n_get("settings.sort.applied"));
                 break;
 
             case SETTINGS_IDX_CUE_ENCODING:
                 g_app_config.cue_encoding = g_sel_idx;
                 save_config();
-                show_status_message(menu_text("CUE编码设置已保存", "CUE encoding saved"));
+                show_status_message(i18n_get("settings.cue.saved"));
                 break;
 
             case SETTINGS_IDX_LYRICS_ALIGNMENT:
@@ -923,8 +919,7 @@ static void close_sel_menu(int apply)
                 int latency_opts[] = {20, 40, 60, 80, 100, 120, 150, 200, 250};
                 g_app_config.audio_latency_ms = latency_opts[g_sel_idx];
                 save_config();
-                show_status_message(menu_text("输出时延将在下次播放生效",
-                                              "Output latency applies on next playback"));
+                show_status_message(i18n_get("settings.opt.latency_hint"));
                 break;
             }
             default:
@@ -1100,7 +1095,7 @@ static void create_sel_window(void)
         switch (src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 snprintf(opts[i], 48, "%s",
-                         play_mode_display_name((PlayMode)i, use_english_ui())); break;
+                         play_mode_display_name((PlayMode)i, 0)); break;
             case SETTINGS_IDX_DEFAULT_SPEED:
                 if (i < g_speed_count)
                     snprintf(opts[i], 48, "%.2fx", (double)g_speed_ratios[i]);
@@ -1114,7 +1109,7 @@ static void create_sel_window(void)
                         continue;
                     if (idx == i) {
                         switch (be[j]) {
-                            case AUDIO_BACKEND_AUTO: snprintf(opts[i],48,"%s",menu_text("自动","Auto"));break;
+                            case AUDIO_BACKEND_AUTO: snprintf(opts[i],48,"%s",i18n_get("general.auto"));break;
                             case AUDIO_BACKEND_PIPEWIRE: snprintf(opts[i],48,"PipeWire");break;
                             case AUDIO_BACKEND_PULSE:    snprintf(opts[i],48,"PulseAudio");break;
                             case AUDIO_BACKEND_ALSA:     snprintf(opts[i],48,"ALSA");break;
@@ -1126,23 +1121,23 @@ static void create_sel_window(void)
                 break;
             }
             case SETTINGS_IDX_SORT_MODE:{
-                const char *a[]={menu_text("默认","Default"),menu_text("标题","Title"),
-                                 menu_text("艺术家","Artist"),menu_text("专辑","Album"),
-                                 menu_text("文件名","Filename")};
+                const char *a[]={i18n_get("sort.default"),i18n_get("sort.title"),
+                                 i18n_get("sort.artist"),i18n_get("sort.album"),
+                                 i18n_get("sort.filename")};
                 if (i<5) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_CUE_ENCODING:{
-                const char *a[]={menu_text("自动","Auto"),"UTF-8","GB18030","GBK",
+                const char *a[]={i18n_get("general.auto"),"UTF-8","GB18030","GBK",
                                  "BIG5","Shift-JIS"};
                 if (i<CUE_ENCODING_COUNT) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_LYRICS_ALIGNMENT:{
-                const char *a[]={menu_text("居左","Left"),menu_text("居中","Center"),
-                                 menu_text("居右","Right")};
+                const char *a[]={i18n_get("align.left"),i18n_get("align.center"),
+                                 i18n_get("align.right")};
                 if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_LANGUAGE:{
-                const char *a[]={menu_text("中文","Chinese"),"English"};
+                const char *a[]={i18n_get("lang.name"),"English"};
                 if (i<2) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_VOLUME:
@@ -1167,9 +1162,9 @@ static void create_sel_window(void)
                             if (sel_color_val(k) == val) { in_pre = 1; break; }
                         }
                         if (in_pre || val < 0 || val >= COLORS)
-                            snprintf(opts[i], 48, "[%s...]", menu_text("自定义", "Custom"));
+                            snprintf(opts[i], 48, "[%s...]", i18n_get("general.custom"));
                         else
-                            snprintf(opts[i], 48, "%s: %d", menu_text("自定义", "Custom"), val);
+                            snprintf(opts[i], 48, "%s: %d", i18n_get("general.custom"), val);
                         break;
                     }
                     /* Preset colors */
@@ -1232,7 +1227,7 @@ static void draw_sel_menu(void)
         switch (src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 snprintf(opts[i], 48, "%s",
-                         play_mode_display_name((PlayMode)i, use_english_ui())); break;
+                         play_mode_display_name((PlayMode)i, 0)); break;
             case SETTINGS_IDX_DEFAULT_SPEED:
                 if (i < g_speed_count)
                     snprintf(opts[i], 48, "%.2fx", (double)g_speed_ratios[i]);
@@ -1246,7 +1241,7 @@ static void draw_sel_menu(void)
                         continue;
                     if (idx == i) {
                         switch (be[j]) {
-                            case AUDIO_BACKEND_AUTO: snprintf(opts[i],48,"%s",menu_text("自动","Auto"));break;
+                            case AUDIO_BACKEND_AUTO: snprintf(opts[i],48,"%s",i18n_get("general.auto"));break;
                             case AUDIO_BACKEND_PIPEWIRE: snprintf(opts[i],48,"PipeWire");break;
                             case AUDIO_BACKEND_PULSE:    snprintf(opts[i],48,"PulseAudio");break;
                             case AUDIO_BACKEND_ALSA:     snprintf(opts[i],48,"ALSA");break;
@@ -1258,23 +1253,23 @@ static void draw_sel_menu(void)
                 break;
             }
             case SETTINGS_IDX_SORT_MODE:{
-                const char *a[]={menu_text("默认","Default"),menu_text("标题","Title"),
-                                 menu_text("艺术家","Artist"),menu_text("专辑","Album"),
-                                 menu_text("文件名","Filename")};
+                const char *a[]={i18n_get("sort.default"),i18n_get("sort.title"),
+                                 i18n_get("sort.artist"),i18n_get("sort.album"),
+                                 i18n_get("sort.filename")};
                 if (i<5) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_CUE_ENCODING:{
-                const char *a[]={menu_text("自动","Auto"),"UTF-8","GB18030","GBK",
+                const char *a[]={i18n_get("general.auto"),"UTF-8","GB18030","GBK",
                                  "BIG5","Shift-JIS"};
                 if (i<CUE_ENCODING_COUNT) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_LYRICS_ALIGNMENT:{
-                const char *a[]={menu_text("居左","Left"),menu_text("居中","Center"),
-                                 menu_text("居右","Right")};
+                const char *a[]={i18n_get("align.left"),i18n_get("align.center"),
+                                 i18n_get("align.right")};
                 if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_LANGUAGE:{
-                const char *a[]={menu_text("中文","Chinese"),"English"};
+                const char *a[]={i18n_get("lang.name"),"English"};
                 if (i<2) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_VOLUME:
@@ -1298,9 +1293,9 @@ static void draw_sel_menu(void)
                             if (sel_color_val(k) == val) { in_pre = 1; break; }
                         }
                         if (in_pre || val < 0 || val >= COLORS)
-                            snprintf(opts[i], 48, "[%s...]", menu_text("自定义", "Custom"));
+                            snprintf(opts[i], 48, "[%s...]", i18n_get("general.custom"));
                         else
-                            snprintf(opts[i], 48, "%s: %d", menu_text("自定义", "Custom"), val);
+                            snprintf(opts[i], 48, "%s: %d", i18n_get("general.custom"), val);
                         break;
                     }
                     int paired = cv[(src % 2 == 0) ? src + 1 : src - 1];
@@ -1330,18 +1325,18 @@ static void draw_sel_menu(void)
     /* Title */
     const char *title = "";
     switch (src) {
-        case SETTINGS_IDX_DEFAULT_PLAY_MODE: title = ui_text(" 播放模式 "," Play Mode "); break;
-        case SETTINGS_IDX_DEFAULT_SPEED:     title = ui_text(" 倍速 "," Speed "); break;
-        case SETTINGS_IDX_AUDIO_BACKEND:     title = ui_text(" 音频后端 "," Backend "); break;
-        case SETTINGS_IDX_SORT_MODE:         title = ui_text(" 排序方式 "," Sort "); break;
-        case SETTINGS_IDX_LYRICS_ALIGNMENT:  title = ui_text(" 对齐方式 "," Align "); break;
-        case SETTINGS_IDX_LANGUAGE:          title = ui_text(" 语言 "," Lang "); break;
-        case SETTINGS_IDX_VOLUME:            title = ui_text(" 音量 "," Volume "); break;
-        case SETTINGS_IDX_LATENCY:           title = ui_text(" 时延 "," Latency "); break;
-        case SETTINGS_IDX_CUE_ENCODING:      title = ui_text(" CUE编码 "," CUE Enc "); break;
+        case SETTINGS_IDX_DEFAULT_PLAY_MODE: title = i18n_get("popup.play_mode"); break;
+        case SETTINGS_IDX_DEFAULT_SPEED:     title = i18n_get("popup.speed"); break;
+        case SETTINGS_IDX_AUDIO_BACKEND:     title = i18n_get("popup.backend"); break;
+        case SETTINGS_IDX_SORT_MODE:         title = i18n_get("popup.sort"); break;
+        case SETTINGS_IDX_LYRICS_ALIGNMENT:  title = i18n_get("popup.align"); break;
+        case SETTINGS_IDX_LANGUAGE:          title = i18n_get("popup.lang"); break;
+        case SETTINGS_IDX_VOLUME:            title = i18n_get("popup.volume"); break;
+        case SETTINGS_IDX_LATENCY:           title = i18n_get("popup.latency"); break;
+        case SETTINGS_IDX_CUE_ENCODING:      title = i18n_get("popup.cue_enc"); break;
         default:
             if (src >= 0 && src < 12)
-                title = ui_text(" 颜色 "," Color ");
+                title = i18n_get("popup.color");
             break;
     }
     if (title[0])
@@ -1415,7 +1410,7 @@ static int handle_sel_input(int ch)
                 noecho();
                 curs_set(1);
                 prompt_text_input(stdscr, my - 3, mx / 4 + 2,
-                    menu_text("输入颜色值 (0-255): ", "Enter color (0-255): "),
+                    i18n_get("settings.color.prompt"),
                     buf, sizeof(buf), 0, 0, 0);
                 curs_set(0);
                 noecho();
@@ -1428,8 +1423,7 @@ static int handle_sel_input(int ch)
                         apply_color_theme();
                         save_config();
                     } else if (v == paired_val) {
-                        show_status_message(menu_text("前景色和背景色不能相同",
-                                                      "Foreground/background must differ"));
+                        show_status_message(i18n_get("settings.color.same_error"));
                     }
                 }
                 g_sel_active = 0;
@@ -1578,7 +1572,7 @@ static void remote_go_back(void)
 
 static void rerender_remote_view(void)
 {
-    render_menu_frame(menu_text("设置 [F2]", "Settings [F2]"));
+    render_menu_frame(i18n_get("menu.settings"));
     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
     render_settings_content();
     render_menu_hint_bar();
@@ -1596,7 +1590,7 @@ static void remote_refresh_entries(void)
     g_remote_entry_count = 0;
     g_remote_entry_offset = 0;
 
-    show_status_message(menu_text("正在连接...", "Connecting..."));
+    show_status_message(i18n_get("general.connecting"));
     refresh();
 
     const RemoteConnectionConfig *conn = &g_app_config.remote_connections[g_remote_selected_conn];
@@ -1608,10 +1602,10 @@ static void remote_refresh_entries(void)
         if (err && err[0]) {
             char buf[256];
             snprintf(buf, sizeof(buf), "%s: %s",
-                     menu_text("无法列出远程目录", "Cannot list remote directory"), err);
+                     i18n_get("remote.list_failed"), err);
             show_status_message(buf);
         } else {
-            show_status_message(menu_text("无法列出远程目录", "Cannot list remote directory"));
+            show_status_message(i18n_get("remote.list_failed"));
         }
     }
 }
@@ -1642,7 +1636,7 @@ static void remote_refresh_connection(void)
     g_remote_entry_count = 0;
     g_remote_entry_offset = 0;
 
-    show_status_message(menu_text("正在连接...", "Connecting..."));
+    show_status_message(i18n_get("general.connecting"));
     render_settings_content();
     refresh();
 
@@ -1656,18 +1650,18 @@ static void remote_refresh_connection(void)
         if (err && err[0]) {
             char buf[256];
             snprintf(buf, sizeof(buf), "%s%s%s",
-                     menu_text("刷新失败：", "Refresh failed: "), err,
-                     menu_text("  ← 按任意键继续", "  ← Press any key"));
+                     i18n_get("remote.refresh_failed"), err,
+                     i18n_get("remote.press_any_key"));
             show_status_message(buf);
         } else {
-            show_status_message(menu_text("刷新失败  ← 按任意键继续", "Refresh failed  ← Press any key"));
+            show_status_message(i18n_get("remote.refresh_failed_short"));
         }
     } else {
         char buf[128];
         snprintf(buf, sizeof(buf), "%s %d %s",
-                 menu_text("连接成功，共", "Connection OK, found"),
+                 i18n_get("remote.connection_ok"),
                  count,
-                 menu_text("个条目", "entries"));
+                 i18n_get("remote.entries"));
         show_status_message(buf);
     }
     render_settings_content();
@@ -1686,12 +1680,12 @@ static void remote_load_playlist(void)
         g_selected_index = 0;
         char msg[128];
         snprintf(msg, sizeof(msg), "%s: %s (%d %s)",
-                 menu_text("已加载", "Loaded"), conn->name, count,
-                 menu_text("首歌曲", "tracks"));
+                 i18n_get("remote.loaded"), conn->name, count,
+                 i18n_get("status.tracks_unit"));
         show_status_message(msg);
         exit_current_view();
     } else {
-        show_status_message(menu_text("该目录没有音频文件", "No audio files in this directory"));
+        show_status_message(i18n_get("remote.no_audio"));
     }
 }
 
@@ -1707,19 +1701,19 @@ static int remote_form_field_count(void)
 static void remote_form_field_label(int field_idx, char *buf, size_t size)
 {
     switch (field_idx) {
-        case 0: snprintf(buf, size, "%s:", menu_text("名称", "Name")); break;
-        case 1: snprintf(buf, size, "%s:", menu_text("协议", "Protocol")); break;
-        case 2: snprintf(buf, size, "%s:", menu_text("主机", "Host")); break;
-        case 3: snprintf(buf, size, "%s:", menu_text("端口", "Port")); break;
-        case 4: snprintf(buf, size, "%s:", menu_text("用户名", "Username")); break;
-        case 5: snprintf(buf, size, "%s:", menu_text("密码", "Password")); break;
+        case 0: snprintf(buf, size, "%s:", i18n_get("remote.field.name")); break;
+        case 1: snprintf(buf, size, "%s:", i18n_get("remote.field.protocol")); break;
+        case 2: snprintf(buf, size, "%s:", i18n_get("remote.field.host")); break;
+        case 3: snprintf(buf, size, "%s:", i18n_get("remote.field.port")); break;
+        case 4: snprintf(buf, size, "%s:", i18n_get("remote.field.username")); break;
+        case 5: snprintf(buf, size, "%s:", i18n_get("remote.field.password")); break;
         case 6:
             if (g_remote_form_config.protocol == REMOTE_PROTOCOL_SFTP)
-                snprintf(buf, size, "%s:", menu_text("私钥", "Private Key"));
+                snprintf(buf, size, "%s:", i18n_get("remote.field.private_key"));
             else
-                snprintf(buf, size, "%s:", menu_text("基础路径", "Base Path"));
+                snprintf(buf, size, "%s:", i18n_get("remote.field.base_path"));
             break;
-        case 7: snprintf(buf, size, "%s:", menu_text("基础路径", "Base Path")); break;
+        case 7: snprintf(buf, size, "%s:", i18n_get("remote.field.base_path")); break;
     }
 }
 
@@ -1836,12 +1830,12 @@ static void remote_form_edit_field(int field_idx)
 static void remote_form_save(void)
 {
     if (!g_remote_form_config.name[0]) {
-        show_status_message(menu_text("名称为必填项", "Name is required"));
+        show_status_message(i18n_get("remote.name_required"));
         rerender_remote_view();
         return;
     }
     if (!g_remote_form_config.host[0]) {
-        show_status_message(menu_text("主机地址为必填项", "Host is required"));
+        show_status_message(i18n_get("remote.host_required"));
         rerender_remote_view();
         return;
     }
@@ -1854,7 +1848,7 @@ static void remote_form_save(void)
         g_app_config.remote_connections[g_remote_form_editing_idx] = g_remote_form_config;
     } else {
         if (g_app_config.remote_connection_count >= MAX_REMOTE_CONNECTIONS) {
-            show_status_message(menu_text("远程连接已满", "Remote connections full"));
+            show_status_message(i18n_get("remote.connections_full"));
             rerender_remote_view();
             return;
         }
@@ -1862,7 +1856,7 @@ static void remote_form_save(void)
     }
 
     save_config();
-    show_status_message(menu_text("连接已保存", "Connection saved"));
+    show_status_message(i18n_get("remote.connection_saved"));
     g_remote_mode = 0;
     g_remote_selected = g_remote_form_editing_idx >= 0
         ? g_remote_form_editing_idx
@@ -1911,7 +1905,7 @@ static void remote_delete_connection(int conn_idx)
     }
     g_app_config.remote_connection_count--;
     save_config();
-    show_status_message(menu_text("连接已删除", "Connection deleted"));
+    show_status_message(i18n_get("remote.connection_deleted"));
 
     g_remote_mode = 0;
     if (g_remote_selected >= g_app_config.remote_connection_count) {
@@ -1941,14 +1935,13 @@ static void render_remote_content(void)
 
     if (g_remote_mode == 0) {
         mvprintw(y++, content_start_x, "%s",
-                 menu_text("远程设备：↑/↓ 选择 ENTER 管理  ESC 返回",
-                           "Remote: Up/Down select Enter manage Esc back"));
+                 i18n_get("remote.hint_manage"));
         y++;
 
         int count = g_app_config.remote_connection_count;
         char header[64];
         snprintf(header, sizeof(header), "%s (%d)",
-                 menu_text("已保存的连接", "Saved Connections"), count);
+                 i18n_get("remote.saved_connections"), count);
         mvprintw(y++, content_start_x, "%s", header);
         y++;
 
@@ -1962,28 +1955,28 @@ static void render_remote_content(void)
 
         y++;
         if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attron(A_REVERSE);
-        mvprintw(y++, content_start_x, "  %s", menu_text("↓ 添加新连接", "↓ Add New Connection"));
+        mvprintw(y++, content_start_x, "  %s", i18n_get("remote.add_new"));
         if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attroff(A_REVERSE);
 
     } else if (g_remote_mode == 1) {
         int conn_idx = g_remote_selected_conn;
         if (conn_idx < 0 || conn_idx >= g_app_config.remote_connection_count) {
-            mvprintw(y++, content_start_x, "%s", menu_text("(无连接)", "(No connection)"));
+            mvprintw(y++, content_start_x, "%s", i18n_get("general.no_connection"));
             attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
             return;
         }
         const RemoteConnectionConfig *rc = &g_app_config.remote_connections[conn_idx];
 
         mvprintw(y++, content_start_x, "%s: %s [%s]",
-                 menu_text("连接", "Connection"), rc->name, remote_protocol_name(rc->protocol));
+                 i18n_get("remote.connection"), rc->name, remote_protocol_name(rc->protocol));
         y++;
 
         const char *actions[] = {
-            menu_text("浏览目录", "Browse Folder"),
-            menu_text("加载此目录到播放列表", "Load to Playlist"),
-            menu_text("刷新连接", "Refresh Connection"),
-            menu_text("编辑连接", "Edit Connection"),
-            menu_text("删除连接", "Delete Connection")
+            i18n_get("remote.browse"),
+            i18n_get("remote.load_to_playlist"),
+            i18n_get("remote.refresh"),
+            i18n_get("remote.edit"),
+            i18n_get("remote.delete")
         };
         int action_count = 5;
 
@@ -1996,10 +1989,8 @@ static void render_remote_content(void)
     } else if (g_remote_mode == 2) {
         int field_count = remote_form_field_count();
         const char *title_fmt = g_remote_form_editing_idx >= 0
-            ? menu_text("编辑连接 (↑/↓ 选择 ENTER 编辑 +/- 协议 S 保存 ESC 取消)",
-                       "Edit Connection (Up/Down select Enter edit +/- Protocol S Save Esc Cancel)")
-            : menu_text("添加连接 (↑/↓ 选择 ENTER 编辑 +/- 协议 S 保存 ESC 取消)",
-                       "Add Connection (Up/Down select Enter edit +/- Protocol S Save Esc Cancel)");
+            ? i18n_get("remote.edit_hint")
+            : i18n_get("remote.add_hint");
         mvprintw(y++, content_start_x, "%s", title_fmt);
         y++;
 
@@ -2017,13 +2008,12 @@ static void render_remote_content(void)
 
         if (y < max_y - 2) {
             mvprintw(y, content_start_x, "%s",
-                     menu_text("↑/↓:选择  ENTER:编辑  +/-:协议  S:保存  ESC:取消",
-                               "Up/Down:navigate  Enter:edit  +/-:protocol  S:save  Esc:cancel"));
+                     i18n_get("remote.edit_keys"));
         }
 
     } else if (g_remote_mode == 3) {
         if (g_remote_selected_conn < 0) {
-            mvprintw(y++, content_start_x, "%s", menu_text("(无连接)", "(No connection)"));
+            mvprintw(y++, content_start_x, "%s", i18n_get("general.no_connection"));
             attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
             return;
         }
@@ -2031,15 +2021,15 @@ static void render_remote_content(void)
 
         char header[256];
         snprintf(header, sizeof(header), "%s: %s > %s",
-                 menu_text("浏览", "Browse"), conn->name,
+                 i18n_get("remote.browse_short"), conn->name,
                  g_remote_current_path[0] ? g_remote_current_path : "/");
         mvprintw(y++, content_start_x, "%s", header);
         y++;
 
         if (!g_remote_entries) {
-            mvprintw(y++, content_start_x, "%s", menu_text("正在加载...", "Loading..."));
+            mvprintw(y++, content_start_x, "%s", i18n_get("general.loading"));
         } else if (g_remote_entry_count == 0) {
-            mvprintw(y++, content_start_x, "%s", menu_text("(空目录)", "(Empty directory)"));
+            mvprintw(y++, content_start_x, "%s", i18n_get("general.empty_dir"));
         } else {
             int display_count = g_remote_entry_count;
             int max_display = max_y - y - 3;
@@ -2050,7 +2040,7 @@ static void render_remote_content(void)
 
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attron(A_REVERSE);
             mvprintw(y++, content_start_x, "  %s",
-                     menu_text("↓ 加载此目录到播放列表", "↓ Load into Playlist"));
+                     i18n_get("remote.load_hint"));
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attroff(A_REVERSE);
 
             for (int i = g_remote_entry_offset; i < g_remote_entry_count && y < max_y - 3; i++) {
@@ -2059,7 +2049,7 @@ static void render_remote_content(void)
                 if (is_sel) attron(A_REVERSE);
                 if (e->is_dir) {
                     mvprintw(y++, content_start_x, "  [%s] %s",
-                             menu_text("目录", "dir"), e->name);
+                             i18n_get("remote.dir"), e->name);
                 } else {
                     mvprintw(y++, content_start_x, "  %s", e->name);
                 }
@@ -2069,8 +2059,7 @@ static void render_remote_content(void)
 
         if (y < max_y - 2) {
             mvprintw(y, content_start_x, "%s",
-                     menu_text("↑/↓ 选择  ENTER 加载  RIGHT 进入目录  ESC 返回",
-                               "Up/Down select  Enter load  Right enter dir  Esc back"));
+                     i18n_get("remote.browse_hint"));
         }
     }
 
@@ -2286,59 +2275,51 @@ void render_settings_content(void)
 
     if (g_menu_selected_idx == 0) {  /* 颜色主题 */
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("颜色主题：↑/↓ 选择，→或 ENTER 调整，←/TAB 返回菜单",
-                           "Theme: Up/Down select, Right/Enter adjust, Left/Tab back"));
+                 i18n_get("settings.color.select_hint"));
         start_y += 2;
         render_settings_option_group(start_y, content_start_x, max_y, spec);
         start_y += spec.count + 1;
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("前景色和背景色会自动避免使用相同颜色",
-                           "Foreground/background pairs avoid identical colors"));
+                 i18n_get("settings.color.auto_avoid_same"));
     } else if (g_menu_selected_idx == 1) {  /* 默认路径 */
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("默认路径：ENTER 编辑，←/TAB 返回菜单",
-                           "Default path: Enter edits, Left/Tab back"));
+                 i18n_get("settings.path.hint"));
         start_y += 2;
         render_settings_option_group(start_y, content_start_x, max_y, spec);
         start_y += spec.count + 1;
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("支持使用 ~ 开头的用户目录路径",
-                           "Paths starting with ~ are expanded to your home directory"));
+                 i18n_get("settings.path.tilde_hint"));
     } else if (g_menu_selected_idx == 2) {  /* 播放设置 */
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("播放设置：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单",
-                           "Playback: Up/Down select, Enter picks value, Left/Tab back"));
+                 i18n_get("settings.playback.hint"));
         start_y += 2;
         render_settings_option_group(start_y, content_start_x, max_y, spec);
         start_y += spec.count + 1;
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("语言可用 ENTER 切换，时延会在下次播放时生效",
-                           "Press Enter to toggle language; latency applies on next playback"));
+                 i18n_get("settings.playback.language"));
     } else if (g_menu_selected_idx == 3) {  /* 播放模式 */
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("播放模式：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单",
-                           "Play Mode: Up/Down select, Enter picks value, Left/Tab back"));
+                 i18n_get("settings.play_mode.hint"));
         start_y += 2;
         render_settings_option_group(start_y, content_start_x, max_y, spec);
     } else if (g_menu_selected_idx == 4) {  /* 快捷键 */
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("快捷键说明：←/TAB 返回菜单",
-                           "Hotkeys: Left/Tab back"));
+                 i18n_get("settings.hotkeys.hint"));
         start_y += 2;
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text("F1-F8：切换页面 / 语言 / 退出", "F1-F8: Views / language / quit"));
+                 i18n_get("settings.hotkeys.f1_f8"));
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text("O / I：打开目录 / 追加目录", "O / I: Open folder / append folder"));
+                 i18n_get("settings.hotkeys.o_i"));
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text("C / L：切换控件焦点与列表焦点", "C / L: Controls focus / list focus"));
+                 i18n_get("settings.hotkeys.c_l"));
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text("D：进入或退出歌词定位模式", "D: Toggle lyric seek mode"));
+                 i18n_get("settings.hotkeys.d"));
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text("空格 / Enter：执行当前动作", "Space / Enter: Activate current action"));
+                 i18n_get("settings.hotkeys.space_enter"));
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text("+ / -：调整音量", "+ / -: Adjust volume"));
+                 i18n_get("settings.hotkeys.volume"));
         mvprintw(start_y++, content_start_x, "%s",
-                 menu_text(", / .：快退 / 快进", ", / .: Seek backward / forward"));
+                 i18n_get("settings.hotkeys.seek"));
     } else if (g_menu_selected_idx == 5) {  /* 远程设备 */
         render_remote_content();
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
@@ -2346,7 +2327,7 @@ void render_settings_content(void)
         attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     } else {
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("按 ENTER 返回主界面", "Press Enter to return to the main view"));
+                 i18n_get("settings.hotkeys.enter_return"));
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
@@ -2387,8 +2368,8 @@ static void render_eq_visual(void)
     /* Status header */
     attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     const char *status = g_app_config.eq_enabled
-        ? menu_text("均衡器 [已启用]", "Equalizer [Enabled]")
-        : menu_text("均衡器 [已禁用]", "Equalizer [Disabled]");
+        ? i18n_get("eq.title_enabled")
+        : i18n_get("eq.title_disabled");
 
     /* Clear content area */
     for (int y = start_y; y < max_y - 2; y++) {
@@ -2401,8 +2382,7 @@ static void render_eq_visual(void)
 
     /* Help row (include pre-amp and enable toggle hint) */
     mvprintw(start_y, cx, "%s",
-             menu_text("←/→ 选     ↑/↓ 调整  ESC 返回  ENTER 开关",
-                      "←/→ Select  ↑/↓ Adjust  ESC Back  ENTER Toggle"));
+             i18n_get("eq.hint"));
     start_y++;
 
     /* Pre-amp display */
@@ -2411,7 +2391,7 @@ static void render_eq_visual(void)
                          && g_settings_current_option == SETTINGS_IDX_EQ_PREAMP);
         char buf[32];
         snprintf(buf, sizeof(buf), "%s %d dB",
-                 menu_text("预增益", "Pre-amp"), g_app_config.eq_preamp);
+                 i18n_get("eq.preampl"), g_app_config.eq_preamp);
         if (pre_selected)
             attron(A_REVERSE);
         mvprintw(start_y, cx, "%s", buf);
@@ -2425,10 +2405,10 @@ static void render_eq_visual(void)
                         && g_settings_current_option == SETTINGS_IDX_EQ_ENABLED);
         char buf[24];
         snprintf(buf, sizeof(buf), "  %s: %s",
-                 menu_text("均衡器", "EQ"),
+                 i18n_get("eq.title"),
                  g_app_config.eq_enabled
-                     ? menu_text("开", "ON")
-                     : menu_text("关", "OFF"));
+                     ? i18n_get("general.on")
+                     : i18n_get("general.off"));
         if (en_selected)
             attron(A_REVERSE);
         mvprintw(start_y, cx + 20, "%s", buf);
@@ -2734,7 +2714,7 @@ void handle_settings_input(int ch)
         case 's':
         case 'S':
             save_config();
-            show_status_message(menu_text("设置已保存", "Settings saved"));
+            show_status_message(i18n_get("status.settings_saved"));
             rerender_settings_view();
             break;
     }

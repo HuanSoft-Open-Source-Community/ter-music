@@ -22,6 +22,7 @@
 #include "playlist/encoding.h"
 #include "logger/logger.h"
 #include "audio/equalizer.h"
+#include "i18n/i18n.h"
 
 /* ── Forward declarations of internal helpers ─────────────────────── */
 

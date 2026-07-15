@@ -11,6 +11,7 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menu_internal.h"
 #include "ui/scrollbar.h"
 #include "ui/braille/braille_art.h"
@@ -62,11 +63,11 @@ static const char *get_playlist_source_label(void)
 {
     static char folder_path[MAX_PATH_LEN];
     if (playlist_has_multiple_sources()) {
-        return ui_text("多目录队列", "Mixed queue");
+        return i18n_get("player.mixed_queue");
     }
     playlist_copy_folder_path(folder_path, sizeof(folder_path));
     if (folder_path[0] != '\0') return folder_path;
-    return ui_text("(无)", "(none)");
+    return i18n_get("general.none");
 }
 
 /* ============================================================
@@ -158,20 +159,20 @@ void render_playlist_content(void)
     char title_buf[128];
     if (snap_in_progress) {
         snprintf(title_buf, sizeof(title_buf), "%s (%d/%d) ",
-                 ui_text(" 搜索中 ", " Searching "), snap_progress, playlist_count());
+                 i18n_get("playlist.search_progress"), snap_progress, playlist_count());
         mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else if (snap_active) {
         snprintf(title_buf, sizeof(title_buf), "%s (%d %s) ",
-                 ui_text(" 搜索结果 ", " Search Results "), snap_count,
-                 ui_text("个", "found"));
+                 i18n_get("playlist.search_title"), snap_count,
+                 i18n_get("playlist.results_unit"));
         mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
         snprintf(title_buf, sizeof(title_buf), " %s [%s] ",
-                 ui_text("播放队列", "Play Queue"),
+                 i18n_get("player.play_queue"),
                  get_play_mode_str());
         mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else {
-        mvwprintw(win_playlist, 0, 2, "%s", ui_text(" 播放列表 ", " Playlist "));
+        mvwprintw(win_playlist, 0, 2, "%s", i18n_get("controls.playlist"));
     }
     wattroff(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     wbkgd(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
@@ -208,11 +209,11 @@ void render_playlist_content(void)
     if (!playlist_loaded) {
         char display_path[MAX_PATH_LEN];
         format_display_text(display_path, sizeof(display_path), get_playlist_source_label(), w - 10, 0);
-        mvwprintw(win_playlist, h/2 - 1, 2, "%s", ui_text("播放列表为空。", "Playlist is empty."));
+        mvwprintw(win_playlist, h/2 - 1, 2, "%s", i18n_get("playlist.empty"));
         mvwprintw(win_playlist, h/2, 2, "%s",
                   ui_text("按 'O' 打开目录，按 'I' 追加目录。",
                           "Press 'O' to open a folder, 'I' to append one."));
-        mvwprintw(win_playlist, h/2 + 1, 2, "%s%s", ui_text("当前路径：", "Path: "), display_path);
+        mvwprintw(win_playlist, h/2 + 1, 2, "%s%s", i18n_get("player.path"), display_path);
     } else {
         int start_idx = 0;
         int visible_lines = content_height - 6;
@@ -401,14 +402,14 @@ void render_playlist_content(void)
 
         if (total_tracks == 0) {
             if (snap_in_progress) {
-                mvwprintw(win_playlist, 1, 2, "%s", ui_text("正在搜索...", "Searching..."));
+                mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.searching"));
             } else if (snap_active) {
-                mvwprintw(win_playlist, 1, 2, "%s", ui_text("没有找到匹配的歌曲。", "No matching tracks found."));
+                mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.no_match"));
             } else {
                 if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
-                    mvwprintw(win_playlist, 1, 2, "%s", ui_text("队列为空。按 'a' 从浏览视图添加曲目。", "Queue empty. Press 'a' to add from browser."));
+                    mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.queue_empty"));
                 else
-                    mvwprintw(win_playlist, 1, 2, "%s", ui_text("当前目录下没有音频文件。", "No audio files found here."));
+                    mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.no_audio"));
             }
         }
 
@@ -425,10 +426,10 @@ void render_playlist_content(void)
 
         char status_msg[MAX_META_LEN];
         switch (g_play_state) {
-            case PLAY_STATE_PLAYING: snprintf(status_msg, sizeof(status_msg), "%s", ui_text("播放中", "Playing")); break;
-            case PLAY_STATE_PAUSED:  snprintf(status_msg, sizeof(status_msg), "%s", ui_text("已暂停", "Paused")); break;
+            case PLAY_STATE_PLAYING: snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.playing")); break;
+            case PLAY_STATE_PAUSED:  snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.paused")); break;
             case PLAY_STATE_STOPPED:
-            default:                 snprintf(status_msg, sizeof(status_msg), "%s", ui_text("已停止", "Stopped")); break;
+            default:                 snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.stopped")); break;
         }
 
         if (playlist_total > 0) {
@@ -499,18 +500,18 @@ void render_playlist_content(void)
             format_display_text(truncated_album, sizeof(truncated_album), t.album, col_width - 1, 0);
 
             // Left column: metadata
-            mvwprintw(win_playlist, status_line + 1, left_col_x, "%s%s", ui_text("状态：", "State: "), status_msg);
-            mvwprintw(win_playlist, status_line + 2, left_col_x, "%s%s", ui_text("模式：", "Mode: "), get_play_mode_str());
-            mvwprintw(win_playlist, status_line + 3, left_col_x, "%s%s", ui_text("标题：", "Title: "), truncated_title);
-            mvwprintw(win_playlist, status_line + 4, left_col_x, "%s%s", ui_text("艺术家：", "Artist: "), truncated_artist);
+            mvwprintw(win_playlist, status_line + 1, left_col_x, "%s%s", i18n_get("player.state"), status_msg);
+            mvwprintw(win_playlist, status_line + 2, left_col_x, "%s%s", i18n_get("player.mode"), get_play_mode_str());
+            mvwprintw(win_playlist, status_line + 3, left_col_x, "%s%s", i18n_get("player.title"), truncated_title);
+            mvwprintw(win_playlist, status_line + 4, left_col_x, "%s%s", i18n_get("player.artist"), truncated_artist);
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && g_play_queue.count > 0) {
                 char qbuf[64];
                 snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
-                         menu_text("队列：", "Queue: "),
+                         i18n_get("player.queue_label"),
                          g_play_queue.current_position + 1, g_play_queue.count);
                 mvwprintw(win_playlist, status_line + 5, left_col_x, "%s", qbuf);
             } else {
-                mvwprintw(win_playlist, status_line + 5, left_col_x, "%s%s", ui_text("专辑：", "Album: "), truncated_album);
+                mvwprintw(win_playlist, status_line + 5, left_col_x, "%s%s", i18n_get("player.album"), truncated_album);
             }
 
             // Center column: audio technical info
@@ -527,10 +528,10 @@ void render_playlist_content(void)
                 snprintf(codec_display, sizeof(codec_display), "%s", upper);
             }
 
-            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s%s", ui_text("采样率：", "Sample Rate: "), rate_str);
-            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s%s", ui_text("位深：", "Bit Depth: "), depth_str);
-            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s%s", ui_text("比特率：", "Bitrate: "), bitrate_str);
-            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s%s", ui_text("编码：", "Codec: "), codec_display);
+            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s%s", i18n_get("player.sample_rate"), rate_str);
+            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s%s", i18n_get("player.bit_depth"), depth_str);
+            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s%s", i18n_get("player.bitrate"), bitrate_str);
+            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s%s", i18n_get("player.codec"), codec_display);
 
             // Album cover (braille art)
             if (show_cover) {
@@ -546,22 +547,22 @@ void render_playlist_content(void)
         } else {
             int col_width = (w - 4) / 2;
             int center_col_x = 2 + col_width;
-            mvwprintw(win_playlist, status_line + 1, 2, "%s%s", ui_text("状态：", "State: "), status_msg);
-            mvwprintw(win_playlist, status_line + 2, 2, "%s%s", ui_text("模式：", "Mode: "), get_play_mode_str());
-            mvwprintw(win_playlist, status_line + 3, 2, "%s--", ui_text("标题：", "Title: "));
-            mvwprintw(win_playlist, status_line + 4, 2, "%s--", ui_text("艺术家：", "Artist: "));
-            mvwprintw(win_playlist, status_line + 5, 2, "%s--", ui_text("专辑：", "Album: "));
+            mvwprintw(win_playlist, status_line + 1, 2, "%s%s", i18n_get("player.state"), status_msg);
+            mvwprintw(win_playlist, status_line + 2, 2, "%s%s", i18n_get("player.mode"), get_play_mode_str());
+            mvwprintw(win_playlist, status_line + 3, 2, "%s--", i18n_get("player.title"));
+            mvwprintw(win_playlist, status_line + 4, 2, "%s--", i18n_get("player.artist"));
+            mvwprintw(win_playlist, status_line + 5, 2, "%s--", i18n_get("player.album"));
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && g_play_queue.count > 0) {
                 char qbuf[64];
                 snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
-                         menu_text("队列：", "Queue: "),
+                         i18n_get("player.queue_label"),
                          g_play_queue.current_position + 1, g_play_queue.count);
                 mvwprintw(win_playlist, status_line + 5, 2, "%s", qbuf);
             }
-            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s--", ui_text("采样率：", "Sample Rate: "));
-            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s--", ui_text("位深：", "Bit Depth: "));
-            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s--", ui_text("比特率：", "Bitrate: "));
-            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s--", ui_text("编码：", "Codec: "));
+            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s--", i18n_get("player.sample_rate"));
+            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s--", i18n_get("player.bit_depth"));
+            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s--", i18n_get("player.bitrate"));
+            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s--", i18n_get("player.codec"));
         }
     }
     wrefresh(win_playlist);

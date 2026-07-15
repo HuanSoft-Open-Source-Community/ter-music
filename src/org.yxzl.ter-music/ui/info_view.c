@@ -11,6 +11,7 @@
 #include "types.h"
 #include "audio/audio.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include <stdio.h>
@@ -32,44 +33,41 @@ void render_info_content(void)
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
 
     mvprintw(start_y, content_start_x, "%s %s",
-             menu_text("关于", "About"), APP_NAME);
+             i18n_get("info.about_title"), APP_NAME);
     mvprintw(start_y + 1, content_start_x, "========================================");
     start_y += 3;
 
     mvprintw(start_y, content_start_x,
-             use_english_ui() ? "Name: %s" : "名称：%s", APP_NAME);
+             i18n_get("info.name_fmt"), APP_NAME);
     mvprintw(start_y + 1, content_start_x,
-             use_english_ui() ? "Version: %s" : "版本：%s", APP_VERSION);
+             i18n_get("info.version_fmt"), APP_VERSION);
     mvprintw(start_y + 2, content_start_x,
-             use_english_ui() ? "Authors: %s" : "巨献：%s", APP_AUTHORS);
+             i18n_get("info.authors_fmt"), APP_AUTHORS);
     mvprintw(start_y + 3, content_start_x,
-             use_english_ui() ? "Email: %s" : "邮箱：%s", APP_EMAIL);
+             i18n_get("info.email_fmt"), APP_EMAIL);
     start_y += 5;
 
     mvprintw(start_y, content_start_x, "%s",
-             menu_text("简介：", "Summary:"));
+             i18n_get("info.summary"));
     mvprintw(start_y + 1, content_start_x, "%s",
-             menu_text("  基于 ncurses 的终端音乐播放器。",
-                       "  A terminal music player built on ncurses."));
+             i18n_get("info.summary_line1"));
     mvprintw(start_y + 2, content_start_x, "%s",
-             menu_text("  通过 FFmpeg 支持多种音频格式。",
-                       "  Supports multiple audio formats via FFmpeg."));
+             i18n_get("info.summary_line2"));
     mvprintw(start_y + 3, content_start_x, "%s",
-             menu_text("  提供歌单、收藏和歌词显示。",
-                       "  Includes playlists, favorites, and lyrics."));
+             i18n_get("info.summary_line3"));
     start_y += 5;
 
     mvprintw(start_y, content_start_x, "%s",
-             menu_text("仓库地址：", "Repository:"));
+             i18n_get("info.repository"));
     mvprintw(start_y + 1, content_start_x, "  %s", APP_REPO);
     start_y += 3;
 
     mvprintw(start_y, content_start_x, "%s",
-             menu_text("许可证：GPL v3", "License: GPL v3"));
+             i18n_get("info.license"));
     start_y += 2;
 
     mvprintw(start_y, content_start_x, "%s",
-             menu_text("这里的信息为只读。", "This page is read-only."));
+             i18n_get("info.readonly"));
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
     refresh();

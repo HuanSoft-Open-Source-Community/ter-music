@@ -16,6 +16,7 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/dialog.h"
 #include "audio/audio.h"
 #include "playlist/playlist.h"
@@ -203,9 +204,10 @@ size_t utf8_next_char(const char *src, wchar_t *wc_out, int *width_out)
  * ui_text: bilingual text helper
  * ============================================================ */
 
-const char *ui_text(const char *utf8, const char *ascii)
+const char *ui_text(const char *key, const char *unused)
 {
-    return use_english_ui() ? ascii : utf8;
+    (void)unused;
+    return i18n_get(key);
 }
 
 /* ============================================================
@@ -455,9 +457,9 @@ void run_event_loop(void)
                 if (g_lyric_cursor_mode) {
                     g_lyrics.cursor_index = g_lyrics.current_index;
                     g_lyric_cursor_index = g_lyrics.cursor_index;
-                    update_controls_status(ui_text("已进入歌词定位模式", "Lyric seek enabled"));
+                    update_controls_status(i18n_get("lyrics.seek_enabled"));
                 } else {
-                    update_controls_status(ui_text("已退出歌词定位模式", "Lyric seek disabled"));
+                    update_controls_status(i18n_get("lyrics.seek_disabled"));
                 }
                 pthread_mutex_unlock(&g_lyrics.lock);
                 render_controls();
@@ -466,7 +468,7 @@ void run_event_loop(void)
             } else {
                 pthread_mutex_unlock(&g_lyrics.lock);
                 if (!g_lyrics.has_lyrics)
-                    update_controls_status(ui_text("当前没有可定位的歌词", "No lyric position available"));
+                    update_controls_status(i18n_get("lyrics.no_position"));
                 continue;
             }
         }
@@ -593,7 +595,7 @@ void run_event_loop(void)
                 case ' ':
                 case 10:
                     if (g_search_state.in_progress) {
-                        update_controls_status(ui_text("搜索中，请稍候...", "Searching, please wait..."));
+                        update_controls_status(i18n_get("status.search_wait"));
                         break;
                     }
                     if (g_search_state.active && g_search_state.result_count > 0) {
@@ -647,7 +649,7 @@ void run_event_loop(void)
                             if (track_idx < 0) break;
                         }
                         play_queue_insert_after(&g_play_queue, track_idx);
-                        update_controls_status(ui_text("已插入到下一首", "Inserted next"));
+                        update_controls_status(i18n_get("status.inserted_next"));
                     }
                     break;
                 case 'I': prompt_append_folder(); render_playlist_content(); break;
@@ -668,8 +670,8 @@ void run_event_loop(void)
                         get_track_metadata(track_idx, &t);
                         int result = add_to_favorites(&t);
                         update_controls_status(result == 0
-                            ? ui_text("已添加到收藏", "Added to favorites")
-                            : ui_text("收藏已存在或已满", "Favorite exists or list is full"));
+                            ? i18n_get("favorites.added")
+                            : i18n_get("favorites.exists_or_full"));
                     }
                     break;
                 case '/':
@@ -687,7 +689,7 @@ void run_event_loop(void)
                         g_search_state.in_progress = 0;
                         pthread_mutex_unlock(&g_search_mutex);
                         render_playlist_content();
-                        update_controls_status(ui_text("搜索已取消", "Search cancelled"));
+                        update_controls_status(i18n_get("status.search_cancelled"));
                         continue;
                     }
                     break;
@@ -724,8 +726,8 @@ void run_event_loop(void)
                         render_controls();
                         update_controls_status(
                             g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE
-                                ? ui_text("切换到播放队列视图", "Switched to Play Queue view")
-                                : ui_text("切换到文件浏览视图", "Switched to File Browser view"));
+                                ? i18n_get("status.switched_queue")
+                                : i18n_get("status.switched_browser"));
                     }
                     break;
                 case 'a':
@@ -742,7 +744,7 @@ void run_event_loop(void)
                             if (track_idx < 0) break;
                         }
                         play_queue_append(&g_play_queue, track_idx);
-                        update_controls_status(ui_text("已添加到队列", "Added to queue"));
+                        update_controls_status(i18n_get("status.added_to_queue"));
                     }
                     break;
                 case 'A':
@@ -765,7 +767,7 @@ void run_event_loop(void)
                         getmaxyx(stdscr, max_y, max_x);
                         WINDOW *win_win = newwin(max_y - 4, max_x - 4, 2, 2);
                         rounded_box(win_win);
-                        mvwprintw(win_win, 0, 2, "%s", ui_text(" 选择歌单 ", " Select Playlist "));
+                        mvwprintw(win_win, 0, 2, "%s", i18n_get("playlist_mgr.select_playlist"));
                         wbkgd(win_win, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
                         int start_y = 2;
@@ -781,12 +783,12 @@ void run_event_loop(void)
                                 if (idx == selected) {
                                     wattron(win_win, A_REVERSE);
                                     mvwprintw(win_win, start_y + i, 2,
-                                              use_english_ui() ? " %s (%d tracks)" : " %s (%d 首)",
+                                              i18n_get("playlist_mgr.track_count_fmt"),
                                               playlist_name, pl->track_count);
                                     wattroff(win_win, A_REVERSE);
                                 } else {
                                     mvwprintw(win_win, start_y + i, 2,
-                                              use_english_ui() ? " %s (%d tracks)" : " %s (%d 首)",
+                                              i18n_get("playlist_mgr.track_count_fmt"),
                                               playlist_name, pl->track_count);
                                 }
                             }
@@ -809,9 +811,9 @@ void run_event_loop(void)
                             }
                             if (c == 10 || c == ' ') {
                                 int r = add_track_to_playlist(selected, &t);
-                                if (r == 0)       update_controls_status(ui_text("已添加到歌单", "Added to playlist"));
-                                else if (r == -3) update_controls_status(ui_text("歌单已满", "Playlist is full"));
-                                else              update_controls_status(ui_text("歌曲已在歌单中", "Track already in playlist"));
+                                if (r == 0)       update_controls_status(i18n_get("playlist_mgr.added_to_playlist"));
+                                else if (r == -3) update_controls_status(i18n_get("playlist_mgr.playlist_full"));
+                                else              update_controls_status(i18n_get("playlist_mgr.already_in_playlist"));
                                 break;
                             }
                         }
@@ -856,7 +858,7 @@ void run_event_loop(void)
                         play_queue_clear(&g_play_queue);
                         g_queue_selected_index = 0;
                         render_playlist_content();
-                        update_controls_status(ui_text("队列已清空", "Queue cleared"));
+                        update_controls_status(i18n_get("status.queue_cleared"));
                     }
                     break;
                 case 'J':
@@ -940,7 +942,7 @@ void run_event_loop(void)
                 int px = (mx - pw) / 2, py = (my - ph) / 2;
                 WINDOW *w = newwin(ph, pw, py, px);
                 rounded_box(w);
-                mvwprintw(w, 0, 2, "%s", ui_text(" 播放历史 ", " Play History "));
+                mvwprintw(w, 0, 2, "%s", i18n_get("play_history.title"));
                 int sel = 0, off = 0;
                 while (1) {
                     for (int i = 0; i < n && i < ph - 3; i++) {
@@ -960,7 +962,7 @@ void run_event_loop(void)
                             mvwprintw(w, i + 1, 2, " %s", label);
                         }
                     }
-                    mvwprintw(w, ph - 2, 2, "%s", ui_text(" ENTER:播放 ESC:取消 ", " ENTER:Play ESC:Cancel "));
+                    mvwprintw(w, ph - 2, 2, "%s", i18n_get("play_history.hint"));
                     wrefresh(w);
                     wtimeout(w, UI_INPUT_TIMEOUT_MS);
                     int c = wgetch(w);
@@ -1089,7 +1091,7 @@ void toggle_rainbow_mode(void)
         apply_color_theme();
         g_rainbow_mode_enabled = 0;
         g_rainbow_color_offset = 0;
-        update_controls_status(use_english_ui() ? "Rainbow mode disabled" : "彩虹模式已关闭");
+        update_controls_status(i18n_get("status.rainbow_off"));
     } else {
         memcpy(&g_saved_theme, &g_app_config.theme, sizeof(ColorTheme));
         g_app_config.theme.border_bg    = -1;
@@ -1101,7 +1103,7 @@ void toggle_rainbow_mode(void)
         g_rainbow_color_offset = 0;
         update_rainbow_colors();
         g_rainbow_mode_enabled = 1;
-        update_controls_status(use_english_ui() ? "Konami code! Rainbow mode enabled" : "康娜米！彩虹模式已启用");
+        update_controls_status(i18n_get("status.rainbow_on"));
     }
 
 

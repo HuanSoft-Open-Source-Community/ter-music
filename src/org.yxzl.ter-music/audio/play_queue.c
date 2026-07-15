@@ -10,6 +10,7 @@
 #include "audio/play_queue.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "logger/logger.h"
 #include <stdio.h>
@@ -560,96 +561,52 @@ int play_mode_repeats(PlayMode mode)
  * Display names
  * ============================================================ */
 
-const char *play_mode_display_name(PlayMode mode, int use_english)
+const char *play_mode_display_name(PlayMode mode, int unused)
 {
-    if (use_english) {
-        switch (mode) {
-            case PLAY_MODE_SEQUENTIAL:             return "Sequential";
-            case PLAY_MODE_SINGLE_REPEAT:          return "Single Repeat";
-            case PLAY_MODE_LIST_REPEAT:            return "List Repeat";
-            case PLAY_MODE_SHUFFLE_ONCE:           return "Shuffle Once";
-            case PLAY_MODE_SHUFFLE_REPEAT:         return "Shuffle Repeat";
-            case PLAY_MODE_FOLDER_SEQUENTIAL:      return "Folder Sequential";
-            case PLAY_MODE_FOLDER_REPEAT:          return "Folder Repeat";
-            case PLAY_MODE_FOLDER_SHUFFLE:         return "Folder Shuffle";
-            case PLAY_MODE_FOLDER_SHUFFLE_REPEAT:  return "Folder Shuffle Repeat";
-            case PLAY_MODE_ALBUM_SEQUENTIAL:       return "Album Sequential";
-            case PLAY_MODE_ALBUM_REPEAT:           return "Album Repeat";
-            case PLAY_MODE_ALBUM_SHUFFLE:          return "Album Shuffle";
-            case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:   return "Album Shuffle Repeat";
-            case PLAY_MODE_ARTIST_SEQUENTIAL:      return "Artist Sequential";
-            case PLAY_MODE_ARTIST_REPEAT:          return "Artist Repeat";
-            case PLAY_MODE_ARTIST_SHUFFLE:         return "Artist Shuffle";
-            case PLAY_MODE_ARTIST_SHUFFLE_REPEAT:  return "Artist Shuffle Repeat";
-            default:                               return "Sequential";
-        }
-    } else {
-        switch (mode) {
-            case PLAY_MODE_SEQUENTIAL:             return "顺序播放";
-            case PLAY_MODE_SINGLE_REPEAT:          return "单曲循环";
-            case PLAY_MODE_LIST_REPEAT:            return "列表循环";
-            case PLAY_MODE_SHUFFLE_ONCE:           return "随机播放";
-            case PLAY_MODE_SHUFFLE_REPEAT:         return "随机循环";
-            case PLAY_MODE_FOLDER_SEQUENTIAL:      return "文件夹顺序";
-            case PLAY_MODE_FOLDER_REPEAT:          return "文件夹循环";
-            case PLAY_MODE_FOLDER_SHUFFLE:         return "文件夹随机";
-            case PLAY_MODE_FOLDER_SHUFFLE_REPEAT:  return "文件夹随机循环";
-            case PLAY_MODE_ALBUM_SEQUENTIAL:       return "专辑顺序";
-            case PLAY_MODE_ALBUM_REPEAT:           return "专辑循环";
-            case PLAY_MODE_ALBUM_SHUFFLE:          return "专辑随机";
-            case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:   return "专辑随机循环";
-            case PLAY_MODE_ARTIST_SEQUENTIAL:      return "艺术家顺序";
-            case PLAY_MODE_ARTIST_REPEAT:          return "艺术家循环";
-            case PLAY_MODE_ARTIST_SHUFFLE:         return "艺术家随机";
-            case PLAY_MODE_ARTIST_SHUFFLE_REPEAT:  return "艺术家随机循环";
-            default:                               return "顺序播放";
-        }
+    (void)unused;
+    switch (mode) {
+        case PLAY_MODE_SEQUENTIAL:             return i18n_get("play_mode.seq");
+        case PLAY_MODE_SINGLE_REPEAT:          return i18n_get("play_mode.single_repeat");
+        case PLAY_MODE_LIST_REPEAT:            return i18n_get("play_mode.list_repeat");
+        case PLAY_MODE_SHUFFLE_ONCE:           return i18n_get("play_mode.shuffle_once");
+        case PLAY_MODE_SHUFFLE_REPEAT:         return i18n_get("play_mode.shuffle_repeat");
+        case PLAY_MODE_FOLDER_SEQUENTIAL:      return i18n_get("play_mode.folder_seq");
+        case PLAY_MODE_FOLDER_REPEAT:          return i18n_get("play_mode.folder_repeat");
+        case PLAY_MODE_FOLDER_SHUFFLE:         return i18n_get("play_mode.folder_shuffle");
+        case PLAY_MODE_FOLDER_SHUFFLE_REPEAT:  return i18n_get("play_mode.folder_shuffle_repeat");
+        case PLAY_MODE_ALBUM_SEQUENTIAL:       return i18n_get("play_mode.album_seq");
+        case PLAY_MODE_ALBUM_REPEAT:           return i18n_get("play_mode.album_repeat");
+        case PLAY_MODE_ALBUM_SHUFFLE:          return i18n_get("play_mode.album_shuffle");
+        case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:   return i18n_get("play_mode.album_shuffle_repeat");
+        case PLAY_MODE_ARTIST_SEQUENTIAL:      return i18n_get("play_mode.artist_seq");
+        case PLAY_MODE_ARTIST_REPEAT:          return i18n_get("play_mode.artist_repeat");
+        case PLAY_MODE_ARTIST_SHUFFLE:         return i18n_get("play_mode.artist_shuffle");
+        case PLAY_MODE_ARTIST_SHUFFLE_REPEAT:  return i18n_get("play_mode.artist_shuffle_repeat");
+        default:                               return i18n_get("play_mode.seq");
     }
 }
 
-const char *play_mode_short_name(PlayMode mode, int use_english)
+const char *play_mode_short_name(PlayMode mode, int unused)
 {
-    if (use_english) {
-        switch (mode) {
-            case PLAY_MODE_SEQUENTIAL:             return "Seq";
-            case PLAY_MODE_SINGLE_REPEAT:          return "S-Rept";
-            case PLAY_MODE_LIST_REPEAT:            return "L-Rept";
-            case PLAY_MODE_SHUFFLE_ONCE:           return "Shuf";
-            case PLAY_MODE_SHUFFLE_REPEAT:         return "Sh-Rept";
-            case PLAY_MODE_FOLDER_SEQUENTIAL:      return "Dir-Seq";
-            case PLAY_MODE_FOLDER_REPEAT:          return "Dir-Rept";
-            case PLAY_MODE_FOLDER_SHUFFLE:         return "Dir-Shuf";
-            case PLAY_MODE_FOLDER_SHUFFLE_REPEAT:  return "Dir-ShRpt";
-            case PLAY_MODE_ALBUM_SEQUENTIAL:       return "Alb-Seq";
-            case PLAY_MODE_ALBUM_REPEAT:           return "Alb-Rept";
-            case PLAY_MODE_ALBUM_SHUFFLE:          return "Alb-Shuf";
-            case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:   return "Alb-ShRpt";
-            case PLAY_MODE_ARTIST_SEQUENTIAL:      return "Art-Seq";
-            case PLAY_MODE_ARTIST_REPEAT:          return "Art-Rept";
-            case PLAY_MODE_ARTIST_SHUFFLE:         return "Art-Shuf";
-            case PLAY_MODE_ARTIST_SHUFFLE_REPEAT:  return "Art-ShRpt";
-            default:                               return "Seq";
-        }
-    } else {
-        switch (mode) {
-            case PLAY_MODE_SEQUENTIAL:             return "顺序";
-            case PLAY_MODE_SINGLE_REPEAT:          return "单曲";
-            case PLAY_MODE_LIST_REPEAT:            return "列表";
-            case PLAY_MODE_SHUFFLE_ONCE:           return "随机";
-            case PLAY_MODE_SHUFFLE_REPEAT:         return "随机循";
-            case PLAY_MODE_FOLDER_SEQUENTIAL:      return "文顺序";
-            case PLAY_MODE_FOLDER_REPEAT:          return "文循环";
-            case PLAY_MODE_FOLDER_SHUFFLE:         return "文随机";
-            case PLAY_MODE_FOLDER_SHUFFLE_REPEAT:  return "文随循";
-            case PLAY_MODE_ALBUM_SEQUENTIAL:       return "专顺序";
-            case PLAY_MODE_ALBUM_REPEAT:           return "专循环";
-            case PLAY_MODE_ALBUM_SHUFFLE:          return "专随机";
-            case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:   return "专随循";
-            case PLAY_MODE_ARTIST_SEQUENTIAL:      return "艺顺序";
-            case PLAY_MODE_ARTIST_REPEAT:          return "艺循环";
-            case PLAY_MODE_ARTIST_SHUFFLE:         return "艺随机";
-            case PLAY_MODE_ARTIST_SHUFFLE_REPEAT:  return "艺随循";
-            default:                               return "顺序";
-        }
+    (void)unused;
+    switch (mode) {
+        case PLAY_MODE_SEQUENTIAL:             return i18n_get("play_mode.seq_short");
+        case PLAY_MODE_SINGLE_REPEAT:          return i18n_get("play_mode.single_repeat_short");
+        case PLAY_MODE_LIST_REPEAT:            return i18n_get("play_mode.list_repeat_short");
+        case PLAY_MODE_SHUFFLE_ONCE:           return i18n_get("play_mode.shuffle_once_short");
+        case PLAY_MODE_SHUFFLE_REPEAT:         return i18n_get("play_mode.shuffle_repeat_short");
+        case PLAY_MODE_FOLDER_SEQUENTIAL:      return i18n_get("play_mode.folder_seq_short");
+        case PLAY_MODE_FOLDER_REPEAT:          return i18n_get("play_mode.folder_repeat_short");
+        case PLAY_MODE_FOLDER_SHUFFLE:         return i18n_get("play_mode.folder_shuffle_short");
+        case PLAY_MODE_FOLDER_SHUFFLE_REPEAT:  return i18n_get("play_mode.folder_shuffle_repeat_short");
+        case PLAY_MODE_ALBUM_SEQUENTIAL:       return i18n_get("play_mode.album_seq_short");
+        case PLAY_MODE_ALBUM_REPEAT:           return i18n_get("play_mode.album_repeat_short");
+        case PLAY_MODE_ALBUM_SHUFFLE:          return i18n_get("play_mode.album_shuffle_short");
+        case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:   return i18n_get("play_mode.album_shuffle_repeat_short");
+        case PLAY_MODE_ARTIST_SEQUENTIAL:      return i18n_get("play_mode.artist_seq_short");
+        case PLAY_MODE_ARTIST_REPEAT:          return i18n_get("play_mode.artist_repeat_short");
+        case PLAY_MODE_ARTIST_SHUFFLE:         return i18n_get("play_mode.artist_shuffle_short");
+        case PLAY_MODE_ARTIST_SHUFFLE_REPEAT:  return i18n_get("play_mode.artist_shuffle_repeat_short");
+        default:                               return i18n_get("play_mode.seq_short");
     }
 }

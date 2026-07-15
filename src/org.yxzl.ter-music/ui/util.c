@@ -14,6 +14,7 @@
 #include "ui/menu_internal.h"
 #include "config/config.h"
 #include "playlist/playlist.h"
+#include "i18n/i18n.h"
 #include <stdio.h>
 #include <string.h>
 #include <ncursesw/ncurses.h>
@@ -105,105 +106,57 @@ void rounded_box(WINDOW *win)
  * ============================================================ */
 
 const char *settings_sidebar_items[] = {
-    "颜色主题",
-    "默认路径",
-    "播放设置",
-    "播放模式",
-    "快捷键",
-    "远程设备",
-    "均衡器",    /* ← 均衡器 */
-    "← 返回"    /* ← 返回 */
+    "sidebar.settings.theme",
+    "sidebar.settings.default_path",
+    "sidebar.settings.playback",
+    "sidebar.settings.play_mode",
+    "sidebar.settings.hotkeys",
+    "sidebar.settings.remote_devices",
+    "sidebar.settings.equalizer",
+    "general.back"
 };
 const int SETTINGS_ITEM_COUNT = 8;
 
 const char *history_sidebar_items[] = {
-    "目录历史",
-    "清空历史",
-    "← 返回"
+    "sidebar.history.folder_history",
+    "sidebar.history.clear_history",
+    "general.back"
 };
 const int HISTORY_ITEM_COUNT = 3;
 
 const char *playlist_sidebar_items[] = {
-    "全部歌单",
-    "新建歌单",
-    "← 返回"
+    "sidebar.playlist.all_playlists",
+    "sidebar.playlist.new_playlist",
+    "general.back"
 };
 const int PLAYLIST_ITEM_COUNT = 3;
 
 const char *favorites_sidebar_items[] = {
-    "全部收藏",
-    "← 返回"
+    "sidebar.favorites.all_favorites",
+    "general.back"
 };
 const int FAVORITES_ITEM_COUNT = 2;
 
 const char *info_sidebar_items[] = {
-    "关于",
-    "仓库地址",
-    "← 返回"
+    "sidebar.info.about",
+    "sidebar.info.repository",
+    "general.back"
 };
 const int INFO_ITEM_COUNT = 3;
 
 const char *help_sidebar_items[] = {
-    "快速上手",
-    "← 返回"
+    "sidebar.help.quick_start",
+    "general.back"
 };
 const int HELP_ITEM_COUNT = 2;
-
-/* ── ASCII (English) sidebar items ── */
-
-const char *settings_sidebar_items_ascii[] = {
-    "Theme",
-    "Default Path",
-    "Playback",
-    "Play Mode",
-    "Hotkeys",
-    "Remote Devices",
-    "Equalizer",
-    "<- Back"
-};
-
-const char *history_sidebar_items_ascii[] = {
-    "Folder History",
-    "Clear History",
-    "<- Back"
-};
-
-const char *playlist_sidebar_items_ascii[] = {
-    "All Playlists",
-    "New Playlist",
-    "<- Back"
-};
-
-const char *favorites_sidebar_items_ascii[] = {
-    "All Favorites",
-    "<- Back"
-};
-
-const char *info_sidebar_items_ascii[] = {
-    "About",
-    "Repository",
-    "<- Back"
-};
-
-const char *help_sidebar_items_ascii[] = {
-    "Quick Start",
-    "<- Back"
-};
 
 /* ── Color names (for settings display) ── */
 
 const char *color_names[] = {
-    "黑色", "红色", "绿色", "黄色",
-    "蓝色", "洋红", "青色", "白色",
-    "亮黑(灰)", "亮红", "亮绿", "亮黄",
-    "亮蓝", "亮洋红", "亮青", "亮白"
-};
-
-const char *color_names_ascii[] = {
-    "Black", "Red", "Green", "Yellow",
-    "Blue", "Magenta", "Cyan", "White",
-    "Bright Black", "Bright Red", "Bright Green", "Bright Yellow",
-    "Bright Blue", "Bright Magenta", "Bright Cyan", "Bright White"
+    "color.black", "color.red", "color.green", "color.yellow",
+    "color.blue", "color.magenta", "color.cyan", "color.white",
+    "color.bright_black", "color.bright_red", "color.bright_green", "color.bright_yellow",
+    "color.bright_blue", "color.bright_magenta", "color.bright_cyan", "color.bright_white"
 };
 
 const int ncurses_colors[] = {
@@ -215,39 +168,39 @@ const int ncurses_colors[] = {
  * Text helper functions
  * ============================================================ */
 
-const char *menu_text(const char *utf8, const char *ascii)
+const char *menu_text(const char *key, const char *unused)
 {
-    return use_english_ui() ? ascii : utf8;
+    (void)unused;
+    return i18n_get(key);
 }
 
 const char *menu_bool_text(int enabled)
 {
-    return enabled ? menu_text("是", "On") : menu_text("否", "Off");
+    return enabled ? i18n_get("general.yes") : i18n_get("general.no");
 }
 
 const char *menu_color_name(int color_value)
 {
-    const char **names = use_english_ui() ? color_names_ascii : color_names;
     if (color_value == -1)
-        return menu_text("透明", "Transparent");
+        return i18n_get("general.transparent");
     if (color_value >= 0 && color_value < 16)
-        return names[color_value];
+        return i18n_get(color_names[color_value]);
     switch (color_value) {
-        case 208: return menu_text("橙",   "Orange");
-        case 130: return menu_text("棕",   "Brown");
-        case 198: return menu_text("粉",   "Pink");
-        case 93:  return menu_text("紫",   "Purple");
-        case 37:  return menu_text("青绿", "Teal");
-        case 75:  return menu_text("天蓝", "Sky Blue");
-        case 203: return menu_text("珊瑚", "Coral");
-        case 118: return menu_text("石灰", "Lime");
+        case 208: return i18n_get("color.orange");
+        case 130: return i18n_get("color.brown");
+        case 198: return i18n_get("color.pink");
+        case 93:  return i18n_get("color.purple");
+        case 37:  return i18n_get("color.teal");
+        case 75:  return i18n_get("color.sky_blue");
+        case 203: return i18n_get("color.coral");
+        case 118: return i18n_get("color.lime");
     }
-    return menu_text("未知", "Unknown");
+    return i18n_get("general.unknown");
 }
 
-const char *menu_language_name(int language)
+const char *menu_language_name(void)
 {
-    return language == UI_LANG_EN ? "English" : menu_text("中文", "Chinese");
+    return i18n_get("lang.name");
 }
 
 void sanitize_ascii_menu_text(char *dest, size_t dest_size, const char *src)
@@ -299,39 +252,36 @@ void sanitize_ascii_menu_text(char *dest, size_t dest_size, const char *src)
 
 const char **resolve_sidebar_items(const char **items)
 {
-    if (!use_english_ui()) {
-        return items;
+    static char resolved_bufs[16][64];
+    static const char *resolved_ptrs[16];
+    int count = 0;
+
+    if (items == settings_sidebar_items) count = SETTINGS_ITEM_COUNT;
+    else if (items == history_sidebar_items) count = HISTORY_ITEM_COUNT;
+    else if (items == playlist_sidebar_items) count = PLAYLIST_ITEM_COUNT;
+    else if (items == favorites_sidebar_items) count = FAVORITES_ITEM_COUNT;
+    else if (items == info_sidebar_items) count = INFO_ITEM_COUNT;
+    else if (items == help_sidebar_items) count = HELP_ITEM_COUNT;
+    else return items;
+
+    for (int i = 0; i < count && i < 16; i++) {
+        const char *resolved = i18n_get(items[i]);
+        strncpy(resolved_bufs[i], resolved, sizeof(resolved_bufs[i]) - 1);
+        resolved_bufs[i][sizeof(resolved_bufs[i]) - 1] = '\0';
+        resolved_ptrs[i] = resolved_bufs[i];
     }
-    if (items == settings_sidebar_items) {
-        return settings_sidebar_items_ascii;
-    }
-    if (items == history_sidebar_items) {
-        return history_sidebar_items_ascii;
-    }
-    if (items == playlist_sidebar_items) {
-        return playlist_sidebar_items_ascii;
-    }
-    if (items == favorites_sidebar_items) {
-        return favorites_sidebar_items_ascii;
-    }
-    if (items == info_sidebar_items) {
-        return info_sidebar_items_ascii;
-    }
-    if (items == help_sidebar_items) {
-        return help_sidebar_items_ascii;
-    }
-    return items;
+    return resolved_ptrs;
 }
 
 const char *resolve_menu_title(const char *title)
 {
-    if (!use_english_ui() || !title) {
-        return title;
-    }
-    if (strcmp(title, "设置 [F2]") == 0) return "Settings [F2]";
-    if (strcmp(title, "历史 [F3]") == 0) return "History [F3]";
-    if (strcmp(title, "歌单 [F4]") == 0) return "Playlists [F4]";
-    if (strcmp(title, "收藏 [F5]") == 0) return "Favorites [F5]";
-    if (strcmp(title, "信息 [F6]") == 0) return "Info [F6]";
-    return title;
+    if (!title) return title;
+    if (strcmp(title, "设置 [F2]") == 0) return i18n_get("menu.settings");
+    if (strcmp(title, "历史 [F3]") == 0) return i18n_get("menu.history");
+    if (strcmp(title, "歌单 [F4]") == 0) return i18n_get("menu.playlists");
+    if (strcmp(title, "收藏 [F5]") == 0) return i18n_get("menu.favorites");
+    if (strcmp(title, "信息 [F6]") == 0) return i18n_get("menu.info");
+    if (strcmp(title, "帮助 [F8]") == 0) return i18n_get("menu.help");
+    if (strcmp(title, "Help [F8]") == 0) return i18n_get("menu.help");
+    return i18n_get(title);
 }

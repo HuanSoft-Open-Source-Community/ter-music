@@ -1,6 +1,7 @@
 #include "search/search.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "playlist/playlist.h"
 #include "logger/logger.h"
 #include "media/session.h"
@@ -75,9 +76,9 @@ static void* search_thread_func(void *arg) {
 
     char msg[64];
     snprintf(msg, sizeof(msg), "%s: %d %s",
-             use_english_ui() ? "Search completed" : "搜索完成",
+             i18n_get("search.completed"),
              local_count,
-             use_english_ui() ? "results" : "个结果");
+             i18n_get("search.results_unit"));
     update_controls_status(msg);
     log_info("search", "Search '%s': %d results out of %d tracks",
              query, local_count, playlist_total);
@@ -123,12 +124,12 @@ void search_async_start(const char *query) {
         g_search_state.in_progress = 0;
         g_search_state.active = 0;
         pthread_mutex_unlock(&g_search_mutex);
-        update_controls_status(use_english_ui() ? "Search failed" : "搜索失败");
+        update_controls_status(i18n_get("search.failed"));
         return;
     }
 
     request_ui_refresh(UI_DIRTY_PLAYLIST);
-    update_controls_status(use_english_ui() ? "Searching..." : "正在搜索...");
+    update_controls_status(i18n_get("search.searching"));
 }
 
 void search_async_cancel(void) {
@@ -167,7 +168,7 @@ void search_clear(void) {
 void search_prompt(void) {
     if (!win_controls || !playlist_is_loaded() || playlist_count() == 0) {
         if (!playlist_is_loaded() || playlist_count() == 0) {
-            update_controls_status(use_english_ui() ? "Playlist is empty" : "播放列表为空，无法搜索");
+            update_controls_status(i18n_get("search.playlist_empty"));
         }
         return;
     }
@@ -178,7 +179,7 @@ void search_prompt(void) {
     getmaxyx(win_controls, max_y, max_x);
 
     mvwprintw(win_controls, 4, 2, "%s",
-              use_english_ui() ? "Search: " : "搜索歌曲: ");
+              i18n_get("search.prompt"));
     int input_start_col = getcurx(win_controls);
     wclrtoeol(win_controls);
     wrefresh(win_controls);
@@ -225,7 +226,7 @@ void search_prompt(void) {
     wrefresh(win_controls);
 
     if (ch == 27) {
-        update_controls_status(use_english_ui() ? "Search cancelled" : "搜索已取消");
+        update_controls_status(i18n_get("search.cancelled"));
         return;
     }
 
@@ -238,7 +239,7 @@ void search_prompt(void) {
         g_search_state.in_progress = 0;
         pthread_mutex_unlock(&g_search_mutex);
         render_playlist_content();
-        update_controls_status(use_english_ui() ? "Search cancelled" : "搜索已取消");
+        update_controls_status(i18n_get("search.cancelled"));
     }
 }
 

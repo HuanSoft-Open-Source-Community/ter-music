@@ -10,6 +10,7 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "config/config.h"
@@ -157,7 +158,7 @@ void create_layout(void)
     rounded_box(win_playlist);
     wattroff(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     wbkgd(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    mvwprintw(win_playlist, 0, 2, "%s", ui_text(" 播放列表 ", " Playlist "));
+    mvwprintw(win_playlist, 0, 2, "%s", i18n_get("controls.playlist"));
     wrefresh(win_playlist);
 
     // 2. 控制栏窗口 (左下)
@@ -165,17 +166,17 @@ void create_layout(void)
     wattron(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
     rounded_box(win_controls);
     const char *focus_hint = g_control_focus
-        ? ui_text("[控件焦点]", "[Ctrl Focus]")
-        : ui_text("[列表焦点]", "[List Focus]");
+        ? i18n_get("controls.ctrl_focus")
+        : i18n_get("controls.list_focus");
     const char *lyric_hint = g_lyric_cursor_mode
-        ? ui_text("[D:退出定位]", "[D:Exit Seek]")
-        : ui_text("[D:歌词定位]", "[D:Lyric Seek]");
+        ? i18n_get("controls.d_exit_seek")
+        : i18n_get("controls.d_lyric_seek");
     char controls_header[160];
     snprintf(controls_header, sizeof(controls_header), "%s %s %s %s %s",
-             ui_text("控制区", "Controls"),
-             ui_text("[空格:执行]", "[Space:Run]"),
-             ui_text("[C:控件]", "[C:Ctrl]"),
-             ui_text("[L:列表]", "[L:List]"),
+             i18n_get("controls.controls_area"),
+             i18n_get("controls.space_run"),
+             i18n_get("controls.c_ctrl"),
+             i18n_get("controls.l_list"),
              focus_hint);
     wattroff(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
     wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
@@ -191,8 +192,8 @@ void create_layout(void)
         rounded_box(win_lyrics);
         wattroff(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
         wbkgd(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
-        mvwprintw(win_lyrics, 0, 2, "%s", ui_text(" 歌词 ", " Lyrics "));
-        mvwprintw(win_lyrics, 2, 2, "%s", ui_text("未加载歌词。", "No lyrics loaded."));
+        mvwprintw(win_lyrics, 0, 2, "%s", i18n_get("controls.lyrics"));
+        mvwprintw(win_lyrics, 2, 2, "%s", i18n_get("lyrics.not_loaded"));
         wrefresh(win_lyrics);
     } else {
         win_lyrics = NULL;

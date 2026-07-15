@@ -11,6 +11,7 @@
 #include "types.h"
 #include "audio/audio.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "playlist/playlist.h"
@@ -34,16 +35,16 @@ void render_favorites_content(void)
     attron(COLOR_PAIR(COLOR_PAIR_LYRICS));
 
     mvprintw(start_y, content_start_x,
-             use_english_ui() ? "Favorites (%d)" : "收藏夹（%d 首）",
+             i18n_get("favorites.title_fmt"),
              g_favorites.count);
     mvprintw(start_y + 1, content_start_x, "----------------------------------------");
     start_y += 3;
 
     if (g_favorites.count == 0) {
         mvprintw(start_y, content_start_x, "%s",
-                 menu_text("还没有收藏。", "No favorites yet."));
+                 i18n_get("favorites.empty"));
         mvprintw(start_y + 1, content_start_x, "%s",
-                 menu_text("在主界面按 'F' 可加入收藏。", "Press 'F' in the main view to favorite."));
+                 i18n_get("favorites.hint_f"));
     } else {
         int visible_lines = max_y - start_y - 2;
 
@@ -85,8 +86,7 @@ void render_favorites_content(void)
 
         int bottom_y = max_y - 3;
         mvprintw(bottom_y, content_start_x, "%s",
-                 menu_text("ENTER: 播放 | D: 移出收藏",
-                           "Enter: Play | D: Remove"));
+                 i18n_get("favorites.hint_manage"));
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_LYRICS));
@@ -165,8 +165,7 @@ void handle_favorites_input(int ch)
                         play_audio(found);
                         exit_current_view();
                     } else {
-                        show_status_message(menu_text("当前播放列表中没有这首歌",
-                                                      "Track not found in current playlist"));
+                        show_status_message(i18n_get("playlist_mgr.track_not_in_queue"));
                     }
                 }
             }
@@ -181,7 +180,7 @@ void handle_favorites_input(int ch)
                 if (g_content_selected_idx >= g_favorites.count) {
                     g_content_selected_idx = g_favorites.count - 1;
                 }
-                show_status_message(menu_text("已从收藏移除", "Removed from favorites"));
+                show_status_message(i18n_get("favorites.removed"));
                 render_favorites_content();
             }
             break;

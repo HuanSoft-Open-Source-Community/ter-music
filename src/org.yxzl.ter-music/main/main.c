@@ -374,19 +374,14 @@ int main(int argc, char *argv[]) {
                     const char *err = remote_strerror();
                     if (err && err[0]) {
                         mvprintw(2, 2, "%s",
-                                 use_english_ui()
-                                     ? "Warning:" : "警告：");
+                                 i18n_get("main.warn.prefix"));
                         mvprintw(2, 12, "%s", err);
                     } else {
                         mvprintw(2, 2, "%s",
-                                 use_english_ui()
-                                     ? "Warning: no audio files found"
-                                     : "警告：没有找到音频文件");
+                                 i18n_get("main.warn.no_audio_files"));
                     }
                     mvprintw(3, 2, "%s",
-                             use_english_ui()
-                                 ? "Continuing with current directory and default paths..."
-                                 : "将继续尝试当前目录和默认启动路径...");
+                             i18n_get("main.continue_default"));
                     refresh();
                     used_fallback = 1;
                 }
@@ -396,10 +391,7 @@ int main(int argc, char *argv[]) {
                          use_english_ui()
                              ? "Warning: invalid remote URL"
                              : "警告：远程 URL 格式无效");
-                mvprintw(3, 2, "%s",
-                         use_english_ui()
-                             ? "Continuing with current directory and default paths..."
-                             : "将继续尝试当前目录和默认启动路径...");
+                mvprintw(3, 2, "%s", i18n_get("main.continue_default"));
                 refresh();
                 used_fallback = 1;
             }
@@ -420,28 +412,23 @@ int main(int argc, char *argv[]) {
                 } else {
                     log_warn("main", "Failed to load local path: '%s'", expanded_path);
                     const char *error_msg = S_ISREG(s.st_mode)
-                        ? (use_english_ui() ? "Warning: cannot open audio file" : "警告：无法打开音频文件")
-                        : (use_english_ui() ? "Warning: the selected folder has no playable audio files" : "警告：指定目录中没有可播放的音频文件");
+                        ? i18n_get("main.warn.cannot_open")
+                        : i18n_get("main.warn.no_playable");
                     
                     mvprintw(2, 2, "%s", error_msg);
                     mvprintw(3, 2, "%s",
-                             use_english_ui()
-                                 ? "Continuing with current directory and default paths..."
-                                 : "将继续尝试当前目录和默认启动路径...");
+                             i18n_get("main.continue_default"));
                     refresh();
                     used_fallback = 1;
                 }
             } else {
-                mvprintw(2, 2, use_english_ui() ? "Warning: invalid path: %s" : "警告：指定路径无效：%s", open_path);
-                mvprintw(3, 2, "%s",
-                         use_english_ui()
-                             ? "Continuing with current directory and default paths..."
-                             : "将继续尝试当前目录和默认启动路径...");
+                mvprintw(2, 2, i18n_get("main.warn.invalid_path"), open_path);
+                mvprintw(3, 2, "%s", i18n_get("main.continue_default"));
                 refresh();
                 used_fallback = 1;
             }
         } else {
-            mvprintw(2, 2, use_english_ui() ? "Warning: invalid path: %s" : "警告：指定路径无效：%s", open_path);
+            mvprintw(2, 2, i18n_get("main.warn.invalid_path"), open_path);
             mvprintw(3, 2, "%s",
                      use_english_ui()
                          ? "Continuing with current directory and default paths..."
@@ -493,7 +480,7 @@ int main(int argc, char *argv[]) {
 
             if (used_fallback) {
                 mvprintw(4, 2,
-                         use_english_ui() ? "Loaded from default path: %s" : "已从默认路径加载：%s",
+                         i18n_get("main.loaded_default"),
                          g_app_config.default_startup_path);
                 refresh();
             }
@@ -560,6 +547,6 @@ int main(int argc, char *argv[]) {
     log_info("main", "ter-music exited cleanly");
     logger_shutdown();
 
-    printf("%s\n", use_english_ui() ? "ter-music exited cleanly." : "ter-music 已正常退出。");
+    printf("%s\n", i18n_get("app.exit_clean"));
     return 0;
 }

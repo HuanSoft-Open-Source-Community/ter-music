@@ -10,12 +10,14 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menu_internal.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "playlist/playlist.h"
 #include "config/config.h"
 #include "logger/logger.h"
+#include "i18n/i18n.h"
 #include "ui/menus.h"
 #include <ncursesw/ncurses.h>
 #include <stdio.h>
@@ -50,7 +52,7 @@ static void render_controls_popup(void);
 static const char *get_control_label(int index)
 {
     if (index < 0 || index >= CONTROL_COUNT) return "";
-    return use_english_ui() ? control_labels_en[index] : control_labels[index];
+    return control_labels[index];
 }
 
 void build_control_label(int index, char *dest, size_t dest_size)
@@ -214,7 +216,7 @@ static void build_popup_option_text(PopupType type, int index,
     switch (type) {
         case POPUP_LOOP_MODE: {
             PlayMode mode = get_available_play_mode_at(index);
-            snprintf(dest, dest_size, "%s", play_mode_display_name(mode, use_english_ui()));
+            snprintf(dest, dest_size, "%s", play_mode_display_name(mode, 0));
             break;
         }
         case POPUP_SPEED: {
@@ -245,7 +247,7 @@ static void apply_popup_selection(void)
             save_config();
             char msg[64];
             snprintf(msg, sizeof(msg), "%s: %.2fx",
-                     use_english_ui() ? "Speed" : "倍速", (double)g_playback_speed);
+                     i18n_get("controls.label.speed"), (double)g_playback_speed);
             update_controls_status(msg);
             apply_playback_speed_change();
             break;
@@ -409,9 +411,9 @@ static void render_controls_popup(void)
 
     const char *title = "";
     switch (g_popup.type) {
-        case POPUP_LOOP_MODE: title = ui_text(" 播放模式 ", " Play Mode "); break;
-        case POPUP_SPEED:     title = ui_text(" 播放速度 ", " Speed "); break;
-        case POPUP_VOLUME:    title = ui_text(" 音量 ", " Volume "); break;
+        case POPUP_LOOP_MODE: title = i18n_get("popup.play_mode"); break;
+        case POPUP_SPEED:     title = i18n_get("popup.speed"); break;
+        case POPUP_VOLUME:    title = i18n_get("popup.volume"); break;
         default: break;
     }
     if (title[0])
@@ -530,18 +532,18 @@ void render_controls(void)
     rounded_box(win_controls);
 
     const char *focus_hint = g_control_focus
-        ? ui_text("[控件焦点]", "[Ctrl Focus]")
-        : ui_text("[列表焦点]", "[List Focus]");
+        ? i18n_get("controls.ctrl_focus")
+        : i18n_get("controls.list_focus");
     const char *lyric_hint = g_lyric_cursor_mode
-        ? ui_text("[D:退出定位]", "[D:Exit Seek]")
-        : ui_text("[D:歌词定位]", "[D:Lyric Seek]");
+        ? i18n_get("controls.d_exit_seek")
+        : i18n_get("controls.d_lyric_seek");
     char controls_header[160];
     snprintf(controls_header, sizeof(controls_header), "%s %s %s %s %s %s",
-             ui_text("控制区", "Controls"),
-             ui_text("[空格:执行]", "[Space:Run]"),
-             ui_text("[C:控件]", "[C:Ctrl]"),
-             ui_text("[L:列表]", "[L:List]"),
-             ui_text("[Tab:切换]", "[Tab:View]"),
+             i18n_get("controls.controls_area"),
+             i18n_get("controls.space_run"),
+             i18n_get("controls.c_ctrl"),
+             i18n_get("controls.l_list"),
+             i18n_get("controls.tab_view"),
              focus_hint);
     mvwprintw(win_controls, 0, 2, " %s %s", controls_header, lyric_hint);
 
