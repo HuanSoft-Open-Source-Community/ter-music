@@ -11,6 +11,7 @@
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/scrollbar.h"
 #include "config/config.h"
 #include "logger/logger.h"
 #include <stdio.h>
@@ -159,16 +160,22 @@ void render_language_content(void)
         else
             cov_buf[0] = '\0';
         int cov_width = 9;  /* fixed: " 100.000%" */
-        int avail = max_x - content_start_x - 2 - 2 - (int)utf8_str_width(tag) - 2 - cov_width;
+        int avail = max_x - content_start_x - 2 - 1 - (int)utf8_str_width(tag) - 2 - cov_width - 3;
         if (avail < 6) avail = 6;
         char name_buf[128];
         utf8_str_truncate(name_buf, g_langs[idx].name, avail);
+        char padded_name[256];
+        utf8_str_pad(padded_name, sizeof(padded_name), name_buf, avail);
 
-        mvprintw(row, content_start_x, "%s %-*s  %s%s",
-                 marker, avail, name_buf, tag, cov_buf);
+        mvprintw(row, content_start_x, "%s %s  %s%s",
+                 marker, padded_name, tag, cov_buf);
 
         if (idx == g_lang_selected) attroff(A_REVERSE);
     }
+
+    /* Draw scrollbar */
+    scrollbar_draw(stdscr, start_y, visible,
+                   g_lang_count, visible, g_lang_scroll, max_x - 2);
 
     /* Hint bar */
     int hint_row = max_y - 3;
