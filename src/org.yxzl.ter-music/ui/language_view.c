@@ -228,6 +228,8 @@ void handle_language_input(int ch)
                     save_config();
                     help_free_lines();
                     show_status_message(i18n_get("lang_mgr.switched"));
+                    rerender_active_view();
+                    return;
                 }
             }
             break;
@@ -262,6 +264,10 @@ void handle_language_input(int ch)
                         strcpy(g_app_config.ui_language, "zh_CN");
                         save_config();
                         help_free_lines();
+                        lang_refresh_list();
+                        show_status_message(i18n_get("lang_mgr.deleted"));
+                        rerender_active_view();
+                        return;
                     }
                     lang_refresh_list();
                     show_status_message(i18n_get("lang_mgr.deleted"));

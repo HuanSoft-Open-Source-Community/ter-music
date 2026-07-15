@@ -991,31 +991,31 @@ void switch_to_view(ViewMode view)
 
     switch (view) {
         case VIEW_SETTINGS:
-            render_menu_frame("设置 [F2]");
+            render_menu_frame(i18n_get("menu.settings"));
             render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
             render_settings_content();
             render_menu_hint_bar();
             break;
         case VIEW_HISTORY:
-            render_menu_frame("历史 [F3]");
+            render_menu_frame(i18n_get("menu.history"));
             render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
             render_history_content();
             render_menu_hint_bar();
             break;
         case VIEW_PLAYLIST:
-            render_menu_frame("歌单 [F4]");
+            render_menu_frame(i18n_get("menu.playlists"));
             render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
             render_playlist_manager_content();
             render_menu_hint_bar();
             break;
         case VIEW_FAVORITES:
-            render_menu_frame("收藏 [F5]");
+            render_menu_frame(i18n_get("menu.favorites"));
             render_menu_sidebar(g_menu_selected_idx, favorites_sidebar_items, FAVORITES_ITEM_COUNT);
             render_favorites_content();
             render_menu_hint_bar();
             break;
         case VIEW_INFO:
-            render_menu_frame("信息 [F6]");
+            render_menu_frame(i18n_get("menu.info"));
             render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
             render_info_content();
             render_menu_hint_bar();
@@ -1063,31 +1063,31 @@ void rerender_active_view(void)
 
     switch (g_current_view) {
         case VIEW_SETTINGS:
-            render_menu_frame("设置 [F2]");
+            render_menu_frame(i18n_get("menu.settings"));
             render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
             render_settings_content();
             render_menu_hint_bar();
             break;
         case VIEW_HISTORY:
-            render_menu_frame("历史 [F3]");
+            render_menu_frame(i18n_get("menu.history"));
             render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
             render_history_content();
             render_menu_hint_bar();
             break;
         case VIEW_PLAYLIST:
-            render_menu_frame("歌单 [F4]");
+            render_menu_frame(i18n_get("menu.playlists"));
             render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
             render_playlist_manager_content();
             render_menu_hint_bar();
             break;
         case VIEW_FAVORITES:
-            render_menu_frame("收藏 [F5]");
+            render_menu_frame(i18n_get("menu.favorites"));
             render_menu_sidebar(g_menu_selected_idx, favorites_sidebar_items, FAVORITES_ITEM_COUNT);
             render_favorites_content();
             render_menu_hint_bar();
             break;
         case VIEW_INFO:
-            render_menu_frame("信息 [F6]");
+            render_menu_frame(i18n_get("menu.info"));
             render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
             render_info_content();
             render_menu_hint_bar();

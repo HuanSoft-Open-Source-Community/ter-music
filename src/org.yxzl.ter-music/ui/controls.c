@@ -25,9 +25,17 @@
 
 extern WINDOW *win_controls;
 
-/* ── Control labels ── */
-extern const char *control_labels[];
-extern const char *control_labels_en[];
+/* ── Control label i18n keys ── */
+static const char *control_label_keys[] = {
+    "controls.label.prev",
+    "controls.label.play_pause",
+    "controls.label.next",
+    "controls.label.stop",
+    "controls.label.loop",
+    "controls.label.speed",
+    "controls.label.volume",
+    "controls.label.progress"
+};
 
 /* ── Speed state (defined in audio.c) ── */
 extern float g_speed_ratios[];
@@ -52,7 +60,7 @@ static void render_controls_popup(void);
 static const char *get_control_label(int index)
 {
     if (index < 0 || index >= CONTROL_COUNT) return "";
-    return control_labels[index];
+    return i18n_get(control_label_keys[index]);
 }
 
 void build_control_label(int index, char *dest, size_t dest_size)

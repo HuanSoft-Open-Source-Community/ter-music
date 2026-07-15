@@ -82,10 +82,8 @@ WINDOW *win_playlist;
 WINDOW *win_controls;
 WINDOW *win_lyrics;
 
-/* ── Control labels ── */
-const char *control_labels[] = {"上一曲", "播放/暂停", "下一曲", "停止", "循环", "倍速", "音量", "进度"};
-const char *control_labels_en[] = {"Prev", "Play/Pause", "Next", "Stop", "Loop", "Speed", "Vol", "Prog"};
-int g_control_count = sizeof(control_labels) / sizeof(control_labels[0]);
+/* ── Control count ── */
+int g_control_count = CONTROL_COUNT;
 
 /* ── Lyric cursor mode ── */
 int g_lyric_cursor_mode = 0;
