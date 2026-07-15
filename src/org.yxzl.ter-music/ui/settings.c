@@ -63,35 +63,35 @@ extern int   g_speed_count;
  * ============================================================ */
 
 static const char *settings_options[] = {
-    "settings.color.playlist_fg",
-    "settings.color.playlist_bg",
-    "settings.color.controls_fg",
-    "settings.color.controls_bg",
-    "settings.color.lyrics_fg",
-    "settings.color.lyrics_bg",
-    "settings.color.sidebar_fg",
-    "settings.color.sidebar_bg",
-    "settings.color.highlight_fg",
-    "settings.color.highlight_bg",
-    "settings.color.border_fg",
-    "settings.color.border_bg",
-    "settings.opt.startup_path",
+    "settings.opt.playlist_fg",
+    "settings.opt.playlist_bg",
+    "settings.opt.controls_fg",
+    "settings.opt.controls_bg",
+    "settings.opt.lyrics_fg",
+    "settings.opt.lyrics_bg",
+    "settings.opt.sidebar_fg",
+    "settings.opt.sidebar_bg",
+    "settings.opt.highlight_fg",
+    "settings.opt.highlight_bg",
+    "settings.opt.border_fg",
+    "settings.opt.border_bg",
+    "settings.opt.default_path",
     "settings.opt.auto_play",
-    "settings.opt.remember_last_path",
+    "settings.opt.remember_path",
     "settings.opt.clear_history",
     "settings.opt.language",
-    "settings.opt.default_volume",
+    "settings.opt.volume",
     "settings.opt.latency",
     "settings.opt.show_lyrics",
-    "settings.opt.default_play_mode",
+    "settings.opt.play_mode",
     "settings.opt.default_speed",
-    "settings.opt.show_album_art",
+    "settings.opt.cover_art",
     "settings.opt.lyrics_align",
     "settings.opt.audio_backend",
     "settings.opt.sort_mode",
-    "settings.opt.adv_play_mode",
-    "settings.opt.default_play_mode",
-    "settings.opt.preload_next",
+    "settings.opt.advanced_modes",
+    "settings.opt.play_mode",
+    "settings.opt.seamless_preload",
     "settings.opt.cue_encoding",
     "settings.opt.enable_eq",
     "settings.opt.preampl",
@@ -378,47 +378,47 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
     if (option_index < 12) {
         int color_val = *color_values[option_index];
         snprintf(line, line_size, "%s%s%s (%d)",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_color_name(color_val), color_val);
     } else if (option_index == SETTINGS_IDX_DEFAULT_PATH) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  g_app_config.default_startup_path[0] ? g_app_config.default_startup_path : unset_label);
     } else if (option_index == SETTINGS_IDX_AUTO_PLAY) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.auto_play_on_start));
     } else if (option_index == SETTINGS_IDX_REMEMBER_PATH) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.remember_last_path));
     } else if (option_index == SETTINGS_IDX_CLEAR_HISTORY) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.clear_history_on_startup));
     } else if (option_index == SETTINGS_IDX_LANGUAGE) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_language_name());
     } else if (option_index == SETTINGS_IDX_VOLUME) {
         snprintf(line, line_size, "%s%s%d%%",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  g_app_config.volume_percent);
     } else if (option_index == SETTINGS_IDX_LATENCY) {
         snprintf(line, line_size, "%s%s%d ms",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  g_app_config.audio_latency_ms);
     } else if (option_index == SETTINGS_IDX_SHOW_LYRICS) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.show_lyrics_panel));
     } else if (option_index == SETTINGS_IDX_SHOW_ALBUM_COVER) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.show_album_cover));
     } else if (option_index == SETTINGS_IDX_SEAMLESS_PRELOAD) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.seamless_preload));
     } else if (option_index == SETTINGS_IDX_LYRICS_ALIGNMENT) {
         const char *align_str;
@@ -428,19 +428,19 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
             default: align_str = i18n_get("align.left");
         }
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator, align_str);
+                 i18n_get(current_settings_options[option_index]), separator, align_str);
     } else if (option_index == SETTINGS_IDX_DEFAULT_PLAY_MODE) {
         const char *mode_str = play_mode_display_name(
             (PlayMode)g_app_config.default_play_mode, use_english_ui());
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator, mode_str);
+                 i18n_get(current_settings_options[option_index]), separator, mode_str);
     } else if (option_index == SETTINGS_IDX_ADVANCED_PLAY_MODES) {
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.advanced_play_modes_enabled));
     } else if (option_index == SETTINGS_IDX_DEFAULT_SPEED) {
         snprintf(line, line_size, "%s%s%.2fx",
-                 current_settings_options[option_index], separator,
+                 i18n_get(current_settings_options[option_index]), separator,
                  (double)g_app_config.default_playback_speed);
     } else if (option_index == SETTINGS_IDX_AUDIO_BACKEND) {
         const char *backend_str;
@@ -452,7 +452,7 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
             default:                     backend_str = i18n_get("general.auto");
         }
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator, backend_str);
+                 i18n_get(current_settings_options[option_index]), separator, backend_str);
     } else if (option_index == SETTINGS_IDX_SORT_MODE) {
         const char *sort_str;
         switch (g_app_config.sort_mode) {
@@ -464,7 +464,7 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
             default:            sort_str = i18n_get("sort.default");
         }
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator, sort_str);
+                 i18n_get(current_settings_options[option_index]), separator, sort_str);
     } else if (option_index == SETTINGS_IDX_CUE_ENCODING) {
         const char *enc_str;
         switch (g_app_config.cue_encoding) {
@@ -477,29 +477,29 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
             default:                     enc_str = i18n_get("general.auto"); break;
         }
         snprintf(line, line_size, "%s%s%s",
-                 current_settings_options[option_index], separator, enc_str);
+                 i18n_get(current_settings_options[option_index]), separator, enc_str);
     } else if (option_index >= SETTINGS_IDX_EQ_ENABLED &&
                option_index <= SETTINGS_IDX_EQ_BAND_9) {
         if (option_index == SETTINGS_IDX_EQ_ENABLED) {
             snprintf(line, line_size, "%s%s%s",
-                     current_settings_options[option_index], separator,
+                     i18n_get(current_settings_options[option_index]), separator,
                      menu_bool_text(g_app_config.eq_enabled));
         } else if (option_index == SETTINGS_IDX_EQ_PREAMP) {
             snprintf(line, line_size, "%s%s%d dB",
-                     current_settings_options[option_index], separator,
+                     i18n_get(current_settings_options[option_index]), separator,
                      g_app_config.eq_preamp);
         } else {
             int band = option_index - SETTINGS_IDX_EQ_BAND_0;
             int gain = g_app_config.eq_band_gains[band];
             if (gain >= 0)
                 snprintf(line, line_size, "%s%s+%d dB",
-                         current_settings_options[option_index], separator, gain);
+                         i18n_get(current_settings_options[option_index]), separator, gain);
             else
                 snprintf(line, line_size, "%s%s%d dB",
-                         current_settings_options[option_index], separator, gain);
+                         i18n_get(current_settings_options[option_index]), separator, gain);
         }
     } else {
-        snprintf(line, line_size, "%s", current_settings_options[option_index]);
+        snprintf(line, line_size, "%s", i18n_get(current_settings_options[option_index]));
     }
 }
 
@@ -2350,7 +2350,7 @@ void render_settings_content(void)
 
 static void rerender_settings_view(void)
 {
-    render_menu_frame("设置 [F2]");
+    render_menu_frame(i18n_get("menu.settings"));
     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
     render_settings_content();
     render_menu_hint_bar();
