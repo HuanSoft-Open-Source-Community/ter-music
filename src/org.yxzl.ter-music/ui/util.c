@@ -150,6 +150,12 @@ const char *help_sidebar_items[] = {
 };
 const int HELP_ITEM_COUNT = 2;
 
+/* Language view sidebar */
+const char *language_sidebar_items[] = {
+    "general.back"
+};
+const int LANGUAGE_ITEM_COUNT = 1;
+
 /* ── Color names (for settings display) ── */
 
 const char *color_names[] = {
