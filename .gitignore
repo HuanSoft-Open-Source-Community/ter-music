@@ -5,7 +5,7 @@
 .directory
 
 # Build files
-build/
+/build/
 CMakeCache.txt
 CMakeFiles/
 Makefile

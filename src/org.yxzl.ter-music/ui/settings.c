@@ -79,8 +79,6 @@ static const char *settings_options[] = {
     "settings.opt.auto_play",
     "settings.opt.remember_path",
     "settings.opt.clear_history",
-    "settings.opt.language",
-    "settings.opt.volume",
     "settings.opt.latency",
     "settings.opt.show_lyrics",
     "settings.opt.play_mode",
@@ -123,8 +121,6 @@ static const char *settings_options_ascii[] = {
     "Auto Play On Start",
     "Remember Last Path",
     "Clear History On Start",
-    "Language",
-    "Default Volume",
     "Output Latency",
     "Show Lyrics Panel",
     "Default Play Mode",
@@ -150,7 +146,7 @@ static const char *settings_options_ascii[] = {
     "8 kHz",
     "16 kHz"
 };
-#define SETTINGS_OPTION_COUNT 42
+#define SETTINGS_OPTION_COUNT 40
 
 enum {
     SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
@@ -169,32 +165,30 @@ enum {
     SETTINGS_IDX_AUTO_PLAY           = 13,
     SETTINGS_IDX_REMEMBER_PATH       = 14,
     SETTINGS_IDX_CLEAR_HISTORY       = 15,
-    SETTINGS_IDX_LANGUAGE            = 16,
-    SETTINGS_IDX_VOLUME              = 17,
-    SETTINGS_IDX_LATENCY             = 18,
-    SETTINGS_IDX_SHOW_LYRICS         = 19,
-    SETTINGS_IDX_DEFAULT_PLAY_MODE   = 20,
-    SETTINGS_IDX_DEFAULT_SPEED       = 21,
-    SETTINGS_IDX_SHOW_ALBUM_COVER    = 22,
-    SETTINGS_IDX_LYRICS_ALIGNMENT    = 23,
-    SETTINGS_IDX_AUDIO_BACKEND       = 24,
-    SETTINGS_IDX_SORT_MODE           = 25,
-    SETTINGS_IDX_ADVANCED_PLAY_MODES = 26,
-    SETTINGS_IDX_DEFAULT_PLAY_MODE2  = 27,
-    SETTINGS_IDX_SEAMLESS_PRELOAD    = 28,
-    SETTINGS_IDX_CUE_ENCODING        = 29,
-    SETTINGS_IDX_EQ_ENABLED          = 30,
-    SETTINGS_IDX_EQ_PREAMP           = 31,
-    SETTINGS_IDX_EQ_BAND_0           = 32,  /* 31 Hz */
-    SETTINGS_IDX_EQ_BAND_1           = 33,  /* 62 Hz */
-    SETTINGS_IDX_EQ_BAND_2           = 34,  /* 125 Hz */
-    SETTINGS_IDX_EQ_BAND_3           = 35,  /* 250 Hz */
-    SETTINGS_IDX_EQ_BAND_4           = 36,  /* 500 Hz */
-    SETTINGS_IDX_EQ_BAND_5           = 37,  /* 1 kHz */
-    SETTINGS_IDX_EQ_BAND_6           = 38,  /* 2 kHz */
-    SETTINGS_IDX_EQ_BAND_7           = 39,  /* 4 kHz */
-    SETTINGS_IDX_EQ_BAND_8           = 40,  /* 8 kHz */
-    SETTINGS_IDX_EQ_BAND_9           = 41   /* 16 kHz */
+    SETTINGS_IDX_LATENCY             = 16,
+    SETTINGS_IDX_SHOW_LYRICS         = 17,
+    SETTINGS_IDX_DEFAULT_PLAY_MODE   = 18,
+    SETTINGS_IDX_DEFAULT_SPEED       = 19,
+    SETTINGS_IDX_SHOW_ALBUM_COVER    = 20,
+    SETTINGS_IDX_LYRICS_ALIGNMENT    = 21,
+    SETTINGS_IDX_AUDIO_BACKEND       = 22,
+    SETTINGS_IDX_SORT_MODE           = 23,
+    SETTINGS_IDX_ADVANCED_PLAY_MODES = 24,
+    SETTINGS_IDX_DEFAULT_PLAY_MODE2  = 25,
+    SETTINGS_IDX_SEAMLESS_PRELOAD    = 26,
+    SETTINGS_IDX_CUE_ENCODING        = 27,
+    SETTINGS_IDX_EQ_ENABLED          = 28,
+    SETTINGS_IDX_EQ_PREAMP           = 29,
+    SETTINGS_IDX_EQ_BAND_0           = 30,  /* 31 Hz */
+    SETTINGS_IDX_EQ_BAND_1           = 31,  /* 62 Hz */
+    SETTINGS_IDX_EQ_BAND_2           = 32,  /* 125 Hz */
+    SETTINGS_IDX_EQ_BAND_3           = 33,  /* 250 Hz */
+    SETTINGS_IDX_EQ_BAND_4           = 34,  /* 500 Hz */
+    SETTINGS_IDX_EQ_BAND_5           = 35,  /* 1 kHz */
+    SETTINGS_IDX_EQ_BAND_6           = 36,  /* 2 kHz */
+    SETTINGS_IDX_EQ_BAND_7           = 37,  /* 4 kHz */
+    SETTINGS_IDX_EQ_BAND_8           = 38,  /* 8 kHz */
+    SETTINGS_IDX_EQ_BAND_9           = 39   /* 16 kHz */
 };
 
 typedef struct {
@@ -225,8 +219,6 @@ static const int settings_playback_option_indices[] = {
     SETTINGS_IDX_AUTO_PLAY,
     SETTINGS_IDX_REMEMBER_PATH,
     SETTINGS_IDX_CLEAR_HISTORY,
-    SETTINGS_IDX_LANGUAGE,
-    SETTINGS_IDX_VOLUME,
     SETTINGS_IDX_LATENCY,
     SETTINGS_IDX_SHOW_LYRICS,
     SETTINGS_IDX_SHOW_ALBUM_COVER,
@@ -396,14 +388,6 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.clear_history_on_startup));
-    } else if (option_index == SETTINGS_IDX_LANGUAGE) {
-        snprintf(line, line_size, "%s%s%s",
-                 i18n_get(current_settings_options[option_index]), separator,
-                 menu_language_name());
-    } else if (option_index == SETTINGS_IDX_VOLUME) {
-        snprintf(line, line_size, "%s%s%d%%",
-                 i18n_get(current_settings_options[option_index]), separator,
-                 g_app_config.volume_percent);
     } else if (option_index == SETTINGS_IDX_LATENCY) {
         snprintf(line, line_size, "%s%s%d ms",
                  i18n_get(current_settings_options[option_index]), separator,
@@ -644,23 +628,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.clear_history_on_startup = !g_app_config.clear_history_on_startup;
             save_config();
             break;
-        case SETTINGS_IDX_LANGUAGE:
-            if (delta < 0) {
-                strcpy(g_app_config.ui_language, "zh_CN");
-            } else if (delta > 0) {
-                strcpy(g_app_config.ui_language, "en_US");
-            } else {
-                strcpy(g_app_config.ui_language,
-                       strcmp(g_app_config.ui_language, "zh_CN") == 0 ? "en_US" : "zh_CN");
-            }
-            i18n_reload(g_app_config.ui_language);
-            save_config();
-            break;
-        case SETTINGS_IDX_VOLUME:
-            if (delta == 0) delta = 1;
-            set_volume_percent(g_app_config.volume_percent + delta * 5);
-            g_app_config.volume_percent = get_volume_percent();
-            break;
         case SETTINGS_IDX_LATENCY:
             if (delta == 0) delta = 1;
             g_app_config.audio_latency_ms = clamp_latency_ms(g_app_config.audio_latency_ms + delta * 10);
@@ -679,14 +646,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.seamless_preload = !g_app_config.seamless_preload;
             save_config();
             break;
-        case SETTINGS_IDX_LYRICS_ALIGNMENT:
-            if (delta < 0) {
-                g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment - 1 + 3) % 3;
-            } else {
-                g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment + 1) % 3;
-            }
-            save_config();
-            break;
         case SETTINGS_IDX_DEFAULT_PLAY_MODE:
             if (delta < 0) {
                 g_app_config.default_play_mode = (g_app_config.default_play_mode - 1 + PLAY_MODE_COUNT) % PLAY_MODE_COUNT;
@@ -698,6 +657,14 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             save_config();
             g_play_mode = (PlayMode)g_app_config.default_play_mode;
             show_status_message(i18n_get("settings.play_mode.updated"));
+            break;
+        case SETTINGS_IDX_LYRICS_ALIGNMENT:
+            if (delta < 0) {
+                g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment - 1 + 3) % 3;
+            } else {
+                g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment + 1) % 3;
+            }
+            save_config();
             break;
         case SETTINGS_IDX_ADVANCED_PLAY_MODES:
             g_app_config.advanced_play_modes_enabled = !g_app_config.advanced_play_modes_enabled;
@@ -905,20 +872,6 @@ static void close_sel_menu(int apply)
                 save_config();
                 break;
 
-            case SETTINGS_IDX_LANGUAGE:
-                strcpy(g_app_config.ui_language,
-                       g_sel_idx == 1 ? "en_US" : "zh_CN");
-                i18n_reload(g_app_config.ui_language);
-                save_config();
-                break;
-
-            case SETTINGS_IDX_VOLUME: {
-                int vol = g_sel_idx * 10;
-                set_volume_percent(vol);
-                g_app_config.volume_percent = get_volume_percent();
-                break;
-            }
-
             case SETTINGS_IDX_LATENCY: {
                 int latency_opts[] = {20, 40, 60, 80, 100, 120, 150, 200, 250};
                 g_app_config.audio_latency_ms = latency_opts[g_sel_idx];
@@ -1008,17 +961,6 @@ static void open_sel_menu(int option_index)
         case SETTINGS_IDX_LYRICS_ALIGNMENT:
             count = 3;
             cur   = g_app_config.lyrics_alignment;
-            break;
-        case SETTINGS_IDX_LANGUAGE:
-            count = 2;
-            cur   = (strcmp(g_app_config.ui_language, "en_US") == 0) ? 1 : 0;
-            break;
-            break;
-        case SETTINGS_IDX_VOLUME:
-            count = 11; /* 0%,10%,…,100% */
-            cur   = (g_app_config.volume_percent + 5) / 10;
-            if (cur < 0) cur = 0;
-            if (cur >= count) cur = count - 1;
             break;
         case SETTINGS_IDX_LATENCY: {
             int lat[] = {20,40,60,80,100,120,150,200,250};
@@ -1141,12 +1083,6 @@ static void create_sel_window(void)
                                  i18n_get("align.right")};
                 if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
             }
-            case SETTINGS_IDX_LANGUAGE:{
-                const char *a[]={i18n_get("lang.name"),"English"};
-                if (i<2) snprintf(opts[i],48,"%s",a[i]); break;
-            }
-            case SETTINGS_IDX_VOLUME:
-                snprintf(opts[i],48,"%d%%",i*10); break;
             case SETTINGS_IDX_LATENCY:{
                 int lat[]={20,40,60,80,100,120,150,200,250};
                 if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
@@ -1273,12 +1209,6 @@ static void draw_sel_menu(void)
                                  i18n_get("align.right")};
                 if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
             }
-            case SETTINGS_IDX_LANGUAGE:{
-                const char *a[]={i18n_get("lang.name"),"English"};
-                if (i<2) snprintf(opts[i],48,"%s",a[i]); break;
-            }
-            case SETTINGS_IDX_VOLUME:
-                snprintf(opts[i],48,"%d%%",i*10); break;
             case SETTINGS_IDX_LATENCY:{
                 int lat[]={20,40,60,80,100,120,150,200,250};
                 if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
@@ -1335,8 +1265,6 @@ static void draw_sel_menu(void)
         case SETTINGS_IDX_AUDIO_BACKEND:     title = i18n_get("popup.backend"); break;
         case SETTINGS_IDX_SORT_MODE:         title = i18n_get("popup.sort"); break;
         case SETTINGS_IDX_LYRICS_ALIGNMENT:  title = i18n_get("popup.align"); break;
-        case SETTINGS_IDX_LANGUAGE:          title = i18n_get("popup.lang"); break;
-        case SETTINGS_IDX_VOLUME:            title = i18n_get("popup.volume"); break;
         case SETTINGS_IDX_LATENCY:           title = i18n_get("popup.latency"); break;
         case SETTINGS_IDX_CUE_ENCODING:      title = i18n_get("popup.cue_enc"); break;
         default:
@@ -1469,9 +1397,7 @@ static void activate_settings_current_option(void)
     }
 
     /* Multi-choice: ENTER opens the popup */
-    if (g_settings_current_option == SETTINGS_IDX_LANGUAGE ||
-        g_settings_current_option == SETTINGS_IDX_VOLUME ||
-        g_settings_current_option == SETTINGS_IDX_LATENCY ||
+    if (g_settings_current_option == SETTINGS_IDX_LATENCY ||
         g_settings_current_option == SETTINGS_IDX_DEFAULT_PLAY_MODE ||
         g_settings_current_option == SETTINGS_IDX_DEFAULT_SPEED ||
         g_settings_current_option == SETTINGS_IDX_LYRICS_ALIGNMENT ||
