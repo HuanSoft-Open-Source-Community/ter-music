@@ -30,6 +30,8 @@ extern void prompt_open_folder();
 
 int g_debug_enabled = 0;
 volatile sig_atomic_t g_config_reload_requested = 0;
+/* 终端关闭/终止信号触发安全退出标志，供事件循环轮询 */
+volatile sig_atomic_t g_should_exit = 0;
 
 void crash_handler(int sig) {
     log_error("main", "Fatal signal %d received! Performing emergency shutdown", sig);
@@ -45,9 +47,19 @@ void crash_handler(int sig) {
     exit(1);
 }
 
+/* 收到 SIGHUP（终端关闭/挂断）时同时设置退出标志和配置重载标志，
+ * 确保程序走安全退出路径而不是继续在后台播放。
+ * 保留 g_config_reload_requested 兼容事件循环中的既有检查路径。 */
 void sighup_handler(int sig) {
     (void)sig;
     g_config_reload_requested = 1;
+    g_should_exit = 1;
+}
+
+/* SIGTERM/SIGINT 触发安全退出 */
+void sigterm_handler(int sig) {
+    (void)sig;
+    g_should_exit = 1;
 }
 
 static void expand_user_path(const char *input, char *output, size_t output_size) {
@@ -270,6 +282,8 @@ int main(int argc, char *argv[]) {
     signal(SIGSEGV, crash_handler);
     signal(SIGABRT, crash_handler);
     signal(SIGHUP, sighup_handler);
+    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, sigterm_handler);
 
     char *open_path = NULL;
     int opt;

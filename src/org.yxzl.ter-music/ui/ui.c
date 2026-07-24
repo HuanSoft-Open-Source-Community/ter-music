@@ -281,6 +281,7 @@ void init_ncurses(void)
 
 void run_event_loop(void)
 {
+    extern volatile sig_atomic_t g_should_exit;
     int ch;
     log_info("ui", "Event loop started");
 
@@ -305,6 +306,12 @@ void run_event_loop(void)
             reload_config();
         }
 
+        /* 响应终端关闭、SIGTERM/SIGINT 等退出信号 */
+        if (g_should_exit) {
+            log_info("ui", "Event loop exiting on g_should_exit signal");
+            break;
+        }
+
         ch = getch();
 
         if (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED) {
@@ -322,6 +329,12 @@ void run_event_loop(void)
         process_pending_ui_refresh();
 
         if (ch == ERR) {
+            /* 终端断开检测：stdin 不再是 tty 时触发安全退出 */
+            if (!isatty(STDIN_FILENO)) {
+                log_info("ui", "Event loop exiting: stdin is no longer a TTY");
+                g_should_exit = 1;
+                break;
+            }
             if (esc_pending) {
                 uint64_t now = get_ui_time_ms();
                 if (now - esc_pending_time > ESC_TIMEOUT_MS) esc_pending = 0;
