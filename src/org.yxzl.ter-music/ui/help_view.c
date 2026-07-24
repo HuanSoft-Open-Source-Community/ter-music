@@ -25,6 +25,8 @@
  * Help internal state
  * ============================================================ */
 
+static int g_help_is_fallback = 0;
+
 #define HELP_MAX_LINES 2000
 #define HELP_SEARCH_RESULTS 200
 
@@ -58,6 +60,65 @@ void help_free_lines(void)
     }
     g_help_line_count = 0;
     g_help_loaded = 0;
+    g_help_is_fallback = 0;
+}
+
+/* Use full locale ID as help file suffix (matches XML lang id) */
+static const char *lang_id_to_short(const char *lang_id)
+{
+    if (!lang_id) return "en_US";
+    return lang_id;
+}
+
+/* Try to open a help text file; returns FILE* or NULL. */
+static FILE *help_try_open(const char *suffix)
+{
+    char path[MAX_PATH_LEN];
+
+    /* Priority 1: user help dir (~/.config/ter-music/help/) */
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(path, sizeof(path), "%s/.config/ter-music/help/help-quickstart-%s.txt", home, suffix);
+        FILE *f = fopen(path, "r");
+        if (f) return f;
+    }
+
+    /* Priority 2: TER_MUSIC_DATA_DIR */
+    snprintf(path, sizeof(path), TER_MUSIC_DATA_DIR "/help/help-quickstart-%s.txt", suffix);
+    FILE *f = fopen(path, "r");
+    if (f) return f;
+
+    /* Priority 3: /usr/share/ter-music/ */
+    snprintf(path, sizeof(path), "/usr/share/ter-music/help/help-quickstart-%s.txt", suffix);
+    f = fopen(path, "r");
+    if (f) return f;
+
+    /* Priority 4: relative to executable */
+    char exe_path[MAX_PATH_LEN];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len > 0) {
+        exe_path[len] = '\0';
+        char *dir = strrchr(exe_path, '/');
+        if (dir) {
+            *dir = '\0';
+            snprintf(path, sizeof(path), "%s/../share/ter-music/help/help-quickstart-%s.txt",
+                     exe_path, suffix);
+            f = fopen(path, "r");
+            if (f) return f;
+        }
+    }
+
+    /* Priority 5: CWD dev path */
+    snprintf(path, sizeof(path), "data/help/help-quickstart-%s.txt", suffix);
+    f = fopen(path, "r");
+    if (f) return f;
+
+    /* Priority 6: source tree (build-dir safe) */
+    snprintf(path, sizeof(path), TER_MUSIC_SOURCE_DIR "/data/help/help-quickstart-%s.txt", suffix);
+    f = fopen(path, "r");
+    if (f) return f;
+
+    return NULL;
 }
 
 static void help_load_file(void)
@@ -66,36 +127,19 @@ static void help_load_file(void)
 
     help_free_lines();
 
-    const char *suffix = i18n_current_lang();
-    char path[MAX_PATH_LEN];
+    const char *lang_id = i18n_current_lang();
+    const char *suffix = lang_id_to_short(lang_id);
     FILE *f = NULL;
 
-    snprintf(path, sizeof(path), TER_MUSIC_DATA_DIR "/help-quickstart-%s.txt", suffix);
-    f = fopen(path, "r");
+    /* First try: current language's help */
+    f = help_try_open(suffix);
 
+    /* If not found, fall back to English */
     if (!f) {
-        snprintf(path, sizeof(path), "/usr/share/ter-music/help-quickstart-%s.txt", suffix);
-        f = fopen(path, "r");
-    }
-
-    if (!f) {
-        char exe_path[MAX_PATH_LEN];
-        ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-        if (len > 0) {
-            exe_path[len] = '\0';
-            char *dir = strrchr(exe_path, '/');
-            if (dir) {
-                *dir = '\0';
-                snprintf(path, sizeof(path), "%s/../share/ter-music/help-quickstart-%s.txt",
-                         exe_path, suffix);
-                f = fopen(path, "r");
-            }
+        f = help_try_open("en_US");
+        if (f) {
+            g_help_is_fallback = 1;
         }
-    }
-
-    if (!f) {
-        snprintf(path, sizeof(path), "data/help-quickstart-%s.txt", suffix);
-        f = fopen(path, "r");
     }
 
     if (!f) return;
@@ -203,7 +247,9 @@ void render_help_content(void)
     int content_start_x = menu_width + 2;
     int start_y = 2;
 
-    int visible_lines = max_y - start_y - 5;
+    /* Reserve an extra line for fallback notice if active */
+    int fallback_banner = g_help_is_fallback ? 1 : 0;
+    int visible_lines = max_y - start_y - 5 - fallback_banner;
     if (visible_lines < 1) visible_lines = 1;
 
     int total_lines = g_help_line_count;
@@ -225,9 +271,29 @@ void render_help_content(void)
              i18n_get("menu.help"));
     mvprintw(start_y + 1, content_start_x, "========================================");
 
+    /* Fallback notice: show when help is from English but current language is not */
+    if (fallback_banner) {
+        const char *tmpl = i18n_get("help.fallback_notice");
+        const char *lname = i18n_current_lang_name();
+        char notice[512];
+        const char *placeholder = strstr(tmpl, "{name}");
+        if (placeholder) {
+            size_t pre_len = (size_t)(placeholder - tmpl);
+            snprintf(notice, sizeof(notice), "%.*s%s%s",
+                     (int)pre_len, tmpl, lname, placeholder + 6);
+        } else {
+            strncpy(notice, tmpl, sizeof(notice) - 1);
+            notice[sizeof(notice) - 1] = '\0';
+        }
+        attron(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+        mvprintw(start_y + 2, content_start_x, "%s", notice);
+        attroff(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+    }
+
+    int content_row = start_y + 3 + fallback_banner;
     for (int i = 0; i < visible_lines && (g_help_scroll_offset + i) < total_lines; i++) {
         int line_idx = g_help_scroll_offset + i;
-        int row = start_y + 3 + i;
+        int row = content_row + i;
 
         int is_match = 0;
         if (g_help_search_active && g_help_search_count > 0) {
@@ -275,7 +341,7 @@ void render_help_content(void)
     mvprintw(hint_row, max_x - (int)strlen(pos) - 3, "%s", pos);
 
     /* Draw scrollbar */
-    scrollbar_draw(stdscr, start_y + 3, visible_lines,
+    scrollbar_draw(stdscr, content_row, visible_lines,
                    total_lines, visible_lines, g_help_scroll_offset, max_x - 2);
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));

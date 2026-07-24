@@ -474,11 +474,17 @@
   <string key="lang_mgr.user">[用户]</string>
   <string key="lang_mgr.hint">↑/↓: 选择  ENTER: 切换  A: 添加  D: 删除  ESC: 返回</string>
   <string key="lang_mgr.actions">[ENTER]=设为当前  [A]=添加语言包  [D]=删除  [ESC]=返回</string>
-  <string key="lang_mgr.add_prompt">输入语言包 XML 文件路径：</string>
+  <string key="lang_mgr.add_prompt">输入语言包 .tar.gz 文件路径：</string>
   <string key="lang_mgr.switched">语言已切换</string>
   <string key="lang_mgr.added">语言包已添加</string>
   <string key="lang_mgr.add_failed">添加失败：文件无效或格式错误</string>
+  <string key="lang_mgr.tar_invalid">添加失败：文件不是有效的 tar.gz 格式</string>
+  <string key="lang_mgr.tar_no_xml">添加失败：tar.gz 中未找到 lang.xml</string>
+  <string key="lang_mgr.tar_extract_failed">添加失败：解压错误</string>
   <string key="lang_mgr.deleted">语言包已删除</string>
   <string key="lang_mgr.delete_failed">删除失败</string>
   <string key="lang_mgr.cannot_delete_builtin">内置语言不可删除</string>
+
+  <!-- ===== Help fallback ===== -->
+  <string key="help.fallback_notice">{name}语言包内帮助页面缺失，此处显示为缺省英文帮助页面！</string>
 </lang>

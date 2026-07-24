@@ -74,6 +74,12 @@ int i18n_available_languages(I18nLanguage *langs, int max);
  */
 const char *i18n_current_lang(void);
 
+/**
+ * Return the display name of the currently loaded language
+ * (e.g. "中文（简体）").  Falls back to "zh_CN" if unknown.
+ */
+const char *i18n_current_lang_name(void);
+
 /* ── Coverage ────────────────────────────────────────────────── */
 
 /**
@@ -91,16 +97,20 @@ double i18n_coverage(const char *lang_id);
 int i18n_is_builtin(const char *lang_id);
 
 /**
- * Copy an external .xml translation file into the user
+ * Copy an external .tar.gz language pack into the user
  * language directory (~/.config/ter-music/lang/<id>.xml).
- * Validates the XML structure before copying.
+ * The tar.gz must contain a lang.xml with a <lang id="...">
+ * attribute.  If a help.txt is also present, it is installed
+ * to ~/.config/ter-music/help/help-<id>.txt.
+ * Validates the XML structure before installing.
  * @return 0 on success, -1 on error.
  */
 int i18n_add_language(const char *source_path);
 
 /**
  * Delete a user-installed language pack.
- * Fails with -1 for built-in languages (zh_CN / en_US).
+ * Removes both the .xml and .txt files from the user config
+ * directory.  Fails with -1 for built-in languages (zh_CN / en_US).
  * @return 0 on success, -1 on error.
  */
 int i18n_delete_language(const char *lang_id);

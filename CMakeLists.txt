@@ -48,6 +48,9 @@ pkg_check_modules(PIPEWIRE libpipewire-0.3)
 pkg_check_modules(DBUS dbus-1)
 pkg_check_modules(LIBCURL libcurl)
 pkg_check_modules(LIBXML2 REQUIRED libxml-2.0)
+# zlib — required for tar.gz language pack extraction
+pkg_check_modules(ZLIB REQUIRED zlib)
+message(STATUS "Using zlib: ${ZLIB_VERSION}")
 # SQLite3 — required dependency
 # Install libsqlite3-dev (Debian) or sqlite-devel (RHEL) before building
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
@@ -169,6 +172,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${JPEG_INCLUDE_DIRS}
     ${LIBXML2_INCLUDE_DIRS}
     ${SQLITE3_INCLUDE_DIRS}
+    ${ZLIB_INCLUDE_DIRS}
 )
 
 if(DBUS_FOUND)
@@ -198,6 +202,7 @@ target_link_libraries(${PROJECT_NAME}
     ${NCURSESW_LIBRARY}
     ${LIBXML2_LIBRARIES}
     ${SQLITE3_LIBRARIES}
+    ${ZLIB_LIBRARIES}
     m
     ${PTHREAD_LIBRARY}
     ${CMAKE_DL_LIBS}
@@ -267,8 +272,8 @@ install(FILES resources/icons/hicolor/scalable/apps/${PROJECT_NAME}.svg
 )
 
 # 安装帮助文档
-install(FILES data/help-quickstart-zh.txt data/help-quickstart-en.txt
-        DESTINATION share/ter-music
+install(FILES data/help/help-quickstart-zh_CN.txt data/help/help-quickstart-en_US.txt
+        DESTINATION share/ter-music/help
 )
 
 # Install language translation files

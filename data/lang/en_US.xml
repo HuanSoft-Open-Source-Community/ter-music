@@ -474,11 +474,17 @@
   <string key="lang_mgr.user">[User]</string>
   <string key="lang_mgr.hint">Up/Down: select  ENTER: switch  A: add  D: delete  ESC: back</string>
   <string key="lang_mgr.actions">[ENTER]=Activate  [A]=Add pack  [D]=Delete  [ESC]=Back</string>
-  <string key="lang_mgr.add_prompt">Enter path to .xml language pack:</string>
+  <string key="lang_mgr.add_prompt">Enter language pack .tar.gz path:</string>
   <string key="lang_mgr.switched">Language switched</string>
   <string key="lang_mgr.added">Language pack added</string>
   <string key="lang_mgr.add_failed">Add failed: invalid or malformed file</string>
+  <string key="lang_mgr.tar_invalid">Add failed: not a valid tar.gz file</string>
+  <string key="lang_mgr.tar_no_xml">Add failed: lang.xml not found in tar.gz</string>
+  <string key="lang_mgr.tar_extract_failed">Add failed: extraction error</string>
   <string key="lang_mgr.deleted">Language pack deleted</string>
   <string key="lang_mgr.delete_failed">Delete failed</string>
   <string key="lang_mgr.cannot_delete_builtin">Cannot delete built-in languages</string>
+
+  <!-- ===== Help fallback ===== -->
+  <string key="help.fallback_notice">The help page for {name} is missing — displaying the default English help page instead.</string>
 </lang>
