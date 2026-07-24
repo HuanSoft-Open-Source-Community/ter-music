@@ -255,7 +255,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
         int64_t target_ts = av_rescale_q(target_position + cue_offset, (AVRational){1, 1}, time_base);
         int ret = av_seek_frame(fmt_ctx, audio_stream_index, target_ts, 0);
         if (ret < 0) {
-            update_controls_status(audio_text("跳转失败", "Seek failed"));
+            update_controls_status(i18n_get("audio.err.seek_failed"));
         } else {
             avcodec_flush_buffers(codec_ctx);
             if (swr_ctx) swr_init(swr_ctx);
@@ -649,12 +649,12 @@ void *play_audio_thread(void *arg)
 
     if (avformat_open_input(&fmt_ctx, file_path, NULL, NULL) != 0) {
         log_error("audio", "avformat_open_input failed for '%s' (index=%d)", file_path, index);
-        update_controls_status(audio_text("无法打开音频文件", "Cannot open audio file"));
+        update_controls_status(i18n_get("audio.err.cannot_open_file"));
         goto cleanup;
     }
     if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
         log_error("audio", "avformat_find_stream_info failed for '%s'", file_path);
-        update_controls_status(audio_text("无法读取音频流信息", "Cannot read stream info"));
+        update_controls_status(i18n_get("audio.err.cannot_read_stream"));
         goto cleanup;
     }
 
@@ -702,7 +702,7 @@ void *play_audio_thread(void *arg)
     }
     if (audio_stream_index == -1) {
         log_error("audio", "No audio stream found in '%s'", file_path);
-        update_controls_status(audio_text("未找到音频流", "No audio stream found"));
+        update_controls_status(i18n_get("audio.err.no_stream"));
         goto cleanup;
     }
 
@@ -710,14 +710,14 @@ void *play_audio_thread(void *arg)
     const AVCodec *codec = avcodec_find_decoder(codec_par->codec_id);
     if (!codec) {
         log_error("audio", "Unsupported codec in '%s' (codec_id=%d)", file_path, codec_par->codec_id);
-        update_controls_status(audio_text("当前编解码器不受支持", "Unsupported codec"));
+        update_controls_status(i18n_get("audio.err.unsupported_codec"));
         goto cleanup;
     }
 
     codec_ctx = avcodec_alloc_context3(codec);
-    if (!codec_ctx) { update_controls_status(audio_text("无法分配解码器上下文", "Cannot allocate codec context")); goto cleanup; }
-    if (avcodec_parameters_to_context(codec_ctx, codec_par) < 0) { update_controls_status(audio_text("无法复制编解码参数", "Cannot copy codec parameters")); goto cleanup; }
-    if (avcodec_open2(codec_ctx, codec, NULL) < 0) { update_controls_status(audio_text("无法打开编解码器", "Cannot open codec")); goto cleanup; }
+    if (!codec_ctx) { update_controls_status(i18n_get("audio.err.alloc_codec_ctx")); goto cleanup; }
+    if (avcodec_parameters_to_context(codec_ctx, codec_par) < 0) { update_controls_status(i18n_get("audio.err.copy_codec_params")); goto cleanup; }
+    if (avcodec_open2(codec_ctx, codec, NULL) < 0) { update_controls_status(i18n_get("audio.err.open_codec")); goto cleanup; }
 
     input_channels = codec_channel_count(codec_ctx);
     if (input_channels <= 0) input_channels = 2;
@@ -746,7 +746,7 @@ void *play_audio_thread(void *arg)
 
     /* ── Segment pool init ── */
     if (segment_pool_init(&seg_pool, output_sample_rate, output_channels) < 0) {
-        update_controls_status(audio_text("无法分配分段缓冲区", "Cannot allocate segment buffer"));
+        update_controls_status(i18n_get("audio.err.alloc_segment_buf"));
         goto cleanup;
     }
     pool_initialized = 1;
@@ -758,21 +758,21 @@ void *play_audio_thread(void *arg)
 
     if (use_resampler) {
         swr_ctx = swr_alloc();
-        if (!swr_ctx) { update_controls_status(audio_text("无法分配重采样器", "Cannot allocate resampler")); goto cleanup; }
+        if (!swr_ctx) { update_controls_status(i18n_get("audio.err.alloc_resampler")); goto cleanup; }
         if (init_resampler(swr_ctx, codec_ctx, input_channels, output_channels, output_sample_rate) < 0) {
-            update_controls_status(audio_text("无法初始化重采样器", "Cannot initialize resampler")); goto cleanup;
+            update_controls_status(i18n_get("audio.err.init_resampler")); goto cleanup;
         }
     }
 
     if (init_atempo_filter(codec_ctx, g_playback_speed) < 0) {
-        update_controls_status(audio_text("无法初始化倍速滤镜", "Cannot initialize speed filter")); goto cleanup;
+        update_controls_status(i18n_get("audio.err.init_speed_filter")); goto cleanup;
     }
 
     packet = av_packet_alloc();
     frame = av_frame_alloc();
     filtered_frame = av_frame_alloc();
     if (!packet || !frame || !filtered_frame) {
-        update_controls_status(audio_text("无法分配解码数据结构", "Cannot allocate decode structures"));
+        update_controls_status(i18n_get("audio.err.alloc_decode"));
         goto cleanup;
     }
 
@@ -1090,7 +1090,7 @@ void *play_audio_thread(void *arg)
 
         /* Write to audio backend */
         if (audio_backend_write_samples(write_ptr, batch) < 0) {
-            update_controls_status(audio_text("写入音频设备失败", "Audio device write failed"));
+            update_controls_status(i18n_get("audio.err.device_write"));
             playback_error = 1;
             break;
         }

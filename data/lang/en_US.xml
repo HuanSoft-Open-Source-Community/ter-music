@@ -191,6 +191,7 @@
   <!-- ===== Controls ===== -->
   <string key="controls.playlist"> Playlist </string>
   <string key="controls.lyrics"> Lyrics </string>
+  <string key="controls.lyrics_seek"> [Seek] Lyrics </string>
   <string key="controls.controls_area">Controls</string>
   <string key="controls.ctrl_focus">[Ctrl Focus]</string>
   <string key="controls.list_focus">[List Focus]</string>
@@ -388,6 +389,13 @@
   <string key="lyrics.seek_enabled">Lyric seek enabled</string>
   <string key="lyrics.seek_disabled">Lyric seek disabled</string>
   <string key="lyrics.no_position">No lyric position available</string>
+  <string key="lyrics.not_available">No lyrics available</string>
+  <string key="lyrics.no_lyrics_emoji">🎵 No Lyrics 🎶</string>
+  <string key="lyrics.no_lyrics">No Lyrics</string>
+  <string key="lyrics.particle_emoji">Letters · Symbols · Emoji</string>
+  <string key="lyrics.particle_text">Letter + Symbol Particles</string>
+  <string key="lyrics.instrumental">(Instrumental)</string>
+  <string key="lyrics.playing">Playing...</string>
 
   <!-- ===== General status messages ===== -->
   <string key="status.folder_loaded">Folder loaded</string>
@@ -417,6 +425,42 @@
   <string key="main.warn.no_audio_files">Warning: no audio files found</string>
   <string key="main.warn.invalid_remote">Warning: invalid remote URL</string>
   <string key="main.warn.prefix">Warning: </string>
+
+  <!-- ===== Audio backend messages ===== -->
+  <string key="audio.backend.pipewire">Using PipeWire backend</string>
+  <string key="audio.backend.pulseaudio">Connected to PulseAudio</string>
+  <string key="audio.backend.alsa">Using ALSA backend</string>
+  <string key="audio.status.downloading">Downloading...</string>
+  <string key="audio.status.playing">Playing: </string>
+  <string key="audio.err.pulseaudio_disconnected">PulseAudio disconnected</string>
+  <string key="audio.err.pulseaudio_create_stream">Cannot create PulseAudio stream</string>
+  <string key="audio.err.pulseaudio_connect_stream">Cannot connect PulseAudio stream</string>
+  <string key="audio.err.pulseaudio_init_failed">PulseAudio stream init failed</string>
+  <string key="audio.err.alsa_not_ready">ALSA backend not ready</string>
+  <string key="audio.err.alsa_open">Cannot open ALSA device</string>
+  <string key="audio.err.alsa_config">Cannot configure ALSA device</string>
+  <string key="audio.err.no_backend">No audio backend available</string>
+  <string key="audio.err.seek_failed">Seek failed</string>
+  <string key="audio.err.cannot_open_file">Cannot open audio file</string>
+  <string key="audio.err.cannot_read_stream">Cannot read stream info</string>
+  <string key="audio.err.no_stream">No audio stream found</string>
+  <string key="audio.err.unsupported_codec">Unsupported codec</string>
+  <string key="audio.err.alloc_codec_ctx">Cannot allocate codec context</string>
+  <string key="audio.err.copy_codec_params">Cannot copy codec parameters</string>
+  <string key="audio.err.open_codec">Cannot open codec</string>
+  <string key="audio.err.alloc_segment_buf">Cannot allocate segment buffer</string>
+  <string key="audio.err.alloc_resampler">Cannot allocate resampler</string>
+  <string key="audio.err.init_resampler">Cannot initialize resampler</string>
+  <string key="audio.err.init_speed_filter">Cannot initialize speed filter</string>
+  <string key="audio.err.alloc_decode">Cannot allocate decode structures</string>
+  <string key="audio.err.device_write">Audio device write failed</string>
+  <string key="audio.pw.create_loop">Cannot create PipeWire thread loop</string>
+  <string key="audio.pw.create_context">Cannot create PipeWire context</string>
+  <string key="audio.pw.connect">Cannot connect to PipeWire</string>
+  <string key="audio.pw.create_stream">Cannot create PipeWire stream</string>
+  <string key="audio.pw.connect_stream">Cannot connect PipeWire stream</string>
+  <string key="audio.pw.start_thread">Cannot start PipeWire thread</string>
+  <string key="audio.pw.stream_not_ready">PW stream not ready</string>
 
   <!-- ===== Sort modes ===== -->
   <string key="sort.title">Title</string>
@@ -484,6 +528,25 @@
   <string key="lang_mgr.deleted">Language pack deleted</string>
   <string key="lang_mgr.delete_failed">Delete failed</string>
   <string key="lang_mgr.cannot_delete_builtin">Cannot delete built-in languages</string>
+
+  <!-- ===== Help view hotkeys ===== -->
+  <string key="help.search_matches">Search: %d matches | n/N: next | Left: sidebar</string>
+  <string key="help.scroll_hint">Up/Down: scroll 3 lines  |  /: search  |  Left: sidebar</string>
+
+  <!-- ===== Hotkey labels ===== -->
+  <string key="hotkey.f1">F1:Home</string>
+  <string key="hotkey.f2">F2:Settings</string>
+  <string key="hotkey.f3">F3:History</string>
+  <string key="hotkey.f4">F4:Playlists</string>
+  <string key="hotkey.f5">F5:Favorites</string>
+  <string key="hotkey.f6">F6:Info</string>
+  <string key="hotkey.f7">F7:Lang</string>
+  <string key="hotkey.f8">F8:Help</string>
+  <string key="hotkey.f9">F9:Quit</string>
+
+  <!-- ===== Playlist fallback strings ===== -->
+  <string key="playlist.unknown_artist">Unknown Artist</string>
+  <string key="playlist.unknown_album">Unknown Album</string>
 
   <!-- ===== Help fallback ===== -->
   <string key="help.fallback_notice">The help page for {name} is missing — displaying the default English help page instead.</string>

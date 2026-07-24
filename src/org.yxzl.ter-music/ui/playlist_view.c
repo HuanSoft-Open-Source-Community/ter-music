@@ -276,7 +276,7 @@ void handle_playlist_input(int ch)
                         }
                     }
 
-                    render_menu_frame("歌单 [F4]");
+                    render_menu_frame(i18n_get("menu.playlists"));
                     render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
                     render_playlist_manager_content();
                 } else if (g_menu_selected_idx == PLAYLIST_ITEM_COUNT - 1) {
@@ -370,7 +370,7 @@ void handle_playlist_input(int ch)
                         }
                     }
 
-                    render_menu_frame("歌单 [F4]");
+                    render_menu_frame(i18n_get("menu.playlists"));
                     render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
                     render_playlist_manager_content();
                 }

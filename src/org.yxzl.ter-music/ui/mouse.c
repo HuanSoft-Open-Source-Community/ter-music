@@ -10,6 +10,7 @@
  */
 
 #include "types.h"
+#include "i18n/i18n.h"
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
@@ -234,16 +235,12 @@ int get_lyric_index_from_window_row(int window_y, int *lyric_index, double *time
 
 int get_menu_hint_fkey_from_column(int screen_x)
 {
-    static const char *menu_labels_zh[] = {
-        "F1:主页", "F2:设置", "F3:历史", "F4:歌单",
-        "F5:收藏", "F6:信息", "F7:中/EN", "F8:帮助", "F9:退出"
-    };
-    static const char *menu_labels_en[] = {
-        "F1:Home", "F2:Settings", "F3:History", "F4:Playlists",
-        "F5:Favorites", "F6:Info", "F7:Lang", "F8:Help", "F9:Quit"
+    const char *labels[] = {
+        i18n_get("hotkey.f1"), i18n_get("hotkey.f2"), i18n_get("hotkey.f3"),
+        i18n_get("hotkey.f4"), i18n_get("hotkey.f5"), i18n_get("hotkey.f6"),
+        i18n_get("hotkey.f7"), i18n_get("hotkey.f8"), i18n_get("hotkey.f9")
     };
 
-    const char **labels = use_english_ui() ? menu_labels_en : menu_labels_zh;
     int col = 2;
 
     for (int i = 0; i < 9; i++) {

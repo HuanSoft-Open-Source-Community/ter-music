@@ -118,10 +118,6 @@ char g_default_audio_device[128] = "default";
  * Helpers
  * ============================================================ */
 
-const char *audio_text(const char *utf8, const char *ascii) {
-    return use_english_ui() ? ascii : utf8;
-}
-
 static int clamp_volume_percent(int volume) {
     if (volume < 0) return 0;
     if (volume > 100) return 100;
@@ -212,7 +208,7 @@ void init_audio_device(void)
             if (pw_probe_backend() == 0) {
                 g_active_backend = AUDIO_BACKEND_PIPEWIRE;
                 log_info("audio", "PipeWire backend selected");
-                printf("%s\n", audio_text("当前使用 PipeWire 音频后端", "Using PipeWire backend"));
+                printf("%s\n", i18n_get("audio.backend.pipewire"));
                 return;
             }
             pipewire_unload(); pipewire_loaded = 0;
@@ -241,7 +237,7 @@ void init_audio_device(void)
             pa_connected = 1;
             g_active_backend = AUDIO_BACKEND_PULSE;
             log_info("audio", "PulseAudio connected successfully");
-            printf("%s\n", audio_text("已连接到 PulseAudio 服务", "Connected to PulseAudio"));
+            printf("%s\n", i18n_get("audio.backend.pulseaudio"));
             return;
 
 pulse_failed:
@@ -259,7 +255,7 @@ pulse_failed:
             alsa_ready = 1;
             g_active_backend = AUDIO_BACKEND_ALSA;
             log_info("audio", "ALSA backend ready, device='default'");
-            printf("%s\n", audio_text("当前使用 ALSA 音频后端", "Using ALSA backend"));
+            printf("%s\n", i18n_get("audio.backend.alsa"));
             return;
         } else if (g_active_backend == AUDIO_BACKEND_ALSA) {
             log_error("audio", "ALSA library could not be loaded");
@@ -658,7 +654,7 @@ start_playback:
             if (audio_fd >= 0) close(audio_fd);
         }
         if (audio_fd >= 0) {
-            update_controls_status(audio_text("正在下载...", "Downloading..."));
+            update_controls_status(i18n_get("audio.status.downloading"));
             refresh();
             if (remote_fetch_to_file(track_path, tmp_audio) == 0) {
                 strncpy(g_cached_audio_path, tmp_audio, MAX_PATH_LEN - 1);
@@ -723,7 +719,7 @@ start_playback:
     get_track_metadata(index, &track);
     char msg[64];
     snprintf(msg, sizeof(msg), "%s%s - %s",
-             audio_text("正在播放：", "Playing: "), track.title, track.artist);
+             i18n_get("audio.status.playing"), track.title, track.artist);
     update_controls_status(msg);
     add_history_entry(&track);
     log_info("audio", "Now playing: '%s' - '%s' (idx=%d)", track.title, track.artist, index);

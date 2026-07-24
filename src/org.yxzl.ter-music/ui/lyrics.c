@@ -2,6 +2,7 @@
 #include "types.h"
 #include "audio/audio.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "ui/menu_internal.h"
 #include "config/config.h"
 #include "ui/scrollbar.h"
@@ -39,10 +40,6 @@ Lyrics g_lyrics = {
 
 // 外部窗口变量声明
 extern WINDOW *win_lyrics;
-
-static const char *lyric_text(const char *utf8, const char *ascii) {
-    return use_english_ui() ? ascii : utf8;
-}
 
 static uint64_t lyric_now_ms(void) {
     struct timespec ts;
@@ -131,7 +128,7 @@ static int use_emoji_no_lyrics_title(void) {
 
 static void render_no_lyrics_spectrum(int h, int w) {
     if (h < 12 || w < 24) {
-        mvwprintw(win_lyrics, h / 2, 2, "%s", lyric_text("没有可用歌词", "No lyrics available"));
+        mvwprintw(win_lyrics, h / 2, 2, "%s", i18n_get("lyrics.not_available"));
         return;
     }
 
@@ -240,11 +237,11 @@ static void render_no_lyrics_spectrum(int h, int w) {
     }
 
     const char *title = use_emoji_no_lyrics_title()
-        ? lyric_text("🎵 暂无歌词 🎶", "🎵 No Lyrics 🎶")
-        : lyric_text("暂无歌词", "No Lyrics");
+        ? i18n_get("lyrics.no_lyrics_emoji")
+        : i18n_get("lyrics.no_lyrics");
     const char *subtitle = use_emoji_no_lyrics_title()
-        ? lyric_text("字母 · 符号 · Emoji", "Letters · Symbols · Emoji")
-        : lyric_text("字母 · 符号粒子", "Letter + Symbol Particles");
+        ? i18n_get("lyrics.particle_emoji")
+        : i18n_get("lyrics.particle_text");
     int title_col = center_x - utf8_str_width(title) / 2;
     int subtitle_col = center_x - utf8_str_width(subtitle) / 2;
     int text_row = center_y + disc_outer + max_bar_len + 1;
@@ -896,7 +893,7 @@ static int parse_lrc_line(const char *line, double *timestamp, char *text) {
 
     // 如果歌词文本为空，使用占位符
     if (len == 0) {
-        snprintf(text, MAX_LYRIC_TEXT_LEN, "%s", lyric_text("(纯音乐)", "(Instrumental)"));
+        snprintf(text, MAX_LYRIC_TEXT_LEN, "%s", i18n_get("lyrics.instrumental"));
     }
     
     return 1;
@@ -1365,9 +1362,9 @@ void render_lyrics(void) {
     // 重绘边框和标题
     rounded_box(win_lyrics);
     if (g_lyric_cursor_mode) {
-        mvwprintw(win_lyrics, 0, 2, "%s", lyric_text(" [定位] 歌词 ", " [Seek] Lyrics "));
+        mvwprintw(win_lyrics, 0, 2, "%s", i18n_get("controls.lyrics_seek"));
     } else {
-        mvwprintw(win_lyrics, 0, 2, "%s", lyric_text(" 歌词 ", " Lyrics "));
+        mvwprintw(win_lyrics, 0, 2, "%s", i18n_get("controls.lyrics"));
     }
     
     wattroff(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
@@ -1389,7 +1386,7 @@ void render_lyrics(void) {
         if (message_row >= h - 1) {
             message_row = h - 2;
         }
-        mvwprintw(win_lyrics, message_row, 2, "%s", lyric_text("播放中...", "Playing..."));
+        mvwprintw(win_lyrics, message_row, 2, "%s", i18n_get("lyrics.playing"));
         pthread_mutex_unlock(&g_lyrics.lock);
         wrefresh(win_lyrics);
         return;

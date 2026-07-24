@@ -18,11 +18,6 @@ int use_ascii_fallback_ui(void) {
     return g_ascii_fallback_ui;
 }
 
-int use_english_ui(void) {
-    if (g_ascii_fallback_ui) return 1;
-    const char *lang = i18n_current_lang();
-    return (strcmp(lang, "zh_CN") != 0);
-}
 int utf8_str_truncate(char *dest, const char *src, int max_cols) {
     if (!dest || !src || max_cols <= 0) {
         if (dest) *dest = '\0';

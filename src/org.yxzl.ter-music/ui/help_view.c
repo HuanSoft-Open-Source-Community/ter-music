@@ -318,15 +318,11 @@ void render_help_content(void)
     char hint[256];
     if (g_help_search_active && g_help_search_count > 0) {
         snprintf(hint, sizeof(hint),
-                 use_english_ui()
-                     ? "Search: %d matches | n/N: next | Left: sidebar"
-                     : "搜索: %d 个匹配 | n/N: 下一个 | 左键: 侧栏",
+                 i18n_get("help.search_matches"),
                  g_help_search_count);
     } else {
         snprintf(hint, sizeof(hint),
-                 use_english_ui()
-                     ? "Up/Down: scroll 3 lines  |  /: search  |  Left: sidebar"
-                     : "上/下: 滚动3行  |  /: 搜索  |  左键: 侧栏");
+                 i18n_get("help.scroll_hint"));
     }
 
     int display_end = g_help_scroll_offset + visible_lines;

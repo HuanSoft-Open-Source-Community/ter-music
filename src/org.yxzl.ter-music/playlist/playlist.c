@@ -7,6 +7,7 @@
 #include "playlist/ape_tag.h"
 #include "ui/braille/braille_art.h"
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "logger/logger.h"
@@ -819,8 +820,8 @@ static void fill_metadata_from_filename(const char *path, char *title, char *art
     }
 
     utf8_str_truncate(title, temp_title, MAX_META_LEN - 1);
-    utf8_str_truncate(artist, "未知艺术家", MAX_META_LEN - 1);
-    utf8_str_truncate(album, "未知专辑", MAX_META_LEN - 1);
+    utf8_str_truncate(artist, i18n_get("playlist.unknown_artist"), MAX_META_LEN - 1);
+    utf8_str_truncate(album, i18n_get("playlist.unknown_album"), MAX_META_LEN - 1);
 
     char *dash_pos = strstr(temp_title, " - ");
     if (dash_pos) {

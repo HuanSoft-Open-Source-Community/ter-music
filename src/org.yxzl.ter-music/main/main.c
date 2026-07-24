@@ -388,9 +388,7 @@ int main(int argc, char *argv[]) {
             } else {
                 log_warn("main", "Failed to parse remote URL: %s", open_path);
                 mvprintw(2, 2, "%s",
-                         use_english_ui()
-                             ? "Warning: invalid remote URL"
-                             : "警告：远程 URL 格式无效");
+                         i18n_get("main.warn.invalid_remote"));
                 mvprintw(3, 2, "%s", i18n_get("main.continue_default"));
                 refresh();
                 used_fallback = 1;
@@ -430,9 +428,7 @@ int main(int argc, char *argv[]) {
         } else {
             mvprintw(2, 2, i18n_get("main.warn.invalid_path"), open_path);
             mvprintw(3, 2, "%s",
-                     use_english_ui()
-                         ? "Continuing with current directory and default paths..."
-                         : "将继续尝试当前目录和默认启动路径...");
+                     i18n_get("main.continue_default"));
             refresh();
             used_fallback = 1;
         }
@@ -464,8 +460,7 @@ int main(int argc, char *argv[]) {
 
             if (used_fallback) {
                 mvprintw(4, 2,
-                         use_english_ui() ? "Auto-detected music folder in current directory: %s"
-                                          : "已从当前目录自动找到音乐目录：%s",
+                         i18n_get("main.auto_detect"),
                          auto_found_path);
                 refresh();
             }

@@ -415,7 +415,7 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
                  i18n_get(current_settings_options[option_index]), separator, align_str);
     } else if (option_index == SETTINGS_IDX_DEFAULT_PLAY_MODE) {
         const char *mode_str = play_mode_display_name(
-            (PlayMode)g_app_config.default_play_mode, use_english_ui());
+            (PlayMode)g_app_config.default_play_mode, 0);
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator, mode_str);
     } else if (option_index == SETTINGS_IDX_ADVANCED_PLAY_MODES) {

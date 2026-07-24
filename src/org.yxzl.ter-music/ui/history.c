@@ -161,7 +161,7 @@ void handle_history_input(int ch)
                     clear_dir_history();
                     g_content_selected_idx = 0;
                     show_status_message(i18n_get("history.cleared"));
-                    render_menu_frame("历史 [F3]");
+                    render_menu_frame(i18n_get("menu.history"));
                     render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
                     render_history_content();
                 } else if (g_menu_selected_idx == HISTORY_ITEM_COUNT - 1) {

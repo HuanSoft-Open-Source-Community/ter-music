@@ -12,6 +12,7 @@
 #include "audio/audio_internal.h"
 #include <ncursesw/ncurses.h>
 #include "ui/ui.h"
+#include "i18n/i18n.h"
 #include "logger/logger.h"
 #include <dlfcn.h>
 #include <stdio.h>
@@ -357,11 +358,6 @@ int pw_probe_backend(void) {
 /* Forward reference to shared helper from audio.c */
 int get_configured_latency_ms(void);
 
-static const char *pw_audio_text(const char *utf8, const char *ascii) {
-    extern int use_english_ui(void);
-    return use_english_ui() ? ascii : utf8;
-}
-
 int pw_prepare_stream(int sample_rate, int channels) {
     pw_channels = channels;
     pw_sample_rate = sample_rate;
@@ -379,16 +375,14 @@ int pw_prepare_stream(int sample_rate, int channels) {
 
     pw_loop = PW.thread_loop_new("ter-music-pw", NULL);
     if (!pw_loop) {
-        update_controls_status(pw_audio_text("无法创建 PipeWire 线程循环",
-                                             "Cannot create PW thread loop"));
+        update_controls_status(i18n_get("audio.pw.create_loop"));
         return -1;
     }
     pw_mainloop = PW.thread_loop_get_loop(pw_loop);
 
     pw_ctx = PW.context_new(pw_mainloop, NULL, 0);
     if (!pw_ctx) {
-        update_controls_status(pw_audio_text("无法创建 PipeWire 上下文",
-                                             "Cannot create PW context"));
+        update_controls_status(i18n_get("audio.pw.create_context"));
         PW.thread_loop_destroy(pw_loop);
         pw_loop = NULL; pw_mainloop = NULL;
         return -1;
@@ -396,8 +390,7 @@ int pw_prepare_stream(int sample_rate, int channels) {
 
     pw_core = PW.context_connect(pw_ctx, NULL, 0);
     if (!pw_core) {
-        update_controls_status(pw_audio_text("无法连接到 PipeWire",
-                                             "Cannot connect to PipeWire"));
+        update_controls_status(i18n_get("audio.pw.connect"));
         PW.context_destroy(pw_ctx); pw_ctx = NULL;
         PW.thread_loop_destroy(pw_loop);
         pw_loop = NULL; pw_mainloop = NULL;
@@ -406,8 +399,7 @@ int pw_prepare_stream(int sample_rate, int channels) {
 
     pw_s = PW.stream_new(pw_core, "ter-music", NULL);
     if (!pw_s) {
-        update_controls_status(pw_audio_text("无法创建 PipeWire 流",
-                                             "Cannot create PW stream"));
+        update_controls_status(i18n_get("audio.pw.create_stream"));
         PW.core_disconnect(pw_core); pw_core = NULL;
         PW.context_destroy(pw_ctx); pw_ctx = NULL;
         PW.thread_loop_destroy(pw_loop);
@@ -427,8 +419,7 @@ int pw_prepare_stream(int sample_rate, int channels) {
                      PW_STREAM_FLAG_MAP_BUFFERS |
                      PW_STREAM_FLAG_DONT_RECONNECT;
     if (PW.stream_connect(pw_s, PW_DIRECTION_OUTPUT, 0, flags, params, 1) < 0) {
-        update_controls_status(pw_audio_text("无法连接 PipeWire 流",
-                                             "Cannot connect PW stream"));
+        update_controls_status(i18n_get("audio.pw.connect_stream"));
         PW.stream_destroy(pw_s); pw_s = NULL;
         PW.core_disconnect(pw_core); pw_core = NULL;
         PW.context_destroy(pw_ctx); pw_ctx = NULL;
@@ -438,8 +429,7 @@ int pw_prepare_stream(int sample_rate, int channels) {
     }
 
     if (PW.thread_loop_start(pw_loop) < 0) {
-        update_controls_status(pw_audio_text("无法启动 PipeWire 线程",
-                                             "Cannot start PW thread"));
+        update_controls_status(i18n_get("audio.pw.start_thread"));
         PW.stream_destroy(pw_s); pw_s = NULL;
         PW.core_disconnect(pw_core); pw_core = NULL;
         PW.context_destroy(pw_ctx); pw_ctx = NULL;
@@ -498,7 +488,7 @@ int pw_prepare_stream(int sample_rate, int channels) {
     }
 
     if (!is_ready) {
-        update_controls_status(pw_audio_text("PipeWire 流未就绪", "PW stream not ready"));
+        update_controls_status(i18n_get("audio.pw.stream_not_ready"));
         goto pw_cleanup_and_fail;
     }
 

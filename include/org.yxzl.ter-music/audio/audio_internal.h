@@ -116,7 +116,6 @@ struct AVCodecContext;
 struct AVFrame;
 
 /* ---- 通用辅助函数（定义在 audio.c） ---- */
-const char *audio_text(const char *utf8, const char *ascii);
 int  get_configured_latency_ms(void);
 void apply_volume_to_samples(int32_t *samples, int sample_count);
 

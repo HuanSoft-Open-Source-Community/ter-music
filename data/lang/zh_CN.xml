@@ -191,6 +191,7 @@
   <!-- ===== Controls ===== -->
   <string key="controls.playlist">播放列表</string>
   <string key="controls.lyrics">歌词</string>
+  <string key="controls.lyrics_seek">[定位] 歌词</string>
   <string key="controls.controls_area">控制区</string>
   <string key="controls.ctrl_focus">[控件焦点]</string>
   <string key="controls.list_focus">[列表焦点]</string>
@@ -388,6 +389,13 @@
   <string key="lyrics.seek_enabled">已进入歌词定位模式</string>
   <string key="lyrics.seek_disabled">已退出歌词定位模式</string>
   <string key="lyrics.no_position">当前没有可定位的歌词</string>
+  <string key="lyrics.not_available">没有可用歌词</string>
+  <string key="lyrics.no_lyrics_emoji">🎵 暂无歌词 🎶</string>
+  <string key="lyrics.no_lyrics">暂无歌词</string>
+  <string key="lyrics.particle_emoji">字母 · 符号 · Emoji</string>
+  <string key="lyrics.particle_text">字母 · 符号粒子</string>
+  <string key="lyrics.instrumental">(纯音乐)</string>
+  <string key="lyrics.playing">播放中...</string>
 
   <!-- ===== General status messages ===== -->
   <string key="status.folder_loaded">目录加载成功</string>
@@ -417,6 +425,42 @@
   <string key="main.warn.no_audio_files">警告：没有找到音频文件</string>
   <string key="main.warn.invalid_remote">警告：远程 URL 格式无效</string>
   <string key="main.warn.prefix">警告：</string>
+
+  <!-- ===== Audio backend messages ===== -->
+  <string key="audio.backend.pipewire">当前使用 PipeWire 音频后端</string>
+  <string key="audio.backend.pulseaudio">已连接到 PulseAudio 服务</string>
+  <string key="audio.backend.alsa">当前使用 ALSA 音频后端</string>
+  <string key="audio.status.downloading">正在下载...</string>
+  <string key="audio.status.playing">正在播放：</string>
+  <string key="audio.err.pulseaudio_disconnected">PulseAudio 未连接</string>
+  <string key="audio.err.pulseaudio_create_stream">无法创建 PulseAudio 播放流</string>
+  <string key="audio.err.pulseaudio_connect_stream">无法连接 PulseAudio 播放流</string>
+  <string key="audio.err.pulseaudio_init_failed">PulseAudio 播放流初始化失败</string>
+  <string key="audio.err.alsa_not_ready">ALSA 后端未就绪</string>
+  <string key="audio.err.alsa_open">无法打开 ALSA 设备</string>
+  <string key="audio.err.alsa_config">无法配置 ALSA 设备</string>
+  <string key="audio.err.no_backend">没有可用的音频后端</string>
+  <string key="audio.err.seek_failed">跳转失败</string>
+  <string key="audio.err.cannot_open_file">无法打开音频文件</string>
+  <string key="audio.err.cannot_read_stream">无法读取音频流信息</string>
+  <string key="audio.err.no_stream">未找到音频流</string>
+  <string key="audio.err.unsupported_codec">当前编解码器不受支持</string>
+  <string key="audio.err.alloc_codec_ctx">无法分配解码器上下文</string>
+  <string key="audio.err.copy_codec_params">无法复制编解码参数</string>
+  <string key="audio.err.open_codec">无法打开编解码器</string>
+  <string key="audio.err.alloc_segment_buf">无法分配分段缓冲区</string>
+  <string key="audio.err.alloc_resampler">无法分配重采样器</string>
+  <string key="audio.err.init_resampler">无法初始化重采样器</string>
+  <string key="audio.err.init_speed_filter">无法初始化倍速滤镜</string>
+  <string key="audio.err.alloc_decode">无法分配解码数据结构</string>
+  <string key="audio.err.device_write">写入音频设备失败</string>
+  <string key="audio.pw.create_loop">无法创建 PipeWire 线程循环</string>
+  <string key="audio.pw.create_context">无法创建 PipeWire 上下文</string>
+  <string key="audio.pw.connect">无法连接到 PipeWire</string>
+  <string key="audio.pw.create_stream">无法创建 PipeWire 流</string>
+  <string key="audio.pw.connect_stream">无法连接 PipeWire 流</string>
+  <string key="audio.pw.start_thread">无法启动 PipeWire 线程</string>
+  <string key="audio.pw.stream_not_ready">PipeWire 流未就绪</string>
 
   <!-- ===== Sort modes ===== -->
   <string key="sort.title">标题</string>
@@ -484,6 +528,25 @@
   <string key="lang_mgr.deleted">语言包已删除</string>
   <string key="lang_mgr.delete_failed">删除失败</string>
   <string key="lang_mgr.cannot_delete_builtin">内置语言不可删除</string>
+
+  <!-- ===== Help view hotkeys ===== -->
+  <string key="help.search_matches">搜索: %d 个匹配 | n/N: 下一个 | 左键: 侧栏</string>
+  <string key="help.scroll_hint">上/下: 滚动3行  |  /: 搜索  |  左键: 侧栏</string>
+
+  <!-- ===== Hotkey labels ===== -->
+  <string key="hotkey.f1">F1:主页</string>
+  <string key="hotkey.f2">F2:设置</string>
+  <string key="hotkey.f3">F3:历史</string>
+  <string key="hotkey.f4">F4:歌单</string>
+  <string key="hotkey.f5">F5:收藏</string>
+  <string key="hotkey.f6">F6:信息</string>
+  <string key="hotkey.f7">F7:中/EN</string>
+  <string key="hotkey.f8">F8:帮助</string>
+  <string key="hotkey.f9">F9:退出</string>
+
+  <!-- ===== Playlist fallback strings ===== -->
+  <string key="playlist.unknown_artist">未知艺术家</string>
+  <string key="playlist.unknown_album">未知专辑</string>
 
   <!-- ===== Help fallback ===== -->
   <string key="help.fallback_notice">{name}语言包内帮助页面缺失，此处显示为缺省英文帮助页面！</string>
