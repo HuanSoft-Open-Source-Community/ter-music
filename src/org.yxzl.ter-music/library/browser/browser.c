@@ -22,6 +22,7 @@
 #include "playlist/playlist.h"
 #include "audio/audio.h"
 #include "ui/ui.h"
+#include "ui/dialog.h"
 #include "logger/logger.h"
 #include <ncursesw/ncurses.h>
 #include <string.h>
@@ -478,11 +479,16 @@ static void handle_home_input(int ch) {
         }
         break;
     case 's':
-    case 'S':
-        /* Scan directory — for now, scan from current working directory */
-        library_scan_directory(".");
+    case 'S': {
+        char scan_path[MAX_PATH_LEN] = ".";
+        prompt_text_input(stdscr, LINES - 2, 2,
+                          "Scan directory: ", scan_path, sizeof(scan_path), 0, 0, 0);
+        if (scan_path[0] != '\0') {
+            library_scan_directory(scan_path);
+        }
         request_ui_refresh(UI_DIRTY_PLAYLIST);
         break;
+    }
     case 'r':
     case 'R':
         library_scan_all_roots();
@@ -501,10 +507,14 @@ static void handle_artist_input(int ch) {
     case KEY_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case KEY_DOWN:
         if (g_library_state.selected_index < g_library_state.item_count - 1)
             g_library_state.selected_index++;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case '\n':
     case ' ':
@@ -542,10 +552,14 @@ static void handle_album_input(int ch) {
     case KEY_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case KEY_DOWN:
         if (g_library_state.selected_index < g_library_state.item_count - 1)
             g_library_state.selected_index++;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case '\n':
     case ' ':
@@ -592,10 +606,14 @@ static void handle_genre_input(int ch) {
     case KEY_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case KEY_DOWN:
         if (g_library_state.selected_index < g_library_state.item_count - 1)
             g_library_state.selected_index++;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case '\n':
     case ' ':
@@ -631,10 +649,14 @@ static void handle_track_list_input(int ch, const int *rowids, int count) {
     case KEY_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case KEY_DOWN:
         if (g_library_state.selected_index < count - 1)
             g_library_state.selected_index++;
+        g_library_state.scroll_offset = ensure_scroll_visible(
+            g_library_state.selected_index, g_library_state.scroll_offset, 25);
         break;
     case '\n':
     case ' ':

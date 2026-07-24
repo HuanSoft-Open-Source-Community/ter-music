@@ -20,7 +20,7 @@
 #include "logger/logger.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
-#include "search/search.h"
+#include "config/config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -455,6 +455,11 @@ int library_init(void) {
     exec_sql("PRAGMA journal_mode=WAL");
     /* Enable foreign keys */
     exec_sql("PRAGMA foreign_keys=ON");
+    /* Performance tuning */
+    exec_sql("PRAGMA synchronous=NORMAL");         /* safe with WAL */
+    exec_sql("PRAGMA cache_size=-16000");          /* 64 MB page cache */
+    exec_sql("PRAGMA mmap_size=268435456");        /* 256 MB memory-mapped I/O */
+    exec_sql("PRAGMA temp_store=MEMORY");          /* temp tables in RAM */
 
     /* Create schema */
     if (exec_sql(g_schema_sql) != 0) {
@@ -468,6 +473,34 @@ int library_init(void) {
 
     g_library_available = 1;
     log_info("library", "Library database initialized successfully");
+
+    /* Auto-register scan roots from user config */
+    {
+        const char *paths[] = {
+            g_app_config.default_startup_path,
+            g_app_config.last_opened_path,
+            g_app_config.last_played_folder_path,
+            NULL
+        };
+        for (int i = 0; paths[i]; i++) {
+            if (paths[i][0] != '\0') {
+                struct stat st;
+                if (stat(paths[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+                    /* Inline INSERT — mutex already held by library_init() */
+                    sqlite3_stmt *stmt = NULL;
+                    sqlite3_prepare_v2(g_db,
+                        "INSERT OR IGNORE INTO scan_roots(path, last_scanned, recursive)"
+                        " VALUES(?, 0, 1)", -1, &stmt, NULL);
+                    if (stmt) {
+                        sqlite3_bind_text(stmt, 1, paths[i], -1, SQLITE_STATIC);
+                        sqlite3_step(stmt);
+                        sqlite3_finalize(stmt);
+                    }
+                }
+            }
+        }
+    }
+
     pthread_mutex_unlock(&g_library_mutex);
     return 0;
 }
@@ -483,7 +516,9 @@ void library_shutdown(void) {
     }
 
     if (g_db) {
-        /* Close all prepared statements would go here in later phases */
+        /* Graceful shutdown: optimize query planner + checkpoint WAL */
+        exec_sql("PRAGMA optimize");
+        exec_sql("PRAGMA wal_checkpoint(TRUNCATE)");
         sqlite3_close(g_db);
         g_db = NULL;
     }
@@ -506,72 +541,138 @@ int library_scan_directory(const char *dir_path) {
     int count = 0;
     sqlite3_exec(g_db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
 
-    /* Use a stack-based iterative approach to avoid deep recursion */
-    /* For simplicity in Phase 1, use a single-level scan */
-    /* Full recursive scan will be implemented in Phase 2 */
-    DIR *dir = opendir(dir_path);
-    if (!dir) {
-        log_error("library", "Cannot open directory: %s", dir_path);
+    /* Read recursive flag from scan_roots */
+    int scan_recursive = 1;
+    {
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(g_db,
+                "SELECT recursive FROM scan_roots WHERE path = ?", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, dir_path, -1, SQLITE_STATIC);
+            if (sqlite3_step(stmt) == SQLITE_ROW)
+                scan_recursive = sqlite3_column_int(stmt, 0);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    /* Dynamic stack for directory paths (BFS-safe iterative traversal) */
+    size_t stack_cap = 64;
+    size_t stack_len = 0;
+    char **stack = malloc(stack_cap * sizeof(char *));
+    if (!stack) {
+        log_error("library", "Failed to allocate scan stack");
         sqlite3_exec(g_db, "ROLLBACK", NULL, NULL, NULL);
         pthread_mutex_unlock(&g_library_mutex);
         return -1;
     }
 
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
+    /* Push initial directory */
+    stack[stack_len] = strdup(dir_path);
+    if (!stack[stack_len]) {
+        free(stack);
+        sqlite3_exec(g_db, "ROLLBACK", NULL, NULL, NULL);
+        pthread_mutex_unlock(&g_library_mutex);
+        return -1;
+    }
+    stack_len++;
+
+    /* Iterate stack — pop one dir, scan its files, push its subdirs */
+    while (stack_len > 0) {
         if (g_scan_cancel) break;
 
-        if (entry->d_name[0] == '.') continue;  /* skip hidden files and . and .. */
+        stack_len--;
+        char *current_dir = stack[stack_len];
 
-        /* Build full path */
-        char full_path[MAX_PATH_LEN];
-        int path_len = snprintf(full_path, sizeof(full_path), "%s/%s",
-                                dir_path, entry->d_name);
-        if (path_len < 0 || (size_t)path_len >= sizeof(full_path)) continue;
-
-        struct stat st;
-        if (stat(full_path, &st) != 0) continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            /* Recursion will be handled in Phase 2 */
-            /* For now, skip subdirectories in the scan */
+        DIR *dir = opendir(current_dir);
+        if (!dir) {
+            free(current_dir);
             continue;
         }
 
-        if (!is_audio_file(entry->d_name)) continue;
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (g_scan_cancel) break;
 
-        time_t mtime = st.st_mtime;
-        if (track_exists_and_unchanged(full_path, mtime)) {
-            continue;  /* Incremental: skip unchanged files */
-        }
+            if (entry->d_name[0] == '.') continue;
 
-        if (insert_or_update_track(full_path, mtime) > 0) {
-            count++;
+            /* Build full path */
+            char full_path[MAX_PATH_LEN];
+            int path_len = snprintf(full_path, sizeof(full_path), "%s/%s",
+                                    current_dir, entry->d_name);
+            if (path_len < 0 || (size_t)path_len >= sizeof(full_path)) continue;
+
+            struct stat st;
+            if (stat(full_path, &st) != 0) continue;
+
+            if (S_ISDIR(st.st_mode)) {
+                /* Push subdirectory onto stack if recursive */
+                if (scan_recursive) {
+                    /* Grow stack if needed */
+                    if (stack_len >= stack_cap) {
+                        size_t new_cap = stack_cap * 2;
+                        char **new_stack = realloc(stack, new_cap * sizeof(char *));
+                        if (!new_stack) continue;
+                        stack = new_stack;
+                        stack_cap = new_cap;
+                    }
+                    stack[stack_len] = strdup(full_path);
+                    if (stack[stack_len]) stack_len++;
+                }
+                continue;
+            }
+
+            if (!is_audio_file(entry->d_name)) continue;
+
+            time_t mtime = st.st_mtime;
+            if (track_exists_and_unchanged(full_path, mtime)) continue;
+
+            if (insert_or_update_track(full_path, mtime) > 0) {
+                count++;
+            }
+            /* Update progress atomically */
+            g_scan_progress++;
         }
+        closedir(dir);
+        free(current_dir);
     }
-    closedir(dir);
 
-    sqlite3_exec(g_db, "COMMIT", NULL, NULL, NULL);
-    log_info("library", "Scanned '%s': %d tracks added/updated", dir_path, count);
+    /* Clean up remaining stack entries on cancel */
+    while (stack_len > 0) {
+        free(stack[--stack_len]);
+    }
+    free(stack);
+
+    if (g_scan_cancel) {
+        sqlite3_exec(g_db, "ROLLBACK", NULL, NULL, NULL);
+        log_info("library", "Scan cancelled at '%s': %d tracks processed", dir_path, count);
+    } else {
+        sqlite3_exec(g_db, "COMMIT", NULL, NULL, NULL);
+        /* Update last_scanned timestamp in scan_roots */
+        {
+            sqlite3_stmt *stmt = NULL;
+            if (sqlite3_prepare_v2(g_db,
+                    "UPDATE scan_roots SET last_scanned = ? WHERE path = ?",
+                    -1, &stmt, NULL) == SQLITE_OK) {
+                sqlite3_bind_int64(stmt, 1, (sqlite3_int64)time(NULL));
+                sqlite3_bind_text(stmt, 2, dir_path, -1, SQLITE_STATIC);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        }
+        log_info("library", "Scanned '%s': %d tracks added/updated", dir_path, count);
+    }
+
     pthread_mutex_unlock(&g_library_mutex);
-    return count;
+    return g_scan_cancel ? -2 : count;
 }
 
 int library_scan_file(const char *file_path) {
     if (!library_is_available()) return -1;
     if (!file_path || !file_path[0]) return -1;
 
-    /* Check if it's an audio file */
-    const char *ext = strrchr(file_path, '.');
-    if (!ext) return 0;
-    int is_audio = 0;
-    for (int i = 0; audio_extensions[i]; i++) {
-        if (strcmp(ext, audio_extensions[i]) == 0) {
-            is_audio = 1;
-            break;
-        }
-    }
-    if (!is_audio) return 0;
+    /* Check if it's an audio file — reuse is_audio_file() from playlist.c */
+    const char *filename = strrchr(file_path, '/');
+    filename = filename ? filename + 1 : file_path;
+    if (!is_audio_file(filename)) return 0;
 
     time_t mtime = get_file_mtime(file_path);
     if (mtime == 0) return -1;
@@ -760,7 +861,7 @@ int library_scan_directory_async(const char *dir_path) {
         g_scan_in_progress = 0;
         return -1;
     }
-    pthread_detach(g_scan_thread);
+    /* Thread stays joinable — library_shutdown() will join it */
     return 0;
 }
 
@@ -801,6 +902,11 @@ static void *scan_thread_func(void *arg) {
     /* Do the actual scan */
     int result = library_scan_directory(dir_path);
     (void)result;
+
+    /* Auto-prune tracks whose files no longer exist on disk */
+    if (result > 0) {
+        library_prune_missing();
+    }
 
     free(dir_path);
     g_scan_in_progress = 0;
