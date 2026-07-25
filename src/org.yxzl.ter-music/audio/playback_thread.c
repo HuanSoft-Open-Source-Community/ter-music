@@ -809,7 +809,11 @@ void *play_audio_thread(void *arg)
             dst->frame_count = src->frame_count;
             dst->consumed_frames = 0;
             dst->segment_id = s;
-            dst->is_last = 0;   /* will be corrected by decoder in Phase 3 fill */
+            /* is_last: this is the final segment if it is the last
+             * preloaded slot AND it covers the end of the track.
+             * Phase 3 only decodes free slots (> current), so slot 0's
+             * is_last would never be corrected if left at 0 here. */
+            dst->is_last = (s == n - 1) && (s >= seg_pool.total_segments - 1);
             dst->is_valid = (src->frame_count > 0);
         }
         seg_pool.current_slot = 0;
@@ -1014,6 +1018,28 @@ void *play_audio_thread(void *arg)
                 break;
             }
 
+            /* If current slot is invalid (never filled) and decoder is
+             * finished, check whether any other slot still holds
+             * unconsumed data before declaring end-of-stream. */
+            if (!segment_pool_current(&seg_pool) && decoder_finished) {
+                int has_remaining = 0;
+                for (int s = 0; s < SEGMENT_POOL_SIZE; s++) {
+                    if (s == seg_pool.current_slot) continue;
+                    Segment *candidate = &seg_pool.slots[s];
+                    if (candidate->is_valid &&
+                        candidate->frame_count > candidate->consumed_frames) {
+                        has_remaining = 1;
+                        break;
+                    }
+                }
+                if (!has_remaining) {
+                    reached_end_of_stream = 1;
+                    break;
+                }
+                /* There is still data in other slots — let Phase 5
+                 * recovery pick it up. */
+            }
+
             /* Trigger next-track preload when within 2 segments of the end */
             extern AppConfig g_app_config;
             if (g_app_config.seamless_preload && !preload_attempted &&
@@ -1040,6 +1066,22 @@ void *play_audio_thread(void *arg)
                                             next_global,
                                             (decoder_finished || next_global >= seg_pool.total_segments - 1));
                 }
+            } else if (free_slot < 0 && !segment_pool_current(&seg_pool) && decoder_finished) {
+                /* Advance failed but current slot is still invalid and decoder
+                 * is done.  If another slot has unconsumed data, jump to it
+                 * directly so Phase 5 can play it out. */
+                for (int s = 0; s < SEGMENT_POOL_SIZE; s++) {
+                    if (s == seg_pool.current_slot) continue;
+                    Segment *candidate = &seg_pool.slots[s];
+                    if (candidate->is_valid &&
+                        candidate->frame_count > candidate->consumed_frames) {
+                        log_debug("audio", "Phase 4 recovery: advancing to slot %d with remaining data",
+                                  s);
+                        seg_pool.current_slot = s;
+                        seg_pool.current_segment_id = candidate->segment_id;
+                        break;
+                    }
+                }
             }
             continue;
         }
@@ -1047,26 +1089,31 @@ void *play_audio_thread(void *arg)
         /* ── Phase 5: Write batch from current segment ── */
         Segment *cur = segment_pool_current(&seg_pool);
         if (!cur) {
-            if (decoder_finished) { reached_end_of_stream = 1; break; }
-            /* Current slot invalid but decoder not finished: try to recover by
-             * advancing to the next valid slot if one exists. This prevents
-             * getting stuck when a slot was never filled (e.g. decoder_finished
-             * triggered during Phase 3 fill before all slots were ready). */
-            {   /* scan for any valid slot other than current */
-                int recovered = 0;
-                for (int s = 0; s < SEGMENT_POOL_SIZE; s++) {
-                    if (seg_pool.slots[s].is_valid && s != seg_pool.current_slot) {
-                        log_debug("audio", "Recovering: advancing from invalid slot %d to valid slot %d",
-                                  seg_pool.current_slot, s);
-                        seg_pool.current_slot = s;
-                        seg_pool.current_segment_id = seg_pool.slots[s].segment_id;
-                        recovered = 1;
-                        break;
-                    }
+            /* Current slot invalid: try to recover by finding another
+             * valid slot in the pool that still has unconsumed data.
+             * This is attempted even when decoder_finished is true,
+             * because there may still be data in other slots that
+             * should be played before we declare end-of-stream. */
+            int recovered = 0;
+            for (int s = 0; s < SEGMENT_POOL_SIZE; s++) {
+                if (s == seg_pool.current_slot) continue;
+                Segment *candidate = &seg_pool.slots[s];
+                if (candidate->is_valid &&
+                    candidate->frame_count > candidate->consumed_frames) {
+                    log_debug("audio", "Recovering: advancing from invalid slot %d to valid slot %d",
+                              seg_pool.current_slot, s);
+                    seg_pool.current_slot = s;
+                    seg_pool.current_segment_id = candidate->segment_id;
+                    recovered = 1;
+                    break;
                 }
-                if (!recovered) {
-                    log_debug("audio", "Recovery failed: no valid slots — waiting for decode");
-                }
+            }
+            if (!recovered && decoder_finished) {
+                reached_end_of_stream = 1;
+                break;
+            }
+            if (!recovered) {
+                log_debug("audio", "Recovery failed: no valid slots — waiting for decode");
             }
             continue;
         }

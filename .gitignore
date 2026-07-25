@@ -52,6 +52,7 @@ oadoc/
 
 .lingma/*
 .trae
+.reasonix/
 .claude/
 .tmp/*
 .*_temp/
