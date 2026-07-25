@@ -529,6 +529,8 @@ void run_event_loop(void)
                 case KEY_UP:
                     if (g_lyric_cursor_mode && g_lyrics.has_lyrics) {
                         pthread_mutex_lock(&g_lyrics.lock);
+                        if (g_lyrics.cursor_index < 0)
+                            g_lyrics.cursor_index = g_lyrics.current_index;
                         if (g_lyrics.cursor_index > 0) {
                             g_lyrics.cursor_index--;
                             g_lyric_cursor_index = g_lyrics.cursor_index;
@@ -554,6 +556,8 @@ void run_event_loop(void)
                 case KEY_DOWN:
                     if (g_lyric_cursor_mode && g_lyrics.has_lyrics) {
                         pthread_mutex_lock(&g_lyrics.lock);
+                        if (g_lyrics.cursor_index < 0)
+                            g_lyrics.cursor_index = g_lyrics.current_index;
                         if (g_lyrics.cursor_index < g_lyrics.count - 1) {
                             g_lyrics.cursor_index++;
                             g_lyric_cursor_index = g_lyrics.cursor_index;

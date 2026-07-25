@@ -1135,6 +1135,7 @@ static int extract_embedded_lyrics(const char *audio_path)
     g_lyrics.current_index = has_timestamps ? -1 : 0;
     g_lyrics.highlight_count = 0;
     g_lyrics.cursor_index = -1;
+    g_lyric_cursor_mode = 0;
     g_lyrics.source = LYRICS_SOURCE_EMBEDDED;
     pthread_mutex_unlock(&g_lyrics.lock);
 
@@ -1263,6 +1264,7 @@ void load_lyrics(const char *audio_path, int lyrics_source) {
     g_lyrics.current_index = -1;
     g_lyrics.highlight_count = 0;
     g_lyrics.cursor_index = -1;
+    g_lyric_cursor_mode = 0;
     g_lyrics.source = LYRICS_SOURCE_EXTERNAL;
     pthread_mutex_unlock(&g_lyrics.lock);
 
