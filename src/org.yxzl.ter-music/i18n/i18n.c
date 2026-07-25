@@ -680,7 +680,7 @@ int i18n_add_language(const char *source_path)
             if (help_dir) {
                 mkdir(help_dir, 0755);
                 char help_dest[MAX_PATH_LEN];
-                snprintf(help_dest, sizeof(help_dest), "%s/help-%s.txt", help_dir, lang_id);
+                snprintf(help_dest, sizeof(help_dest), "%s/help-quickstart-%s.txt", help_dir, lang_id);
 
                 FILE *hs = fopen(help_src, "rb");
                 FILE *hd = fopen(help_dest, "wb");
@@ -739,7 +739,7 @@ int i18n_delete_language(const char *lang_id)
     const char *help_dir = i18n_user_help_dir();
     if (help_dir) {
         char help_path[MAX_PATH_LEN];
-        snprintf(help_path, sizeof(help_path), "%s/help-%s.txt", help_dir, lang_id);
+        snprintf(help_path, sizeof(help_path), "%s/help-quickstart-%s.txt", help_dir, lang_id);
         unlink(help_path);
     }
 
