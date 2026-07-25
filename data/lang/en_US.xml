@@ -396,6 +396,8 @@
   <string key="lyrics.particle_text">Letter + Symbol Particles</string>
   <string key="lyrics.instrumental">(Instrumental)</string>
   <string key="lyrics.playing">Playing...</string>
+  <string key="lyrics.source_embedded">[Embedded] Lyrics source: embedded</string>
+  <string key="lyrics.source_external">[External] Lyrics source: external LRC file</string>
 
   <!-- ===== General status messages ===== -->
   <string key="status.folder_loaded">Folder loaded</string>

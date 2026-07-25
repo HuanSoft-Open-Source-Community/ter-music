@@ -396,6 +396,8 @@
   <string key="lyrics.particle_text">字母 · 符号粒子</string>
   <string key="lyrics.instrumental">(纯音乐)</string>
   <string key="lyrics.playing">播放中...</string>
+  <string key="lyrics.source_embedded">[内置] 歌词来源：歌曲内嵌</string>
+  <string key="lyrics.source_external">[外置] 歌词来源：LRC 文件</string>
 
   <!-- ===== General status messages ===== -->
   <string key="status.folder_loaded">目录加载成功</string>

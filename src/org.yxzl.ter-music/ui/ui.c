@@ -706,6 +706,18 @@ void run_event_loop(void)
                     break;
                 case 9:   /* Tab */
                 case KEY_BTAB:  /* Shift+Tab (KEY_BTAB = 353) */
+                    /* ── Lyric cursor mode: toggle between embedded / external lyrics ── */
+                    if (g_lyric_cursor_mode && g_lyrics.has_lyrics) {
+                        int new_source = (g_lyrics.source == LYRICS_SOURCE_EMBEDDED)
+                            ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
+                        reload_lyrics_with_source(new_source);
+                        update_controls_status(
+                            new_source == LYRICS_SOURCE_EMBEDDED
+                                ? i18n_get("lyrics.source_embedded")
+                                : i18n_get("lyrics.source_external"));
+                        continue;
+                    }
+
                     if (playlist_is_loaded()) {
                         /* Save browser cursor position before switching to queue */
                         if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER)

@@ -10,6 +10,7 @@
 #include "logger/logger.h"
 #include "playlist/playlist.h"
 #include "playlist/ape_tag.h"
+#include "library/library.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,7 @@ Lyrics g_lyrics = {
     .has_lyrics = 0,
     .has_timestamps = 0,
     .cursor_index = -1,
+    .source = LYRICS_SOURCE_AUTO,
     .lock = PTHREAD_MUTEX_INITIALIZER
 };
 
@@ -416,6 +418,7 @@ static void reset_loaded_lyrics(void) {
     g_lyrics.has_lyrics = 0;
     g_lyrics.has_timestamps = 0;
     g_lyrics.cursor_index = -1;
+    g_lyrics.source = LYRICS_SOURCE_AUTO;
     pthread_mutex_unlock(&g_lyrics.lock);
 }
 
@@ -1153,6 +1156,7 @@ static int extract_embedded_lyrics(const char *audio_path)
     g_lyrics.current_index = has_timestamps ? -1 : 0;
     g_lyrics.highlight_count = 0;
     g_lyrics.cursor_index = -1;
+    g_lyrics.source = LYRICS_SOURCE_EMBEDDED;
     pthread_mutex_unlock(&g_lyrics.lock);
 
     log_info("lyrics", "Loaded %d embedded lyric lines from '%s' (timestamps=%d)",
@@ -1160,16 +1164,29 @@ static int extract_embedded_lyrics(const char *audio_path)
     return 0;
 }
 
-void load_lyrics(const char *audio_path) {
+void load_lyrics(const char *audio_path, int lyrics_source) {
     if (!audio_path) {
         return;
     }
-    log_debug("lyrics", "load_lyrics(path='%s') called", audio_path);
+    log_debug("lyrics", "load_lyrics(path='%s', source=%d) called", audio_path, lyrics_source);
 
-    /* Phase 1: Embedded lyrics (highest priority) */
-    if (extract_embedded_lyrics(audio_path) == 0) {
-        log_debug("lyrics", "Using embedded lyrics for '%s'", audio_path);
-        return;
+    /* Phase 1: Embedded lyrics */
+    if (lyrics_source == LYRICS_SOURCE_AUTO || lyrics_source == LYRICS_SOURCE_EMBEDDED) {
+        if (extract_embedded_lyrics(audio_path) == 0) {
+            log_debug("lyrics", "Using embedded lyrics for '%s'", audio_path);
+            return;
+        }
+        /* AUTO mode: fall through to external LRC. EMBEDDED mode: stop here. */
+        if (lyrics_source == LYRICS_SOURCE_EMBEDDED) {
+            log_debug("lyrics", "Embedded-only mode, no lyrics found for '%s'", audio_path);
+            reset_loaded_lyrics();
+            return;
+        }
+    }
+
+    /* EXTERNAL-only mode: skip embedded entirely */
+    if (lyrics_source == LYRICS_SOURCE_EXTERNAL) {
+        log_debug("lyrics", "External-only mode, skipping embedded for '%s'", audio_path);
     }
     
     // 构造 LRC 文件路径
@@ -1267,6 +1284,7 @@ void load_lyrics(const char *audio_path) {
     g_lyrics.current_index = -1;
     g_lyrics.highlight_count = 0;
     g_lyrics.cursor_index = -1;
+    g_lyrics.source = LYRICS_SOURCE_EXTERNAL;
     pthread_mutex_unlock(&g_lyrics.lock);
 
     log_info("lyrics", "Loaded %d lyric lines from '%s'", count, lrc_path);
@@ -1280,7 +1298,27 @@ void clear_lyrics(void) {
     g_lyrics.highlight_count = 0;
     g_lyrics.has_lyrics = 0;
     g_lyrics.has_timestamps = 0;
+    g_lyrics.source = LYRICS_SOURCE_AUTO;
     pthread_mutex_unlock(&g_lyrics.lock);
+}
+
+void reload_lyrics_with_source(int new_source) {
+    char track_path[MAX_PATH_LEN];
+    if (playlist_get_track_path(g_current_play_index, track_path, sizeof(track_path)) != 0) {
+        log_warn("lyrics", "reload_lyrics_with_source: cannot get current track path");
+        return;
+    }
+
+    /* Persist the preference to the database */
+    library_set_lyrics_source(track_path, new_source);
+
+    /* Reload lyrics with the new source */
+    load_lyrics(track_path, new_source);
+
+    /* Refresh the display */
+    if (g_current_view == VIEW_MAIN) {
+        render_lyrics();
+    }
 }
 
 void update_lyrics_display(void) {

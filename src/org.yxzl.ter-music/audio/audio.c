@@ -27,6 +27,7 @@
 #include "remote/remote.h"
 #include "logger/logger.h"
 #include "ui/braille/braille_art.h"
+#include "library/library.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -711,7 +712,8 @@ start_playback:
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
 
-    load_lyrics(local_lyrics_path[0] ? local_lyrics_path : track_path);
+    int lyrics_source = library_get_lyrics_source(track_path);
+    load_lyrics(local_lyrics_path[0] ? local_lyrics_path : track_path, lyrics_source);
     if (g_current_view == VIEW_MAIN) render_lyrics();
     update_album_cover_for_track(local_audio_path[0] ? local_audio_path : track_path);
 

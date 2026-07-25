@@ -163,7 +163,11 @@ static const char *g_schema_sql =
     "  track_path  TEXT NOT NULL"
     ");"
 
-    "INSERT OR IGNORE INTO schema_version(version) VALUES (2);";
+    "INSERT OR IGNORE INTO schema_version(version) VALUES (2);"
+
+    /* --- v3: Lyrics source preference per track --- */
+    "ALTER TABLE tracks ADD COLUMN lyrics_source INTEGER DEFAULT 0;"
+    "INSERT OR IGNORE INTO schema_version(version) VALUES (3);";
 
 /* ========== Forward declarations of internal functions ========== */
 static void build_db_path(char *buf, size_t buf_size);
@@ -385,12 +389,14 @@ static int insert_or_update_track(const char *path, time_t mtime) {
     int rc = sqlite3_prepare_v2(g_db,
         "INSERT OR REPLACE INTO tracks("
         "  path, title, artist, album, genre, year, duration_seconds,"
-        "  mtime, file_size, added_at, last_played_at, play_count"
+        "  mtime, file_size, added_at, last_played_at, play_count,"
+        "  lyrics_source"
         ") VALUES("
         "  ?, ?, ?, ?, ?, ?, ?,"
         "  ?, ?, COALESCE((SELECT added_at FROM tracks WHERE path = ?), ?),"
         "  COALESCE((SELECT last_played_at FROM tracks WHERE path = ?), 0),"
-        "  COALESCE((SELECT play_count FROM tracks WHERE path = ?), 0)"
+        "  COALESCE((SELECT play_count FROM tracks WHERE path = ?), 0),"
+        "  COALESCE((SELECT lyrics_source FROM tracks WHERE path = ?), 0)"
         ")",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -411,6 +417,7 @@ static int insert_or_update_track(const char *path, time_t mtime) {
     sqlite3_bind_int64(stmt, 11, (sqlite3_int64)now);       /* default added_at */
     sqlite3_bind_text(stmt, 12, path, -1, SQLITE_STATIC);   /* subquery for last_played_at */
     sqlite3_bind_text(stmt, 13, path, -1, SQLITE_STATIC);   /* subquery for play_count */
+    sqlite3_bind_text(stmt, 14, path, -1, SQLITE_STATIC);   /* subquery for lyrics_source */
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -1109,7 +1116,7 @@ int library_get_track_metadata(int rowid, Track *out) {
     pthread_mutex_lock(&g_library_mutex);
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g_db,
-        "SELECT path, title, artist, album FROM tracks WHERE rowid = ?",
+        "SELECT path, title, artist, album, lyrics_source FROM tracks WHERE rowid = ?",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         pthread_mutex_unlock(&g_library_mutex);
@@ -1137,6 +1144,7 @@ int library_get_track_metadata(int rowid, Track *out) {
     out->artist[sizeof(out->artist) - 1] = '\0';
     strncpy(out->album, album ? album : "", sizeof(out->album) - 1);
     out->album[sizeof(out->album) - 1] = '\0';
+    out->lyrics_source = sqlite3_column_int(stmt, 4);
 
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(&g_library_mutex);
@@ -1655,6 +1663,48 @@ int library_history_get_all(HistoryEntry *entries, int max_entries) {
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(&g_library_mutex);
     return count;
+}
+
+/* ========== Public API: Lyrics Source Preference ========== */
+
+int library_get_lyrics_source(const char *track_path) {
+    if (!library_is_available() || !track_path || !track_path[0]) return LYRICS_SOURCE_AUTO;
+
+    pthread_mutex_lock(&g_library_mutex);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(g_db,
+        "SELECT lyrics_source FROM tracks WHERE path = ?", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&g_library_mutex);
+        return LYRICS_SOURCE_AUTO;
+    }
+    sqlite3_bind_text(stmt, 1, track_path, -1, SQLITE_STATIC);
+
+    int source = LYRICS_SOURCE_AUTO;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        source = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_library_mutex);
+    return source;
+}
+
+void library_set_lyrics_source(const char *track_path, int source) {
+    if (!library_is_available() || !track_path || !track_path[0]) return;
+
+    pthread_mutex_lock(&g_library_mutex);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(g_db,
+        "UPDATE tracks SET lyrics_source = ? WHERE path = ?", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&g_library_mutex);
+        return;
+    }
+    sqlite3_bind_int(stmt, 1, source);
+    sqlite3_bind_text(stmt, 2, track_path, -1, SQLITE_STATIC);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_library_mutex);
 }
 
 /* ========== Public API: User Playlists (SQLite-backed) ========== */

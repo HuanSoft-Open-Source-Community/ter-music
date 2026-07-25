@@ -183,6 +183,20 @@ const char *library_get_track_path(int rowid);
  */
 int library_get_track_count(void);
 
+/* ========== Lyrics Source Preference ========== */
+
+/**
+ * Get the lyrics source preference for a track by path.
+ * Returns LYRICS_SOURCE_AUTO (0) if no preference is stored.
+ */
+int library_get_lyrics_source(const char *track_path);
+
+/**
+ * Set the lyrics source preference for a track by path.
+ * Persisted immediately to the database.
+ */
+void library_set_lyrics_source(const char *track_path, int source);
+
 /* ========== Browsing Dimensions ========== */
 
 /**

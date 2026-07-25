@@ -23,6 +23,7 @@ typedef struct {
     int has_lyrics;                     // 是否成功加载歌词
     int has_timestamps;                 // 1=有 LRC 时间戳, 0=纯文本嵌入歌词
     int cursor_index;                   // 光标位置索引（编辑模式下使用）
+    int source;                         // 实际加载来源: LYRICS_SOURCE_*
     pthread_mutex_t lock;               // 互斥锁
 } Lyrics;
 
@@ -30,10 +31,17 @@ typedef struct {
 extern Lyrics g_lyrics;
 
 /**
- * 从音频文件路径加载对应的 LRC 歌词文件
+ * 从音频文件路径加载歌词
  * @param audio_path 音频文件路径（如 /path/to/song.mp3）
+ * @param lyrics_source 歌词来源偏好: LYRICS_SOURCE_AUTO/EMBEDDED/EXTERNAL
  */
-void load_lyrics(const char *audio_path);
+void load_lyrics(const char *audio_path, int lyrics_source);
+
+/**
+ * 用指定的歌词源重新加载当前曲目的歌词（用于 Tab 切换）
+ * @param new_source 新的歌词来源 (LYRICS_SOURCE_EMBEDDED / LYRICS_SOURCE_EXTERNAL)
+ */
+void reload_lyrics_with_source(int new_source);
 
 /**
  * 渲染歌词到窗口

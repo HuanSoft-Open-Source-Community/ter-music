@@ -169,6 +169,11 @@ typedef struct {
 
 #define CONFIG_CURRENT_VERSION 4
 
+/* ── Lyrics source preference ── */
+#define LYRICS_SOURCE_AUTO     0   /* default: embedded first, then external */
+#define LYRICS_SOURCE_EMBEDDED 1   /* force embedded lyrics only */
+#define LYRICS_SOURCE_EXTERNAL 2   /* force external .lrc file only */
+
 typedef struct {
     char path[MAX_PATH_LEN];
     char title[MAX_META_LEN];
@@ -176,6 +181,7 @@ typedef struct {
     char album[MAX_META_LEN];
     int cue_offset;          /* seconds offset within the file (0 = not a CUE sub-track) */
     int cue_track_number;    /* CUE track number (0 = not a CUE sub-track) */
+    int lyrics_source;       /* LYRICS_SOURCE_AUTO / EMBEDDED / EXTERNAL */
 } Track;
 
 typedef struct {
