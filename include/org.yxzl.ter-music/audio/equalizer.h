@@ -25,6 +25,7 @@ extern "C" {
 #define EQ_GAIN_MAX       12
 #define EQ_PREAMP_MIN    -12
 #define EQ_PREAMP_MAX     12
+#define EQ_PRESET_COUNT   10
 
 /* ISO standard centre frequencies for a 10-band graphic equaliser (Hz) */
 extern const int eq_band_frequencies[EQ_BAND_COUNT];
@@ -70,6 +71,15 @@ int  eq_get_band_gain(int band);
  * @param gains  Array of EQ_BAND_COUNT gain values in dB.
  */
 void eq_set_all_gains(const int gains[EQ_BAND_COUNT]);
+
+/**
+ * Apply a built-in EQ preset by index (0 … EQ_PRESET_COUNT-1).
+ * This enables the EQ and loads the preset band gains.
+ * The caller is responsible for saving config afterwards.
+ *
+ * @param idx  Preset index; clamped to valid range.
+ */
+void eq_apply_preset(int idx);
 
 #ifdef __cplusplus
 }

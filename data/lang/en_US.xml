@@ -222,6 +222,7 @@
   <string key="popup.sort"> Sort </string>
   <string key="popup.align"> Align </string>
   <string key="popup.cue_enc"> CUE Enc </string>
+  <string key="popup.eq_preset"> Preset </string>
   <string key="popup.latency"> Latency </string>
 
   <!-- ===== Player status ===== -->
@@ -376,9 +377,21 @@
   <string key="remote.field.base_path">Base Path</string>
 
   <!-- ===== Equalizer ===== -->
+  <!-- Preset names -->
+  <string key="eq.preset.rock">Rock</string>
+  <string key="eq.preset.pop">Pop</string>
+  <string key="eq.preset.classical">Classical</string>
+  <string key="eq.preset.jazz">Jazz</string>
+  <string key="eq.preset.electronic">Electronic</string>
+  <string key="eq.preset.vocal">Vocal</string>
+  <string key="eq.preset.bass_boost">Bass Boost</string>
+  <string key="eq.preset.live">Live</string>
+  <string key="eq.preset.balanced">Balanced</string>
+  <string key="eq.preset.flat">Flat</string>
+
   <string key="eq.title_enabled">Equalizer [Enabled]</string>
   <string key="eq.title_disabled">Equalizer [Disabled]</string>
-  <string key="eq.hint">←/→ select     ↑/↓ adjust  ESC back  ENTER toggle</string>
+  <string key="eq.hint">←/→ select     ↑/↓ adjust  P:preset  ESC back  ENTER toggle</string>
   <string key="eq.preampl">Pre-amp</string>
   <string key="eq.enabled">Equalizer enabled</string>
   <string key="eq.disabled">Equalizer disabled</string>

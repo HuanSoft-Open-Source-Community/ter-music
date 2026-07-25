@@ -222,6 +222,7 @@
   <string key="popup.sort"> 排序方式 </string>
   <string key="popup.align"> 对齐方式 </string>
   <string key="popup.cue_enc"> CUE编码 </string>
+  <string key="popup.eq_preset"> 预设 </string>
   <string key="popup.latency"> 时延 </string>
 
   <!-- ===== Player status ===== -->
@@ -376,9 +377,21 @@
   <string key="remote.field.base_path">基础路径</string>
 
   <!-- ===== Equalizer ===== -->
+  <!-- 预设名称 -->
+  <string key="eq.preset.rock">摇滚</string>
+  <string key="eq.preset.pop">流行</string>
+  <string key="eq.preset.classical">古典</string>
+  <string key="eq.preset.jazz">爵士</string>
+  <string key="eq.preset.electronic">电子</string>
+  <string key="eq.preset.vocal">人声</string>
+  <string key="eq.preset.bass_boost">重低音</string>
+  <string key="eq.preset.live">现场</string>
+  <string key="eq.preset.balanced">通用平衡</string>
+  <string key="eq.preset.flat">平坦</string>
+
   <string key="eq.title_enabled">均衡器 [已启用]</string>
   <string key="eq.title_disabled">均衡器 [已禁用]</string>
-  <string key="eq.hint">←/→ 选     ↑/↓ 调整  ESC 返回  ENTER 开关</string>
+  <string key="eq.hint">←/→ 选     ↑/↓ 调整  P:预设  ESC 返回  ENTER 开关</string>
   <string key="eq.preampl">预增益</string>
   <string key="eq.enabled">均衡器已启用</string>
   <string key="eq.disabled">均衡器已禁用</string>

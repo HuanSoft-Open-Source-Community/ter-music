@@ -175,12 +175,9 @@ void eq_process(int32_t *samples, int frame_count, int channels, int sample_rate
     if (g_eq.dirty) {
         g_eq.sample_rate = sample_rate;
         recalc_coefficients();
-
-        /* Reset delay lines on coefficient change to avoid discontinuities */
-        memset(g_eq.x1, 0, sizeof(g_eq.x1));
-        memset(g_eq.x2, 0, sizeof(g_eq.x2));
-        memset(g_eq.y1, 0, sizeof(g_eq.y1));
-        memset(g_eq.y2, 0, sizeof(g_eq.y2));
+        /* Note: delay lines are intentionally NOT reset here.
+         * Resetting them would cause an audible click.  The biquad filters
+         * naturally settle over a few samples after coefficient changes. */
     }
 
     /* Pre-amp linear factor */
@@ -188,12 +185,27 @@ void eq_process(int32_t *samples, int frame_count, int channels, int sample_rate
         ? 1.0f
         : powf(10.0f, (float)g_eq.preamp / 20.0f);
 
+    /* Auto headroom: only attenuate when the strongest single-band boost
+     * exceeds +10 dB.  Below that threshold the cascaded peaking-EQ gain
+     * stays within tanh's linear-adjacent region (tanh(2.0) ≈ 0.96),
+     * so no pre-attenuation is needed — tanhf alone handles rare peaks. */
+    float max_boost_dB = 0.0f;
+    for (int b = 0; b < EQ_BAND_COUNT; b++) {
+        if (g_eq.band_gains[b] > max_boost_dB)
+            max_boost_dB = (float)g_eq.band_gains[b];
+    }
+    if (g_eq.preamp > 0) max_boost_dB += (float)g_eq.preamp;
+    float headroom_gain = 1.0f;
+    if (max_boost_dB > 10.0f) {
+        headroom_gain = 1.0f / powf(10.0f, (max_boost_dB - 10.0f) / 20.0f);
+    }
+
     /* Process each frame */
     for (int f = 0; f < frame_count; f++) {
         for (int ch = 0; ch < channels; ch++) {
             /* Convert S32 to float (normalised to [-1.0, 1.0)) */
-            float in = (float)samples[f * channels + ch] / 2147483648.0f;
-            float out = in;
+            float in = (float)samples[f * channels + ch] / 2147483647.0f;
+            float out = in * headroom_gain;
 
             /* Cascade through all bands */
             for (int b = 0; b < EQ_BAND_COUNT; b++) {
@@ -219,11 +231,10 @@ void eq_process(int32_t *samples, int frame_count, int channels, int sample_rate
             /* Apply pre-amp gain */
             out *= preamp_linear;
 
-            /* Clip to valid S32 range to prevent wrap-around on overflow */
-            if (out > 1.0f)
-                out = 1.0f;
-            else if (out < -1.0f)
-                out = -1.0f;
+            /* Soft-clip with tanh to prevent wrap-around on overflow.
+             * Unlike a hard clip, tanh is C∞-smooth and produces virtually
+             * no harmonic fold-back distortion even near saturation. */
+            out = tanhf(out);
 
             /* Convert back to S32 */
             samples[f * channels + ch] = (int32_t)(out * 2147483647.0f);
@@ -285,4 +296,40 @@ void eq_set_all_gains(const int gains[EQ_BAND_COUNT])
     }
     if (changed)
         g_eq.dirty = 1;
+}
+
+/* ================================================================
+ * Built-in presets
+ * ================================================================ */
+
+/** 10-band gain values (dB) for each preset, ordered per eq_band_frequencies. */
+static const int g_eq_presets[EQ_PRESET_COUNT][EQ_BAND_COUNT] = {
+    /* Rock       31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 0 */    {  +4, +5, +6, +3, +1,  0, +1, +2, +3, +4 },
+    /* Pop         31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 1 */    {  -2, -3, -4, -1, +2, +4, +4, +3, +2, +1 },
+    /* Classical  31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 2 */    {   0,  0, +1, +1, +1, +2, +1,  0, +1, +2 },
+    /* Jazz       31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 3 */    {  +2, +3, +2, +1,  0,  0, +1, +2, +3, +3 },
+    /* Electronic 31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 4 */    {  +5, +6, +4, +1, -1,  0,  0, +2, +4, +5 },
+    /* Vocal      31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 5 */    {  -3, -2, -1,  0, +2, +5, +4, +3, +1,  0 },
+    /* Bass Boost 31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 6 */    {  +6, +7, +5, +2,  0, -1, -1,  0, +1, +1 },
+    /* Live       31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 7 */    {  +1, +2, +2, +2, +1,  0, +1, +2, +3, +3 },
+    /* Balanced   31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 8 */    {  +1, +2, +4,  0, +2, +4, +3, +2, +1, +2 },
+    /* Flat       31  62 125 250 500  1k  2k  4k  8k 16k */
+    /* 9 */    {   0,  0,  0,  0,  0,  0,  0,  0,  0,  0 }
+};
+
+void eq_apply_preset(int idx)
+{
+    if (idx < 0) idx = 0;
+    if (idx >= EQ_PRESET_COUNT) idx = EQ_PRESET_COUNT - 1;
+    eq_set_all_gains(g_eq_presets[idx]);
+    eq_set_enabled(1);
 }

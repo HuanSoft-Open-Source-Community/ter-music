@@ -188,7 +188,8 @@ enum {
     SETTINGS_IDX_EQ_BAND_6           = 36,  /* 2 kHz */
     SETTINGS_IDX_EQ_BAND_7           = 37,  /* 4 kHz */
     SETTINGS_IDX_EQ_BAND_8           = 38,  /* 8 kHz */
-    SETTINGS_IDX_EQ_BAND_9           = 39   /* 16 kHz */
+    SETTINGS_IDX_EQ_BAND_9           = 39,  /* 16 kHz */
+    SETTINGS_IDX_EQ_PRESET           = 40
 };
 
 typedef struct {
@@ -879,6 +880,17 @@ static void close_sel_menu(int apply)
                 show_status_message(i18n_get("settings.opt.latency_hint"));
                 break;
             }
+
+            case SETTINGS_IDX_EQ_PRESET:
+                eq_apply_preset(g_sel_idx);
+                /* Sync config with new EQ state */
+                g_app_config.eq_enabled = eq_is_enabled();
+                for (int b = 0; b < EQ_BAND_COUNT; b++)
+                    g_app_config.eq_band_gains[b] = eq_get_band_gain(b);
+                save_config();
+                /* Pre-amp is preserved, not reset by preset */
+                break;
+
             default:
                 if (g_sel_src >= 0 && g_sel_src < 12) {
                     /* Theme color: find selected color value, skip paired */
@@ -957,6 +969,10 @@ static void open_sel_menu(int option_index)
         case SETTINGS_IDX_CUE_ENCODING:
             count = CUE_ENCODING_COUNT;
             cur   = g_app_config.cue_encoding;
+            break;
+        case SETTINGS_IDX_EQ_PRESET:
+            count = EQ_PRESET_COUNT;
+            cur   = 0;
             break;
         case SETTINGS_IDX_LYRICS_ALIGNMENT:
             count = 3;
@@ -1086,6 +1102,17 @@ static void create_sel_window(void)
             case SETTINGS_IDX_LATENCY:{
                 int lat[]={20,40,60,80,100,120,150,200,250};
                 if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
+            case SETTINGS_IDX_EQ_PRESET:{
+                const char *preset_keys[] = {
+                    "eq.preset.rock", "eq.preset.pop", "eq.preset.classical",
+                    "eq.preset.jazz", "eq.preset.electronic", "eq.preset.vocal",
+                    "eq.preset.bass_boost", "eq.preset.live",
+                    "eq.preset.balanced", "eq.preset.flat"
+                };
+                if (i < EQ_PRESET_COUNT)
+                    snprintf(opts[i], 48, "%s", i18n_get(preset_keys[i]));
+                break;
+            }
             }
             default:
                 if (src >= 0 && src < 12) {
@@ -1211,6 +1238,17 @@ static void draw_sel_menu(void)
             }
             case SETTINGS_IDX_LATENCY:{
                 int lat[]={20,40,60,80,100,120,150,200,250};
+            case SETTINGS_IDX_EQ_PRESET:{
+                const char *preset_keys[] = {
+                    "eq.preset.rock", "eq.preset.pop", "eq.preset.classical",
+                    "eq.preset.jazz", "eq.preset.electronic", "eq.preset.vocal",
+                    "eq.preset.bass_boost", "eq.preset.live",
+                    "eq.preset.balanced", "eq.preset.flat"
+                };
+                if (i < EQ_PRESET_COUNT)
+                    snprintf(opts[i], 48, "%s", i18n_get(preset_keys[i]));
+                break;
+            }
                 if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
             }
             default:
@@ -1267,6 +1305,7 @@ static void draw_sel_menu(void)
         case SETTINGS_IDX_LYRICS_ALIGNMENT:  title = i18n_get("popup.align"); break;
         case SETTINGS_IDX_LATENCY:           title = i18n_get("popup.latency"); break;
         case SETTINGS_IDX_CUE_ENCODING:      title = i18n_get("popup.cue_enc"); break;
+        case SETTINGS_IDX_EQ_PRESET:        title = i18n_get("popup.eq_preset"); break;
         default:
             if (src >= 0 && src < 12)
                 title = i18n_get("popup.color");
@@ -2543,6 +2582,16 @@ void handle_settings_input(int ch)
     /* Selection menu active — handle menu input first */
     if (g_sel_active) {
         handle_sel_input(ch);
+        return;
+    }
+
+    /* EQ preset popup (P/p) */
+    if (g_menu_selected_idx == 6 && (ch == 'P' || ch == 'p')) {
+        if (!g_sel_active) {
+            open_sel_menu(SETTINGS_IDX_EQ_PRESET);
+            draw_sel_menu();
+            refresh();
+        }
         return;
     }
 
