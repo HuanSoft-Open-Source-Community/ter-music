@@ -765,6 +765,10 @@ double i18n_coverage(const char *lang_id)
     }
     if (ref_total == 0) return -1.0;
 
+    /* Include help-text availability as a virtual key, so missing help
+     * files are reflected in the coverage percentage. */
+    ref_total++;
+
     /* Find and parse the target language XML */
     char path[MAX_PATH_LEN];
     if (i18n_find_lang_file(lang_id, path, sizeof(path)) != 0)
@@ -794,6 +798,46 @@ double i18n_coverage(const char *lang_id)
     }
 
     xmlFreeDoc(doc);
+
+    /* Check for corresponding help-quickstart-{lang_id}.txt.
+     * If found the virtual key is counted, otherwise it counts as missing. */
+    {
+        char help_path[MAX_PATH_LEN];
+        int help_found = 0;
+
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(help_path, sizeof(help_path),
+                     "%s/.config/ter-music/help/help-quickstart-%s.txt", home, lang_id);
+            if (access(help_path, F_OK) == 0) help_found = 1;
+        }
+
+        if (!help_found) {
+            snprintf(help_path, sizeof(help_path),
+                     TER_MUSIC_DATA_DIR "/help/help-quickstart-%s.txt", lang_id);
+            if (access(help_path, F_OK) == 0) help_found = 1;
+        }
+
+        if (!help_found) {
+            snprintf(help_path, sizeof(help_path),
+                     "/usr/share/ter-music/help/help-quickstart-%s.txt", lang_id);
+            if (access(help_path, F_OK) == 0) help_found = 1;
+        }
+
+        if (!help_found) {
+            snprintf(help_path, sizeof(help_path),
+                     "data/help/help-quickstart-%s.txt", lang_id);
+            if (access(help_path, F_OK) == 0) help_found = 1;
+        }
+
+        if (!help_found) {
+            snprintf(help_path, sizeof(help_path),
+                     TER_MUSIC_SOURCE_DIR "/data/help/help-quickstart-%s.txt", lang_id);
+            if (access(help_path, F_OK) == 0) help_found = 1;
+        }
+
+        if (help_found) matched++;
+    }
 
     return (double)(matched * 100.0) / (double)ref_total;
 }
