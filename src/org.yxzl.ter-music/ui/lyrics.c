@@ -787,39 +787,6 @@ static double parse_timestamp(const char *time_str) {
     }
     return -1.0;
 }
-
-/**
- * 去除歌词文本中嵌入的 [mm:ss.xx] 时间戳标签
- * 新式 LRC 同一行内正文后可能包含额外时间戳，如 "作词 : ST[00:01.00]"
- */
-static void strip_embedded_timestamps(char *text) {
-    if (!text || !text[0]) {
-        return;
-    }
-    char *src = text;
-    char *dst = text;
-    while (*src) {
-        if (*src == '[') {
-            char *end = strchr(src, ']');
-            if (end) {
-                int mm, ss, xx;
-                if (sscanf(src + 1, "%d:%d.%d", &mm, &ss, &xx) == 3) {
-                    src = end + 1;
-                    continue;
-                }
-            }
-        }
-        *dst++ = *src++;
-    }
-    *dst = '\0';
-
-    // 去除可能因删除时间戳产生的尾随空格
-    int len = strlen(text);
-    while (len > 0 && text[len - 1] == ' ') {
-        text[--len] = '\0';
-    }
-}
-
 /**
  * 解析单行 LRC 内容
  * @param line LRC 文件的一行
@@ -880,19 +847,31 @@ static int parse_lrc_line(const char *line, double *timestamp, char *text) {
         text_start++;
     }
     
-    // 复制歌词文本
-    strncpy(text, text_start, MAX_LYRIC_TEXT_LEN - 1);
-    text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-    
+    // 复制歌词文本，边复制边过滤嵌入的 [mm:ss.xx] 时间戳标签
+    // 这样 MAX_LYRIC_TEXT_LEN 限制只作用于真正的歌词内容，
+    // 避免卡拉OK式 LRC 因原始文本过长而把时间戳截断成碎片残留
+    int dst = 0;
+    const char *src = text_start;
+    while (*src && dst < MAX_LYRIC_TEXT_LEN - 1) {
+        if (*src == '[') {
+            const char *close = strchr(src, ']');
+            if (close) {
+                int mm, ss, xx;
+                if (sscanf(src + 1, "%d:%d.%d", &mm, &ss, &xx) == 3) {
+                    src = close + 1;
+                    continue;
+                }
+            }
+        }
+        text[dst++] = *src++;
+    }
+    text[dst] = '\0';
+    len = dst;
+
     // 去除末尾换行符和空格
-    len = strlen(text);
     while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r' || text[len-1] == ' ')) {
         text[--len] = '\0';
     }
-
-    // 去除嵌入的 [mm:ss.xx] 时间戳标签（新式 LRC 格式）
-    strip_embedded_timestamps(text);
-    len = strlen(text);
 
     // 如果歌词文本为空，使用占位符
     if (len == 0) {
