@@ -78,7 +78,7 @@ ter-music Quick Start Guide
   .                 Seek forward 5 seconds
   +/=               Increase volume
   -/_               Decrease volume
-  D                 Jump to current lyric line
+  Ctrl+L             Toggle lyric seek mode; ↑/↓ then navigates lyrics
 
   Control Buttons:
   [<<]    Previous track

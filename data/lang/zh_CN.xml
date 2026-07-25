@@ -66,10 +66,10 @@
   <string key="settings.playback.hint">播放设置：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单</string>
   <string key="settings.play_mode.hint">播放模式：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单</string>
   <string key="settings.hotkeys.hint">快捷键说明：←/TAB 返回菜单</string>
-  <string key="settings.hotkeys.f1_f8">F1-F8：切换页面 / 语言 / 退出</string>
+  <string key="settings.hotkeys.f1_f9">F1-F9：切换页面 / 语言 / 退出</string>
   <string key="settings.hotkeys.o_i">O / I：打开目录 / 追加目录</string>
   <string key="settings.hotkeys.c_l">C / L：切换控件焦点与列表焦点</string>
-  <string key="settings.hotkeys.d">D：进入或退出歌词定位模式</string>
+  <string key="settings.hotkeys.ctrl_l">Ctrl+L：进入或退出歌词定位模式</string>
   <string key="settings.hotkeys.space_enter">空格 / Enter：执行当前动作</string>
 
   <string key="settings.input_path">输入路径：</string>
@@ -199,8 +199,8 @@
   <string key="controls.c_ctrl">[C:控件]</string>
   <string key="controls.l_list">[L:列表]</string>
   <string key="controls.tab_view">[Tab:切换]</string>
-  <string key="controls.d_exit_seek">[D:退出定位]</string>
-  <string key="controls.d_lyric_seek">[D:歌词定位]</string>
+  <string key="controls.ctrl_l_exit_seek">[^L:退出定位]</string>
+  <string key="controls.ctrl_l_lyric_seek">[^L:歌词定位]</string>
 
   <!-- ===== Control labels ===== -->
   <string key="controls.label.prev">上一曲</string>

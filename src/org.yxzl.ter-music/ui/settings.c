@@ -2238,13 +2238,13 @@ void render_settings_content(void)
                  i18n_get("settings.hotkeys.hint"));
         start_y += 2;
         mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.f1_f8"));
+                 i18n_get("settings.hotkeys.f1_f9"));
         mvprintw(start_y++, content_start_x, "%s",
                  i18n_get("settings.hotkeys.o_i"));
         mvprintw(start_y++, content_start_x, "%s",
                  i18n_get("settings.hotkeys.c_l"));
         mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.d"));
+                 i18n_get("settings.hotkeys.ctrl_l"));
         mvprintw(start_y++, content_start_x, "%s",
                  i18n_get("settings.hotkeys.space_enter"));
         mvprintw(start_y++, content_start_x, "%s",

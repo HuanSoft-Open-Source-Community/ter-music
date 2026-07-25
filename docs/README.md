@@ -402,10 +402,10 @@ Menu: Options Menu
 | --- | -------- |
 | `C` | Switch focus to control area |
 | `L` | Switch focus to list area |
-| `D` | Temporarily switch focus to lyrics area |
+| `Ctrl+L` | Toggle lyric seek mode (then ↑/↓ to navigate lyrics) |
 | `Tab` / `Shift+Tab` | Toggle between file browser and playback queue views |
 
-- **Note**: After switching focus to the lyrics area, the lyrics area will display the lyrics of the currently playing song, but will not automatically scroll to the current playback position. You need to press D again to resume scrolling. Moreover, you can only switch to lyrics area focus when focus is on the list area.
+- **Note**: Press `Ctrl+L` to enter lyric seek mode; then use `↑`/`↓` to navigate lyrics and `Enter`/`Space` to jump to the selected line's playback position. Press `Ctrl+L` again to exit. Works from any focus mode.
 
 #### List Area Operations (Focus on Playlist)
 
@@ -454,7 +454,7 @@ Menu: Options Menu
 | `Space` | Activate currently selected button |
 | `,` (comma) | Seek backward 5 seconds |
 | `.` (period) | Seek forward 5 seconds |
-| `D` / `d` | Jump to playback position corresponding to current lyrics line |
+| `Ctrl+L` | Toggle lyric seek mode |
 | `-` / `_` | Decrease volume |
 | `=` / `+` | Increase volume |
 
@@ -471,12 +471,12 @@ Menu: Options Menu
 | `Progress` | Progress bar (shows current playback progress) |
 | `Volume` | Volume control (opens popup slider, shows current volume percentage) |
 
-#### Lyrics Area Operations (Focus on Lyrics Area)
+#### Lyric Seek Operations
 
 | Key | Function |
 | ----------------------------- | --------------- |
 | `↑` / `↓` | Select lyrics line up/down |
-| `D` | Exit lyrics area focus, resume scrolling |
+| `Ctrl+L` or `Enter`/`Space` | Exit lyric seek / jump to selected position |
 
 #### Function Keys (Globally Available)
 
@@ -699,12 +699,12 @@ All user data is stored in the `~/.config/ter-music/` directory:
 | <br /> | `Space` | Activate control / open popup |
 | <br /> | `,` | Back 5 sec |
 | <br /> | `.` | Forward 5 sec |
-| <br /> | `D` | Jump to lyric line |
+| <br /> | `Ctrl+L` | Toggle lyric seek mode |
 | <br /> | `-`/`_` | Decrease volume |
 | <br /> | `=`/`+` | Increase volume |
-| **Lyrics** | `D` | Temp focus to lyrics |
-| <br /> | `↑`/`↓` | Select prev/next line |
-| <br /> | `D`/`Enter`/`Space` | Jump to selected line |
+| **Lyrics** | `Ctrl+L` | Toggle lyric seek mode |
+| <br /> | `↑`/`↓` | Select prev/next line (in seek mode) |
+| <br /> | `Enter`/`Space` | Jump to selected line (in seek mode) |
 
 ### 5.12 Terminal Resizing
 

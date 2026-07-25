@@ -169,8 +169,8 @@ void create_layout(void)
         ? i18n_get("controls.ctrl_focus")
         : i18n_get("controls.list_focus");
     const char *lyric_hint = g_lyric_cursor_mode
-        ? i18n_get("controls.d_exit_seek")
-        : i18n_get("controls.d_lyric_seek");
+        ? i18n_get("controls.ctrl_l_exit_seek")
+        : i18n_get("controls.ctrl_l_lyric_seek");
     char controls_header[160];
     snprintf(controls_header, sizeof(controls_header), "%s %s %s %s %s",
              i18n_get("controls.controls_area"),

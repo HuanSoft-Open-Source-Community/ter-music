@@ -66,10 +66,10 @@
   <string key="settings.playback.hint">Playback: ↑/↓ select, ENTER to expand, ←/TAB back</string>
   <string key="settings.play_mode.hint">Play Mode: ↑/↓ select, ENTER to expand, ←/TAB back</string>
   <string key="settings.hotkeys.hint">Hotkeys: ←/TAB back</string>
-  <string key="settings.hotkeys.f1_f8">F1-F8: Views / language / quit</string>
+  <string key="settings.hotkeys.f1_f9">F1-F9: Views / language / quit</string>
   <string key="settings.hotkeys.o_i">O / I: Open folder / append folder</string>
   <string key="settings.hotkeys.c_l">C / L: Controls focus / list focus</string>
-  <string key="settings.hotkeys.d">D: Toggle lyric seek mode</string>
+  <string key="settings.hotkeys.ctrl_l">Ctrl+L: Toggle lyric seek mode</string>
   <string key="settings.hotkeys.space_enter">Space / Enter: Activate current action</string>
 
   <string key="settings.input_path">Enter path: </string>
@@ -199,8 +199,8 @@
   <string key="controls.c_ctrl">[C:Ctrl]</string>
   <string key="controls.l_list">[L:List]</string>
   <string key="controls.tab_view">[Tab:View]</string>
-  <string key="controls.d_exit_seek">[D:Exit Seek]</string>
-  <string key="controls.d_lyric_seek">[D:Lyric Seek]</string>
+  <string key="controls.ctrl_l_exit_seek">[^L:Exit Seek]</string>
+  <string key="controls.ctrl_l_lyric_seek">[^L:Lyric Seek]</string>
 
   <!-- ===== Control labels ===== -->
   <string key="controls.label.prev">Prev</string>
