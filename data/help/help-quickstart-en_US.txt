@@ -115,7 +115,7 @@ ter-music Quick Start Guide
   F4  Playlists (manage and create playlists)
   F5  Favorites (view and manage favorite tracks)
   F6  Info (version and project info)
-  F7  Lang (toggle UI language)
+  F7  Lang (open language selection view)
   F8  Help (this page)
   F9  Quit
 
@@ -139,6 +139,7 @@ ter-music Quick Start Guide
   Priority order: embedded lyrics (FFmpeg/APE) > .lrc file > vinyl animation
   .lrc files in the same directory are loaded automatically.
   Embedded lyrics (in ID3/APE tags) take priority when available.
+  Switch between embedded/external: Ctrl+L → Tab (in lyric seek mode).
   Toggle lyrics panel in Settings.
   Supports alignment: left, center, right.
 
@@ -155,6 +156,7 @@ ter-music Quick Start Guide
   Adjust in Settings -> Equalizer.
   Use ←/→ to select band, ↑/↓ to adjust gain (±12dB).
   Pre-amp range: ±12dB.
+  Soft-clip and EQ presets are available in the popup menu.
 
 13. Remote Playback
 -------------------

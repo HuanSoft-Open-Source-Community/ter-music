@@ -27,11 +27,11 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🌐 **Remote Music Playback**: Supports SMB, SFTP, FTP, WebDAV, HTTP protocols for playing music from remote servers and NAS devices
 - 🎵 **Supports Multiple Audio Formats**: MP3, WAV, FLAC, OGG, M4A, AAC, WMA, APE, OPUS, **WV (WavPack)** and other popular formats
 - 🎼 **CUE Split-track Support**: CUE sheet parsing for FLAC/APE/WV, with auto-detect encoding (GBK/BIG5/Shift-JIS)
-- 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights current line with playback progress; **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files
-- 🎛️ **10-band Graphic Equalizer**: ISO frequencies (31Hz-16kHz) with biquad IIR DSP, ±12dB range, visual bar UI in settings
+- 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights current line with playback progress; **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files. Switch between embedded/external sources in lyric seek mode (Ctrl+L → Tab)
+- 🎛️ **10-band Graphic Equalizer**: ISO frequencies (31Hz-16kHz) with biquad IIR DSP, ±12dB range, visual bar UI in settings, with **EQ presets** and **soft-clip** support
 - 🎶 **17 Playback Modes**: From basic (Sequential, Single Repeat, List Repeat, Shuffle) to advanced (Folder/Album/Artist-based variants)
 - ⚡ **Playback Speed Control**: Supports 0.75x, 1.0x, 1.25x, 1.5x, 2.0x, 3.0x speed adjustment for efficient listening
-- 📚 **Music Library**: SQLite-backed music library with FTS5 full-text search, browse by artist/album/genre
+- 📚 **Music Library**: SQLite-backed music library with FTS5 full-text search, **recursive directory scan**, browse by artist/album/genre, incremental tracking
 - 📋 **Play Queue**: Dedicated queue UI with sequence numbers, now-playing indicator, reordering and persistence
 - 🗂️ **Playlist Management**: Supports user-defined creation of multiple playlists
 - ❤️ **Favorites Feature**: Bookmark favorite songs for quick access
@@ -61,7 +61,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🎨 **Beautiful TUI**                         | Split-column layout, colored interface, supports terminal size adaptation |
 | 🌍 **UTF-8 Chinese Support**                  | Perfect UTF-8 encoding support, correctly displays Chinese song metadata |
 | 🔄 **Persistent Storage**                     | SQLite-backed storage — configuration, library, favorites, playlists, and history, all in one database |
-| 🎯 **Multiple View Switching**: Quickly switch between settings, history, playlist, library and other views via F2-F8 function keys | <br /> |
+| 🎯 **Multiple View Switching**: Quickly switch between settings, history, playlist, library, language and other views via F2-F8 function keys | <br /> |
 | ⚡ **Responsive UI**: 100 FPS refresh rate, smooth progress bar updates | <br /> |
 | 🔧 **CMake Build**: Modern build system, good cross-platform compatibility | <br /> |
 | 🔊 **Audio Backend**: Supports PipeWire, PulseAudio and ALSA output, auto-detected at runtime (PipeWire > Pulse > ALSA) | <br /> |
@@ -559,10 +559,12 @@ Ter-Music supports playback speed adjustment, allowing you to listen to audio at
 
 Ter-Music supports automatic loading of LRC format lyrics files:
 
+- **Embedded lyrics take priority**: The player first reads embedded lyrics from the audio file (FFmpeg/APE tags). If none are found, it falls back to external `.lrc` files.
 - Lyrics files should be placed in the same directory as the audio file
 - Lyrics filename should match the audio filename, with extension `.lrc`
 - Example: `song.mp3` → `song.lrc`
 - The program automatically highlights current lyrics based on playback time
+- **Switch lyrics source**: Press `Ctrl+L` to enter lyric seek mode, then press `Tab` to switch between embedded/external lyrics
 - If no lyrics file is found, the lyrics area will display "No lyrics loaded"
 
 ### 5.8 Configuration File
@@ -585,7 +587,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `clear_history_on_startup`: Clear playback history on startup (0/1)
 - `resume_last_playback`: Resume playback from last position (0/1)
 - `seamless_preload`: Pre-decode next track at end of current for gapless playback (0/1)
-- `ui_language`: Interface language (0=Chinese, 1=English)
+- `ui_language`: Interface language (string ID: "zh_CN", "en_US", etc. Set via F7 language view)
 - `volume_percent`: Default volume percentage (0-100)
 - `audio_latency_ms`: Output latency in milliseconds
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire)
@@ -670,7 +672,7 @@ All user data is stored in the `~/.config/ter-music/` directory:
 | <br /> | `F4` | Playlist management |
 | <br /> | `F5` | Favorites |
 | <br /> | `F6` | About |
-| <br /> | `F7` | Toggle language |
+| <br /> | `F7` | Language selection (opens language view) |
 | <br /> | `F8` | Help |
 | <br /> | `F9` | Quit |
 | <br /> | `Esc` | Return to main / back |
@@ -715,7 +717,7 @@ Ter-Music supports terminal window resizing. When you resize the terminal, the p
 There are three ways to exit:
 
 - Press `q` in the main interface
-- Press `Ctrl+C` (the program will clean up correctly and exit)
+- Press `Ctrl+C` / `Ctrl+D` / `Ctrl+\` (the program handles SIGHUP/SIGTERM/SIGINT gracefully and exits cleanly)
 - Select "Exit" in the options menu (which is the `F9` key)
 
 ## 6. Frequently Asked Questions
@@ -753,6 +755,7 @@ There are three ways to exit:
 **Music library not showing all my music**
 - Press `M` to enter library browser mode, then check if `library.db` exists in `~/.config/ter-music/`
 - The library scans on startup — if you added new music, restart the program to trigger a rescan
+- The library now supports **recursive directory scanning** for nested folder structures
 
 ## 7. Technical Architecture
 
@@ -772,6 +775,7 @@ Ter-Music adopts a modular design, main modules include:
   - **history.c**: Playback history view
   - **info_view.c**: About/info view
   - **help_view.c**: Help view
+  - **language_view.c**: Language selection view (i18n language pack browser)
   - **layout.c**: Terminal layout management (resize handling)
   - **progress_ui.c**: Progress bar rendering (suspend on popup active)
   - **visualizer.c**: Audio spectrum visualizer
@@ -796,7 +800,7 @@ Ter-Music adopts a modular design, main modules include:
   - **backend/pulse.c**: PulseAudio audio output
   - **backend/alsa.c**: ALSA audio output
 - **playlist/**: Playlist loading, metadata, CUE parsing
-  - **playlist.c**: Directory scanning, metadata reading (FFmpeg + native APEv2 tags),
+  - **playlist.c**: Directory scanning (**recursive** sub-directory scan), metadata reading (FFmpeg + native APEv2 tags),
     CUE sheet detection
   - **cue_parser.c**: CUE sheet line-by-line parser for split-track support
   - **encoding.c**: CUE file encoding auto-detect and conversion (iconv)
