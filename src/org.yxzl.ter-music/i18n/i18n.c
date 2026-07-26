@@ -637,6 +637,14 @@ int i18n_add_language(const char *source_path)
     }
     xmlFreeDoc(doc);
 
+    /* Reject built-in languages (zh_CN, en_US) */
+    if (i18n_is_builtin(lang_id)) {
+        log_error("i18n", "Refusing to overwrite built-in language '%s' from %s",
+                  lang_id, source_path);
+        rmdir_safe(tmp_dir);
+        return -1;
+    }
+
     /* Install lang.xml to ~/.config/ter-music/lang/ */
     const char *user_dir = i18n_user_lang_dir();
     if (!user_dir) {
