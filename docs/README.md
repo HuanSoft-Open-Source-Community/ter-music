@@ -490,7 +490,7 @@ Menu: Options Menu
 | `F4` | Open playlist management view |
 | `F5` | Open favorites view |
 | `F6` | Open about view |
-| `F7` | Toggle language (Chinese/English) |
+| `F7` | Language selection (opens language view) |
 | `F8` | Help (this page) |
 | `F9` | Quit |
 
@@ -504,7 +504,7 @@ Menu: Options Menu
 | `Esc` + `4` | Open playlist management view |
 | `Esc` + `5` | Open favorites view |
 | `Esc` + `6` | Open about view |
-| `Esc` + `7` | Toggle language (Chinese/English) |
+| `Esc` + `7` | Language selection (opens language view) |
 | `Esc` + `8` | Help (this page) |
 | `Esc` + `9` | Quit |
 | `q` | Exit program |
@@ -599,6 +599,94 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 
 The program automatically saves configuration; changes take effect immediately after modification.
 
+### 5.8.1 Language Pack System
+
+Ter-Music uses an XML-based internationalization (i18n) system. Built-in language packs are located at `data/lang/` in the source tree and installed to `TER_MUSIC_DATA_DIR/lang/`.
+
+**Language Pack Format:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<lang id="en_US" name="English (US)">
+  <string key="general.yes">On</string>
+  <string key="general.no">Off</string>
+  <!-- ... more string entries ... -->
+</lang>
+```
+
+- The root element is `<lang>` with attributes `id` (language identifier, e.g. "zh_CN") and `name` (display name).
+- Each translatable string is a `<string>` element with a `key` attribute and the translated text as content.
+- String keys follow a dotted hierarchical convention: `module.section.name` (e.g. `sidebar.settings.theme`, `menu.help`).
+
+**Lookup Priority (highest to lowest):**
+
+1. `~/.config/ter-music/lang/<id>.xml` — User custom overrides
+2. `TER_MUSIC_DATA_DIR/lang/<id>.xml` — Compile-time install prefix
+3. `/usr/share/ter-music/lang/<id>.xml` — System-wide install
+4. `<exe_path>/../share/ter-music/lang/<id>.xml` — Relative to executable
+5. `data/lang/<id>.xml` — Development/runtime directory
+6. Source tree `data/lang/<id>.xml`
+
+To add a new language, create an `<id>.xml` file following the format above and place it in one of the search paths (user override at `~/.config/ter-music/lang/` is recommended). The language will appear in the F7 language selection view automatically.
+
+#### 5.8.2 tar.gz Language Pack Distribution
+
+Language packs can also be distributed as `.tar.gz` (or `.tgz`) archives for easy sharing and one-click installation via the language selection view (press `A` to install, `D` to delete a user-added language).
+
+**Archive Contents:**
+
+| File | Required | Description |
+|------|----------|-------------|
+| `lang.xml` | Yes | Language data file (see §5.8.1 for format) |
+| `help.txt` | No | Quick-start help text for this language |
+
+Only files named `lang.xml` and `help.txt` are extracted from the archive; all other files are silently ignored. Files are matched by basename only, so they may reside at any depth within the tarball.
+
+**Specification:**
+
+| Property | Value |
+|----------|-------|
+| File extension | `.tar.gz` or `.tgz` |
+| Archive format | POSIX/USTAR (standard `tar` format) |
+| Compression | gzip |
+| Per-file size limit | 50 MB |
+| Character encoding | UTF-8 |
+| Compression level | Any (gzip compatible) |
+
+**Creating a Language Pack:**
+
+```bash
+# Minimal — language data only
+tar -czf mylanguage.tar.gz lang.xml
+
+# With optional help text
+tar -czf mylanguage.tar.gz lang.xml help.txt
+
+# Files may be in a subdirectory; only the basename matters
+tar -czf mylanguage.tar.gz path/to/lang.xml path/to/help.txt
+```
+
+**Installation Paths:**
+
+Upon installation via the language view (`A` key), the extracted files are placed:
+- `~/.config/ter-music/lang/<id>.xml` — Language data
+- `~/.config/ter-music/help/help-quickstart-<id>.txt` — Help text (if `help.txt` was included)
+
+The language `<id>` is read from the `id` attribute of the `<lang>` root element in `lang.xml`.
+
+**Validation:**
+
+The program validates the archive on import:
+1. Rejects non-regular files and non-`.tar.gz`/`.tgz` extensions
+2. Extracts `lang.xml` and parses it as XML
+3. Verifies the root element is `<lang>` with a non-empty `id` attribute
+4. Rejects archives that would overwrite built-in languages (`zh_CN`, `en_US`)
+5. Enforces the 50 MB per-file size limit
+
+After successful validation, the language appears in the language selection view immediately. User-installed languages are marked distinctly from built-in languages in the UI.
+
+**Note:** If a language with the same `<id>` already exists in `~/.config/ter-music/lang/`, installing a new tar.gz will silently overwrite it. Reinstall the program to restore built-in languages if they were accidentally deleted.
+
 ### 5.9 Data Storage Location
 
 All user data is stored in the `~/.config/ter-music/` directory:
@@ -609,7 +697,8 @@ All user data is stored in the `~/.config/ter-music/` directory:
 ├── library.db       # SQLite database (music library, favorites, playlists, history)
 ├── queue.txt        # Playback queue persistence
 ├── album_cover_cache/   # Album cover image cache
-└── config.json.bak # Auto-backup of v1 config on first migration (if present)
+├── lang/            # User language pack directory (overrides built-in translations)
+└── config.json.bak  # Auto-backup of v1 config on first migration (if present)
 ```
 
 **Note:** The v1.0 JSON-based storage (`config.json`, separate `favorites`, `history`, `dir_history`, `playlists/`) has been fully replaced by the SQLite database `library.db`. Migration is automatic on first v2.0 startup.

@@ -418,7 +418,7 @@ Menu: 选项菜单
 | `F4` | 开曲帙营理之视 |
 | `F5` | 开珍存之视 |
 | `F6` | 开关于之视 |
-| `F7` | 迁中英文之界 |
+| `F7` | 迁语言之视（开语言选择界面） |
 | `F8` | 开助益之视 |
 | `F9` | 退其器 |
 
@@ -431,7 +431,7 @@ Menu: 选项菜单
 | `Esc` + `4` | 开曲帙营理之视 |
 | `Esc` + `5` | 开珍存之视 |
 | `Esc` + `6` | 开关于之视 |
-| `Esc` + `7` | 迁中英文之界 |
+| `Esc` + `7` | 迁语言之视（开语言选择界面） |
 | `Esc` + `8` | 开助益之视 |
 | `Esc` + `9` | 退其器 |
 | `q` | 退其器 |
@@ -519,6 +519,94 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 
 器将自动存其节度，改之即生效。
 
+### 五之一 语言包之制
+
+Ter-Music 用 XML 之国际化（i18n）制。内置语言包在源码 `data/lang/`，纳置于 `TER_MUSIC_DATA_DIR/lang/`。
+
+**语言包格式：**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<lang id="en_US" name="English (US)">
+  <string key="general.yes">On</string>
+  <string key="general.no">Off</string>
+  <!-- ... 更多辞目 ... -->
+</lang>
+```
+
+- 根元素 `<lang>`，`id` 为语言标识（如 "zh_CN"），`name` 为显名。
+- 每辞为 `<string>` 元素，`key` 属性为键，内容为译辞。
+- 键以点分：`模.子模.名`（如 `sidebar.settings.theme`、`menu.help`）。
+
+**搜索优先序（高至低）：**
+
+1. `~/.config/ter-music/lang/<id>.xml` — 用户自定
+2. `TER_MUSIC_DATA_DIR/lang/<id>.xml` — 编译期安装前缀
+3. `/usr/share/ter-music/lang/<id>.xml` — 系统全局
+4. `<exe_path>/../share/ter-music/lang/<id>.xml` — 相对于可执行文件
+5. `data/lang/<id>.xml` — 开发/运行目录
+6. 源码 `data/lang/<id>.xml`
+
+欲添新语言，依上制创 `<id>.xml`，置任一搜索路径（推荐 `~/.config/ter-music/lang/`）。该语言将自现于 F7 语言选择之视。
+
+##### 五之二 tar.gz 语言包布之规
+
+语言包亦可以 `.tar.gz`（或 `.tgz`）压缩包形布之，以便共享与一键纳置。于语言选择视中按 `A` 键纳之，按 `D` 键除已加之用户语言包。
+
+**压缩包之内：**
+
+| 文件 | 必需 | 说 |
+|------|------|----|
+| `lang.xml` | 是 | 语言数据文件（格式见五之一） |
+| `help.txt` | 否 | 该语言之速启助文 |
+
+唯名为 `lang.xml` 与 `help.txt` 者乃提，余者默弃。文件仅以基本名配之，可居 tar 包内任意子录。
+
+**规格：**
+
+| 属性 | 值 |
+|------|----|
+| 文件扩展名 | `.tar.gz` 或 `.tgz` |
+| 归档格式 | POSIX/USTAR（标准 `tar` 格式） |
+| 压缩法 | gzip |
+| 单文件大小限 | 50 MB |
+| 字符编码 | UTF-8 |
+| 压缩级 | 任意（gzip 兼容即可） |
+
+**制语言包：**
+
+```bash
+# 最小——仅语言数据
+tar -czf mylanguage.tar.gz lang.xml
+
+# 附带助文
+tar -czf mylanguage.tar.gz lang.xml help.txt
+
+# 文件可在子录中，唯基本名作用
+tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
+```
+
+**纳置路径：**
+
+以语言视（`A` 键）纳之，所提文件置：
+- `~/.config/ter-music/lang/<id>.xml` — 语言数据
+- `~/.config/ter-music/help/help-quickstart-<id>.txt` — 助文（若含 `help.txt`）
+
+语言 `<id>` 从 `lang.xml` 之 `<lang>` 根元素 `id` 属性读之。
+
+**验核之序：**
+
+程序纳包时行此验：
+1. 拒非普通文件与非 `.tar.gz`/`.tgz` 扩展名
+2. 提 `lang.xml` 析为 XML
+3. 验根元素为 `<lang>` 且 `id` 非空
+4. 拒覆内置语言（`zh_CN`、`en_US`）之包
+5. 行 50 MB 单文件大小限之检
+
+验过，该语言即现于语言选择视。用户所加之语言，在界面上与内置者有明别。
+
+**注：** 若 `~/.config/ter-music/lang/` 中已存同 `<id>` 之语言包，纳新 tar.gz 将默覆之。欲复误删之内置语言，请重装程序。
+
 ### 九 数据存贮之所
 所有用户数据，皆存于`~/.config/ter-music/`目录之下：
 ```
@@ -527,6 +615,7 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 ├── library.db       # SQLite数据库（音乐库、珍存、曲帙、往迹）
 ├── queue.txt        # 播弄队列恒存
 ├── album_cover_cache/  # 专辑封面暂存
+├── lang/            # 用户语言包目录（覆盖内置翻译）
 └── config.json.bak  # v1节度首迁之自动备份（如有）
 ```
 

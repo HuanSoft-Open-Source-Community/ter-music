@@ -417,7 +417,7 @@ Menu: 选项菜单
 | `F4` | 打开歌单管理视图 |
 | `F5` | 打开收藏视图 |
 | `F6` | 打开关于视图 |
-| `F7` | 切换中英文界面 |
+| `F7` | 语言选择（打开语言选择视图） |
 | `F8` | 帮助（本页面） |
 | `F9` | 退出播放器 |
 
@@ -430,7 +430,7 @@ Menu: 选项菜单
 | `Esc` + `4` | 打开歌单管理视图 |
 | `Esc` + `5` | 打开收藏视图 |
 | `Esc` + `6` | 打开关于视图 |
-| `Esc` + `7` | 切换中英文界面 |
+| `Esc` + `7` | 语言选择（打开语言选择视图） |
 | `Esc` + `8` | 帮助（本页面） |
 | `Esc` + `9` | 退出播放器 |
 | `q` | 退出播放器 |
@@ -520,15 +520,104 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 
 播放器会自动保存配置，修改后立即生效。
 
+### 5.8.1 语言包系统
+
+Ter-Music 使用基于 XML 的国际化（i18n）系统。内置语言包位于源码树的 `data/lang/` 目录，安装后位于 `TER_MUSIC_DATA_DIR/lang/`。
+
+**语言包格式：**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<lang id="en_US" name="English (US)">
+  <string key="general.yes">On</string>
+  <string key="general.no">Off</string>
+  <!-- ... 更多字符串条目 ... -->
+</lang>
+```
+
+- 根元素为 `<lang>`，属性 `id` 为语言标识（如 "zh_CN"），`name` 为显示名称。
+- 每个可翻译字符串为一个 `<string>` 元素，`key` 属性为键名，元素内容为译文。
+- 键名采用点号分层约定：`模块.子模块.名称`（如 `sidebar.settings.theme`、`menu.help`）。
+
+**查找优先级（从高到低）：**
+
+1. `~/.config/ter-music/lang/<id>.xml` — 用户自定义覆盖
+2. `TER_MUSIC_DATA_DIR/lang/<id>.xml` — 编译期安装前缀
+3. `/usr/share/ter-music/lang/<id>.xml` — 系统全局安装
+4. `<exe_path>/../share/ter-music/lang/<id>.xml` — 相对于可执行文件
+5. `data/lang/<id>.xml` — 开发/运行目录
+6. 源码树 `data/lang/<id>.xml`
+
+要添加新语言，按上述格式创建 `<id>.xml` 文件，放入任一搜索路径（推荐 `~/.config/ter-music/lang/`）。该语言将自动出现在 F7 语言选择视图中。
+
+##### 5.8.2 tar.gz 语言包分发规范
+
+语言包也可通过 `.tar.gz`（或 `.tgz`）压缩包形式分发，方便共享和一键安装。在语言选择视图中按 `A` 键安装，按 `D` 键删除已添加的用户语言包。
+
+**压缩包内容：**
+
+| 文件 | 必需 | 说明 |
+|------|------|------|
+| `lang.xml` | 是 | 语言数据文件（格式见 §5.8.1） |
+| `help.txt` | 否 | 该语言的快速入门帮助文本 |
+
+只有文件名称为 `lang.xml` 和 `help.txt` 的文件会被提取，其余文件将被自动忽略。文件仅按基本名称匹配，可位于 tar 包内的任意子目录中。
+
+**规格要求：**
+
+| 属性 | 值 |
+|------|-----|
+| 文件扩展名 | `.tar.gz` 或 `.tgz` |
+| 归档格式 | POSIX/USTAR（标准 `tar` 格式） |
+| 压缩方式 | gzip |
+| 单文件大小上限 | 50 MB |
+| 字符编码 | UTF-8 |
+| 压缩级别 | 任意（gzip 兼容即可） |
+
+**创建语言包：**
+
+```bash
+# 最小化——仅语言数据
+tar -czf mylanguage.tar.gz lang.xml
+
+# 附带帮助文本
+tar -czf mylanguage.tar.gz lang.xml help.txt
+
+# 文件可在子目录中，仅基本名称起作用
+tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
+```
+
+**安装路径：**
+
+通过语言视图（`A` 键）安装后，提取的文件被放置到：
+- `~/.config/ter-music/lang/<id>.xml` — 语言数据
+- `~/.config/ter-music/help/help-quickstart-<id>.txt` — 帮助文本（若包含 `help.txt`）
+
+语言 `<id>` 从 `lang.xml` 中 `<lang>` 根元素的 `id` 属性读取。
+
+**校验流程：**
+
+程序在导入时会执行以下验证：
+1. 拒绝非普通文件和非 `.tar.gz`/`.tgz` 扩展名
+2. 提取 `lang.xml` 并解析为 XML
+3. 验证根元素为 `<lang>` 且 `id` 属性非空
+4. 拒绝覆盖内置语言（`zh_CN`、`en_US`）的压缩包
+5. 执行 50 MB 单文件大小上限检查
+
+验证通过后，该语言将立即出现在语言选择视图中。用户安装的语言在界面上与内置语言有明确区分。
+
+**注意：** 如果 `~/.config/ter-music/lang/` 中已存在相同 `<id>` 的语言包，安装新的 tar.gz 会静默覆盖。如需恢复被误删的内置语言，请重新安装程序。
+
 ### 九 数据存储位置
 
 所有用户数据均存储在`~/.config/ter-music/`目录下：
 ```
 ~/.config/ter-music/
-├── config.xml       # 配置文件（v2.2 XML格式，通过libxml2解析）
+├── config.xml       # 配置文件（v2.2 XML格式，libxml2解析）
 ├── library.db       # SQLite数据库（音乐库、收藏、歌单、历史）
 ├── queue.txt        # 播放队列持久化
 ├── album_cover_cache/   # 专辑封面缓存
+├── lang/            # 用户语言包目录（覆盖内置翻译）
 └── config.json.bak  # v1配置文件首次迁移时的自动备份（如有）
 ```
 
