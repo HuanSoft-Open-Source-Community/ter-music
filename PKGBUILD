@@ -4,16 +4,16 @@
 pkgname=ter-music-cn
 pkgver() {
   cd "$srcdir/ter-music"
-  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g' || echo "2.0.0"
+  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g' || echo "2.1.0"
 }
 pkgrel=1
 pkgdesc="Terminal based music player"
 arch=('x86_64')
-url="https://github.com/YXZL985/ter-music"
+url="https://github.com/HuanSoft-Open-Source-Community/ter-music"
 license=('GPL')
 depends=('ffmpeg' 'ncurses' 'libxml2' 'libpng' 'libjpeg' 'libao' 'libmad' 'libid3tag' 'curl' 'sqlite')
 makedepends=('cmake' 'make' 'gcc' 'git' 'pkg-config')
-source=("ter-music::git+https://github.com/YXZL985/ter-music.git#branch=master")
+source=("ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#branch=master")
 sha256sums=('SKIP')
 # Note: Using SKIP for git source is acceptable as git provides its own integrity verification
 

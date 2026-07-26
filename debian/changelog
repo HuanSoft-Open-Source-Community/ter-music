@@ -1,4 +1,4 @@
-ter-music (2.0.0-1) unstable; urgency=medium
+ter-music (2.1.0-1) unstable; urgency=medium
 
   * 10-band ISO graphic equalizer with biquad IIR DSP.
   * Visual bar chart EQ UI in settings panel.

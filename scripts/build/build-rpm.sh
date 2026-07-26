@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 PROJECT_NAME="ter-music"
-DEFAULT_VERSION="2.0.0"
+DEFAULT_VERSION="2.1.0"
 OUTPUT_DIR="${SCRIPT_DIR}/build/rpm"
 TEMP_DIR="${SCRIPT_DIR}/.rpmbuild_temp"
 
@@ -509,7 +509,7 @@ Version:        ${version}
 Release:        1%{?dist}
 Summary:        A terminal-based music player with ncurses interface
 License:        GPL-3.0-or-later
-URL:            https://github.com/YXZL985/ter-music
+URL:            https://github.com/HuanSoft-Open-Source-Community/ter-music
 Source0:        %{name}-%{version}.tar.gz
 
 # Target Architecture: ${target_arch}

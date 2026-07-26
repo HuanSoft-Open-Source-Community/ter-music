@@ -1,7 +1,7 @@
 Source: ter-music
 Section: sound
 Priority: optional
-Maintainer: Yanxi Bamboo Forest <yxzl666xx@outlook.com>
+Maintainer: 浣软科技（HuanSoft） <yxzl666xx@outlook.com>
 Build-Depends:
  cmake,
  debhelper-compat (= 13),
@@ -21,7 +21,7 @@ Build-Depends:
  libsqlite3-dev,
  pkg-config
 Standards-Version: 4.7.0
-Homepage: https://github.com/YXZL985/ter-music
+Homepage: https://github.com/HuanSoft-Open-Source-Community/ter-music
 Rules-Requires-Root: no
 
 Package: ter-music

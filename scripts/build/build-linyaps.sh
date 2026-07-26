@@ -251,7 +251,7 @@ check_dependencies() {
 }
 
 detect_version() {
-    local default_version="2.0.0"
+    local default_version="2.1.0"
 
     if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
         local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)

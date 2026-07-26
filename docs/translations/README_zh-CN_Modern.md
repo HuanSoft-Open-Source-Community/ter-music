@@ -186,7 +186,7 @@ sudo pacman -S pipewire alsa-lib dbus
 ## 第四章 编译步骤
 ### 一 克隆源码
 ```bash
-git clone https://github.com/YXZL985/ter-music.git
+git clone https://github.com/HuanSoft-Open-Source-Community/ter-music.git
 cd ter-music
 ```
 
@@ -786,9 +786,9 @@ Ter-Music 是一款纯粹的音频播放工具，本身不提供、不托管、�
 与本软件所播放的音频内容相关的所有版权及知识产权，均归其各自权利人所有。因使用本软件播放音频内容而产生的任何版权纠纷，概由使用者自行承担全部责任。开发者对因使用本软件引起的任何版权或其他法律问题不承担任何责任。
 
 ## 第九章 开发者
-- **开发者**：燕戏竹林
+- **开发者**：浣软科技（HuanSoft）
 - **邮箱**：<yxzl666xx@outlook.com>
-- **项目仓库**：<https://github.com/YXZL985/ter-music.git>
+- **项目仓库**：<https://github.com/HuanSoft-Open-Source-Community/ter-music.git>
 
 ## 第九章 致谢
 在此诚挚感谢以下贡献者的帮助：

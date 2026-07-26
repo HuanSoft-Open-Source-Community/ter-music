@@ -48,13 +48,13 @@
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本，构建全部包（amd64 默认）
-./scripts/build/launch-auto-build.sh -v 2.0.0
+./scripts/build/launch-auto-build.sh -v 2.1.0
 
 # 指定版本、多架构、部分包类型
-./scripts/build/launch-auto-build.sh -v 2.0.0 -a amd64,arm64 -t deb,rpm
+./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64,arm64 -t deb,rpm
 
 # 跳过 Docker 镜像预构建（镜像已存在时加速）
-./scripts/build/launch-auto-build.sh -v 2.0.0 -a amd64 --skip-images
+./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64 --skip-images
 
 # 仅构建 Docker 镜像，不构建包
 ./scripts/build/launch-auto-build.sh --rebuild-images --skip-builds
@@ -661,10 +661,10 @@ file bin/ter-music
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本，自动构建全部包
-./scripts/build/launch-auto-build.sh -v 2.0.0
+./scripts/build/launch-auto-build.sh -v 2.1.0
 
 # 指定版本和多架构
-./scripts/build/launch-auto-build.sh -v 2.0.0 -a amd64,arm64
+./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64,arm64
 ```
 
 如果只需构建单个包类型，也可以直接使用对应的构建脚本：

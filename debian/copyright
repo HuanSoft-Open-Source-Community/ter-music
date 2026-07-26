@@ -1,10 +1,10 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: ter-music
-Upstream-Contact: Yanxi Bamboo Forest <yxzl666xx@outlook.com>
-Source: https://github.com/YXZL985/ter-music
+Upstream-Contact: 浣软科技（HuanSoft） <yxzl666xx@outlook.com>
+Source: https://github.com/HuanSoft-Open-Source-Community/ter-music
 
 Files: *
-Copyright: 2026 Yanxi Bamboo Forest
+Copyright: 2026 浣软科技（HuanSoft）
 License: GPL-3.0-or-later
 
 License: GPL-3.0-or-later

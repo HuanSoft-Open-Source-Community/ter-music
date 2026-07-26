@@ -328,7 +328,7 @@ check_download_tool() {
 }
 
 detect_version() {
-    local default_version="2.0.0"
+    local default_version="2.1.0"
 
     if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
         local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
@@ -570,11 +570,11 @@ EOF
     <keyword>Terminal</keyword>
     <keyword>Console</keyword>
   </keywords>
-  <url type="homepage">https://github.com/YXZL985/ter-music</url>
-  <url type="bugtracker">https://github.com/YXZL985/ter-music/issues</url>
-  <url type="help">https://github.com/YXZL985/ter-music</url>
+  <url type="homepage">https://github.com/HuanSoft-Open-Source-Community/ter-music</url>
+  <url type="bugtracker">https://github.com/HuanSoft-Open-Source-Community/ter-music/issues</url>
+  <url type="help">https://github.com/HuanSoft-Open-Source-Community/ter-music</url>
   <project_license>GPL-3.0-or-later</project_license>
-  <developer_name>YXZL985</developer_name>
+  <developer_name>浣软科技（HuanSoft）</developer_name>
 </AppImage>
 EOF
 

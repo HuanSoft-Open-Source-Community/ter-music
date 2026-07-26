@@ -273,7 +273,7 @@ check_dependencies() {
 }
 
 detect_version() {
-    local default_version="2.0.0"
+    local default_version="2.1.0"
 
     if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
         local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
@@ -539,7 +539,7 @@ Ter-Music 可移植包
 - 键盘快捷键
 - 实时进度条
 
-项目主页: https://github.com/YXZL985/ter-music
+项目主页: https://github.com/HuanSoft-Open-Source-Community/ter-music
 EOF
 
     log_info "可移植包结构创建完成"

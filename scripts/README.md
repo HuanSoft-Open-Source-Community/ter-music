@@ -70,13 +70,13 @@ packaging/
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本构建全部包
-./scripts/build/launch-auto-build.sh -v 2.0.0
+./scripts/build/launch-auto-build.sh -v 2.1.0
 
 # 指定架构和包类型
-./scripts/build/launch-auto-build.sh -v 2.0.0 -a amd64,arm64 -t deb,rpm
+./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64,arm64 -t deb,rpm
 
 # 跳过 Docker 镜像预构建（镜像已存在时）
-./scripts/build/launch-auto-build.sh -v 2.0.0 --skip-images
+./scripts/build/launch-auto-build.sh -v 2.1.0 --skip-images
 ```
 
 **工作流程：**

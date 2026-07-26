@@ -187,7 +187,7 @@ sudo pacman -S pipewire alsa-lib dbus
 ## 卷四 译纂之程叙
 ### 一 索其源本
 ```bash
-git clone https://github.com/YXZL985/ter-music.git
+git clone https://github.com/HuanSoft-Open-Source-Community/ter-music.git
 cd ter-music
 ```
 
@@ -782,9 +782,9 @@ Ter-Music者，纯然乐播之器也，本器不供、不藏、不分发任何�
 与本器所播音声内容相关之一切版权及智慧财产，俱归各权主所有。因用本器播弄音声内容而致之任何版权纠葛，概由用者自负其责。撰者于因用本器而致之任何版权或他项律法之事，不担任何责任。
 
 ## 卷九 撰者
-- **撰者**：燕戏竹林
+- **撰者**：浣软科技（HuanSoft）
 - **邮驿**：<yxzl666xx@outlook.com>
-- **本籍所藏**：<https://github.com/YXZL985/ter-music.git>
+- **本籍所藏**：<https://github.com/HuanSoft-Open-Source-Community/ter-music.git>
 
 ## 卷九 鸣谢
 谨申丹悃，以谢诸彦之劻勷：

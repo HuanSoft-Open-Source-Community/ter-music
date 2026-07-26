@@ -215,7 +215,7 @@ sudo pacman -S pipewire alsa-lib dbus
 ### 4.1 Get Source Code
 
 ```bash
-git clone https://github.com/yanxizhulin/ter-music.git
+git clone https://github.com/HuanSoft-Open-Source-Community/ter-music.git
 cd ter-music
 ```
 
@@ -920,7 +920,7 @@ All copyright and intellectual property rights related to audio content played u
 
 ## 10. Author
 
-- **Author**: Yan Xi Zhu Lin
+- **Author**: 浣软科技（HuanSoft）
 - **Email**: <yxzl666xx@outlook.com>
 
 ## 11. Acknowledgments
