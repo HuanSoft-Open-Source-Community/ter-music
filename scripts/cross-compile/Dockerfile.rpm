@@ -61,7 +61,8 @@ RUN dnf install -y \
         libpng-devel \
         libjpeg-turbo-devel \
         dbus-devel \
-        sqlite-devel && \
+        sqlite-devel \
+        zlib-devel && \
     dnf clean all
 
 WORKDIR /workspace

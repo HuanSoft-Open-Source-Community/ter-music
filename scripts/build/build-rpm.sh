@@ -776,11 +776,6 @@ main() {
         exec "${SCRIPT_DIR}/scripts/cross-compile/cross-build.sh" "${xb_args[@]}"
     fi
 
-    # 检查是否需要交叉编译
-    if is_cross_compiling "$target_arch"; then
-        log_info "检测到交叉编译模式: $(uname -m) -> $target_arch"
-    fi
-    
     check_dependencies "$target_arch" "$use_static"
 
     prepare_directories "$target_arch"

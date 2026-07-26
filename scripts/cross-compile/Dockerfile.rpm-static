@@ -24,7 +24,7 @@ RUN sed -e 's|^mirrorlist=|#mirrorlist=|g' \
     dnf install -y \
         cmake pkgconfig rpm-build wget aria2 git \
         ncurses-devel libcurl-devel libjpeg-turbo-devel libpng-devel \
-        libxml2-devel pulseaudio-libs-devel dbus-devel sqlite-devel && \
+        libxml2-devel pulseaudio-libs-devel dbus-devel sqlite-devel zlib-devel && \
     dnf clean all
 
 # Build FFmpeg as static libraries (audio-only, minimal footprint)
