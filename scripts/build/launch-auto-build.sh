@@ -180,7 +180,7 @@ show_help() {
 选项:
     -h, --help                显示此帮助信息
     -v, --version VERSION     指定版本号（默认：自动检测）
-    -a, --arch ARCH           目标架构: amd64, arm64（逗号分隔，默认：amd64,arm64）
+    -a, --arch ARCH           目标架构: amd64（逗号分隔，默认：amd64）
     -t, --types TYPES         包类型: deb,rpm,linyaps,appimage,portable（逗号分隔，默认：全部）
     -k, --keep-temp           保留临时构建文件（用于调试）
 
@@ -193,7 +193,7 @@ show_help() {
 交互模式:
     不带任何参数运行即进入交互模式，会提示输入各项配置。
 
-支持的架构: amd64 arm64
+支持的架构: amd64
 支持的包类型: deb rpm linyaps appimage portable
 
 EOF
@@ -217,9 +217,8 @@ parse_args() {
                     p="$(echo "$p" | xargs)"  # trim
                     case "$p" in
                         amd64|x86_64)  ARCHS+=("amd64") ;;
-                        arm64|aarch64) ARCHS+=("arm64") ;;
                         *)
-                            log_error "不支持的架构: $p（支持: amd64, arm64）"
+                            log_error "不支持的架构: $p（仅支持 amd64）"
                             exit 1
                             ;;
                     esac
@@ -300,7 +299,7 @@ interactive_mode() {
     VERSION="${input:-$detected}"
 
     # 架构
-    read -r -p "目标架构（逗号分隔, 支持 amd64 arm64）[amd64,arm64]: " input
+    read -r -p "目标架构（支持 amd64）[amd64]: " input
     if [ -n "$input" ]; then
         ARCHS=()
         IFS=',' read -ra parts <<< "$input"
@@ -308,12 +307,11 @@ interactive_mode() {
             p="$(echo "$p" | xargs)"
             case "$p" in
                 amd64|x86_64)      ARCHS+=("amd64") ;;
-                arm64|aarch64)      ARCHS+=("arm64") ;;
                 *)                  log_warn "忽略未知架构: $p" ;;
             esac
         done
     fi
-    [ ${#ARCHS[@]} -eq 0 ] && ARCHS=("amd64" "arm64")
+    [ ${#ARCHS[@]} -eq 0 ] && ARCHS=("amd64")
 
     # 包类型
     echo "包类型（逗号分隔, 支持: deb,rpm,linyaps,appimage,portable）[全部]: "
@@ -421,16 +419,6 @@ generate_build_matrix() {
                     JOB_DOCKERFILE+=("")
                     JOB_BUILD_ARGS+=("")
                     JOB_INNER_ARGS+=("-v ${VERSION} -a x86_64")
-                    JOB_STATUS+=("")
-                    ;;
-                arm64:deb)
-                    JOB_ARCH+=("arm64")
-                    JOB_TYPE+=("deb")
-                    JOB_METHOD+=("container")
-                    JOB_IMAGE+=("ter-music-cross")
-                    JOB_DOCKERFILE+=("scripts/cross-compile/Dockerfile")
-                    JOB_BUILD_ARGS+=("")
-                    JOB_INNER_ARGS+=("-v ${VERSION} --with-source")
                     JOB_STATUS+=("")
                     ;;
                 *)
@@ -792,9 +780,15 @@ main() {
         log_info "自动检测到版本: ${VERSION}"
     fi
 
-    # 默认架构 = amd64 + arm64
+    # 验证版本号格式（防止注入）
+    if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_error "无效的版本号格式: $VERSION（必须为 X.Y.Z 格式）"
+        exit 1
+    fi
+
+    # 默认架构 = amd64
     if [ ${#ARCHS[@]} -eq 0 ]; then
-        ARCHS=("amd64" "arm64")
+        ARCHS=("amd64")
         log_info "默认架构: ${ARCHS[*]}"
     fi
 

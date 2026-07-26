@@ -14,14 +14,11 @@ scripts/
 │   ├── build-linyaps.sh      # 构建 Linyaps (如意玲珑) 包
 │   ├── build-portable.sh     # 构建可移植压缩包
 │   └── build-rpm.sh         # 构建 RPM 包
-└── cross-compile/             # 交叉编译相关
-    ├── cross-build.sh        # 交叉编译包装脚本
-    ├── Dockerfile           # Docker 镜像定义（Debian 13 DEB + ARM64 交叉编译）
-    ├── Dockerfile.deb       # Debian DEB 构建环境（支持 Debian 10/11/12/13）
-    ├── Dockerfile.rpm       # Rocky Linux RPM 构建环境（支持 EL8/9/10）
-    ├── Dockerfile.deb-static    # 静态链接 DEB 构建环境（Debian 10，FFmpeg 从源码编译）
-    ├── Dockerfile.rpm-static    # 静态链接 RPM 构建环境（Rocky Linux 8）
-    └── docker-compose.yml   # Docker Compose 配置
+└── cross-compile/             # Docker 构建环境
+    ├── cross-build.sh        # Docker 构建包装脚本
+    ├── Dockerfile.deb-static # 静态链接 DEB 构建环境（Debian 10，FFmpeg 从源码编译）
+    ├── Dockerfile.rpm        # Rocky Linux RPM 构建环境（支持 EL8/9/10）
+    └── Dockerfile.rpm-static # 静态链接 RPM 构建环境（Rocky Linux 8）
 ```
 
 ## 打包配置目录
@@ -62,7 +59,6 @@ packaging/
 | 架构 | deb | rpm | linyaps | appimage | portable |
 |------|-----|-----|---------|----------|----------|
 | amd64 | 静态链接+源码包 | 静态链接 | ✓ | ✓ | ✓ |
-| arm64 | 容器构建+源码包 | — | — | — | — |
 
 **示例：**
 ```bash
@@ -208,83 +204,13 @@ packaging/
 ./scripts/build/build-rpm.sh --static
 ```
 
-## 交叉编译
+## 非 x86 架构构建
 
-### cross-build.sh - 交叉编译包装脚本
+非 x86 架构（如 arm64、loong64、sw64、mips64el 等）的软件包由 OBS 构建服务器统一构建和维护。
 
-在 Docker 容器中进行交叉编译。
+**OBS 仓库链接：** [OBS 构建服务器](https://obs22.odata.cc/package/show/home:Admin:app/ter-music)
 
-**用法：**
-```bash
-./scripts/cross-compile/cross-build.sh [选项] -- [构建脚本参数]
-```
-
-**选项：**
-- `-b, --build-image` - 重新构建 Docker 镜像
-- `-s, --script SCRIPT` - 指定构建脚本（默认 build-deb.sh）
-- `-a, --arch ARCH` - 指定目标架构（默认 arm64）
-- `-f, --dockerfile DOCKERFILE` - 指定 Dockerfile 路径（默认 scripts/cross-compile/Dockerfile）
-- `-n, --image-name NAME` - 指定 Docker 镜像名（默认 ter-music-cross）
-- `--build-arg KEY=VALUE` - 传递构建参数给 docker build
-- `-i, --interactive` - 进入交互式 shell
-- `--no-cache` - 构建镜像时不使用缓存
-
-**示例：**
-```bash
-./scripts/cross-compile/cross-build.sh
-./scripts/cross-compile/cross-build.sh -a arm64
-./scripts/cross-compile/cross-build.sh -s build-rpm.sh
-./scripts/cross-compile/cross-build.sh -s build-rpm.sh -f scripts/cross-compile/Dockerfile.rpm --build-arg EL_VERSION=9
-./scripts/cross-compile/cross-build.sh -i
-```
-
-### Dockerfile
-
-用于构建交叉编译环境的 Docker 镜像，基于 Debian 13 (Trixie)，包含 DEB 打包工具和 ARM64 交叉编译工具链。
-
-### Dockerfile.deb
-
-用于在 Docker 容器中构建 DEB 包，支持 Debian 10/11/12/13 多个版本。
-- 通过 `DEBIAN_VERSION` build arg 指定 Debian 版本（默认 12）
-- 使用 USTC 镜像源加速国内构建
-- 支持 ARM64 交叉编译
-- **建议在 CI/CD 中使用此文件进行容器化构建，以确保构建环境一致性**
-
-### Dockerfile.deb-static
-
-用于静态链接 DEB 构建，基于 Debian 10（glibc 2.28，兼容范围最广）。
-- 从源码编译 FFmpeg 7.1（仅音频解码器），使用 aria2 16 线程加速下载
-- 静态链接 FFmpeg，动态链接其他系统库
-- 生成的 DEB 无 FFmpeg soname 依赖，单包兼容 Debian 10/11/12/13+
-- 搭配 `build-deb.sh --static` 使用
-
-### Dockerfile.rpm
-
-用于在 Rocky Linux 容器中构建 RPM 包，确保自动生成的 soname 依赖与目标 RHEL 平台一致。
-- 通过 `EL_VERSION` build arg 支持 EL8、EL9 和 EL10
-- 使用 USTC 镜像源加速国内构建
-
-### Dockerfile.rpm-static
-
-用于静态链接构建，基于 Rocky Linux 8（glibc 2.28，兼容范围最广）。
-- 从源码编译 FFmpeg 7.1（仅音频解码器）
-- 静态链接 FFmpeg，动态链接其他系统库
-- 生成的 RPM 无 FFmpeg soname 依赖，单包兼容 RHEL 8/9/10
-- 使用 USTC 镜像源加速国内构建
-
-### docker-compose.yml
-
-Docker Compose 配置文件，用于快速启动交叉编译环境。
-
-## 支持的架构
-
-所有构建脚本支持以下架构：
-- **x86_64** - Intel/AMD 64位
-- **aarch64/arm64** - ARM 64位
-- **loong64** - 龙芯新世界
-- **loongarch64** - 龙芯旧世界
-- **sw64** - 申威
-- **mips64** - MIPS 64位
+如需为其他架构构建软件包，请直接使用 OBS 服务器，无需在本地配置交叉编译环境。
 
 ## 输出目录
 
@@ -301,7 +227,7 @@ build/
 ## 注意事项
 
 1. 所有脚本都使用相对路径，必须从项目根目录运行
-2. 交叉编译需要 Docker 环境
+2. 容器构建需要 Docker 环境
 3. 某些包格式可能需要特定的构建依赖
 4. 建议使用 `-k, --keep-temp` 选项进行调试
 

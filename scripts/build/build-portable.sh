@@ -36,149 +36,6 @@ copy_to_release() {
     fi
 }
 
-# 检测是否需要交叉编译
-is_cross_compiling() {
-    local host_arch=$(uname -m)
-    local target_arch="$1"
-    
-    # 标准化架构名称进行比较
-    local normalized_host="$host_arch"
-    local normalized_target="$target_arch"
-    
-    # 将 x86_64 和 amd64 视为相同
-    if [ "$normalized_host" = "x86_64" ]; then
-        normalized_host="amd64"
-    fi
-    if [ "$normalized_target" = "x86_64" ]; then
-        normalized_target="amd64"
-    fi
-    
-    # 将 aarch64 和 arm64 视为相同
-    if [ "$normalized_host" = "aarch64" ]; then
-        normalized_host="arm64"
-    fi
-    if [ "$normalized_target" = "aarch64" ]; then
-        normalized_target="arm64"
-    fi
-    
-    if [ "$normalized_host" != "$normalized_target" ]; then
-        return 0  # true - 需要交叉编译
-    else
-        return 1  # false - 不需要交叉编译
-    fi
-}
-
-# 获取交叉编译工具链前缀
-get_cross_compile_prefix() {
-    local target_arch="$1"
-    
-    case "$target_arch" in
-        arm64|aarch64)
-            echo "aarch64-linux-gnu"
-            ;;
-        *)
-            echo ""
-            ;;
-    esac
-}
-
-# 检查交叉编译依赖
-check_cross_compile_deps() {
-    local target_arch="$1"
-    local arch_prefix=$(get_cross_compile_prefix "$target_arch")
-    
-    if [ -z "$arch_prefix" ]; then
-        return 0
-    fi
-    
-    log_info "检查交叉编译工具链..."
-    
-    local missing_deps=()
-    
-    # 检查交叉编译器
-    if ! command -v ${arch_prefix}-gcc &> /dev/null; then
-        missing_deps+=("gcc-${arch_prefix}")
-    fi
-    
-    if ! command -v ${arch_prefix}-g++ &> /dev/null; then
-        missing_deps+=("g++-${arch_prefix}")
-    fi
-    
-    if ! command -v ${arch_prefix}-ar &> /dev/null; then
-        missing_deps+=("binutils-${arch_prefix}")
-    fi
-    
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        log_error "缺少以下交叉编译工具链组件:"
-        for dep in "${missing_deps[@]}"; do
-            echo "  - $dep"
-        done
-        echo ""
-        log_error "请使用以下命令安装交叉编译工具链:"
-        echo "  sudo apt install gcc-${arch_prefix} g++-${arch_prefix} binutils-${arch_prefix}"
-        return 1
-    fi
-    
-    # 检查aarch64开发库
-    local pkg_config_dir="/usr/lib/${arch_prefix}/pkgconfig"
-    if [ ! -d "$pkg_config_dir" ] && [ ! -d "/usr/${arch_prefix}/lib/pkgconfig" ]; then
-        log_warn "未找到 ${arch_prefix} 的 pkgconfig 目录"
-        log_warn "请确保已安装目标架构的开发库，例如:"
-        log_warn "  sudo apt install libpng-dev:arm64 libjpeg-dev:arm64 libxml2-dev:arm64"
-    fi
-
-    # 检查关键开发库是否存在
-    local missing_libs=()
-    if [ -d "$pkg_config_dir" ]; then
-        for lib in libpng libjpeg libxml2 libcurl; do
-            if ! pkg-config --exists --variable pc_path pkg-config 2>/dev/null | grep -q "$arch_prefix"; then
-                :
-            fi
-            if ! [ -f "${pkg_config_dir}/${lib}.pc" ] && ! [ -f "/usr/${arch_prefix}/lib/pkgconfig/${lib}.pc" ]; then
-                missing_libs+=("${lib}-dev:arm64")
-            fi
-        done
-    fi
-
-    if [ ${#missing_libs[@]} -gt 0 ]; then
-        log_warn "以下目标架构开发库可能未安装:"
-        for lib in "${missing_libs[@]}"; do
-            echo "  - $lib"
-        done
-        echo ""
-        log_warn "如需安装，请运行:"
-        echo "  sudo apt install ${missing_libs[*]}"
-    fi
-    
-    log_info "交叉编译工具链检查通过"
-    return 0
-}
-
-# 设置交叉编译环境变量
-setup_cross_compile_env() {
-    local target_arch="$1"
-    local arch_prefix=$(get_cross_compile_prefix "$target_arch")
-    
-    if [ -z "$arch_prefix" ]; then
-        return 0
-    fi
-    
-    log_info "设置交叉编译环境..."
-    
-    export CC=${arch_prefix}-gcc
-    export CXX=${arch_prefix}-g++
-    export AR=${arch_prefix}-ar
-    export STRIP=${arch_prefix}-strip
-    export LD=${arch_prefix}-ld
-    export PKG_CONFIG_PATH=/usr/lib/${arch_prefix}/pkgconfig
-    export PKG_CONFIG_LIBDIR=/usr/lib/${arch_prefix}/pkgconfig
-    
-    log_info "交叉编译环境已设置:"
-    log_info "  CC=$CC"
-    log_info "  CXX=$CXX"
-    log_info "  PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-}
-
 show_help() {
     cat << EOF
 用法: $0 [选项]
@@ -192,30 +49,9 @@ show_help() {
     -r, --rpm FILE      从指定的RPM包文件转换（可选）
     -k, --keep-temp     保留临时构建文件（用于调试）
 
-支持的架构:
-    x86_64              Intel/AMD 64位
-    aarch64             ARM 64位
-    loong64             龙芯新世界
-    loongarch64         龙芯旧世界
-    sw64                申威
-    mips64              MIPS 64位
-
-交叉编译:
-    在 x86_64 机器上构建 aarch64 包时，会自动使用交叉编译
-    需要安装交叉编译工具链:
-      sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-    需要安装目标架构开发库:
-      sudo dpkg --add-architecture arm64
-      sudo apt update
-      sudo apt install libncurses-dev:arm64 libavcodec-dev:arm64 libavfilter-dev:arm64 \
-                       libavformat-dev:arm64 libswresample-dev:arm64 libavutil-dev:arm64 libpulse-dev:arm64 \
-                       libpng-dev:arm64 libjpeg-dev:arm64 libxml2-dev:arm64 libcurl4-openssl-dev:arm64
-
 示例:
     $0                                          自动检测版本和架构，直接从源码构建
     $0 -v 1.4.1                                 使用指定版本号直接从源码构建
-    $0 -a aarch64                              为 ARM 64位架构构建
-    $0 -v 1.4.1 -a aarch64                    指定版本和架构构建
     $0 -r build/rpm/x86_64/ter-music-1.0.0-1.x86_64.rpm  从指定RPM包转换
     $0 --keep-temp                              构建后保留临时文件
 
@@ -240,17 +76,9 @@ check_dependencies() {
         missing_deps+=("make")
     fi
 
-    # 检查是否需要交叉编译
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
-        # 交叉编译模式下，不检查本地gcc
-        if ! check_cross_compile_deps "$target_arch"; then
-            exit 1
-        fi
-    else
-        # 本地编译模式下，检查本地gcc
-        if ! command -v gcc &> /dev/null; then
-            missing_deps+=("gcc")
-        fi
+    # 检查 gcc
+    if ! command -v gcc &> /dev/null; then
+        missing_deps+=("gcc")
     fi
 
     if ! command -v tar &> /dev/null; then
@@ -376,26 +204,11 @@ build_from_source() {
 
     log_info "从源码构建..."
 
-    # 检查是否需要交叉编译
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
-        setup_cross_compile_env "$target_arch"
-        log_info "使用交叉编译模式构建目标架构: $target_arch"
-    fi
-
     mkdir -p "${build_dir}"
     cd "${build_dir}"
 
     # 准备CMake参数
     local cmake_args=("${SCRIPT_DIR}" -DCMAKE_BUILD_TYPE=Release)
-    
-    # 如果是交叉编译，添加工具链文件
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
-        local toolchain_file="${SCRIPT_DIR}/cmake/toolchain-aarch64-linux-gnu.cmake"
-        if [ -f "$toolchain_file" ]; then
-            cmake_args+=(-DCMAKE_TOOLCHAIN_FILE="$toolchain_file")
-            log_info "使用工具链文件: $toolchain_file"
-        fi
-    fi
 
     cmake "${cmake_args[@]}"
     make -j$(nproc)
@@ -692,11 +505,6 @@ main() {
             exit 1
         fi
         log_info "使用指定架构: $target_arch"
-    fi
-    
-    # 检查是否需要交叉编译
-    if is_cross_compiling "$target_arch"; then
-        log_info "检测到交叉编译模式: $(uname -m) -> $target_arch"
     fi
     
     check_dependencies "$target_arch"

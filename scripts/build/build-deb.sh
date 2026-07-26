@@ -25,59 +25,6 @@ copy_to_release() {
     fi
 }
 
-is_cross_compiling() {
-    local host_arch=$(uname -m)
-    local target_arch="$1"
-    local normalized_host="$host_arch"
-    local normalized_target="$target_arch"
-    [ "$normalized_host" = "x86_64" ] && normalized_host="amd64"
-    [ "$normalized_target" = "x86_64" ] && normalized_target="amd64"
-    [ "$normalized_host" = "aarch64" ] && normalized_host="arm64"
-    [ "$normalized_target" = "aarch64" ] && normalized_target="arm64"
-    [ "$normalized_host" != "$normalized_target" ]
-}
-
-get_cross_compile_prefix() {
-    case "$1" in
-        arm64|aarch64) echo "aarch64-linux-gnu" ;;
-        *) echo "" ;;
-    esac
-}
-
-check_cross_compile_deps() {
-    local target_arch="$1"
-    local arch_prefix=$(get_cross_compile_prefix "$target_arch")
-    [ -z "$arch_prefix" ] && return 0
-
-    log_info "检查交叉编译工具链..."
-    local missing=()
-    ! command -v ${arch_prefix}-gcc &>/dev/null && missing+=("gcc-${arch_prefix}")
-    ! command -v ${arch_prefix}-g++ &>/dev/null && missing+=("g++-${arch_prefix}")
-    ! command -v ${arch_prefix}-ar &>/dev/null && missing+=("binutils-${arch_prefix}")
-
-    if [ ${#missing[@]} -gt 0 ]; then
-        log_error "缺少交叉编译工具链: ${missing[*]}"
-        echo "  sudo apt install ${missing[*]}"
-        return 1
-    fi
-    log_info "交叉编译工具链检查通过"
-}
-
-setup_cross_compile_env() {
-    local target_arch="$1"
-    local arch_prefix=$(get_cross_compile_prefix "$target_arch")
-    [ -z "$arch_prefix" ] && return 0
-
-    log_info "设置交叉编译环境..."
-    export CC=${arch_prefix}-gcc
-    export CXX=${arch_prefix}-g++
-    export AR=${arch_prefix}-ar
-    export STRIP=${arch_prefix}-strip
-    export LD=${arch_prefix}-ld
-    export PKG_CONFIG_PATH=/usr/lib/${arch_prefix}/pkgconfig
-    export PKG_CONFIG_LIBDIR=/usr/lib/${arch_prefix}/pkgconfig
-}
-
 show_help() {
     cat << EOF
 用法: $0 [选项]
@@ -91,18 +38,13 @@ show_help() {
     -k, --keep-temp         保留临时构建文件（用于调试）
     --with-source           同时生成源码包（默认不生成）
     --with-debuginfo        生成 debuginfo 包（默认不生成）
-    --container             在 Docker 容器中构建 DEB（推荐方式）
-    --debian-version VERSION 指定 Debian 版本: 10, 11, 12 或 13（默认 12，需配合 --container）
-    --static                静态链接 FFmpeg，消除 soname 依赖，单包兼容多个 Debian 版本
-
-支持的架构:
-    amd64 arm64 loong64 loongarch64 sw64 mips64el
+    --container             在 Docker 容器中构建 DEB（推荐方式，使用静态链接 FFmpeg）
+    --static                静态链接 FFmpeg，消除 soname 依赖，单包兼容多个 Debian 版本（自动启用 --container）
 
 示例:
     $0                                    # 自动检测版本和架构构建 DEB
-    $0 -v 1.2.3 -a arm64                 # 指定版本和架构
+    $0 -v 1.2.3                           # 指定版本
     $0 --container                        # 在容器中构建（推荐）
-    $0 --container --debian-version 10    # 在 Debian 10 容器中构建
     $0 --static                           # 静态链接 FFmpeg，跨版本兼容
     $0 --with-source --with-debuginfo     # 同时生成源码包和 debuginfo 包
 
@@ -125,14 +67,8 @@ check_dependencies() {
         missing+=("devscripts")
     fi
 
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
-        if ! check_cross_compile_deps "$target_arch"; then
-            exit 1
-        fi
-    else
-        ! command -v gcc &>/dev/null && missing+=("gcc")
-        ! command -v make &>/dev/null && missing+=("make")
-    fi
+    ! command -v gcc &>/dev/null && missing+=("gcc")
+    ! command -v make &>/dev/null && missing+=("make")
 
     ! command -v cmake &>/dev/null && missing+=("cmake")
 
@@ -273,17 +209,8 @@ build_via_dpkg() {
         # lacks FFmpeg dev packages (FFmpeg built from source)
         local src_dpkg_args=(--build=source --no-sign -d)
 
-        if [ -n "$target_arch" ] && is_cross_compiling "$target_arch" ]; then
-            local dpkg_arch
-            case "$target_arch" in
-                amd64)       dpkg_arch="amd64" ;;
-                arm64)       dpkg_arch="arm64" ;;
-                loong64)     dpkg_arch="loong64" ;;
-                loongarch64) dpkg_arch="loongarch64" ;;
-                sw64)        dpkg_arch="sw64" ;;
-                mips64el)    dpkg_arch="mips64el" ;;
-                *)           dpkg_arch="$target_arch" ;;
-            esac
+        if [ -n "$target_arch" ]; then
+            local dpkg_arch="$target_arch"
             src_dpkg_args+=(--host-arch "$dpkg_arch")
         fi
 
@@ -318,28 +245,13 @@ build_via_dpkg() {
         export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS} nostrip"
     fi
 
-    # Step 9: Set up cross-compilation environment
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
-        setup_cross_compile_env "$target_arch"
-    fi
-
-    # Step 10: Phase 2 — build binary package (with static patches applied)
+    # Step 9: Phase 2 — build binary package (with static patches applied)
     log_info "Phase 2: 构建二进制包..."
     local bin_dpkg_args=(--build=binary --no-sign)
 
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch" ]; then
-        local dpkg_arch
-        case "$target_arch" in
-            amd64)       dpkg_arch="amd64" ;;
-            arm64)       dpkg_arch="arm64" ;;
-            loong64)     dpkg_arch="loong64" ;;
-            loongarch64) dpkg_arch="loongarch64" ;;
-            sw64)        dpkg_arch="sw64" ;;
-            mips64el)    dpkg_arch="mips64el" ;;
-            *)           dpkg_arch="$target_arch" ;;
-        esac
+    if [ -n "$target_arch" ]; then
+        local dpkg_arch="$target_arch"
         bin_dpkg_args+=(--host-arch "$dpkg_arch")
-        log_info "交叉编译模式: $(uname -m) -> $dpkg_arch"
     fi
 
     if ! dpkg-buildpackage "${bin_dpkg_args[@]}"; then
@@ -566,10 +478,10 @@ main() {
                 -s "build-deb.sh"
                 -f "$dockerfile"
                 -n "$image_name"
-                -a "$target_arch"
             )
 
             local inner_args=(--static)
+            inner_args+=("-a" "$target_arch")
             inner_args+=("-v" "$version")
             [ "$build_source" = "true" ] && inner_args+=(--with-source)
             [ "$build_debuginfo" = "true" ] && inner_args+=(--with-debuginfo)
@@ -592,19 +504,18 @@ main() {
             exit 1
         fi
 
-        log_info "进入容器构建模式（Debian ${debian_version}）..."
-        local dockerfile="scripts/cross-compile/Dockerfile.deb"
+        log_info "进入容器构建模式..."
+        local dockerfile="scripts/cross-compile/Dockerfile.deb-static"
         local image_name="ter-music-deb"
 
         local xb_args=(
             -s "build-deb.sh"
             -f "$dockerfile"
             -n "$image_name"
-            -a "$target_arch"
-            --build-arg "DEBIAN_VERSION=${debian_version}"
         )
 
         local inner_args=()
+        inner_args+=("-a" "$target_arch")
         inner_args+=("-v" "$version")
         [ "$build_source" = "true" ] && inner_args+=(--with-source)
         [ "$build_debuginfo" = "true" ] && inner_args+=(--with-debuginfo)

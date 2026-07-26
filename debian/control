@@ -19,6 +19,7 @@ Build-Depends:
  libxml2-dev,
  libcurl4-openssl-dev,
  libsqlite3-dev,
+ zlib1g-dev,
  pkg-config
 Standards-Version: 4.7.0
 Homepage: https://github.com/HuanSoft-Open-Source-Community/ter-music

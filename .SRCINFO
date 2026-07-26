@@ -15,10 +15,9 @@ pkgbase = ter-music-cn
 			depends = libxml2
 			depends = libpng
 			depends = libjpeg
-			depends = libao
-			depends = libmad
-			depends = libid3tag
 			depends = curl
+			depends = sqlite
+			depends = zlib
 			source = ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#branch=master
 			sha256sums = SKIP
 

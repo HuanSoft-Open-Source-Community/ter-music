@@ -23,7 +23,7 @@
 | 选项 | 说明 | 默认值 |
 |------|------|--------|
 | `-v, --version VERSION` | 指定版本号 | 自动检测 |
-| `-a, --arch ARCH` | 目标架构（逗号分隔）：`amd64`, `arm64` | `amd64,arm64` |
+| `-a, --arch ARCH` | 目标架构：`amd64` | `amd64` |
 | `-t, --types TYPES` | 包类型（逗号分隔）：`deb,rpm,linyaps,appimage,portable` | 全部 |
 | `-k, --keep-temp` | 保留临时构建文件 | 关闭 |
 | `--skip-images` | 跳过 Docker 镜像预构建 | 关闭 |
@@ -34,13 +34,13 @@
 
 **默认构建矩阵：**
 
-| 包类型 | amd64 | arm64 |
-|--------|-------|-------|
-| deb | 容器构建（静态链接 + 源码包，`Dockerfile.deb-static`） | 容器构建（动态链接 + 源码包，`Dockerfile.deb`） |
-| rpm | 容器构建（静态链接，`Dockerfile.rpm-static`） | — |
-| linyaps | 本地构建 | — |
-| appimage | 本地构建 | — |
-| portable | 本地构建 | — |
+| 包类型 | amd64 |
+|--------|-------|
+| deb | 容器构建（静态链接 + 源码包，`Dockerfile.deb-static`） |
+| rpm | 容器构建（静态链接，`Dockerfile.rpm-static`） |
+| linyaps | 本地构建 |
+| appimage | 本地构建 |
+| portable | 本地构建 |
 
 **示例：**
 ```bash
@@ -50,11 +50,11 @@
 # 指定版本，构建全部包（amd64 默认）
 ./scripts/build/launch-auto-build.sh -v 2.1.0
 
-# 指定版本、多架构、部分包类型
-./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64,arm64 -t deb,rpm
+# 指定包类型
+./scripts/build/launch-auto-build.sh -v 2.1.0 -t deb,rpm
 
 # 跳过 Docker 镜像预构建（镜像已存在时加速）
-./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64 --skip-images
+./scripts/build/launch-auto-build.sh -v 2.1.0 --skip-images
 
 # 仅构建 Docker 镜像，不构建包
 ./scripts/build/launch-auto-build.sh --rebuild-images --skip-builds
@@ -472,185 +472,20 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 - `ncurses`
 - `libxml2`
 - `sqlite`
-- `libao`
-- `libmad`
-- `libid3tag`
+- `zlib`
 
 在 Debian/Ubuntu 上安装构建依赖：
 ```bash
-sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev libjpeg-dev libswscale-dev libxml2-dev libsqlite3-dev
+sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev libjpeg-dev libswscale-dev libxml2-dev libsqlite3-dev zlib1g-dev
 ```
 
-## 交叉编译支持
+## 非 x86 架构构建
 
-所有构建脚本都支持在 x86_64/amd64 机器上通过交叉编译工具链构建 aarch64/arm64 架构的包。
+非 x86 架构（如 arm64、loong64、sw64、mips64el 等）的软件包由 OBS 构建服务器统一构建和维护。
 
-### 方式一：使用 Docker 容器（推荐）
+**OBS 仓库链接：** [OBS 构建服务器](https://obs22.odata.cc/package/show/home:Admin:app/ter-music)
 
-为了避免污染主机系统，推荐使用 Docker 容器进行交叉编译。
-
-**前置要求：** 安装 Docker
-```bash
-sudo apt install docker.io
-```
-
-**1. 构建 Docker 镜像**
-```bash
-# 使用提供的脚本构建镜像（会自动构建 Dockerfile.cross-build）
-./cross-build.sh -b
-
-# 构建指定 Dockerfile 的镜像
-./cross-build.sh -b -f scripts/cross-compile/Dockerfile.rpm --build-arg EL_VERSION=9
-```
-
-**2. 在容器中运行交叉编译**
-```bash
-# 构建 arm64 DEB 包（默认）
-./cross-build.sh
-
-# 构建 arm64 RPM 包
-./cross-build.sh -s build-rpm.sh
-
-# 构建 aarch64 AppImage
-./cross-build.sh -s build-appimage.sh -a aarch64
-
-# 构建可移植包
-./cross-build.sh -s build-portable.sh -a arm64
-
-# 使用指定 Dockerfile 和镜像名
-./cross-build.sh -s build-rpm.sh -f scripts/cross-compile/Dockerfile.rpm -n ter-music-rpm-el9
-
-# 传递构建参数给 docker build
-./cross-build.sh -s build-rpm.sh -f scripts/cross-compile/Dockerfile.rpm --build-arg EL_VERSION=10
-
-# 传递额外参数给构建脚本
-./cross-build.sh -- --keep-temp
-```
-
-**3. 进入交互式容器 shell**
-```bash
-./cross-build.sh -i
-```
-
-**4. 使用 docker-compose（可选）**
-```bash
-# 构建镜像
-docker-compose -f docker-compose.cross.yml build
-
-# 运行（需要手动指定命令）
-docker-compose -f docker-compose.cross.yml run --rm cross-build ./build-deb.sh -a arm64
-```
-
-**容器环境包含：**
-- Ubuntu 22.04 基础系统
-- ARM64 交叉编译工具链（gcc, g++, binutils）
-- ARM64 架构的开发库（libavcodec, libavformat, libswresample, libavutil, libavfilter, libpng, libjpeg, libxml2, libsqlite3, libpulse, ncurses）
-- 各种包格式构建工具（dpkg-dev, rpm, squashfs-tools 等）
-
-### Dockerfile.rpm — RHEL 容器构建
-
-用于在 Rocky Linux 容器中构建 RPM 包，确保依赖与目标 RHEL 平台一致。
-- 通过 `EL_VERSION` build arg 选择 EL8、EL9 或 EL10
-- 使用 USTC 镜像源加速国内构建
-- 搭配 `build-rpm.sh --container` 使用
-
-### Dockerfile.rpm-static — RPM 静态链接构建
-
-基于 Rocky Linux 8（glibc 2.28，兼容最广），从源码编译 FFmpeg 7.1 静态库。
-- 仅含音频解码器，最小化配置（`--disable-everything`）
-- 静态链接 FFmpeg，动态链接其他系统库（soname 在 EL 版本间稳定）
-- 生成的 RPM 单包兼容 RHEL 8/9/10，无 FFmpeg soname 依赖
-- 使用 USTC 镜像源加速国内构建
-- 搭配 `build-rpm.sh --static` 使用
-
-### Dockerfile.deb — Debian DEB 容器构建
-
-用于在 Docker 容器中构建 DEB 包，支持 Debian 10/11/12/13 多个版本。
-- 通过 `DEBIAN_VERSION` build arg 选择 Debian 版本（默认 12）
-- Debian 10 使用阿里云归档镜像（buster EOL），11+ 使用 USTC 镜像
-- 安装完整的构建工具链和 FFmpeg 开发库
-- 搭配 `build-deb.sh --container` 使用
-
-### Dockerfile.deb-static — DEB 静态链接构建
-
-基于 Debian 10（glibc 2.28，兼容最广），从源码编译 FFmpeg 7.1 静态库。
-- 仅含音频解码器，最小化配置（`--disable-everything`）
-- 静态链接 FFmpeg，动态链接其他系统库（soname 在 Debian 版本间稳定）
-- 生成的 DEB 单包兼容 Debian 10/11/12/13+，无 FFmpeg soname 依赖
-- 使用阿里云归档镜像加速国内构建
-- 搭配 `build-deb.sh --static` 使用
-
-### 方式二：在主机上直接交叉编译
-
-如果你确定要在主机上进行交叉编译：
-
-**安装交叉编译工具链**
-
-在 Debian/Ubuntu 上：
-```bash
-# 安装交叉编译工具链
-sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-
-# 添加 arm64 架构支持
-sudo dpkg --add-architecture arm64
-sudo apt update
-
-# 安装目标架构的开发库
-sudo apt install libncurses-dev:arm64 libavcodec-dev:arm64 libavformat-dev:arm64 \
-                 libswresample-dev:arm64 libswscale-dev:arm64 libavutil-dev:arm64 libavfilter-dev:arm64 \
-                 libpng-dev:arm64 libjpeg-dev:arm64 libxml2-dev:arm64 libsqlite3-dev:arm64 libpulse-dev:arm64
-```
-
-⚠️ **警告**：在主机上添加多架构支持可能会卸载某些 amd64 软件包，导致系统不稳定！建议在测试环境或虚拟机中执行。
-
-### 使用交叉编译构建
-
-**推荐使用容器方式**（见上方"方式一"），以下是在主机上直接编译的方法：
-
-只需指定目标架构为 arm64/aarch64，脚本会自动检测并使用交叉编译：
-
-```bash
-# 构建 arm64 架构的 DEB 包
-./build-deb.sh -a arm64
-
-# 构建 arm64 架构的 RPM 包
-./build-rpm.sh -a arm64
-
-# 构建 aarch64 架构的 AppImage
-./build-appimage.sh -a aarch64
-
-# 构建 aarch64 架构的可移植包
-./build-portable.sh -a aarch64
-
-# 构建 arm64 架构的 Linyaps 包
-./build-linyaps.sh -a arm64
-```
-
-脚本会自动：
-1. 检测主机架构与目标架构是否不同
-2. 检查交叉编译工具链是否已安装
-3. 设置交叉编译环境变量（CC, CXX, AR, PKG_CONFIG_PATH 等）
-4. 使用 CMake 工具链文件进行交叉编译
-
-### 验证交叉编译结果
-
-构建完成后，可以使用 `file` 命令验证生成的二进制文件架构：
-
-```bash
-# 检查 DEB 包中的二进制文件
-dpkg-deb -x build/deb/arm64/ter-music_*.deb /tmp/ter-music-test
-file /tmp/ter-music-test/usr/bin/ter-music
-# 应显示: ELF 64-bit LSB executable, ARM aarch64
-
-# 检查 RPM 包中的二进制文件
-rpm2cpio build/rpm/arm64/ter-music-*.rpm | cpio -idmv -D /tmp/ter-music-test
-file /tmp/ter-music-test/usr/bin/ter-music
-
-# 检查可移植包中的二进制文件
-tar -xzf build/portable/aarch64/ter-music-*-portable-aarch64.tar.gz -C /tmp
-cd /tmp/ter-music-portable
-file bin/ter-music
-```
+如需为其他架构构建软件包，请直接使用 OBS 服务器，无需在本地配置交叉编译环境。
 
 ## 推荐的构建流程
 
@@ -663,8 +498,8 @@ file bin/ter-music
 # 指定版本，自动构建全部包
 ./scripts/build/launch-auto-build.sh -v 2.1.0
 
-# 指定版本和多架构
-./scripts/build/launch-auto-build.sh -v 2.1.0 -a amd64,arm64
+# 跳过 Docker 镜像预构建（镜像已存在时加速）
+./scripts/build/launch-auto-build.sh -v 2.1.0 --skip-images
 ```
 
 如果只需构建单个包类型，也可以直接使用对应的构建脚本：

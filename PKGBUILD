@@ -11,7 +11,7 @@ pkgdesc="Terminal based music player"
 arch=('x86_64')
 url="https://github.com/HuanSoft-Open-Source-Community/ter-music"
 license=('GPL')
-depends=('ffmpeg' 'ncurses' 'libxml2' 'libpng' 'libjpeg' 'libao' 'libmad' 'libid3tag' 'curl' 'sqlite')
+depends=('ffmpeg' 'ncurses' 'libxml2' 'libpng' 'libjpeg' 'curl' 'sqlite' 'zlib')
 makedepends=('cmake' 'make' 'gcc' 'git' 'pkg-config')
 source=("ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#branch=master")
 sha256sums=('SKIP')

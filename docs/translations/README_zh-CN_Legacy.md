@@ -275,6 +275,8 @@ rm -rf build
 - **玲珑包** - 宜于deepin/UOS之统
 - **Arch Linux包** - 宜于Arch Linux及其衍生之统
 
+> **非 x86 架构（arm64、loong64 等）：** 凡非 x86 之架构（arm64、loong64 之属），其软件包悉托 OBS 构建服务器以总其成。详见 [OBS 构建服务器](https://obs22.odata.cc/package/show/home:Admin:app/ter-music)。
+
 **测试服器之具：**
 - **tools/start-server.py** - 交互相应之脚本，速启本地SMB/FTP/SFTP/WebDAV/HTTP服器，以验远程播乐之功。
   > 此乃 Python 之策，宜在 Conda 玄境中行。先置：`conda create -n ter-music python=3 && conda activate ter-music && pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r tools/requirements.txt` 然后行 `python3 tools/start-server.py`

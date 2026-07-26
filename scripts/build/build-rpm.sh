@@ -37,125 +37,6 @@ copy_to_release() {
     fi
 }
 
-# 检测是否需要交叉编译
-is_cross_compiling() {
-    local host_arch=$(uname -m)
-    local target_arch="$1"
-    
-    # 标准化架构名称进行比较
-    local normalized_host="$host_arch"
-    local normalized_target="$target_arch"
-    
-    # 将 x86_64 和 amd64 视为相同
-    if [ "$normalized_host" = "x86_64" ]; then
-        normalized_host="amd64"
-    fi
-    if [ "$normalized_target" = "x86_64" ]; then
-        normalized_target="amd64"
-    fi
-    
-    # 将 aarch64 和 arm64 视为相同
-    if [ "$normalized_host" = "aarch64" ]; then
-        normalized_host="arm64"
-    fi
-    if [ "$normalized_target" = "aarch64" ]; then
-        normalized_target="arm64"
-    fi
-    
-    if [ "$normalized_host" != "$normalized_target" ]; then
-        return 0  # true - 需要交叉编译
-    else
-        return 1  # false - 不需要交叉编译
-    fi
-}
-
-# 获取交叉编译工具链前缀
-get_cross_compile_prefix() {
-    local target_arch="$1"
-    
-    case "$target_arch" in
-        arm64|aarch64)
-            echo "aarch64-linux-gnu"
-            ;;
-        *)
-            echo ""
-            ;;
-    esac
-}
-
-# 检查交叉编译依赖
-check_cross_compile_deps() {
-    local target_arch="$1"
-    local arch_prefix=$(get_cross_compile_prefix "$target_arch")
-    
-    if [ -z "$arch_prefix" ]; then
-        return 0
-    fi
-    
-    log_info "检查交叉编译工具链..."
-    
-    local missing_deps=()
-    
-    # 检查交叉编译器
-    if ! command -v ${arch_prefix}-gcc &> /dev/null; then
-        missing_deps+=("gcc-${arch_prefix}")
-    fi
-    
-    if ! command -v ${arch_prefix}-g++ &> /dev/null; then
-        missing_deps+=("g++-${arch_prefix}")
-    fi
-    
-    if ! command -v ${arch_prefix}-ar &> /dev/null; then
-        missing_deps+=("binutils-${arch_prefix}")
-    fi
-    
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        log_error "缺少以下交叉编译工具链组件:"
-        for dep in "${missing_deps[@]}"; do
-            echo "  - $dep"
-        done
-        echo ""
-        log_error "请使用以下命令安装交叉编译工具链:"
-        echo "  sudo apt install gcc-${arch_prefix} g++-${arch_prefix} binutils-${arch_prefix}"
-        return 1
-    fi
-    
-    # 检查aarch64开发库
-    local pkg_config_dir="/usr/lib/${arch_prefix}/pkgconfig"
-    if [ ! -d "$pkg_config_dir" ] && [ ! -d "/usr/${arch_prefix}/lib/pkgconfig" ]; then
-        log_warn "未找到 ${arch_prefix} 的 pkgconfig 目录"
-        log_warn "请确保已安装目标架构的开发库"
-    fi
-    
-    log_info "交叉编译工具链检查通过"
-    return 0
-}
-
-# 设置交叉编译环境变量
-setup_cross_compile_env() {
-    local target_arch="$1"
-    local arch_prefix=$(get_cross_compile_prefix "$target_arch")
-    
-    if [ -z "$arch_prefix" ]; then
-        return 0
-    fi
-    
-    log_info "设置交叉编译环境..."
-    
-    export CC=${arch_prefix}-gcc
-    export CXX=${arch_prefix}-g++
-    export AR=${arch_prefix}-ar
-    export STRIP=${arch_prefix}-strip
-    export LD=${arch_prefix}-ld
-    export PKG_CONFIG_PATH=/usr/lib/${arch_prefix}/pkgconfig
-    export PKG_CONFIG_LIBDIR=/usr/lib/${arch_prefix}/pkgconfig
-    
-    log_info "交叉编译环境已设置:"
-    log_info "  CC=$CC"
-    log_info "  CXX=$CXX"
-    log_info "  PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-}
-
 show_help() {
     cat << EOF
 用法: $0 [选项]
@@ -173,30 +54,9 @@ show_help() {
     --static            构建通用静态链接 RPM，单包兼容 EL8/9/10（自动启用 --container）
     --el-version VERSION  指定目标 EL 版本: 8、9 或 10（默认：9，需配合 --container 使用）
 
-支持的架构:
-    x86_64              Intel/AMD 64位
-    arm64               ARM 64位 (aarch64)
-    loong64             龙芯新世界
-    loongarch64         龙芯旧世界
-    sw64                申威
-    mips64              MIPS 64位
-
-交叉编译:
-    在 x86_64 机器上构建 arm64 包时，会自动使用交叉编译
-    需要安装交叉编译工具链:
-      sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-    需要安装目标架构开发库:
-      sudo dpkg --add-architecture arm64
-      sudo apt update
-      sudo apt install libncurses-dev:arm64 libavcodec-dev:arm64 libavfilter-dev:arm64 \
-                       libavformat-dev:arm64 libswresample-dev:arm64 libavutil-dev:arm64 libpulse-dev:arm64 \
-                       libcurl4-openssl-dev:arm64
-
 示例:
     $0                  使用自动检测的版本号和架构构建 RPM
     $0 -v 1.2.3         使用指定版本号 1.2.3 构建 RPM
-    $0 -a arm64         为 ARM 64位架构构建 RPM
-    $0 -v 1.2.3 -a loong64  指定版本和架构构建 RPM
     $0 --keep-temp      构建后保留临时文件
     $0 --with-debuginfo 生成 debuginfo 包
 
@@ -230,17 +90,9 @@ check_dependencies() {
         fi
     fi
     
-    # 检查是否需要交叉编译
-    if [ -n "$target_arch" ] && is_cross_compiling "$target_arch"; then
-        # 交叉编译模式下，不检查本地gcc
-        if ! check_cross_compile_deps "$target_arch"; then
-            exit 1
-        fi
-    else
-        # 本地编译模式下，检查本地gcc
-        if ! command -v gcc &> /dev/null; then
-            missing_deps+=("gcc")
-        fi
+    # 检查本地编译器
+    if ! command -v gcc &> /dev/null; then
+        missing_deps+=("gcc")
     fi
     
     if ! command -v make &> /dev/null; then
@@ -275,6 +127,8 @@ check_dependencies() {
             "libpng-dev"
             "libjpeg-dev"
             "libxml2-dev"
+            "libsqlite3-dev"
+            "zlib1g-dev"
         )
 
         for lib in "${deb_dev_libs[@]}"; do
@@ -294,6 +148,8 @@ check_dependencies() {
                 "libjpeg-turbo-devel"
                 "libxml2-devel"
                 "libcurl-devel"
+                "sqlite-devel"
+                "zlib-devel"
             )
         else
             dev_libs=(
@@ -304,6 +160,8 @@ check_dependencies() {
                 "libjpeg-turbo-devel"
                 "libxml2-devel"
                 "libcurl-devel"
+                "sqlite-devel"
+                "zlib-devel"
             )
         fi
 
@@ -479,14 +337,7 @@ generate_spec_file() {
         debuginfo_macro="%global debug_package %{nil}"
     fi
 
-    # 检查是否需要交叉编译
-    local cross_compile_cmake_args=""
-    if is_cross_compiling "$target_arch"; then
-        cross_compile_cmake_args="-DCMAKE_TOOLCHAIN_FILE=%{_builddir}/cmake/toolchain-aarch64-linux-gnu.cmake"
-        log_info "将在spec中使用交叉编译工具链"
-    fi
-
-    # 静态链接参数
+    # 生成 spec（已不再需要交叉编译工具链）
     local cmake_extra_args=""
     local ffmpeg_build_requires=""
     if [ "$static_build" = "true" ]; then
@@ -523,6 +374,8 @@ BuildRequires:  pkgconfig(ncursesw) >= 6.0
 BuildRequires:  pkgconfig(libpng) >= 1.6
 BuildRequires:  pkgconfig(libjpeg)
 BuildRequires:  pkgconfig(dbus-1) >= 1.0
+BuildRequires:  pkgconfig(sqlite3)
+BuildRequires:  pkgconfig(zlib)
 
 # Runtime library dependencies are auto-generated by rpmbuild from soname
 # (libavcodec.so.60()(64bit), libpulse.so.0()(64bit), etc.),
@@ -550,7 +403,7 @@ Features:
 %build
 mkdir -p build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release ${cross_compile_cmake_args} ${cmake_extra_args}
+cmake .. -DCMAKE_BUILD_TYPE=Release ${cmake_extra_args}
 make %{?_smp_mflags}
 
 %install
@@ -901,7 +754,6 @@ main() {
             -s "build-rpm.sh"
             -f "$dockerfile"
             -n "$image_name"
-            -a "$target_arch"
         )
 
         # 透传 build-arg
@@ -911,6 +763,7 @@ main() {
 
         # 构造传递给内部 build-rpm.sh 的参数
         local inner_args=()
+        inner_args+=("-a" "$target_arch")
         inner_args+=("-v" "$version")
         [ "$use_static" = "true" ] && inner_args+=(--static-build)
         [ "$no_debuginfo" = "false" ] && inner_args+=(--with-debuginfo)

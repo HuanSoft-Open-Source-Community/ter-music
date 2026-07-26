@@ -1,16 +1,15 @@
 #!/bin/bash
 #
-# Cross-compilation wrapper script
-# Runs build scripts inside a Docker container with proper cross-compilation environment
+# Docker build wrapper script
+# Runs build scripts inside a Docker container with proper build environment
 #
 
 set -e
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
-IMAGE_NAME="ter-music-cross"
-DOCKERFILE="scripts/cross-compile/Dockerfile.deb"
-CONTAINER_NAME="ter-music-cross-build"
+IMAGE_NAME="ter-music-deb-static"
+DOCKERFILE="scripts/cross-compile/Dockerfile.deb-static"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -34,24 +33,22 @@ show_help() {
     cat << EOF
 用法: $0 [选项] -- [构建脚本参数]
 
-在 Docker 容器中进行交叉编译
+在 Docker 容器中进行构建
 
 选项:
     -h, --help          显示此帮助信息
     -b, --build-image   重新构建 Docker 镜像
     -s, --script SCRIPT 指定构建脚本 (默认: build-deb.sh)
-    -a, --arch ARCH     指定目标架构 (默认: arm64)
     -i, --interactive   进入容器的交互式 shell
-    -f, --dockerfile DOCKERFILE  指定 Dockerfile 路径 (默认: scripts/cross-compile/Dockerfile.deb)
-    -n, --image-name NAME        指定 Docker 镜像名 (默认: ter-music-cross)
+    -f, --dockerfile DOCKERFILE  指定 Dockerfile 路径 (默认: scripts/cross-compile/Dockerfile.deb-static)
+    -n, --image-name NAME        指定 Docker 镜像名 (默认: ter-music-deb-static)
     --build-arg KEY=VALUE        传递构建参数给 docker build
     --no-cache          构建镜像时不使用缓存
 
 示例:
-    $0                          # 使用默认设置构建 arm64 DEB 包
-    $0 -a arm64                 # 构建 arm64 DEB 包
+    $0                          # 使用默认设置构建 DEB 包
     $0 -s build-rpm.sh         # 使用 RPM 构建脚本
-    $0 -s build-appimage.sh -a aarch64  # 构建 aarch64 AppImage
+    $0 -s build-rpm.sh -f scripts/cross-compile/Dockerfile.rpm --build-arg EL_VERSION=9
     $0 -i                       # 进入交互式 shell
     $0 -b                       # 重新构建 Docker 镜像
     $0 -- --keep-temp           # 传递参数给构建脚本
@@ -62,7 +59,6 @@ EOF
 # Parse arguments
 BUILD_IMAGE=false
 SCRIPT="build-deb.sh"
-TARGET_ARCH="arm64"
 INTERACTIVE=false
 NO_CACHE=""
 BUILD_ARGS=()
@@ -80,10 +76,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         -s|--script)
             SCRIPT="$2"
-            shift 2
-            ;;
-        -a|--arch)
-            TARGET_ARCH="$2"
             shift 2
             ;;
         -i|--interactive)
@@ -153,7 +145,6 @@ if [ "$INTERACTIVE" = true ]; then
         /bin/bash
 else
     log_info "在容器中运行构建脚本: $SCRIPT"
-    log_info "目标架构: $TARGET_ARCH"
     log_info "构建参数: ${BUILD_SCRIPT_ARGS[*]}"
 
     docker run --rm \
@@ -163,7 +154,7 @@ else
         -e HOST_UID=$(id -u) \
         -e HOST_GID=$(id -g) \
         "$IMAGE_NAME" \
-        ./scripts/build/$SCRIPT -a "$TARGET_ARCH" "${BUILD_SCRIPT_ARGS[@]}"
+        "./scripts/build/$SCRIPT" "${BUILD_SCRIPT_ARGS[@]}"
 
     if [ $? -eq 0 ]; then
         log_info "构建完成！输出目录: ${SCRIPT_DIR}/build/"

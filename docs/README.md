@@ -315,6 +315,8 @@ The following formats are supported:
 - **Linyaps Package** - For deepin/UOS systems
 - **Arch Linux Package** - For Arch Linux and derivatives
 
+> **Non-x86 Architectures (arm64, loong64, etc.):** Packages for non-x86 architectures are built and maintained via the OBS build server. See [OBS Build Server](https://obs22.odata.cc/package/show/home:Admin:app/ter-music).
+
 **Test Server Tools:**
 - **tools/start-server.py** - Interactive script to start local SMB/FTP/SFTP/WebDAV/HTTP servers for testing remote playback feature.
   > This Python script should be run in a Conda environment. Setup: `conda create -n ter-music python=3 && conda activate ter-music && pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r tools/requirements.txt` then `python3 tools/start-server.py`
