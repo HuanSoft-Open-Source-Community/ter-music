@@ -38,7 +38,7 @@
 |--------|-------|
 | deb | 容器构建（静态链接 + 源码包，`Dockerfile.deb-static`） |
 | rpm | 容器构建（静态链接，`Dockerfile.rpm-static`） |
-| linyaps | 本地构建 |
+| linyaps | 容器构建（Docker，`Dockerfile.uab`） |
 | appimage | 本地构建 |
 | portable | 本地构建 |
 
@@ -252,50 +252,61 @@ cd ter-music-portable
 - 不需要安装任何依赖
 
 ### 4. build-linyaps.sh - 构建 Linyaps（如意玲珑）包
-直接从源码构建 Linyaps（如意玲珑）格式包，适合 deepin 等使用玲珑包管理的系统。
+
+通过 Docker 容器构建 Linyaps（如意玲珑）UAB 包，适合 deepin 等使用玲珑包管理的系统。
+
+> **需要 Docker**：Linyaps 构建依赖 `ll-builder`，该工具需要对 `/usr` 的写入权限。为避免污染宿主系统，构建在 Docker 容器（Debian 13）中进行。
+
 **使用方法：**
 ```bash
-# 使用默认版本号和架构构建
-./build-linyaps.sh
+# 推荐：通过 launch-auto-build.sh 一键构建
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.1.0
 
-#指定版本号构建
-./build-linyaps.sh -v 1.2.3
+# 或手动调用（需 Docker）
+./scripts/cross-compile/cross-build.sh -p \
+  -s build-linyaps.sh \
+  -f scripts/cross-compile/Dockerfile.uab \
+  -n ter-music-uab-builder \
+  -- -v 2.1.0 -a x86_64 --in-container
 
-# 指定目标架构
-./build-linyaps.sh -a arm64
-
-# 指定版本和架构
-./build-linyaps.sh -v 1.2.3 -a loong64
-
-# 保留临时文件用于调试
-./build-linyaps.sh --keep-temp
-
-# 显示帮助信息
-./build-linyaps.sh --help
+# 进入容器交互式调试
+./scripts/cross-compile/cross-build.sh -p -i \
+  -f scripts/cross-compile/Dockerfile.uab \
+  -n ter-music-uab-builder
 ```
+
+**选项（直接调用 build-linyaps.sh 时）：**
+| 选项 | 说明 |
+|------|------|
+| `-v, --version VERSION` | 指定版本号 |
+| `-a, --arch ARCH` | 目标架构（x86_64 / arm64 / loong64 / mips64 / sw64） |
+| `-k, --keep-temp` | 保留临时构建文件 |
+| `--in-container` | 在 Docker 容器内运行，跳过宿主机依赖检查 |
+
 **支持的架构：**
 - x86_64: Intel/AMD 64位
 - arm64: ARM 64位
-- loong64: 龙芯（包括新世界和旧世界）
+- loong64: 龙芯
 - mips64: MIPS 64位
 - sw64: 申威
 
 **输出：**
-- UAB 包和 layer 文件将输出到: `build/linyaps/<arch>/` 目录
+- UAB 包输出到: `build/linyaps/<arch>/org.yxzl.ter-music_<version>_<arch>.uab`
+- 同步复制到: `build/release/`
 
 **安装：**
 ```bash
-# 使用 ll-cli 安装
-ll-cli install build/linyaps/org.yxzl.ter-music_1.0.0_x86_64.uab
-
-# 运行
+ll-cli install build/linyaps/x86_64/org.yxzl.ter-music_2.1.0_x86_64.uab
 ll-cli run org.yxzl.ter-music
 ```
 
-**优点：**
-- 符合 Linyaps 打包规范
-- 自动处理依赖关系
-- 适合 deepin/UOS 系统用户
+**Docker 镜像说明：**
+- 镜像名：`ter-music-uab-builder`
+- 基础：Debian 13 (trixie)，使用 USTC 镜像源
+- 预装：`linglong-bin`、`linglong-installer`、`linglong-builder`、`xdg-utils`、`rsync`（构建依赖由 ll-builder 容器内自动安装）
+- Dockerfile 路径：`scripts/cross-compile/Dockerfile.uab`
+- 容器以 `--privileged` 模式运行（`ll-builder` 需要 user namespace 支持）
+- 产物所有权通过 `fix_output_ownership()` 自动修复为宿主用户
 
 ### 5. build-deb.sh - 构建 DEB 包
 将项目构建为标准的 Debian/Ubuntu DEB 包，适合 Debian、Ubuntu、Linux Mint、deepin 等基于 Debian 的发行版。
@@ -426,18 +437,16 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 - `rpm2cpio` 和 `cpio`（仅当从 RPM 转换时需要）
 
 ### build-linyaps.sh 依赖：
+- Docker（必需，构建在容器中进行）
+- 无需宿主机安装 linglong 相关包
+
+容器内自动处理以下依赖（由 `Dockerfile.uab` 定义）：
 - `linglong-builder` (ll-builder)
-- `cmake`
-- `make`
-- `pkg-config`
-- `libncurses-dev`
-- `libavformat-dev`
-- `libavcodec-dev`
-- `libswresample-dev`
-- `libavutil-dev`
-- `libtag1-dev`
-- `libpulse-dev`
-- `libsqlite3-dev`
+- `linglong-bin`
+- `linglong-installer`
+- `cmake`、`make`、`gcc`
+- FFmpeg 开发库
+- ncurses、pulseaudio、sqlite、curl、png、jpeg、xml2、dbus 等开发库
 
 ### build-deb.sh 依赖：
 - `dpkg-dev`

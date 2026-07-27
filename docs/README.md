@@ -304,8 +304,7 @@ Note: Also ensure libavfilter-dev is installed for audio filter support
 
 Ter-Music provides multiple build scripts for creating packages in different formats, as well as a test server tool for verifying remote playback functionality. For detailed usage instructions, please refer to:
 
-- [Build Guide](BUILD_GUIDE.md) - Detailed build script usage guide
-- [Scripts README](../scripts/README.md) - Quick reference for all build scripts
+- [Build Guide](BUILD_GUIDE.md) - Detailed build and packaging guide
 
 The following formats are supported:
 - **AppImage** - Universal Linux package format
