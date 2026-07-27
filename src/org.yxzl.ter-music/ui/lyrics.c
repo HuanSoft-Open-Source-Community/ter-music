@@ -923,8 +923,8 @@ static void render_lyric_line(int row, const char *text, int is_highlighted, int
         return;
     }
 
-    // 计算最大可用宽度（减去边框和缩进）
-    int max_width = w - 4;
+    // 计算最大可用宽度（减去边框和缩进，再减1列为滚动条预留空间）
+    int max_width = w - 5;
     if (max_width <= 0) {
         return;
     }
