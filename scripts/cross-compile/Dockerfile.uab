@@ -1,0 +1,32 @@
+# Dockerfile.uab — Linyaps UAB build environment
+# Based on Debian 13 (trixie) with linglong/linyaps toolchain installed
+#
+# Build:  docker build -f scripts/cross-compile/Dockerfile.uab -t ter-music-uab-builder .
+# Run:    docker run --rm --privileged -v $(pwd):/workspace ter-music-uab-builder
+
+FROM debian:trixie
+
+# ── Phase 1: System setup with USTC mirrors ──────────────────────────
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g; s|security.debian.org|mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl wget gnupg \
+        && rm -rf /var/lib/apt/lists/*
+
+# ── Phase 2: Add linglong/linyaps repository ─────────────────────────
+# This step originates from the guidance in the official documentation. 'Skipping GPG verification (i.e., `[trusted=yes]`)' is not a risk introduced by us; for details, please refer to the documentation[Install the Linyaps.](https://linyaps.org.cn/guide/start/install.html). 
+RUN echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_13/ ./" > /etc/apt/sources.list.d/linglong.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        linglong-bin linglong-installer linglong-builder xdg-utils \
+        && rm -rf /var/lib/apt/lists/*
+
+# ── Phase 3: Minimal host tools ──────────────────────────────────────
+# ll-builder 会在自己的容器内通过 buildext.apt 安装所有构建依赖，
+# Docker 镜像只需提供 rsync（build-linyaps.sh 复制源码用）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        rsync \
+        && rm -rf /var/lib/apt/lists/*
+
+# ── Phase 4: Verify installation ─────────────────────────────────────
+RUN ll-builder --version && ll-box --version
+
+WORKDIR /workspace

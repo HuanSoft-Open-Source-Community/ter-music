@@ -42,6 +42,7 @@ show_help() {
     -i, --interactive   进入容器的交互式 shell
     -f, --dockerfile DOCKERFILE  指定 Dockerfile 路径 (默认: scripts/cross-compile/Dockerfile.deb-static)
     -n, --image-name NAME        指定 Docker 镜像名 (默认: ter-music-deb-static)
+    -p, --privileged    以特权模式运行容器（Linyaps 需要）
     --build-arg KEY=VALUE        传递构建参数给 docker build
     --no-cache          构建镜像时不使用缓存
 
@@ -61,6 +62,7 @@ BUILD_IMAGE=false
 SCRIPT="build-deb.sh"
 INTERACTIVE=false
 NO_CACHE=""
+PRIVILEGED=false
 BUILD_ARGS=()
 BUILD_SCRIPT_ARGS=()
 
@@ -80,6 +82,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -i|--interactive)
             INTERACTIVE=true
+            shift
+            ;;
+        -p|--privileged)
+            PRIVILEGED=true
             shift
             ;;
         --no-cache)
@@ -137,22 +143,38 @@ fi
 # Run container
 if [ "$INTERACTIVE" = true ]; then
     log_info "进入交互式容器..."
-    docker run --rm -it \
-        -v "$SCRIPT_DIR":/workspace \
-        --workdir /workspace \
-        --user "$(id -u):$(id -g)" \
+    iopts=(-v "$SCRIPT_DIR:/workspace" --workdir /workspace)
+    if [ "$PRIVILEGED" = true ]; then
+        iopts+=(--privileged)
+    else
+        iopts+=(--user "$(id -u):$(id -g)")
+    fi
+    iopts+=(-e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" -e SKIP_GIT_ARCHIVE=1)
+    docker run --rm -it "${iopts[@]}" \
         "$IMAGE_NAME" \
         /bin/bash
 else
     log_info "在容器中运行构建脚本: $SCRIPT"
     log_info "构建参数: ${BUILD_SCRIPT_ARGS[*]}"
 
-    docker run --rm \
-        -v "$SCRIPT_DIR":/workspace \
-        --workdir /workspace \
-        --user "$(id -u):$(id -g)" \
-        -e HOST_UID=$(id -u) \
-        -e HOST_GID=$(id -g) \
+    run_opts=()
+    run_opts+=(-v "$SCRIPT_DIR:/workspace")
+    run_opts+=(--workdir /workspace)
+
+    if [ "$PRIVILEGED" = true ]; then
+        run_opts+=(--privileged)
+        # Persist linglong cache to avoid re-downloading base layer each run
+        mkdir -p "$SCRIPT_DIR/.cache/linglong"
+        run_opts+=(-v "$SCRIPT_DIR/.cache/linglong:/var/lib/linglong")
+    else
+        run_opts+=(--user "$(id -u):$(id -g)")
+    fi
+
+    run_opts+=(-e "HOST_UID=$(id -u)")
+    run_opts+=(-e "HOST_GID=$(id -g)")
+    run_opts+=(-e SKIP_GIT_ARCHIVE=1)
+
+    docker run --rm "${run_opts[@]}" \
         "$IMAGE_NAME" \
         "./scripts/build/$SCRIPT" "${BUILD_SCRIPT_ARGS[@]}"
 
