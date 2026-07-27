@@ -394,11 +394,11 @@ generate_build_matrix() {
                 amd64:linyaps)
                     JOB_ARCH+=("amd64")
                     JOB_TYPE+=("linyaps")
-                    JOB_METHOD+=("native")
-                    JOB_IMAGE+=("")
-                    JOB_DOCKERFILE+=("")
+                    JOB_METHOD+=("container")
+                    JOB_IMAGE+=("ter-music-uab-builder")
+                    JOB_DOCKERFILE+=("scripts/cross-compile/Dockerfile.uab")
                     JOB_BUILD_ARGS+=("")
-                    JOB_INNER_ARGS+=("-v ${VERSION} -a x86_64")
+                    JOB_INNER_ARGS+=("-v ${VERSION} -a x86_64 --in-container")
                     JOB_STATUS+=("")
                     ;;
                 amd64:appimage)
@@ -541,6 +541,9 @@ execute_single_build() {
             rpm)    xb_args+=(-a "$(rpm_arch "$arch")") ;;
             *)      xb_args+=(-a "$arch") ;;
         esac
+
+        # linyaps 需要特权模式（ll-builder 需要 user namespace）
+        [ "$pkg_type" = "linyaps" ] && xb_args+=(-p)
 
         # 透传 docker build args（如 --build-arg）
         if [ -n "$build_args" ]; then

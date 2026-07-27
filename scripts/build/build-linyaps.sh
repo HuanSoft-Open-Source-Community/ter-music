@@ -58,6 +58,7 @@ show_help() {
     -v, --version VERSION  指定版本号（默认：自动检测）
     -a, --arch ARCH     指定目标架构（默认：自动检测）
     -k, --keep-temp     保留临时构建文件（用于调试）
+    --in-container     在 Docker 容器内运行（跳过依赖检查）
 
 示例:
     $0                  使用自动检测版本和架构构建 Linyaps 包
@@ -243,6 +244,8 @@ build: |
 buildext:
   apt:
     build_depends:
+      - build-essential
+      - cmake
       - pkg-config
       - libncurses-dev
       - libavformat-dev
@@ -300,16 +303,19 @@ build_linyaps() {
     local project_root="$1"
 
     log_info "执行 ll-builder 构建..."
-
     cd "$project_root"
 
-    if ll-builder build --skip-fetch-source; then
-        log_info "Linyaps 构建完成"
+    # 运行 ll-builder（保留 stderr 以显示构建过程）
+    ll-builder build --skip-fetch-source
+    local rc=$?
+
+    if [ $rc -eq 0 ]; then
+        log_info "Linyaps 容器构建完成"
         return 0
-    else
-        log_error "Linyaps 构建失败"
-        return 1
     fi
+
+    log_error "Linyaps 构建失败"
+    return 1
 }
 
 export_uab() {
@@ -363,6 +369,20 @@ export_uab() {
     fi
 }
 
+# ── 修复容器内构建产物的所有权 ────────────────────────────
+# Docker 容器以 root 运行时产物属于 root，通过 chown 恢复为宿主用户
+fix_output_ownership() {
+    if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ] && [ "${HOST_UID}" != "0" ]; then
+        log_info "修复构建产物所有权为宿主用户 (${HOST_UID}:${HOST_GID})..."
+        if [ -d "${OUTPUT_DIR}" ]; then
+            chown -R "${HOST_UID}:${HOST_GID}" "${OUTPUT_DIR}" 2>/dev/null || true
+        fi
+        if [ -d "${SCRIPT_DIR}/build/release" ]; then
+            chown -R "${HOST_UID}:${HOST_GID}" "${SCRIPT_DIR}/build/release" 2>/dev/null || true
+        fi
+    fi
+}
+
 cleanup() {
     local keep_temp="$1"
 
@@ -402,6 +422,7 @@ main() {
     local version=""
     local keep_temp="false"
     local target_arch=""
+    local in_container="false"
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -419,6 +440,10 @@ main() {
                 ;;
             -k|--keep-temp)
                 keep_temp="true"
+                shift
+                ;;
+            --in-container)
+                in_container="true"
                 shift
                 ;;
             *)
@@ -466,7 +491,11 @@ main() {
         log_info "使用指定架构: $target_arch"
     fi
     
-    check_dependencies "$target_arch"
+    if [ "$in_container" = "true" ]; then
+        log_info "容器内构建模式，跳过依赖检查"
+    else
+        check_dependencies "$target_arch"
+    fi
 
     mkdir -p "${OUTPUT_DIR}/${target_arch}"
 
@@ -481,11 +510,13 @@ main() {
     if build_linyaps "$project_root"; then
         export_uab "$project_root" "${OUTPUT_DIR}/${target_arch}" "$APP_ID" "$version" "$target_arch"
         if [ -n "$EXPORTED_UAB_FILE" ] && [ -f "$EXPORTED_UAB_FILE" ]; then
+            fix_output_ownership
             cleanup "$keep_temp"
             show_summary "$target_arch" "$EXPORTED_UAB_FILE"
         else
-            log_error "导出 UAB 失败，跳过清理和总结步骤"
+            fix_output_ownership
             cleanup "$keep_temp"
+            log_error "UAB 导出失败"
             exit 1
         fi
     else
