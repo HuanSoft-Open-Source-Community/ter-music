@@ -124,50 +124,26 @@ detect_version() {
     echo "$version"
 }
 
-# ── 架构检测 (返回 deb 命名风格: amd64 / arm64) ──────────
+# ── 架构检测 (返回 deb 命名风格: amd64) ──────────
 detect_architecture() {
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64)         echo "amd64" ;;
-        aarch64|arm64)  echo "arm64" ;;
-        loongarch64)    echo "loongarch64" ;;
-        loong64)        echo "loong64" ;;
-        mips64)         echo "mips64el" ;;
-        sw_64|sw64)     echo "sw64" ;;
-        *)
-            log_error "未知架构: $arch"
-            return 1
-            ;;
-    esac
+    # Only x86_64/amd64 is supported
+    echo "amd64"
 }
 
 # ── 架构名归一化 ──────────────────────────────────────────
-# deb 脚本用 amd64 / arm64
+# deb 脚本用 amd64
 deb_arch() {
-    case "$1" in
-        amd64|x86_64)           echo "amd64" ;;
-        arm64|aarch64)          echo "arm64" ;;
-        *)                      echo "$1" ;;
-    esac
+    echo "amd64"
 }
 
-# rpm 脚本用 x86_64 / arm64
+# rpm 脚本用 x86_64
 rpm_arch() {
-    case "$1" in
-        amd64|x86_64)           echo "x86_64" ;;
-        arm64|aarch64)          echo "arm64" ;;
-        *)                      echo "$1" ;;
-    esac
+    echo "x86_64"
 }
 
-# linyaps / appimage / portable 用 x86_64 / aarch64
+# linyaps / appimage / portable 用 x86_64
 native_arch() {
-    case "$1" in
-        amd64|x86_64)           echo "x86_64" ;;
-        arm64|aarch64)          echo "aarch64" ;;
-        *)                      echo "$1" ;;
-    esac
+    echo "x86_64"
 }
 
 # ── 帮助 ──────────────────────────────────────────────────
@@ -376,7 +352,7 @@ generate_build_matrix() {
                     JOB_TYPE+=("deb")
                     JOB_METHOD+=("container")
                     JOB_IMAGE+=("ter-music-deb-static")
-                    JOB_DOCKERFILE+=("scripts/cross-compile/Dockerfile.deb-static")
+                    JOB_DOCKERFILE+=("scripts/docker/Dockerfile.deb-static")
                     JOB_BUILD_ARGS+=("")
                     JOB_INNER_ARGS+=("--static --with-source -v ${VERSION}")
                     JOB_STATUS+=("")
@@ -386,7 +362,7 @@ generate_build_matrix() {
                     JOB_TYPE+=("rpm")
                     JOB_METHOD+=("container")
                     JOB_IMAGE+=("ter-music-rpm-static")
-                    JOB_DOCKERFILE+=("scripts/cross-compile/Dockerfile.rpm-static")
+                    JOB_DOCKERFILE+=("scripts/docker/Dockerfile.rpm-static")
                     JOB_BUILD_ARGS+=("")
                     JOB_INNER_ARGS+=("--static-build -v ${VERSION}")
                     JOB_STATUS+=("")
@@ -396,7 +372,7 @@ generate_build_matrix() {
                     JOB_TYPE+=("linyaps")
                     JOB_METHOD+=("container")
                     JOB_IMAGE+=("ter-music-uab-builder")
-                    JOB_DOCKERFILE+=("scripts/cross-compile/Dockerfile.uab")
+                    JOB_DOCKERFILE+=("scripts/docker/Dockerfile.uab")
                     JOB_BUILD_ARGS+=("")
                     JOB_INNER_ARGS+=("-v ${VERSION} -a x86_64 --in-container")
                     JOB_STATUS+=("")
@@ -525,7 +501,7 @@ execute_single_build() {
     [ -n "$image" ] && label="${label} [${image}]"
 
     if [ "$method" = "container" ]; then
-        # ── 容器构建：调用 cross-build.sh ──
+        # ── 容器构建：调用 docker-build.sh ──
         local -a xb_args=()
 
         # -s 构建脚本名
@@ -568,9 +544,9 @@ execute_single_build() {
             done
         fi
 
-        log_info "执行: ${SCRIPT_DIR}/scripts/cross-compile/cross-build.sh ${xb_args[*]}"
+        log_info "执行: ${SCRIPT_DIR}/scripts/docker/docker-build.sh ${xb_args[*]}"
 
-        run_cmd "${SCRIPT_DIR}/scripts/cross-compile/cross-build.sh" "${xb_args[@]}"
+        run_cmd "${SCRIPT_DIR}/scripts/docker/docker-build.sh" "${xb_args[@]}"
         return $?
 
     else

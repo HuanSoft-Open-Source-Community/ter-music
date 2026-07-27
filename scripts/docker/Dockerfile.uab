@@ -1,7 +1,7 @@
 # Dockerfile.uab — Linyaps UAB build environment
 # Based on Debian 13 (trixie) with linglong/linyaps toolchain installed
 #
-# Build:  docker build -f scripts/cross-compile/Dockerfile.uab -t ter-music-uab-builder .
+# Build:  docker build -f scripts/docker/Dockerfile.uab -t ter-music-uab-builder .
 # Run:    docker run --rm --privileged -v $(pwd):/workspace ter-music-uab-builder
 
 FROM debian:trixie

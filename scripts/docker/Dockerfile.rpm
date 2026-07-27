@@ -4,7 +4,7 @@
 #
 # Usage:
 #   docker build --build-arg EL_VERSION=9 \
-#     -f scripts/cross-compile/Dockerfile.rpm \
+#     -f scripts/docker/Dockerfile.rpm \
 #     -t ter-music-rpm .
 #
 #   docker run --rm -v $(pwd):/workspace ter-music-rpm \

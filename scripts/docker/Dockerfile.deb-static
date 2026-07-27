@@ -7,7 +7,7 @@
 # are dynamically linked — their sonames are stable across Debian 10-13.
 #
 # Usage:
-#   docker build -f scripts/cross-compile/Dockerfile.deb-static -t ter-music-deb-static .
+#   docker build -f scripts/docker/Dockerfile.deb-static -t ter-music-deb-static .
 #   docker run --rm -v $(pwd):/workspace ter-music-deb-static \
 #     ./scripts/build/build-deb.sh --static
 #

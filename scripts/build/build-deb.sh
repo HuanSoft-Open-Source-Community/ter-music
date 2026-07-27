@@ -106,28 +106,17 @@ detect_version() {
 }
 
 detect_architecture() {
-    local arch=$(uname -m)
-    case "$arch" in
-        x86_64)         echo "amd64" ;;
-        aarch64|arm64)  echo "arm64" ;;
-        loongarch64)    echo "loongarch64" ;;
-        loong64)        echo "loong64" ;;
-        mips64)         echo "mips64el" ;;
-        sw_64|sw64)     echo "sw64" ;;
-        *)
-            log_error "未知架构: $arch"
-            return 1
-            ;;
-    esac
+    # Only x86_64/amd64 is supported
+    echo "amd64"
 }
 
 validate_architecture() {
     local arch="$1"
-    for v in amd64 arm64 loong64 loongarch64 sw64 mips64el; do
-        [ "$arch" = "$v" ] && return 0
-    done
-    log_error "不支持的架构: $arch"
-    return 1
+    if [ "$arch" != "amd64" ]; then
+        log_error "不支持的架构: $arch（仅支持 amd64）"
+        return 1
+    fi
+    return 0
 }
 
 prepare_directories() {
@@ -474,12 +463,12 @@ main() {
         log_info "使用指定架构: $target_arch"
     fi
 
-    # Container build mode: delegate to cross-build.sh
+    # Container build mode: delegate to docker-build.sh
     # Static builds always use container mode (Debian 10 for widest compat)
     if [ "$static_build" = "true" ]; then
         if command -v docker &>/dev/null; then
             log_info "进入静态构建模式（Debian 10 容器，FFmpeg 从源码编译）..."
-            local dockerfile="scripts/cross-compile/Dockerfile.deb-static"
+            local dockerfile="scripts/docker/Dockerfile.deb-static"
             local image_name="ter-music-deb-static"
 
             local xb_args=(
@@ -498,8 +487,8 @@ main() {
                 xb_args+=("--" "${inner_args[@]}")
             fi
 
-            log_info "委托给 cross-build.sh: ${xb_args[*]}"
-            exec "${SCRIPT_DIR}/scripts/cross-compile/cross-build.sh" "${xb_args[@]}"
+            log_info "委托给 docker-build.sh: ${xb_args[*]}"
+            exec "${SCRIPT_DIR}/scripts/docker/docker-build.sh" "${xb_args[@]}"
         else
             log_info "静态构建模式：Docker 不可用，直接构建（容器内环境）"
         fi
@@ -513,7 +502,7 @@ main() {
         fi
 
         log_info "进入容器构建模式..."
-        local dockerfile="scripts/cross-compile/Dockerfile.deb-static"
+        local dockerfile="scripts/docker/Dockerfile.deb-static"
         local image_name="ter-music-deb"
 
         local xb_args=(
@@ -532,8 +521,8 @@ main() {
             xb_args+=("--" "${inner_args[@]}")
         fi
 
-        log_info "委托给 cross-build.sh: ${xb_args[*]}"
-        exec "${SCRIPT_DIR}/scripts/cross-compile/cross-build.sh" "${xb_args[@]}"
+        log_info "委托给 docker-build.sh: ${xb_args[*]}"
+        exec "${SCRIPT_DIR}/scripts/docker/docker-build.sh" "${xb_args[@]}"
     fi
 
     check_dependencies "$target_arch"

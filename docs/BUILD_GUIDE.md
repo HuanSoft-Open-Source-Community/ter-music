@@ -85,29 +85,12 @@
 # 使用默认版本号和架构构建
 ./build-rpm.sh
 
-# 指定版本号构建
-./build-rpm.sh -v 1.2.3
-
-# 指定目标架构
-./build-rpm.sh -a arm64
-
-# 生成 debuginfo 包（默认不生成）
-./build-rpm.sh --with-debuginfo
-
 # 保留临时文件用于调试
 ./build-rpm.sh --keep-temp
 
 # 显示帮助信息
 ./build-rpm.sh --help
 ```
-**支持的架构：**
-- x86_64: Intel/AMD 64位
-- arm64: ARM 64位
-- loong64: 龙芯新世界
-- loongarch64: 龙芯旧世界
-- sw64: 申威
-- mips64: MIPS 64位
-
 **输出：**
 - RPM 包将输出到 `build/rpm/<arch>/` 目录
 - 默认只生成主包，使用 `--with-debuginfo` 选项可同时生成 debuginfo 包和 debugsource 包
@@ -156,12 +139,6 @@ python3 tools/start-server.py
 # 指定版本号构建
 ./build-appimage.sh -v 1.4.1
 
-# 指定目标架构
-./build-appimage.sh -a aarch64
-
-# 指定版本和架构
-./build-appimage.sh -v 1.4.1 -a aarch64
-
 # 从指定 RPM 包文件转换
 ./build-appimage.sh -r build/rpm/x86_64/ter-music-1.0.0-1.x86_64.rpm
 
@@ -171,14 +148,6 @@ python3 tools/start-server.py
 # 显示帮助信息
 ./build-appimage.sh --help
 ```
-**支持的架构：**
-- x86_64: Intel/AMD 64位
-- aarch64: ARM 64位
-- loong64: 龙芯（包括新世界和旧世界）
-- loongarch64: 龙芯旧世界
-- sw64: 申威
-- mips64: MIPS 64位
-
 **输出：**
 - AppImage 包将输出到: `build/appimage/<arch>/` 目录
 
@@ -207,12 +176,6 @@ chmod +x build/appimage/ter-music-1.0.0-x86_64.AppImage
 # 指定版本号构建
 ./build-portable.sh -v 1.4.1
 
-# 指定目标架构
-./build-portable.sh -a aarch64
-
-# 指定版本和架构
-./build-portable.sh -v 1.4.1 -a aarch64
-
 # 从指定 RPM 包文件转换
 ./build-portable.sh -r build/rpm/x86_64/ter-music-1.0.0-1.x86_64.rpm
 
@@ -222,14 +185,6 @@ chmod +x build/appimage/ter-music-1.0.0-x86_64.AppImage
 # 显示帮助信息
 ./build-portable.sh --help
 ```
-**支持的架构：**
-- x86_64: Intel/AMD 64位
-- aarch64: ARM 64位
-- loong64: 龙芯（包括新世界和旧世界）
-- loongarch64: 龙芯旧世界
-- sw64: 申威
-- mips64: MIPS 64位
-
 **输出：**
 - 可移植包将输出到: `build/portable/<arch>/` 目录
 
@@ -263,15 +218,15 @@ cd ter-music-portable
 ./scripts/build/launch-auto-build.sh -t linyaps -v 2.1.0
 
 # 或手动调用（需 Docker）
-./scripts/cross-compile/cross-build.sh -p \
+./scripts/docker/docker-build.sh -p \
   -s build-linyaps.sh \
-  -f scripts/cross-compile/Dockerfile.uab \
+  -f scripts/docker/Dockerfile.uab \
   -n ter-music-uab-builder \
   -- -v 2.1.0 -a x86_64 --in-container
 
 # 进入容器交互式调试
-./scripts/cross-compile/cross-build.sh -p -i \
-  -f scripts/cross-compile/Dockerfile.uab \
+./scripts/docker/docker-build.sh -p -i \
+  -f scripts/docker/Dockerfile.uab \
   -n ter-music-uab-builder
 ```
 
@@ -279,16 +234,9 @@ cd ter-music-portable
 | 选项 | 说明 |
 |------|------|
 | `-v, --version VERSION` | 指定版本号 |
-| `-a, --arch ARCH` | 目标架构（x86_64 / arm64 / loong64 / mips64 / sw64） |
+| `-a, --arch ARCH` | 目标架构（默认 x86_64） |
 | `-k, --keep-temp` | 保留临时构建文件 |
 | `--in-container` | 在 Docker 容器内运行，跳过宿主机依赖检查 |
-
-**支持的架构：**
-- x86_64: Intel/AMD 64位
-- arm64: ARM 64位
-- loong64: 龙芯
-- mips64: MIPS 64位
-- sw64: 申威
 
 **输出：**
 - UAB 包输出到: `build/linyaps/<arch>/org.yxzl.ter-music_<version>_<arch>.uab`
@@ -304,7 +252,7 @@ ll-cli run org.yxzl.ter-music
 - 镜像名：`ter-music-uab-builder`
 - 基础：Debian 13 (trixie)，使用 USTC 镜像源
 - 预装：`linglong-bin`、`linglong-installer`、`linglong-builder`、`xdg-utils`、`rsync`（构建依赖由 ll-builder 容器内自动安装）
-- Dockerfile 路径：`scripts/cross-compile/Dockerfile.uab`
+- Dockerfile 路径：`scripts/docker/Dockerfile.uab`
 - 容器以 `--privileged` 模式运行（`ll-builder` 需要 user namespace 支持）
 - 产物所有权通过 `fix_output_ownership()` 自动修复为宿主用户
 
@@ -320,9 +268,6 @@ ll-cli run org.yxzl.ter-music
 
 # 指定版本号构建
 ./build-deb.sh -v 1.4.1
-
-# 指定目标架构
-./build-deb.sh -a arm64
 
 # 在 Docker 容器中构建（推荐，确保环境一致性）
 ./build-deb.sh --container
@@ -346,13 +291,6 @@ ll-cli run org.yxzl.ter-music
 - `--static`：静态链接 FFmpeg，消除 soname 依赖，单包兼容多个 Debian 版本（自动使用 Debian 10 容器）
 - `--with-source`：同时生成源码包
 - `--with-debuginfo`：生成 debuginfo 包
-**支持的架构：**
-- amd64: Intel/AMD 64位
-- arm64: ARM 64位
-- loong64: 龙芯新世界
-- loongarch64: 龙芯旧世界
-- sw64: 申威
-- mips64el: MIPS 64位小端
 **输出：**
 - DEB 包将输出到: `build/deb/<arch>/` 目录
 **安装：**
@@ -381,7 +319,6 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 ```
 **支持的架构：**
 - x86_64: Intel/AMD 64位
-- i686: Intel/AMD 32位
 
 **输出：**
 - Arch Linux 包将输出到当前目录
@@ -488,14 +425,6 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev libjpeg-dev libswscale-dev libxml2-dev libsqlite3-dev zlib1g-dev
 ```
 
-## 非 x86 架构构建
-
-非 x86 架构（如 arm64、loong64、sw64、mips64el 等）的软件包由 OBS 构建服务器统一构建和维护。
-
-**OBS 仓库链接：** [OBS 构建服务器](https://obs22.odata.cc/package/show/home:Admin:app/ter-music)
-
-如需为其他架构构建软件包，请直接使用 OBS 服务器，无需在本地配置交叉编译环境。
-
 ## 推荐的构建流程
 
 **推荐使用 `launch-auto-build.sh` 一键构建所有包类型（最便捷的方式）：**
@@ -542,6 +471,14 @@ sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev lib
 - **AppImage**：适合支持 FUSE 的 Linux 系统，单文件分发
 - **可移植包**：适合所有 Linux 系统，兼容性最好
 - **Arch Linux 包**：适合 Arch Linux 和 Arch-based 发行版，可以通过 pacman 或 AUR 安装
+
+## 非 x86 架构构建
+
+非 x86 架构（如 arm64、loong64、sw64、mips64el 等）的软件包由 OBS 构建服务器统一构建和维护。
+
+**OBS 仓库链接：** [OBS 构建服务器](https://obs22.odata.cc/package/show/home:Admin:app/ter-music)
+
+如需为其他架构构建软件包，请直接使用 OBS 服务器，无需在本地配置交叉编译环境。
 
 ## 故障排除
 

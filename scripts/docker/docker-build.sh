@@ -9,7 +9,7 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 IMAGE_NAME="ter-music-deb-static"
-DOCKERFILE="scripts/cross-compile/Dockerfile.deb-static"
+DOCKERFILE="scripts/docker/Dockerfile.deb-static"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -40,7 +40,7 @@ show_help() {
     -b, --build-image   重新构建 Docker 镜像
     -s, --script SCRIPT 指定构建脚本 (默认: build-deb.sh)
     -i, --interactive   进入容器的交互式 shell
-    -f, --dockerfile DOCKERFILE  指定 Dockerfile 路径 (默认: scripts/cross-compile/Dockerfile.deb-static)
+    -f, --dockerfile DOCKERFILE  指定 Dockerfile 路径 (默认: scripts/docker/Dockerfile.deb-static)
     -n, --image-name NAME        指定 Docker 镜像名 (默认: ter-music-deb-static)
     -p, --privileged    以特权模式运行容器（Linyaps 需要）
     --build-arg KEY=VALUE        传递构建参数给 docker build
@@ -49,7 +49,7 @@ show_help() {
 示例:
     $0                          # 使用默认设置构建 DEB 包
     $0 -s build-rpm.sh         # 使用 RPM 构建脚本
-    $0 -s build-rpm.sh -f scripts/cross-compile/Dockerfile.rpm --build-arg EL_VERSION=9
+    $0 -s build-rpm.sh -f scripts/docker/Dockerfile.rpm --build-arg EL_VERSION=9
     $0 -i                       # 进入交互式 shell
     $0 -b                       # 重新构建 Docker 镜像
     $0 -- --keep-temp           # 传递参数给构建脚本

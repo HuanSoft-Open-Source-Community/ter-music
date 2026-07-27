@@ -266,48 +266,17 @@ detect_version() {
 }
 
 detect_architecture() {
-    local arch=$(uname -m)
-    
-    case "$arch" in
-        x86_64)
-            echo "x86_64"
-            ;;
-        aarch64|arm64)
-            echo "arm64"
-            ;;
-        loongarch64)
-            echo "loongarch64"
-            ;;
-        loong64)
-            echo "loong64"
-            ;;
-        mips64)
-            echo "mips64"
-            ;;
-        sw_64|sw64)
-            echo "sw64"
-            ;;
-        *)
-            log_error "未知的架构: $arch"
-            echo "unknown"
-            return 1
-            ;;
-    esac
+    # Only x86_64 is supported
+    echo "x86_64"
 }
 
 validate_architecture() {
     local arch="$1"
-    local valid_archs=("x86_64" "arm64" "loong64" "loongarch64" "sw64" "mips64")
-    
-    for valid_arch in "${valid_archs[@]}"; do
-        if [ "$arch" = "$valid_arch" ]; then
-            return 0
-        fi
-    done
-    
-    log_error "不支持的架构: $arch"
-    log_error "支持的架构列表: ${valid_archs[*]}"
-    return 1
+    if [ "$arch" != "x86_64" ]; then
+        log_error "不支持的架构: $arch（仅支持 x86_64）"
+        return 1
+    fi
+    return 0
 }
 
 prepare_directories() {
@@ -730,7 +699,7 @@ main() {
         log_info "使用指定架构: $target_arch"
     fi
 
-    # 容器构建模式：委托给 cross-build.sh
+    # 容器构建模式：委托给 docker-build.sh
     if [ "$use_container" = "true" ]; then
         if ! command -v docker &> /dev/null; then
             log_error "Docker 未安装，无法使用容器构建模式"
@@ -741,11 +710,11 @@ main() {
         local dockerfile image_name build_args=()
         if [ "$use_static" = "true" ]; then
             log_info "进入容器构建模式（静态链接，单包兼容 EL8/9/10）..."
-            dockerfile="scripts/cross-compile/Dockerfile.rpm-static"
+            dockerfile="scripts/docker/Dockerfile.rpm-static"
             image_name="ter-music-rpm-static"
         else
             log_info "进入容器构建模式（Rocky Linux ${el_version}）..."
-            dockerfile="scripts/cross-compile/Dockerfile.rpm"
+            dockerfile="scripts/docker/Dockerfile.rpm"
             image_name="ter-music-rpm-el${el_version}"
             build_args=(--build-arg "EL_VERSION=${el_version}")
         fi
@@ -772,8 +741,8 @@ main() {
             xb_args+=("--" "${inner_args[@]}")
         fi
 
-        log_info "委托给 cross-build.sh: ${xb_args[*]}"
-        exec "${SCRIPT_DIR}/scripts/cross-compile/cross-build.sh" "${xb_args[@]}"
+        log_info "委托给 docker-build.sh: ${xb_args[*]}"
+        exec "${SCRIPT_DIR}/scripts/docker/docker-build.sh" "${xb_args[@]}"
     fi
 
     check_dependencies "$target_arch" "$use_static"

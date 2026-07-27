@@ -193,48 +193,17 @@ detect_version() {
 }
 
 detect_architecture() {
-    local arch=$(uname -m)
-    
-    case "$arch" in
-        x86_64)
-            echo "x86_64"
-            ;;
-        aarch64|arm64)
-            echo "aarch64"
-            ;;
-        loongarch64)
-            echo "loongarch64"
-            ;;
-        loong64)
-            echo "loong64"
-            ;;
-        mips64)
-            echo "mips64"
-            ;;
-        sw_64|sw64)
-            echo "sw64"
-            ;;
-        *)
-            log_error "未知的架构: $arch"
-            echo "unknown"
-            return 1
-            ;;
-    esac
+    # Only x86_64 is supported
+    echo "x86_64"
 }
 
 validate_architecture() {
     local arch="$1"
-    local valid_archs=("x86_64" "aarch64" "loong64" "loongarch64" "sw64" "mips64")
-    
-    for valid_arch in "${valid_archs[@]}"; do
-        if [ "$arch" = "$valid_arch" ]; then
-            return 0
-        fi
-    done
-    
-    log_error "不支持的架构: $arch"
-    log_error "支持的架构列表: ${valid_archs[*]}"
-    return 1
+    if [ "$arch" != "x86_64" ]; then
+        log_error "不支持的架构: $arch（仅支持 x86_64）"
+        return 1
+    fi
+    return 0
 }
 
 download_appimagetool() {

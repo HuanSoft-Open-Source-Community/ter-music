@@ -3,7 +3,7 @@
 # Based on rockylinux:8 for the oldest glibc (2.28) = widest compatibility.
 #
 # Usage:
-#   docker build -f scripts/cross-compile/Dockerfile.rpm-static -t ter-music-rpm-static .
+#   docker build -f scripts/docker/Dockerfile.rpm-static -t ter-music-rpm-static .
 #   docker run --rm -v $(pwd):/workspace ter-music-rpm-static ./scripts/build/build-rpm.sh
 
 FROM rockylinux:8
