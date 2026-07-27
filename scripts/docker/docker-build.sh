@@ -11,6 +11,12 @@ SCRIPT_DIR="$(pwd)"
 IMAGE_NAME="ter-music-deb-static"
 DOCKERFILE="scripts/docker/Dockerfile.deb-static"
 
+# Redirect Docker client config directory to a writable location
+# (default ~/.docker/ may be on a read-only filesystem, causing Buildx
+#  activity tracking and other Docker writes to fail)
+DOCKER_CONFIG_DIR="$SCRIPT_DIR/.cache/docker-buildx"
+mkdir -p "$DOCKER_CONFIG_DIR"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -37,7 +43,7 @@ show_help() {
 
 选项:
     -h, --help          显示此帮助信息
-    -b, --build-image   重新构建 Docker 镜像
+    -b, --build-image   删除并重新构建 scripts/docker/ 下所有四个构建镜像
     -s, --script SCRIPT 指定构建脚本 (默认: build-deb.sh)
     -i, --interactive   进入容器的交互式 shell
     -f, --dockerfile DOCKERFILE  指定 Dockerfile 路径 (默认: scripts/docker/Dockerfile.deb-static)
@@ -51,7 +57,7 @@ show_help() {
     $0 -s build-rpm.sh         # 使用 RPM 构建脚本
     $0 -s build-rpm.sh -f scripts/docker/Dockerfile.rpm --build-arg EL_VERSION=9
     $0 -i                       # 进入交互式 shell
-    $0 -b                       # 重新构建 Docker 镜像
+    $0 -b                       # 重建所有四个构建镜像
     $0 -- --keep-temp           # 传递参数给构建脚本
 
 EOF
@@ -65,6 +71,14 @@ NO_CACHE=""
 PRIVILEGED=false
 BUILD_ARGS=()
 BUILD_SCRIPT_ARGS=()
+
+# 四个构建镜像的 (Dockerfile:镜像名) 对
+BUILD_TARGETS=(
+    "scripts/docker/Dockerfile.deb-static:ter-music-deb-static"
+    "scripts/docker/Dockerfile.rpm:ter-music-rpm"
+    "scripts/docker/Dockerfile.rpm-static:ter-music-rpm-static"
+    "scripts/docker/Dockerfile.uab:ter-music-uab-builder"
+)
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -127,11 +141,41 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Build Docker image if needed
-if [ "$BUILD_IMAGE" = true ] || ! docker image inspect "$IMAGE_NAME" &> /dev/null; then
+# Build Docker image(s)
+if [ "$BUILD_IMAGE" = true ]; then
+    # -b 模式：删除并重建所有四个构建镜像
+    # 注意：-f/-n 参数在 -b 模式下被忽略（始终构建全部四个镜像）
+    if [ "$DOCKERFILE" != "scripts/docker/Dockerfile.deb-static" ] || [ "$IMAGE_NAME" != "ter-music-deb-static" ]; then
+        log_warn "-b 模式下 -f/-n 参数不生效，将构建全部四个镜像"
+    fi
+    log_info "开始重建所有 Docker 构建镜像..."
+    for target in "${BUILD_TARGETS[@]}"; do
+        df="${target%%:*}"
+        name="${target#*:}"
+        if [ ! -f "$df" ]; then
+            log_error "Dockerfile 不存在: $df"
+            exit 1
+        fi
+        # 删除已存在的镜像（仅删除构建镜像本身，不删除 pull 的基础镜像）
+        if docker image inspect "$name" &>/dev/null; then
+            log_info "删除旧镜像: $name"
+            docker rmi -f "$name" >/dev/null 2>&1 || true
+        fi
+        log_info "构建镜像: $name (Dockerfile: $df)"
+        if ! DOCKER_CONFIG="$DOCKER_CONFIG_DIR" docker build "${BUILD_ARGS[@]}" --no-cache -f "$df" -t "$name" "$SCRIPT_DIR"; then
+            log_error "镜像构建失败: $name"
+            exit 1
+        fi
+        log_info "镜像构建完成: $name"
+    done
+    log_info "所有 Docker 构建镜像已重建完成"
+    exit 0
+fi
+
+# 非 -b 模式：按需构建单个镜像
+if ! docker image inspect "$IMAGE_NAME" &> /dev/null; then
     log_info "构建 Docker 镜像: $IMAGE_NAME (Dockerfile: $DOCKERFILE)"
-    docker build "${BUILD_ARGS[@]}" $NO_CACHE -f "$DOCKERFILE" -t "$IMAGE_NAME" "$SCRIPT_DIR"
-    if [ $? -ne 0 ]; then
+    if ! DOCKER_CONFIG="$DOCKER_CONFIG_DIR" docker build "${BUILD_ARGS[@]}" $NO_CACHE -f "$DOCKERFILE" -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
         log_error "Docker 镜像构建失败"
         exit 1
     fi
@@ -174,11 +218,9 @@ else
     run_opts+=(-e "HOST_GID=$(id -g)")
     run_opts+=(-e SKIP_GIT_ARCHIVE=1)
 
-    docker run --rm "${run_opts[@]}" \
+    if docker run --rm "${run_opts[@]}" \
         "$IMAGE_NAME" \
-        "./scripts/build/$SCRIPT" "${BUILD_SCRIPT_ARGS[@]}"
-
-    if [ $? -eq 0 ]; then
+        "./scripts/build/$SCRIPT" "${BUILD_SCRIPT_ARGS[@]}"; then
         log_info "构建完成！输出目录: ${SCRIPT_DIR}/build/"
     else
         log_error "构建失败"
