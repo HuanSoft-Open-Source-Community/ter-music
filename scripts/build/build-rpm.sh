@@ -421,9 +421,9 @@ install -m 644 ../resources/icons/hicolor/32x32/apps/%{name}.png %{buildroot}%{_
 install -m 644 ../resources/icons/hicolor/48x48/apps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/%{name}.png
 install -m 644 ../resources/icons/hicolor/128x128/apps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/%{name}.png
 install -m 644 ../resources/icons/hicolor/scalable/apps/%{name}.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/%{name}.svg
-mkdir -p %{buildroot}%{_datadir}/ter-music
-install -m 644 ../data/help-quickstart-zh.txt %{buildroot}%{_datadir}/ter-music/help-quickstart-zh.txt
-install -m 644 ../data/help-quickstart-en.txt %{buildroot}%{_datadir}/ter-music/help-quickstart-en.txt
+mkdir -p %{buildroot}%{_datadir}/ter-music/help
+install -m 644 ../data/help/help-quickstart-zh_CN.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-zh_CN.txt
+install -m 644 ../data/help/help-quickstart-en_US.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-en_US.txt
 
 %files
 %{_bindir}/%{name}
@@ -446,7 +446,7 @@ create_source_tarball() {
     
     log_info "创建源码压缩包..."
     
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1 && [ "${SKIP_GIT_ARCHIVE:-0}" != "1" ]; then
         git -C "${SCRIPT_DIR}" archive --format=tar.gz --prefix="${PROJECT_NAME}-${version}/" HEAD > "$tarball_path"
         if [ $? -eq 0 ]; then
             log_info "源码压缩包已创建: $tarball_path (使用 git archive)"

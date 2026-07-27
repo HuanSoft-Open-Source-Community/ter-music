@@ -155,7 +155,7 @@ build_via_dpkg() {
 
     # Step 1: Create .orig.tar.gz via git archive or fallback
     local orig_tarball="${build_root}/${PROJECT_NAME}_${version}.orig.tar.gz"
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1 && [ "${SKIP_GIT_ARCHIVE:-0}" != "1" ]; then
         if ! git -C "${SCRIPT_DIR}" archive --format=tar.gz \
             --prefix="${PROJECT_NAME}-${version}/" \
             HEAD > "$orig_tarball" 2>/dev/null || [ ! -s "$orig_tarball" ]; then
@@ -174,7 +174,15 @@ build_via_dpkg() {
         rm -rf "${fallback_dir}/${PROJECT_NAME}-${version}"/.git \
                "${fallback_dir}/${PROJECT_NAME}-${version}"/build \
                "${fallback_dir}/${PROJECT_NAME}-${version}"/.tmp \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.debbuild_temp 2>/dev/null || true
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.debbuild_temp \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.reasonix \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.claude \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.trae \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.lingma \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.appimagetool \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.cache \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.vscode \
+               "${fallback_dir}/${PROJECT_NAME}-${version}"/.*_temp 2>/dev/null || true
         tar -czf "$orig_tarball" -C "$fallback_dir" "${PROJECT_NAME}-${version}"
     fi
     log_info "源码压缩包已创建: $orig_tarball"

@@ -321,7 +321,7 @@ void render_help_content(void)
                  i18n_get("help.search_matches"),
                  g_help_search_count);
     } else {
-        snprintf(hint, sizeof(hint),
+        snprintf(hint, sizeof(hint), "%s",
                  i18n_get("help.scroll_hint"));
     }
 
