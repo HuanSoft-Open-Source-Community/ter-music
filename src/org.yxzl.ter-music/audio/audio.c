@@ -640,7 +640,7 @@ start_playback:
         char ext_buf[16] = "";
         if (src_ext) {
             size_t ext_len = strlen(src_ext);
-            if (ext_len < sizeof(ext_buf)) strncpy(ext_buf, src_ext, ext_len);
+            if (ext_len < sizeof(ext_buf)) memcpy(ext_buf, src_ext, ext_len + 1);
         }
 
         char tmp_audio[] = "/tmp/ter-music-cache-XXXXXX";
