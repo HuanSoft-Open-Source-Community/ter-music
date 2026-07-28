@@ -32,8 +32,9 @@ copy_to_release() {
     
     if [ -f "$source_file" ]; then
         mkdir -p "$release_dir"
-        cp "$source_file" "$release_dir/"
-        log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        if cp "$source_file" "$release_dir/"; then
+            log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        fi
     fi
 }
 
@@ -498,6 +499,25 @@ fix_ownership() {
         log_info "HOST_UID/HOST_GID 未设置，跳过文件所有权修复"
         return 0
     fi
+
+    # Non-root users cannot chown (EPERM). When the container runs with
+    # --user mapping, files already belong to the correct UID — skip chown
+    # and just ensure readable/writable permissions instead.
+    if [ "$(id -u)" != "0" ]; then
+        log_info "非 root 用户，跳过 chown，确保文件权限可读写..."
+        if [ -d "${OUTPUT_DIR}" ]; then
+            chmod -R u+rwX "${OUTPUT_DIR}" 2>/dev/null || true
+        fi
+        local release_dir="${SCRIPT_DIR}/build/release"
+        if [ -d "$release_dir" ]; then
+            chmod -R u+rwX "$release_dir" 2>/dev/null || true
+        fi
+        if [ -d "${TEMP_DIR}" ]; then
+            chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
     log_info "修复文件所有权为 ${HOST_UID}:${HOST_GID}..."
 
     local ok=0
@@ -572,7 +592,12 @@ cleanup() {
     
     if [ "$keep_temp" != "true" ]; then
         log_clean "清理临时文件..."
-        rm -rf "${TEMP_DIR}"
+        # Ensure all temp files are writable before removal (some may be
+        # created by rpmbuild/fakeroot with restrictive permissions)
+        if [ -d "${TEMP_DIR}" ]; then
+            chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+            rm -rf "${TEMP_DIR}" || true
+        fi
         log_clean "临时文件已清理"
     else
         log_info "保留临时文件: ${TEMP_DIR}"

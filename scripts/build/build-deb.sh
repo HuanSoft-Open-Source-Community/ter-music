@@ -20,8 +20,9 @@ copy_to_release() {
     local release_dir="${SCRIPT_DIR}/build/release"
     if [ -f "$source_file" ]; then
         mkdir -p "$release_dir"
-        cp "$source_file" "$release_dir/"
-        log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        if cp "$source_file" "$release_dir/"; then
+            log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        fi
     fi
 }
 
@@ -123,7 +124,10 @@ prepare_directories() {
     local target_arch="$1"
     log_info "准备构建目录..."
     mkdir -p "${OUTPUT_DIR}/${target_arch}" "${SOURCE_OUTPUT_DIR}"
-    rm -rf "${TEMP_DIR}"
+    if [ -d "${TEMP_DIR}" ]; then
+        chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+        rm -rf "${TEMP_DIR}" || true
+    fi
     mkdir -p "${TEMP_DIR}"
     log_clean "已清理并创建构建目录"
 }
@@ -156,22 +160,36 @@ build_via_dpkg() {
         fi
     else
         # Fallback: tar from file list (no git available)
+        # Use rsync with excludes to avoid "cp cannot copy into itself" errors
+        # when TEMP_DIR (e.g. .debbuild_temp) is inside SCRIPT_DIR.
         local fallback_dir="${TEMP_DIR}/fallback_source"
         rm -rf "$fallback_dir"
         mkdir -p "${fallback_dir}/${PROJECT_NAME}-${version}"
-        cp -a "${SCRIPT_DIR}"/. "${fallback_dir}/${PROJECT_NAME}-${version}/"
-        rm -rf "${fallback_dir}/${PROJECT_NAME}-${version}"/.git \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/build \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.tmp \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.debbuild_temp \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.reasonix \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.claude \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.trae \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.lingma \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.appimagetool \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.cache \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.vscode \
-               "${fallback_dir}/${PROJECT_NAME}-${version}"/.*_temp 2>/dev/null || true
+        if command -v rsync &>/dev/null; then
+            rsync -a --exclude='.git' --exclude='build' --exclude='.tmp' \
+                --exclude='.debbuild_temp' --exclude='.linyaps_temp' \
+                --exclude='.rpmbuild_temp' --exclude='.portable_temp' \
+                --exclude='.appimagetool' --exclude='.cache' \
+                --exclude='.reasonix' --exclude='.claude' --exclude='.trae' \
+                --exclude='.lingma' --exclude='.vscode' \
+                --exclude='*_temp' \
+                "${SCRIPT_DIR}"/ "${fallback_dir}/${PROJECT_NAME}-${version}"/
+        else
+            # rsync not available — fall back to cp + post-cleanup
+            cp -a "${SCRIPT_DIR}"/. "${fallback_dir}/${PROJECT_NAME}-${version}"/ 2>/dev/null || true
+            rm -rf "${fallback_dir}/${PROJECT_NAME}-${version}"/.git \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/build \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.tmp \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.debbuild_temp \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.reasonix \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.claude \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.trae \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.lingma \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.appimagetool \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.cache \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.vscode \
+                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.*_temp 2>/dev/null || true
+        fi
         tar -czf "$orig_tarball" -C "$fallback_dir" "${PROJECT_NAME}-${version}"
     fi
     log_info "源码压缩包已创建: $orig_tarball"
@@ -237,7 +255,7 @@ build_via_dpkg() {
     fi
 
     # Step 8: Set DEB_BUILD_OPTIONS
-    export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-} nocheck"
+    export DEB_BUILD_OPTIONS="nocheck${DEB_BUILD_OPTIONS:+ ${DEB_BUILD_OPTIONS}}"
     if [ "$build_debuginfo" != "true" ]; then
         export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS} nostrip"
     fi
@@ -286,7 +304,7 @@ collect_results() {
         mkdir -p "${SOURCE_OUTPUT_DIR}"
         for f in "${build_root}"/*.dsc "${build_root}"/*.debian.tar.* "${build_root}"/*.orig.tar.*; do
             [ -f "$f" ] || continue
-            cp "$f" "${SOURCE_OUTPUT_DIR}/"
+            cp "$f" "${SOURCE_OUTPUT_DIR}/" || true
             copy_to_release "$f"
             log_info "已复制源码包: $(basename "$f")"
         done
@@ -303,7 +321,12 @@ collect_results() {
 cleanup() {
     if [ "$1" != "true" ]; then
         log_clean "清理临时文件..."
-        rm -rf "${TEMP_DIR}"
+        # Ensure all temp files are writable before removal (some may be
+        # created by fakeroot/dpkg with restrictive permissions)
+        if [ -d "${TEMP_DIR}" ]; then
+            chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+            rm -rf "${TEMP_DIR}" || true
+        fi
         log_clean "临时文件已清理"
     else
         log_info "保留临时文件: ${TEMP_DIR}"
@@ -315,6 +338,25 @@ fix_ownership() {
         log_info "HOST_UID/HOST_GID 未设置，跳过文件所有权修复"
         return 0
     fi
+
+    # Non-root users cannot chown (EPERM). When the container runs with
+    # --user mapping, files already belong to the correct UID — skip chown
+    # and just ensure readable/writable permissions instead.
+    if [ "$(id -u)" != "0" ]; then
+        log_info "非 root 用户，跳过 chown，确保文件权限可读写..."
+        if [ -d "${OUTPUT_DIR}" ]; then
+            chmod -R u+rwX "${OUTPUT_DIR}" 2>/dev/null || true
+        fi
+        local release_dir="${SCRIPT_DIR}/build/release"
+        if [ -d "$release_dir" ]; then
+            chmod -R u+rwX "$release_dir" 2>/dev/null || true
+        fi
+        if [ -d "${TEMP_DIR}" ]; then
+            chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
     log_info "修复文件所有权为 ${HOST_UID}:${HOST_GID}..."
 
     local ok=0

@@ -41,8 +41,9 @@ copy_to_release() {
     
     if [ -f "$source_file" ]; then
         mkdir -p "$release_dir"
-        cp "$source_file" "$release_dir/"
-        log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        if cp "$source_file" "$release_dir/"; then
+            log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        fi
     fi
 }
 
@@ -320,6 +321,9 @@ export_uab() {
 
     if ll-builder export --ref "$ref" -o "$temp_uab"; then
         mv "$temp_uab" "$final_uab"
+        # Ensure UAB file is readable (remove any stray execute bits from
+        # the privileged container build)
+        chmod 644 "$final_uab" 2>/dev/null || true
         log_info "UAB 包导出完成: $final_uab"
 
         # 同时复制 layer 文件到输出目录
@@ -344,13 +348,32 @@ export_uab() {
 # ── 修复容器内构建产物的所有权 ────────────────────────────
 # Docker 容器以 root 运行时产物属于 root，通过 chown 恢复为宿主用户
 fix_output_ownership() {
-    if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ] && [ "${HOST_UID}" != "0" ]; then
-        log_info "修复构建产物所有权为宿主用户 (${HOST_UID}:${HOST_GID})..."
+    if [ -z "${HOST_UID:-}" ] || [ -z "${HOST_GID:-}" ]; then
+        return 0
+    fi
+
+    # Non-root users cannot chown; just ensure permissions are sane
+    if [ "$(id -u)" != "0" ]; then
+        log_info "非 root 用户，确保构建产物权限可读写..."
         if [ -d "${OUTPUT_DIR}" ]; then
-            chown -R "${HOST_UID}:${HOST_GID}" "${OUTPUT_DIR}" 2>/dev/null || true
+            chmod -R u+rwX "${OUTPUT_DIR}" 2>/dev/null || true
         fi
         if [ -d "${SCRIPT_DIR}/build/release" ]; then
-            chown -R "${HOST_UID}:${HOST_GID}" "${SCRIPT_DIR}/build/release" 2>/dev/null || true
+            chmod -R u+rwX "${SCRIPT_DIR}/build/release" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
+    # Root in privileged container: chown files to host user
+    if [ "${HOST_UID}" != "0" ]; then
+        log_info "修复构建产物所有权为宿主用户 (${HOST_UID}:${HOST_GID})..."
+        if [ -d "${OUTPUT_DIR}" ]; then
+            chown -R "${HOST_UID}:${HOST_GID}" "${OUTPUT_DIR}" 2>/dev/null || \
+                chmod -R u+rwX,go+rX "${OUTPUT_DIR}" 2>/dev/null || true
+        fi
+        if [ -d "${SCRIPT_DIR}/build/release" ]; then
+            chown -R "${HOST_UID}:${HOST_GID}" "${SCRIPT_DIR}/build/release" 2>/dev/null || \
+                chmod -R u+rwX,go+rX "${SCRIPT_DIR}/build/release" 2>/dev/null || true
         fi
     fi
 }
@@ -360,7 +383,12 @@ cleanup() {
 
     if [ "$keep_temp" != "true" ]; then
         log_clean "清理临时文件..."
-        rm -rf "${TEMP_DIR}"
+        # Ensure temp files are writable before removal (ll-builder may create
+        # files with restrictive permissions inside the container)
+        if [ -d "${TEMP_DIR}" ]; then
+            chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+            rm -rf "${TEMP_DIR}" || true
+        fi
         log_clean "临时文件已清理"
     else
         log_info "保留临时文件: ${TEMP_DIR}"
@@ -471,7 +499,10 @@ main() {
 
     mkdir -p "${OUTPUT_DIR}/${target_arch}"
 
-    rm -rf "${TEMP_DIR}"
+    if [ -d "${TEMP_DIR}" ]; then
+        chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+        rm -rf "${TEMP_DIR}" || true
+    fi
     mkdir -p "${TEMP_DIR}"
     # 调用函数，通过全局变量返回结果
     prepare_linyaps_structure "$TEMP_DIR" "$APP_ID"

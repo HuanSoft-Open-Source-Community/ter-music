@@ -31,8 +31,9 @@ copy_to_release() {
     
     if [ -f "$source_file" ]; then
         mkdir -p "$release_dir"
-        cp "$source_file" "$release_dir/"
-        log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        if cp "$source_file" "$release_dir/"; then
+            log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        fi
     fi
 }
 
@@ -344,8 +345,11 @@ create_tarball() {
     if [ -d "$(basename "${portable_dir}")" ]; then
         if tar -czf "${tarball_path}" "$(basename "${portable_dir}")"; then
             cd "$original_dir"
-            copy_to_release "${tarball_path}"
+            # Echo path to stdout for command-substitution capture;
+            # redirect copy_to_release output to stderr so its log_info
+            # does not pollute the captured path.
             echo "${tarball_path}"
+            copy_to_release "${tarball_path}" >&2
             return 0
         else
             cd "$original_dir"
@@ -362,7 +366,12 @@ cleanup() {
 
     if [ "$keep_temp" != "true" ]; then
         log_clean "清理临时文件..."
-        rm -rf "${TEMP_DIR}"
+        # Ensure temp files are writable before removal (some may be
+        # created with restrictive permissions during the build)
+        if [ -d "${TEMP_DIR}" ]; then
+            chmod -R u+rwX "${TEMP_DIR}" 2>/dev/null || true
+            rm -rf "${TEMP_DIR}" || true
+        fi
         log_clean "临时文件已清理"
     else
         log_info "保留临时文件: ${TEMP_DIR}"

@@ -33,8 +33,9 @@ copy_to_release() {
     
     if [ -f "$source_file" ]; then
         mkdir -p "$release_dir"
-        cp "$source_file" "$release_dir/"
-        log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        if cp "$source_file" "$release_dir/"; then
+            log_info "构建结果已复制到: ${release_dir}/$(basename "$source_file")"
+        fi
     fi
 }
 
