@@ -20,8 +20,11 @@ override_dh_auto_configure:
 # Debian/Deepin -> libpng16-16,      Ubuntu 24.04+ -> libpng16-16t64 (time64 transition, same soname libpng16.so.16)
 override_dh_shlibdeps:
 	dh_shlibdeps
-	# Add OR-alternatives for libjpeg — Debian uses libjpeg62-turbo, Ubuntu uses libjpeg62
+	# libjpeg: Debian → libjpeg62-turbo, Ubuntu 24.04+ → libjpeg62 (same soname libjpeg.so.62)
 	sed -i 's/libjpeg62-turbo[^,]*/libjpeg62-turbo (>= 1.3.1) | libjpeg62/g' debian/*.substvars
-	# Add OR-alternatives for libpng16 — Debian uses libpng16-16, Ubuntu 24.04+ uses libpng16-16t64
+	# libpng16: t64 transition — Ubuntu 24.04+ → libpng16-16t64 (same soname libpng16.so.16)
 	sed -i 's/libpng16-16[^,]*/libpng16-16 (>= 1.6.2-1) | libpng16-16t64/g' debian/*.substvars
-	# libxml2 soname is stable (libxml2.so.2) across Debian/Ubuntu — no substitution needed
+	# libxml2: Debian → libxml2, Ubuntu 26.04+ → libxml2-16 (same soname libxml2.so.2)
+	sed -i 's/libxml2[^,]*/libxml2 (>= 2.7.4) | libxml2-16/g' debian/*.substvars
+	# libcurl4: t64 transition — Ubuntu 24.04+ → libcurl4t64 (same soname libcurl.so.4)
+	sed -i 's/libcurl4[^,]*/libcurl4 (>= 7.16.2) | libcurl4t64/g' debian/*.substvars

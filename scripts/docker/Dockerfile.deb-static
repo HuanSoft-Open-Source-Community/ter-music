@@ -48,9 +48,9 @@ RUN apt-get update && apt-get install -y \
 # Build FFmpeg as static libraries (audio-only, minimal footprint)
 # Disables video/encoding/network/external deps so the static build
 # has no transitive .so dependencies beyond glibc/libm/libpthread.
-RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-7.1.tar.gz && \
-    tar xzf ffmpeg-7.1.tar.gz && \
-    cd ffmpeg-7.1 && \
+RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz && \
+    tar xzf ffmpeg-8.1.2.tar.gz && \
+    cd ffmpeg-8.1.2 && \
     ./configure \
         --enable-static --disable-shared \
         --disable-programs --disable-doc \
@@ -67,13 +67,35 @@ RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-7.1.tar.gz && \
         --disable-ffplay --disable-ffprobe --disable-ffmpeg && \
     make -j$(nproc) && \
     make install && \
-    cd / && rm -rf ffmpeg-7.1
+    cd / && rm -rf ffmpeg-8.1.2
 
 # Make FFmpeg's pkgconfig files discoverable
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
 # Verify the static libs were installed
 RUN ls -la /usr/local/lib/libavcodec.a /usr/local/lib/libavformat.a /usr/local/lib/libavutil.a
+
+# Build libxml2 as static library to avoid soname breakage across distros
+# Ubuntu 26.04 ships libxml2.so.16 (soname bumped from .2), breaking ABI.
+# Static linking removes the runtime dependency on libxml2.so entirely.
+RUN aria2c -x 8 -s 8 -k 1M https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.6.tar.xz && \
+    tar xf libxml2-2.13.6.tar.xz && \
+    cd libxml2-2.13.6 && \
+    ./configure --enable-static --disable-shared \
+        --without-python --without-lzma \
+        --without-http --without-ftp \
+        --without-modules --without-iconv \
+        --without-schematron --without-schemas && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf libxml2-2.13.6
+
+# Remove system libxml2 shared/static libs so linker picks up the static build
+# Keep libxml2-dev installed to satisfy dpkg Build-Depends check
+RUN rm -f /usr/lib/x86_64-linux-gnu/libxml2.so /usr/lib/x86_64-linux-gnu/libxml2.a
+
+# Verify the static libxml2 was installed
+RUN ls -la /usr/local/lib/libxml2.a
 
 # Install DEB packaging tools (from buster-backports for debhelper compat 13)
 RUN echo "deb http://mirrors.aliyun.com/debian-archive/debian buster-backports main" >> /etc/apt/sources.list && \

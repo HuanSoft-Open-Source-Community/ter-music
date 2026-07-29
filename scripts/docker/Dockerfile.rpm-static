@@ -30,9 +30,9 @@ RUN sed -e 's|^mirrorlist=|#mirrorlist=|g' \
 # Build FFmpeg as static libraries (audio-only, minimal footprint)
 # Disables video/encoding/network/external deps so the static build
 # has no transitive .so dependencies beyond glibc/libm/libpthread.
-RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-7.1.tar.gz && \
-    tar xzf ffmpeg-7.1.tar.gz && \
-    cd ffmpeg-7.1 && \
+RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz && \
+    tar xzf ffmpeg-8.1.2.tar.gz && \
+    cd ffmpeg-8.1.2 && \
     ./configure \
         --enable-static --disable-shared \
         --disable-programs --disable-doc \
@@ -49,12 +49,32 @@ RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-7.1.tar.gz && \
         --disable-ffplay --disable-ffprobe --disable-ffmpeg && \
     make -j$(nproc) && \
     make install && \
-    cd / && rm -rf ffmpeg-7.1
+    cd / && rm -rf ffmpeg-8.1.2
 
 # Make FFmpeg's pkgconfig files discoverable
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
 # Verify the static libs were installed
 RUN ls -la /usr/local/lib/libavcodec.a /usr/local/lib/libavformat.a /usr/local/lib/libavutil.a
+
+# Build libxml2 as static library to avoid soname breakage across distros
+# (EL10+/Ubuntu 26.04 may ship bumped soname versions)
+RUN aria2c -x 8 -s 8 -k 1M https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.6.tar.xz && \
+    tar xf libxml2-2.13.6.tar.xz && \
+    cd libxml2-2.13.6 && \
+    ./configure --enable-static --disable-shared \
+        --without-python --without-lzma \
+        --without-http --without-ftp \
+        --without-modules --without-iconv \
+        --without-schematron --without-schemas && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf libxml2-2.13.6
+
+# Remove system libxml2-devel so CMake picks up the static build
+RUN dnf remove -y libxml2-devel 2>/dev/null || true
+
+# Verify the static libxml2 was installed
+RUN ls -la /usr/local/lib/libxml2.a
 
 WORKDIR /workspace
