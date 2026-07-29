@@ -48,7 +48,9 @@ RUN apt-get update && apt-get install -y \
 # Build FFmpeg as static libraries (audio-only, minimal footprint)
 # Disables video/encoding/network/external deps so the static build
 # has no transitive .so dependencies beyond glibc/libm/libpthread.
-RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz && \
+RUN trap '' PIPE; \
+    aria2c -x 16 -s 16 -k 1M --console-log-level=error --check-certificate=false --show-console-readout=false --summary-interval=0 https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz >/dev/null 2>&1; \
+    test -f ffmpeg-8.1.2.tar.gz && \
     tar xzf ffmpeg-8.1.2.tar.gz && \
     cd ffmpeg-8.1.2 && \
     ./configure \
@@ -78,7 +80,9 @@ RUN ls -la /usr/local/lib/libavcodec.a /usr/local/lib/libavformat.a /usr/local/l
 # Build libxml2 as static library to avoid soname breakage across distros
 # Ubuntu 26.04 ships libxml2.so.16 (soname bumped from .2), breaking ABI.
 # Static linking removes the runtime dependency on libxml2.so entirely.
-RUN aria2c -x 8 -s 8 -k 1M https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.6.tar.xz && \
+RUN trap '' PIPE; \
+    aria2c -x 8 -s 8 -k 1M --console-log-level=error --check-certificate=false --show-console-readout=false --summary-interval=0 https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.6.tar.xz >/dev/null 2>&1; \
+    test -f libxml2-2.13.6.tar.xz && \
     tar xf libxml2-2.13.6.tar.xz && \
     cd libxml2-2.13.6 && \
     ./configure --enable-static --disable-shared \

@@ -21,6 +21,9 @@ RUN sed -e 's|^mirrorlist=|#mirrorlist=|g' \
     dnf config-manager --set-enabled powertools && \
     dnf install -y \
         https://mirrors.ustc.edu.cn/epel/epel-release-latest-8.noarch.rpm && \
+    sed -e 's|^metalink=|#metalink=|g' \
+        -e 's|^#baseurl=https://download.example/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
+        -i /etc/yum.repos.d/epel*.repo && \
     dnf install -y \
         cmake pkgconfig rpm-build wget aria2 git \
         ncurses-devel libcurl-devel libjpeg-turbo-devel libpng-devel \
@@ -30,7 +33,9 @@ RUN sed -e 's|^mirrorlist=|#mirrorlist=|g' \
 # Build FFmpeg as static libraries (audio-only, minimal footprint)
 # Disables video/encoding/network/external deps so the static build
 # has no transitive .so dependencies beyond glibc/libm/libpthread.
-RUN aria2c -x 16 -s 16 -k 1M https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz && \
+RUN trap '' PIPE; \
+    aria2c -x 16 -s 16 -k 1M --console-log-level=error --check-certificate=false --show-console-readout=false --summary-interval=0 https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz >/dev/null 2>&1; \
+    test -f ffmpeg-8.1.2.tar.gz && \
     tar xzf ffmpeg-8.1.2.tar.gz && \
     cd ffmpeg-8.1.2 && \
     ./configure \
@@ -59,7 +64,9 @@ RUN ls -la /usr/local/lib/libavcodec.a /usr/local/lib/libavformat.a /usr/local/l
 
 # Build libxml2 as static library to avoid soname breakage across distros
 # (EL10+/Ubuntu 26.04 may ship bumped soname versions)
-RUN aria2c -x 8 -s 8 -k 1M https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.6.tar.xz && \
+RUN trap '' PIPE; \
+    aria2c -x 8 -s 8 -k 1M --console-log-level=error --check-certificate=false --show-console-readout=false --summary-interval=0 https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.6.tar.xz >/dev/null 2>&1; \
+    test -f libxml2-2.13.6.tar.xz && \
     tar xf libxml2-2.13.6.tar.xz && \
     cd libxml2-2.13.6 && \
     ./configure --enable-static --disable-shared \

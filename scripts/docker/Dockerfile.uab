@@ -16,7 +16,7 @@ RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g; s|security.debian.org|mirror
 # This step originates from the guidance in the official documentation. 'Skipping GPG verification (i.e., `[trusted=yes]`)' is not a risk introduced by us; for details, please refer to the documentation[Install the Linyaps.](https://linyaps.org.cn/guide/start/install.html). 
 RUN echo "deb [trusted=yes] https://ci.deepin.com/repo/obs/linglong:/CI:/release/Debian_13/ ./" > /etc/apt/sources.list.d/linglong.list && \
     apt-get update && apt-get install -y --no-install-recommends \
-        linglong-bin linglong-installer linglong-builder xdg-utils \
+        linglong-bin linglong-installer linglong-builder linglong-box xdg-utils \
         && rm -rf /var/lib/apt/lists/*
 
 # ── Phase 3: Minimal host tools ──────────────────────────────────────

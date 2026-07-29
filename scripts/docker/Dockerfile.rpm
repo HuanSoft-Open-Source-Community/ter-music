@@ -39,6 +39,9 @@ RUN sed -e 's|^mirrorlist=|#mirrorlist=|g' \
         echo "Unsupported EL_VERSION: $EL_VERSION" >&2; \
         exit 1; \
     fi && \
+    sed -e 's|^metalink=|#metalink=|g' \
+        -e 's|^#baseurl=https://download.example/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
+        -i /etc/yum.repos.d/epel*.repo && \
     dnf clean all
 
 # Install build toolchain
