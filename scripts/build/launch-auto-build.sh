@@ -569,7 +569,7 @@ execute_single_build() {
     fi
 }
 
-# ── 查找构建产物路径（用于退出码非零时二次确认） ──────────
+# ── 查找构建产物路径（用于构建前清理旧产物） ──────────
 build_artifact_path() {
     local arch="$1"
     local pkg_type="$2"
@@ -588,7 +588,9 @@ build_artifact_path() {
         linyaps)
             local narch
             narch=$(native_arch "$arch")
+            # UAB 优先，layer 兜底（Docker 容器内缺 uab-header）；两者都清理
             echo "${SCRIPT_DIR}/build/linyaps/${narch}/org.yxzl.ter-music_${VERSION}_${narch}.uab"
+            echo "${SCRIPT_DIR}/build/linyaps/${narch}/org.yxzl.ter-music_${VERSION}.0_${narch}_binary.layer"
             ;;
         appimage)
             local narch
@@ -634,27 +636,30 @@ execute_builds() {
         log_print "${BOLD}[${count}/${total}] 构建 ${arch} ${pkg_type}${NC}"
         log_print "──────────────────────────────────────────"
 
+        # 构建前清理该类型的旧产物，防止残留文件导致假成功判断
+        # （build_artifact_path 可能返回多个候选路径，如 linyaps 的 .uab/.layer）
+        local artifact
+        while IFS= read -r artifact; do
+            [ -z "$artifact" ] && continue
+            if [ -f "$artifact" ]; then
+                rm -f "$artifact"
+                log_info "已清理旧产物: ${artifact}"
+            fi
+        done < <(build_artifact_path "$arch" "$pkg_type")
+
         set +e
         if execute_single_build "$i"; then
             JOB_STATUS[$i]="OK"
             success_count=$((success_count + 1))
             log_ok "${arch} ${pkg_type} 构建成功"
         else
-            # 退出码非零时，二次校验产物文件是否存在
-            local artifact
-            artifact=$(build_artifact_path "$arch" "$pkg_type")
-            if [ -n "$artifact" ] && [ -f "$artifact" ]; then
-                JOB_STATUS[$i]="OK"
-                success_count=$((success_count + 1))
-                log_warn "${arch} ${pkg_type} 脚本退出码非零，但产物文件已存在，视为成功"
-            else
-                JOB_STATUS[$i]="FAIL"
-                fail_count=$((fail_count + 1))
-                log_fail "${arch} ${pkg_type} 构建失败"
-                if [ "$FAIL_FAST" = "true" ]; then
-                    log_error "遇构建失败，退出"
-                    break
-                fi
+            # 构建失败即失败，不做二次校验（旧产物已在构建前清理）
+            JOB_STATUS[$i]="FAIL"
+            fail_count=$((fail_count + 1))
+            log_fail "${arch} ${pkg_type} 构建失败"
+            if [ "$FAIL_FAST" = "true" ]; then
+                log_error "遇构建失败，退出"
+                break
             fi
         fi
         set -e
