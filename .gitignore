@@ -59,3 +59,4 @@ oadoc/
 .appimagetool/*
 squashfs-root/*.cache/
 .cache/
+scripts/docker/uab-tools/

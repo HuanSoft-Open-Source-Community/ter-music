@@ -26,7 +26,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         rsync \
         && rm -rf /var/lib/apt/lists/*
 
+# ── Phase 3b: Fetch UAB builder tools from remote repo ────────────────
+# 容器根文件系统是 overlayfs，内核不支持嵌套 overlayfs 挂载，
+# 因此 cn.org.linyaps.builder.utils 层无法在容器内运行。
+# 直接从 linglong OSTree repo 拉取 builder.utils 层并提取
+# uab-header/uab-loader/mkfs.erofs 到 ll-builder 系统工具 fallback 路径，
+# 使 UAB 导出无需下载/运行 builder.utils 层。
+# 注：此处二进制来自官方 builder.utils 层 (cn.org.linyaps.builder.utils/0.0.1.2)。
+RUN mkdir -p /usr/lib/x86_64-linux-gnu/linglong/builder/uab && \
+    apt-get update && apt-get install -y --no-install-recommends ostree && \
+    mkdir -p /tmp/ostree-repo && ostree --repo=/tmp/ostree-repo init --mode=bare && \
+    ostree --repo=/tmp/ostree-repo remote add --no-gpg-verify stable \
+        https://mirror-repo-linglong.deepin.com/repos/stable && \
+    ostree --repo=/tmp/ostree-repo pull stable \
+        main/cn.org.linyaps.builder.utils/0.0.1.2/x86_64/binary && \
+    COMMIT=$(ostree --repo=/tmp/ostree-repo rev-parse \
+        main/cn.org.linyaps.builder.utils/0.0.1.2/x86_64/binary) && \
+    ostree --repo=/tmp/ostree-repo checkout "$COMMIT" /tmp/builder-utils && \
+    cp /tmp/builder-utils/files/lib/linglong/builder/uab/uab-header \
+       /tmp/builder-utils/files/lib/linglong/builder/uab/uab-loader \
+       /tmp/builder-utils/files/bin/mkfs.erofs \
+       /usr/lib/x86_64-linux-gnu/linglong/builder/uab/ && \
+    chmod 755 /usr/lib/x86_64-linux-gnu/linglong/builder/uab/* && \
+    rm -rf /tmp/ostree-repo /tmp/builder-utils && \
+    apt-get purge -y ostree && apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # ── Phase 4: Verify installation ─────────────────────────────────────
-RUN ll-builder --version && ll-box --version
+RUN ll-builder --version && ll-box --version && \
+    echo "UAB tools:" && \
+    ls -la /usr/lib/x86_64-linux-gnu/linglong/builder/uab/
+
+# Pre-set linyaps remote repo timeout (default 5s is too short for deepin mirrors)
+ENV LINGLONG_CONNECT_TIMEOUT=120
 
 WORKDIR /workspace

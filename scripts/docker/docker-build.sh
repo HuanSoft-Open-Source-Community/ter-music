@@ -190,6 +190,8 @@ if [ "$INTERACTIVE" = true ]; then
     iopts=(-v "$SCRIPT_DIR:/workspace" --workdir /workspace)
     if [ "$PRIVILEGED" = true ]; then
         iopts+=(--privileged)
+        iopts+=(--security-opt seccomp=unconfined)
+        iopts+=(--security-opt apparmor=unconfined)
     else
         iopts+=(--user "$(id -u):$(id -g)")
     fi
@@ -207,9 +209,14 @@ else
 
     if [ "$PRIVILEGED" = true ]; then
         run_opts+=(--privileged)
+        run_opts+=(--security-opt seccomp=unconfined)
+        run_opts+=(--security-opt apparmor=unconfined)
         # Persist linglong cache to avoid re-downloading base layer each run
         mkdir -p "$SCRIPT_DIR/.cache/linglong"
         run_opts+=(-v "$SCRIPT_DIR/.cache/linglong:/var/lib/linglong")
+        # Mount /tmp as tmpfs so that ll-builder can do overlayfs mounts there
+        # (Docker root is overlayfs; nested overlay is rejected by the kernel)
+        run_opts+=(--tmpfs /tmp:exec,size=4G)
     else
         run_opts+=(--user "$(id -u):$(id -g)")
     fi
@@ -217,13 +224,29 @@ else
     run_opts+=(-e "HOST_UID=$(id -u)")
     run_opts+=(-e "HOST_GID=$(id -g)")
     run_opts+=(-e SKIP_GIT_ARCHIVE=1)
+    # Increase linyaps remote repo timeout (default 5s is too short for deepin mirrors)
+    run_opts+=(-e LINGLONG_CONNECT_TIMEOUT=120)
 
+    build_rc=0
     if docker run --rm "${run_opts[@]}" \
         "$IMAGE_NAME" \
         "./scripts/build/$SCRIPT" "${BUILD_SCRIPT_ARGS[@]}"; then
         log_info "构建完成！输出目录: ${SCRIPT_DIR}/build/"
     else
         log_error "构建失败"
-        exit 1
+        build_rc=1
     fi
+
+    # 兜底：容器退出后统一修复 build/ 产物和缓存目录的所有权
+    # 特权容器 (--privileged) 以 root 运行，产物可能属于 root
+    if [ -d "${SCRIPT_DIR}/build" ]; then
+        chown -R "$(id -u):$(id -g)" "${SCRIPT_DIR}/build" 2>/dev/null || \
+            chmod -R u+rwX,go+rX "${SCRIPT_DIR}/build" 2>/dev/null || true
+    fi
+    if [ -d "${SCRIPT_DIR}/.cache/linglong" ]; then
+        chown -R "$(id -u):$(id -g)" "${SCRIPT_DIR}/.cache/linglong" 2>/dev/null || \
+            chmod -R u+rwX,go+rX "${SCRIPT_DIR}/.cache/linglong" 2>/dev/null || true
+    fi
+
+    exit $build_rc
 fi
