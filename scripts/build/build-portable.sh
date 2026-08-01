@@ -361,6 +361,26 @@ create_tarball() {
     fi
 }
 
+# ── 修复容器内构建产物的所有权 ────────────────────────────
+fix_output_ownership() {
+    if [ -z "${HOST_UID:-}" ] || [ -z "${HOST_GID:-}" ]; then
+        return 0
+    fi
+    if [ "$(id -u)" != "0" ]; then
+        if [ -d "${OUTPUT_DIR}" ]; then
+            chmod -R u+rwX "${OUTPUT_DIR}" 2>/dev/null || true
+        fi
+        return 0
+    fi
+    if [ "${HOST_UID}" != "0" ]; then
+        log_info "修复构建产物所有权为宿主用户 (${HOST_UID}:${HOST_GID})..."
+        if [ -d "${OUTPUT_DIR}" ]; then
+            chown -R "${HOST_UID}:${HOST_GID}" "${OUTPUT_DIR}" 2>/dev/null || \
+                chmod -R u+rwX,go+rX "${OUTPUT_DIR}" 2>/dev/null || true
+        fi
+    fi
+}
+
 cleanup() {
     local keep_temp="$1"
 
@@ -519,10 +539,12 @@ main() {
 
     if [ -n "$tarball_path" ] && [ -f "$tarball_path" ]; then
         log_info "压缩包已创建: ${tarball_path}"
+        fix_output_ownership
         cleanup "$keep_temp"
         show_summary "$target_arch" "$tarball_path"
     else
         log_error "可移植包构建失败，跳过清理和总结步骤"
+        fix_output_ownership
         cleanup "$keep_temp"
         exit 1
     fi

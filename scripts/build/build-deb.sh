@@ -159,10 +159,13 @@ build_via_dpkg() {
                 HEAD > "$orig_tarball"
         fi
     else
-        # Fallback: tar from file list (no git available)
-        # Use rsync with excludes to avoid "cp cannot copy into itself" errors
-        # when TEMP_DIR (e.g. .debbuild_temp) is inside SCRIPT_DIR.
-        local fallback_dir="${TEMP_DIR}/fallback_source"
+        # Fallback: tar from file list (no git archive available)
+        # IMPORTANT: the staging dir MUST be outside SCRIPT_DIR. Copying from
+        # SCRIPT_DIR into a dir inside it (e.g. .debbuild_temp/fallback_source)
+        # aborts with "cannot copy a directory into itself" and leaves a
+        # PARTIAL copy — which files survive depends on readdir order, so the
+        # orig.tar.gz randomly misses files (e.g. CMakeLists.txt). /tmp avoids it.
+        local fallback_dir="${TMPDIR:-/tmp}/ter-music-fallback-$$"
         rm -rf "$fallback_dir"
         mkdir -p "${fallback_dir}/${PROJECT_NAME}-${version}"
         if command -v rsync &>/dev/null; then
@@ -174,8 +177,25 @@ build_via_dpkg() {
                 --exclude='.lingma' --exclude='.vscode' \
                 --exclude='*_temp' \
                 "${SCRIPT_DIR}"/ "${fallback_dir}/${PROJECT_NAME}-${version}"/
+        elif command -v tar &>/dev/null; then
+            # tar pipe: supports excludes, avoids copying multi-GB caches
+            # (used when rsync is missing, e.g. the deb-static image)
+            if ! tar --exclude='./.git' --exclude='./build' --exclude='./.tmp' \
+                    --exclude='./.debbuild_temp' --exclude='./.linyaps_temp' \
+                    --exclude='./.rpmbuild_temp' --exclude='./.portable_temp' \
+                    --exclude='./.appimagetool' --exclude='./.cache' \
+                    --exclude='./.reasonix' --exclude='./.claude' --exclude='./.trae' \
+                    --exclude='./.lingma' --exclude='./.vscode' \
+                    --exclude='*_temp' \
+                    -C "${SCRIPT_DIR}" -cf - . | \
+                    tar -C "${fallback_dir}/${PROJECT_NAME}-${version}" -xf -; then
+                log_error "tar 复制源码失败"
+                rm -rf "$fallback_dir"
+                return 1
+            fi
         else
-            # rsync not available — fall back to cp + post-cleanup
+            # last resort: cp + post-cleanup (target in /tmp is outside
+            # SCRIPT_DIR, so no into-itself abort; just slower)
             cp -a "${SCRIPT_DIR}"/. "${fallback_dir}/${PROJECT_NAME}-${version}"/ 2>/dev/null || true
             rm -rf "${fallback_dir}/${PROJECT_NAME}-${version}"/.git \
                    "${fallback_dir}/${PROJECT_NAME}-${version}"/build \
@@ -191,6 +211,8 @@ build_via_dpkg() {
                    "${fallback_dir}/${PROJECT_NAME}-${version}"/.*_temp 2>/dev/null || true
         fi
         tar -czf "$orig_tarball" -C "$fallback_dir" "${PROJECT_NAME}-${version}"
+        # staging dir is outside TEMP_DIR — remove it explicitly
+        rm -rf "$fallback_dir"
     fi
     log_info "源码压缩包已创建: $orig_tarball"
 
@@ -246,21 +268,57 @@ build_via_dpkg() {
         sed -i '/^ libavcodec-dev,$/d; /^ libavfilter-dev,$/d; /^ libavformat-dev,$/d; /^ libavutil-dev,$/d; /^ libswresample-dev,$/d; /^ libswscale-dev,$/d'             "${source_dir}/debian/control"
         # Fix CMakeLists.txt: save/restore CMAKE_FIND_LIBRARY_SUFFIXES around FFmpeg block
         # so .a preference doesn't leak to ncurses/pthread find_library calls (prevents
-        # _dl_pagesize and libtinfo undefined reference errors)
-        sed -i '/^    set(CMAKE_FIND_LIBRARY_SUFFIXES /i\    set(_saved_find_library_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")'             "${source_dir}/CMakeLists.txt"
-        # sed append order: the LAST sed's text appears CLOSEST after the match line
-        # So unset runs first in time → its text ends up last → correct: set restore before unset
-        sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    unset(_saved_find_library_suffixes)'             "${source_dir}/CMakeLists.txt"
-        sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    set(CMAKE_FIND_LIBRARY_SUFFIXES "${_saved_find_library_suffixes}")'             "${source_dir}/CMakeLists.txt"
+        # _dl_pagesize and libtinfo undefined reference errors).
+        # Only apply if the pattern is not already present (idempotent).
+        if ! grep -q '_saved_find_library_suffixes' "${source_dir}/CMakeLists.txt" 2>/dev/null; then
+            sed -i '/^    set(CMAKE_FIND_LIBRARY_SUFFIXES /i\    set(_saved_find_library_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")'             "${source_dir}/CMakeLists.txt"
+            # sed append order: the LAST sed's text appears CLOSEST after the match line
+            # So unset runs first in time → its text ends up last → correct: set restore before unset
+            sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    unset(_saved_find_library_suffixes)'             "${source_dir}/CMakeLists.txt"
+            sed -i '/^    unset(ENV{PKG_CONFIG_ARGN})$/a\    set(CMAKE_FIND_LIBRARY_SUFFIXES "${_saved_find_library_suffixes}")'             "${source_dir}/CMakeLists.txt"
+        else
+            log_info "CMakeLists.txt 已包含 _saved_find_library_suffixes 模式，跳过补丁"
+        fi
     fi
 
-    # Step 8: Set DEB_BUILD_OPTIONS
+    # Step 8: 验证源文件完整性 — 检查 CMakeLists.txt 中引用的 .c 文件是否全部存在
+    # 防止因 git archive 遗漏未提交文件、rsync 排除规则误伤、或 sed 修改
+    # 导致源文件缺失而在 CMake 配置阶段才暴露，提供早期清晰报错。
+    log_info "验证源文件完整性..."
+    local missing_files=0
+    local checked_count=0
+    while IFS= read -r src_file; do
+        # trim 首尾空格
+        local trimmed
+        trimmed=$(echo "$src_file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -z "$trimmed" ] && continue
+        checked_count=$((checked_count + 1))
+        if [ ! -f "${source_dir}/${trimmed}" ]; then
+            log_error "缺少源文件: ${trimmed}"
+            missing_files=$((missing_files + 1))
+        fi
+    done < <(sed -n '/^add_executable(/,/^)/p' "${source_dir}/CMakeLists.txt" | grep '\.c$')
+
+    if [ "$checked_count" -eq 0 ]; then
+        log_error "未能从 CMakeLists.txt 中提取到任何 .c 源文件"
+        log_error "请检查 CMakeLists.txt 格式是否发生变化，或 add_executable 块是否完整"
+        return 1
+    fi
+
+    if [ "$missing_files" -gt 0 ]; then
+        log_error "共缺失 ${missing_files} 个源文件（已检查 ${checked_count} 个），无法继续构建"
+        log_error "请确认所有源文件已提交到 git（git archive 仅包含已追踪文件）"
+        return 1
+    fi
+    log_info "源文件完整性验证通过（${checked_count} 个 .c 文件均存在）"
+
+    # Step 9: Set DEB_BUILD_OPTIONS
     export DEB_BUILD_OPTIONS="nocheck${DEB_BUILD_OPTIONS:+ ${DEB_BUILD_OPTIONS}}"
     if [ "$build_debuginfo" != "true" ]; then
         export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS} nostrip"
     fi
 
-    # Step 9: Phase 2 — build binary package (with static patches applied)
+    # Step 10: Phase 2 — build binary package (with static patches applied)
     log_info "Phase 2: 构建二进制包..."
     local bin_dpkg_args=(--build=binary --no-sign)
 
@@ -296,7 +354,7 @@ collect_results() {
         local name=$(basename "$deb")
         log_info "已复制: $name -> ${output_dir}/"
         copy_to_release "$deb"
-        ((found++))
+        found=$((found + 1))
     done < <(find "${build_root}" -maxdepth 1 -name "*.deb" -type f -print0)
 
     # Collect source packages
@@ -365,7 +423,8 @@ fix_ownership() {
     if chown -R "${HOST_UID}:${HOST_GID}" "${OUTPUT_DIR}"; then
         ok=$((ok + 1))
     else
-        log_error "chown 失败: ${OUTPUT_DIR}"
+        log_warn "chown 失败: ${OUTPUT_DIR}，fallback 到 chmod..."
+        chmod -R u+rwX,go+rX "${OUTPUT_DIR}" 2>/dev/null || true
         fail=$((fail + 1))
     fi
 
@@ -374,7 +433,8 @@ fix_ownership() {
         if chown -R "${HOST_UID}:${HOST_GID}" "$release_dir"; then
             ok=$((ok + 1))
         else
-            log_error "chown 失败: $release_dir"
+            log_warn "chown 失败: $release_dir，fallback 到 chmod..."
+            chmod -R u+rwX,go+rX "$release_dir" 2>/dev/null || true
             fail=$((fail + 1))
         fi
     fi
@@ -383,7 +443,8 @@ fix_ownership() {
         if chown -R "${HOST_UID}:${HOST_GID}" "${TEMP_DIR}"; then
             ok=$((ok + 1))
         else
-            log_error "chown 失败: ${TEMP_DIR}"
+            log_warn "chown 失败: ${TEMP_DIR}，fallback 到 chmod..."
+            chmod -R u+rwX,go+rX "${TEMP_DIR}" 2>/dev/null || true
             fail=$((fail + 1))
         fi
     fi

@@ -190,6 +190,18 @@ check_dependencies() {
                             missing_deps+=("libjpeg-turbo-devel 或 libjpeg-devel 或 libjpeg62-turbo-devel")
                         fi
                         ;;
+                    libxml2-devel)
+                        # 静态构建时 Dockerfile 会移除系统的 libxml2-devel
+                        # （以便 CMake 找到 /usr/local 下的静态版本），
+                        # 此时改用 pkg-config 验证静态库是否可用。
+                        if [ "$static_build" = "true" ]; then
+                            if ! pkg-config --exists libxml-2.0; then
+                                missing_deps+=("libxml2-devel (pkg-config check also failed)")
+                            fi
+                        else
+                            missing_deps+=("$lib")
+                        fi
+                        ;;
                     *)
                         missing_deps+=("$lib")
                         ;;
@@ -526,7 +538,8 @@ fix_ownership() {
     if chown -R "${HOST_UID}:${HOST_GID}" "${OUTPUT_DIR}"; then
         ok=$((ok + 1))
     else
-        log_error "chown 失败: ${OUTPUT_DIR}"
+        log_warn "chown 失败: ${OUTPUT_DIR}，fallback 到 chmod..."
+        chmod -R u+rwX,go+rX "${OUTPUT_DIR}" 2>/dev/null || true
         fail=$((fail + 1))
     fi
 
@@ -535,7 +548,8 @@ fix_ownership() {
         if chown -R "${HOST_UID}:${HOST_GID}" "$release_dir"; then
             ok=$((ok + 1))
         else
-            log_error "chown 失败: $release_dir"
+            log_warn "chown 失败: $release_dir，fallback 到 chmod..."
+            chmod -R u+rwX,go+rX "$release_dir" 2>/dev/null || true
             fail=$((fail + 1))
         fi
     fi
@@ -544,7 +558,8 @@ fix_ownership() {
         if chown -R "${HOST_UID}:${HOST_GID}" "${TEMP_DIR}"; then
             ok=$((ok + 1))
         else
-            log_error "chown 失败: ${TEMP_DIR}"
+            log_warn "chown 失败: ${TEMP_DIR}，fallback 到 chmod..."
+            chmod -R u+rwX,go+rX "${TEMP_DIR}" 2>/dev/null || true
             fail=$((fail + 1))
         fi
     fi
@@ -575,7 +590,7 @@ collect_results() {
         log_info "已复制: $filename -> ${output_dir}/"
         # 同时复制到 release 目录
         copy_to_release "$rpm_file"
-        ((found_rpms++))
+        found_rpms=$((found_rpms + 1))
     done
     
     if [ $found_rpms -eq 0 ]; then

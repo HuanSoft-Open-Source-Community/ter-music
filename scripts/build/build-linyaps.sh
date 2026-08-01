@@ -278,12 +278,31 @@ build_linyaps() {
     log_info "执行 ll-builder 构建..."
     cd "$project_root"
 
+    # 捕获 ll-builder 输出以便分析失败原因
+    local build_log="${TEMP_DIR}/ll-builder-output.log"
+
     # 运行 ll-builder（保留 stderr 以显示构建过程）
-    ll-builder build --skip-fetch-source
-    local rc=$?
+    # 使用 --skip-fetch-source 因为源码已在本地，无需从网络拉取
+    set +e
+    ll-builder build --skip-fetch-source 2>&1 | tee "$build_log"
+    local rc=${PIPESTATUS[0]}
+    set -e
 
     if [ $rc -eq 0 ]; then
         log_info "Linyaps 容器构建完成"
+        return 0
+    fi
+
+    # 构建返回非零，分析失败原因：
+    # Docker 容器内 OverlayFS 无法嵌套挂载，Runtime Check 阶段会失败，
+    # 但编译、安装和提交可能已经成功。区分"编译失败"和"Runtime Check 失败"。
+    # 注意：ll-builder 输出的 [Commit Contents] 区块与 committing/complete
+    # 位于不同行（grep 逐行匹配），不能要求同一行内共存。
+    if grep -q '\[Commit Contents\]' "$build_log" 2>/dev/null && \
+       grep -q 'committing' "$build_log" 2>/dev/null && \
+       grep -qE 'Runtime check failed|stage runtime check error|OverlayFS mount failed' "$build_log" 2>/dev/null; then
+        log_warn "编译和提交成功，但 Runtime Check 失败（Docker 内 OverlayFS 限制，可忽略）"
+        log_warn "继续执行 UAB 导出..."
         return 0
     fi
 
@@ -319,30 +338,51 @@ export_uab() {
     final_uab=$(cd "$output_dir" && pwd)/${app_id}_${version}_${target_arch}.uab
     output_dir=$(cd "$output_dir" && pwd)
 
-    if ll-builder export --ref "$ref" -o "$temp_uab"; then
+    # 分别导出 UAB 和 layer，两者都需成功；UAB 缺失即判失败
+    local uab_ok=false
+    local layer_ok=false
+
+    # ── 1) 导出 UAB ──
+    log_info "导出 UAB 格式包..."
+    if ll-builder export --ref "$ref" -o "$temp_uab" && [ -s "$temp_uab" ]; then
         mv "$temp_uab" "$final_uab"
-        # Ensure UAB file is readable (remove any stray execute bits from
-        # the privileged container build)
         chmod 644 "$final_uab" 2>/dev/null || true
         log_info "UAB 包导出完成: $final_uab"
-
-        # 同时复制 layer 文件到输出目录
-        local layer_file=$(find "$project_root" -name "*_binary.layer" | head -1)
-        if [ -n "$layer_file" ]; then
-            cp "$layer_file" "$output_dir/"
-            log_info "layer 文件也已输出到: $output_dir/$(basename "$layer_file")"
-        fi
-
-        # 复制到 release 目录
         copy_to_release "$final_uab"
-
-        # 通过全局变量返回结果
         EXPORTED_UAB_FILE="$final_uab"
-        return 0
+        uab_ok=true
     else
-        log_error "导出 UAB 失败"
+        log_error "UAB 导出失败"
+        rm -f "$temp_uab"
+    fi
+
+    # ── 2) 导出 layer ──
+    log_info "导出 layer 格式包..."
+    if ll-builder export --layer; then
+        local layer_file
+        layer_file=$(find "$project_root" -maxdepth 1 -name "*_binary.layer" | head -1)
+        if [ -n "$layer_file" ]; then
+            local final_layer
+            final_layer="$(cd "$output_dir" && pwd)/$(basename "$layer_file")"
+            mv "$layer_file" "$final_layer"
+            chmod 644 "$final_layer" 2>/dev/null || true
+            log_info "layer 包导出完成: $final_layer"
+            copy_to_release "$final_layer"
+            EXPORTED_LAYER_FILE="$final_layer"
+            layer_ok=true
+        fi
+    fi
+    if [ "$layer_ok" = false ]; then
+        log_error "layer 导出失败"
+    fi
+
+    # UAB 必须成功；UAB 缺失即使 layer 已成功也判 linyaps 任务失败
+    if [ "$uab_ok" = false ]; then
+        log_error "UAB 导出失败，linyaps 任务判定为失败（即使 layer 可能已成功）"
         return 1
     fi
+
+    return 0
 }
 
 # ── 修复容器内构建产物的所有权 ────────────────────────────
@@ -375,6 +415,13 @@ fix_output_ownership() {
             chown -R "${HOST_UID}:${HOST_GID}" "${SCRIPT_DIR}/build/release" 2>/dev/null || \
                 chmod -R u+rwX,go+rX "${SCRIPT_DIR}/build/release" 2>/dev/null || true
         fi
+        # 修复 .cache/linglong（Docker 挂载持久化 OSTree repo），避免 root-owned 文件
+        # 阻止后续容器启动时 repo 初始化
+        local linglong_cache="${SCRIPT_DIR}/.cache/linglong"
+        if [ -d "$linglong_cache" ]; then
+            chown -R "${HOST_UID}:${HOST_GID}" "$linglong_cache" 2>/dev/null || \
+                chmod -R u+rwX,go+rX "$linglong_cache" 2>/dev/null || true
+        fi
     fi
 }
 
@@ -397,7 +444,8 @@ cleanup() {
 
 show_summary() {
     local target_arch="$1"
-    local output_file="$2"
+    local uab_file="$2"
+    local layer_file="$3"
 
     echo ""
     echo "=========================================="
@@ -405,13 +453,16 @@ show_summary() {
     echo "=========================================="
     echo ""
     echo "目标架构: $target_arch"
-    echo "输出目录: $(dirname "$output_file")/"
+    echo "输出目录: $(dirname "$uab_file")/"
     echo ""
     echo "生成的 Linyaps 包:"
-    ls -lh "$output_file" 2>/dev/null || echo "  未找到 Linyaps 包"
+    ls -lh "$uab_file" 2>/dev/null || echo "  未找到 UAB 包"
+    ls -lh "$layer_file" 2>/dev/null || echo "  未找到 layer 包"
     echo ""
     echo "安装命令:"
-    echo "  ll-cli install $output_file"
+    if [ -n "$uab_file" ] && [ -f "$uab_file" ]; then
+        echo "  ll-cli install $uab_file"
+    fi
     echo ""
     echo "运行命令:"
     echo "  ll-cli run $APP_ID"
@@ -511,11 +562,10 @@ main() {
     generate_linglong_yaml "$project_root" "$APP_ID" "$version" "$target_arch"
 
     if build_linyaps "$project_root"; then
-        export_uab "$project_root" "${OUTPUT_DIR}/${target_arch}" "$APP_ID" "$version" "$target_arch"
-        if [ -n "$EXPORTED_UAB_FILE" ] && [ -f "$EXPORTED_UAB_FILE" ]; then
+        if export_uab "$project_root" "${OUTPUT_DIR}/${target_arch}" "$APP_ID" "$version" "$target_arch"; then
             fix_output_ownership
             cleanup "$keep_temp"
-            show_summary "$target_arch" "$EXPORTED_UAB_FILE"
+            show_summary "$target_arch" "${EXPORTED_UAB_FILE:-}" "${EXPORTED_LAYER_FILE:-}"
         else
             fix_output_ownership
             cleanup "$keep_temp"
