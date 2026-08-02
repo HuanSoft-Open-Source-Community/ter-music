@@ -153,6 +153,8 @@ static int decode_segment_fill(AVFormatContext *fmt_ctx,
     if (target_frames > seg->capacity_frames)
         target_frames = seg->capacity_frames;
 
+    int read_error_count = 0;  /* circuit breaker: resets per segment fill */
+
     while (seg->frame_count < target_frames && !*decoder_finished) {
         /* 1. Try atempo filtered frame first */
         if (atempo_is_active()) {
@@ -192,23 +194,59 @@ static int decode_segment_fill(AVFormatContext *fmt_ctx,
             *decoder_finished = 1;
             break;
         }
-        if (ret != AVERROR(EAGAIN)) return -1;
+        if (ret != AVERROR(EAGAIN)) {
+            /* Non-EOF, non-EAGAIN error from decoder — log and try to
+             * continue rather than aborting the whole track.  Corrupted
+             * FLAC frames or checksum mismatches can trigger transient
+             * decode errors that don't make the rest of the file unreadable. */
+            log_warn("audio", "avcodec_receive_frame error %d in decode_segment_fill, trying to continue", ret);
+            /* Fall through to packet reading to advance past the problem area */
+        }
 
         /* 3. Read next packet */
         if (!*decoder_draining) {
+            /* Circuit breaker: limit consecutive read errors to avoid
+             * infinite spinning on a truly pathological file.  100
+             * failures is well beyond any realistic transient-error
+             * burst but small enough to avoid hung playback. */
             while (1) {
                 ret = av_read_frame(fmt_ctx, packet);
-                if (ret < 0) {
+                if (ret == AVERROR_EOF) {
                     *decoder_draining = 1;
                     ret = avcodec_send_packet(codec_ctx, NULL);
                     if (ret < 0 && ret != AVERROR_EOF) return -1;
                     break;
                 }
+                if (ret < 0) {
+                    /* Non-EOF read error (e.g. corrupted frame, checksum
+                     * mismatch).  Log and try to skip past the bad data
+                     * rather than draining the decoder immediately —
+                     * draining here would discard all remaining audio. */
+                    log_warn("audio", "av_read_frame error %d in decode_segment_fill, attempting to skip and continue", ret);
+                    av_packet_unref(packet);
+                    if (++read_error_count > 100) {
+                        log_error("audio", "av_read_frame: too many consecutive errors (%d), aborting segment fill",
+                                  read_error_count);
+                        return -1;
+                    }
+                    continue;
+                }
+                read_error_count = 0;  /* successful read resets the breaker */
+
                 if (packet->stream_index != audio_stream_index) { av_packet_unref(packet); continue; }
                 ret = avcodec_send_packet(codec_ctx, packet);
                 av_packet_unref(packet);
-                if (ret == AVERROR(EAGAIN)) break;
-                if (ret < 0) return -1;
+                if (ret == AVERROR(EAGAIN)) {
+                    /* Decoder not ready — drain with avcodec_receive_frame and
+                     * re-read; the packet is lost, but EAGAIN is extremely rare
+                     * for audio codecs (it's primarily an issue with video). */
+                    break;
+                }
+                if (ret < 0) {
+                    /* Codec rejected the packet — non-fatal, try next */
+                    log_warn("audio", "avcodec_send_packet error %d in decode_segment_fill, skipping packet", ret);
+                    continue;
+                }
                 break;
             }
         } else {
@@ -284,10 +322,16 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
 
             /* Immediately decode the target segment into slot 0 */
             int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
-            decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
+            int fill_ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
                                 pool, pool->current_slot, target_frames,
                                 audio_stream_index, output_sample_rate, output_channels,
                                 use_resampler, decoder_draining, decoder_finished);
+            if (fill_ret < 0) {
+                log_error("audio", "handle_seek_request: decode_segment_fill failed, aborting seek");
+                update_controls_status(i18n_get("audio.err.seek_failed"));
+                pthread_mutex_unlock(&g_seek_mutex);
+                return handled;  /* leave decoder state as-is; main loop can retry */
+            }
 
             /* Mark the decoded segment as ready — was missing, causing
              * segment_pool_current() to return NULL and skip playback */
@@ -480,6 +524,7 @@ static void attempt_next_track_preload(int current_track_index,
         dst->is_valid = 0;
 
         int frames_so_far = 0;
+        int preload_read_errors = 0;  /* circuit breaker for corrupt next-track */
         while (frames_so_far < target_frames && !eof) {
             /* Try atempo (preload uses original speed, no atempo needed for preload) */
             int rret = avcodec_receive_frame(next_codec, next_frame);
@@ -516,15 +561,31 @@ static void attempt_next_track_preload(int current_track_index,
             }
 
             if (rret == AVERROR_EOF) { eof = 1; break; }
-            if (rret != AVERROR(EAGAIN)) break;
+            if (rret != AVERROR(EAGAIN)) {
+                /* Non-EOF decode error in preload — log and try to skip */
+                log_warn("audio", "preload: avcodec_receive_frame error %d, trying to continue", rret);
+            }
 
             if (!drain) {
                 int pret = av_read_frame(next_fmt, next_pkt);
-                if (pret < 0) {
+                if (pret == AVERROR_EOF) {
                     drain = 1;
                     avcodec_send_packet(next_codec, NULL);
                     break;
                 }
+                if (pret < 0) {
+                    /* Non-EOF read error in preload — try to skip */
+                    av_packet_unref(next_pkt);
+                    if (++preload_read_errors > 100) {
+                        log_error("audio", "preload: av_read_frame too many consecutive errors (%d), aborting",
+                                  preload_read_errors);
+                        eof = 1;
+                        break;
+                    }
+                    log_warn("audio", "preload: av_read_frame error %d, attempting to skip", pret);
+                    continue;
+                }
+                preload_read_errors = 0;  /* successful read resets the breaker */
                 if (next_pkt->stream_index == audio_stream) {
                     avcodec_send_packet(next_codec, next_pkt);
                 }
@@ -658,19 +719,41 @@ void *play_audio_thread(void *arg)
         goto cleanup;
     }
 
-    g_total_duration = fmt_ctx->duration / AV_TIME_BASE;
-    if (g_total_duration <= 0) {
+    /* ── Determine track duration ──
+     * Prefer stream duration (based on total samples from STREAMINFO for FLAC,
+     * or decoded frame count for other formats) over container-level duration.
+     * Container duration can be inflated by attached pictures, trailing
+     * metadata, or bitrate-based estimation for VBR formats. */
+    {
+        int64_t container_duration_sec = fmt_ctx->duration / AV_TIME_BASE;
+        int64_t stream_duration_sec = 0;
+
+        /* Try stream-level duration first — more accurate for most formats */
         for (int i = 0; i < fmt_ctx->nb_streams; i++) {
             if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
                 AVRational time_base = fmt_ctx->streams[i]->time_base;
-                int64_t stream_duration = fmt_ctx->streams[i]->duration;
-                if (stream_duration > 0 && time_base.den > 0) {
-                    g_total_duration = av_rescale_q(stream_duration, time_base, (AVRational){1, 1});
-                    break;
+                int64_t stream_dur = fmt_ctx->streams[i]->duration;
+                if (stream_dur > 0 && time_base.den > 0) {
+                    stream_duration_sec = av_rescale_q(stream_dur, time_base, (AVRational){1, 1});
                 }
+                break;
             }
         }
-        if (g_total_duration <= 0) g_total_duration = 300;
+
+        if (stream_duration_sec > 0) {
+            g_total_duration = (int)stream_duration_sec;
+            if (container_duration_sec > 0) {
+                int64_t diff = llabs(container_duration_sec - stream_duration_sec);
+                if (diff > 5) {
+                    log_info("audio", "Duration: container=%llds stream=%llds (diff=%llds) — using stream duration",
+                             (long long)container_duration_sec, (long long)stream_duration_sec, (long long)diff);
+                }
+            }
+        } else if (container_duration_sec > 0) {
+            g_total_duration = (int)container_duration_sec;
+        } else {
+            g_total_duration = 300;
+        }
     }
 
     /* Cap duration for CUE sub-tracks */
@@ -941,15 +1024,20 @@ void *play_audio_thread(void *arg)
 
             /* Re-decode first segment from seeked position */
             int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
-            decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
+            int fill_ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
                                 &seg_pool, seg_pool.current_slot, target_frames,
                                 audio_stream_index, output_sample_rate, output_channels,
                                 use_resampler, &decoder_draining, &decoder_finished);
-
-            segment_pool_mark_ready(&seg_pool, seg_pool.current_slot,
-                                    seg_pool.slots[seg_pool.current_slot].frame_count,
-                                    seg_id,
-                                    (decoder_finished || seg_id >= seg_pool.total_segments - 1));
+            if (fill_ret < 0) {
+                log_error("audio", "CUE seek: decode_segment_fill failed for slot %d — will retry in main loop",
+                          seg_pool.current_slot);
+                /* Don't mark ready; main loop Phase 3 will fill the slot */
+            } else {
+                segment_pool_mark_ready(&seg_pool, seg_pool.current_slot,
+                                        seg_pool.slots[seg_pool.current_slot].frame_count,
+                                        seg_id,
+                                        (decoder_finished || seg_id >= seg_pool.total_segments - 1));
+            }
 
             log_debug("audio", "CUE offset seek to %ds (index=%d) — decoded segment=%d frames, finished=%d",
                       cue_offset, index, seg_pool.slots[seg_pool.current_slot].frame_count, decoder_finished);
@@ -1162,6 +1250,19 @@ cleanup:
     swr_free(&swr_ctx);
     avcodec_free_context(&codec_ctx);
     avformat_close_input(&fmt_ctx);
+    /* ── Defensive duration correction ──
+     * If the decoder reached end-of-stream cleanly but g_current_position
+     * is less than g_total_duration, the metadata duration was likely
+     * inflated (e.g. by attached pictures or bitrate estimation).
+     * Adjust so the progress bar hits 100% at the true end. */
+    if (reached_end_of_stream && !playback_error &&
+        g_current_position > 0 && g_current_position < g_total_duration) {
+        int gap = g_total_duration - g_current_position;
+        log_info("audio", "Duration correction: metadata=%ds actual=%ds (gap=%ds)",
+                 g_total_duration, g_current_position, gap);
+        g_total_duration = g_current_position + 1;  /* +1 ensures 100% */
+    }
+
     progress_tracker_on_stop();
     reset_visualizer_state();
 
