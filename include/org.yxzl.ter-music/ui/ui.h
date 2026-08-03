@@ -83,6 +83,7 @@ int  get_controls_progress_row(int height);
 int  get_controls_button_row(int height);
 int  get_controls_visualizer_top(int height);
 int  get_controls_visualizer_bottom(int height);
+int  controls_need_second_row(int width);
 uint64_t get_ui_time_ms(void);
 void seek_relative_seconds(int delta_seconds);
 

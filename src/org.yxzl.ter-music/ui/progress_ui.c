@@ -124,8 +124,6 @@ void update_progress_bar(void)
     current_min %= 100;
     total_min %= 100;
 
-    int is_progress_selected = (g_current_control_idx == CONTROL_IDX_PROGRESS && g_control_focus == 1);
-
     int progress_row = get_controls_progress_row(h);
     if (progress_row < 1 || progress_row >= h - 1) return;
 
@@ -133,8 +131,6 @@ void update_progress_bar(void)
     for (int i = 1; i < w - 1 && i < 512; i++) {
         waddch(win_controls, ' ');
     }
-
-    if (is_progress_selected) wattron(win_controls, A_REVERSE | A_BOLD);
 
     char time_str[32];
     snprintf(time_str, sizeof(time_str), "%02d:%02d / %02d:%02d",
@@ -162,8 +158,6 @@ void update_progress_bar(void)
 
     mvwprintw(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
     mvwprintw(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
-
-    if (is_progress_selected) wattroff(win_controls, A_REVERSE | A_BOLD);
 
     mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
     mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");

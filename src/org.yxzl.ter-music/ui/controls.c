@@ -63,6 +63,20 @@ static const char *get_control_label(int index)
     return i18n_get(control_label_keys[index]);
 }
 
+/* 判断控制按钮是否需要在两行显示：
+ * 与 render_controls() 的换行预判逻辑一致（按钮总宽超过可用宽度即换行）。 */
+int controls_need_second_row(int width)
+{
+    if (width < 1) return 0;
+    int total_width = 0;
+    for (int i = 0; i < CONTROL_COUNT - 1; i++) {
+        char label[32];
+        build_control_label(i, label, sizeof(label));
+        total_width += utf8_str_width(label) + 4;
+    }
+    return total_width > width;
+}
+
 void build_control_label(int index, char *dest, size_t dest_size)
 {
     if (!dest || dest_size == 0) return;
@@ -386,8 +400,6 @@ void activate_current_control(void)
                 g_popup.active = (g_popup.popup_win != NULL);
             }
             break;
-        case CONTROL_IDX_PROGRESS:
-            break;
     }
 }
 
@@ -539,6 +551,9 @@ void render_controls(void)
     wattron(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
     rounded_box(win_controls);
 
+    int h, w;
+    getmaxyx(win_controls, h, w);
+
     const char *focus_hint = g_control_focus
         ? i18n_get("controls.ctrl_focus")
         : i18n_get("controls.list_focus");
@@ -553,12 +568,24 @@ void render_controls(void)
              i18n_get("controls.l_list"),
              i18n_get("controls.tab_view"),
              focus_hint);
-    mvwprintw(win_controls, 0, 2, " %s %s", controls_header, lyric_hint);
+    /* 单行显示：按窗口宽度截断 header，避免 ncurses 换行覆盖
+     * 进度条行（窗口 row 1）与右侧边框，导致边框错位。 */
+    int header_max_cols = w - 6;
+    if (header_max_cols < 8) header_max_cols = 8;
+    /* 极端窄窗口（w 接近 10）时 clamp 下限可能越过右边界，联动收窄 */
+    if (header_max_cols > w - 3) header_max_cols = w - 3;
+    if (header_max_cols < 1) header_max_cols = 1;
+    /* 上限 254 列：配合 utf8_str_truncate 无容量参数的追加 "..." 分支，
+     * 保证复制量 + 4 + NUL ≤ 1024（254 列 × 4 字节/列 = 1016 + 4 + 1） */
+    if (header_max_cols > 254) header_max_cols = 254;
+    char header_line[1024];
+    snprintf(header_line, sizeof(header_line), " %s %s", controls_header, lyric_hint);
+    char header_display[1024];
+    utf8_str_truncate(header_display, header_line, header_max_cols);
+    mvwprintw(win_controls, 0, 2, "%s", header_display);
 
     wattroff(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
     wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
-    int h, w;
-    getmaxyx(win_controls, h, w);
 
     // Progress bar
     if (g_play_state != PLAY_STATE_STOPPED && g_total_duration > 0) {
@@ -578,9 +605,6 @@ void render_controls(void)
             int total_sec = g_total_duration % 60;
             current_min %= 100;
             total_min %= 100;
-
-            int is_progress_selected = (g_current_control_idx == CONTROL_IDX_PROGRESS && g_control_focus == 1);
-            if (is_progress_selected) wattron(win_controls, A_REVERSE | A_BOLD);
 
             char time_str[32];
             snprintf(time_str, sizeof(time_str), "%02d:%02d / %02d:%02d",
@@ -612,8 +636,6 @@ void render_controls(void)
 
             mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
             mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
-
-            if (is_progress_selected) wattroff(win_controls, A_REVERSE | A_BOLD);
         }
     }
 

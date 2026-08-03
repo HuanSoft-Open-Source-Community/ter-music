@@ -152,6 +152,17 @@ void create_layout(void)
         }
     }
 
+    // 宽度不足时控制按钮会换行成两行：控件区加高直至第二行可见
+    // （第二行行号 = button_row+1，需小于 h-2 才不被截断），
+    // 播放列表窗格同步减矮（至少保留 1 行）。
+    if (controls_need_second_row(main_width - 2)) {
+        while (get_controls_button_row(controls_height) + 1 >= controls_height - 2 &&
+               playlist_height > 1) {
+            controls_height++;
+            playlist_height--;
+        }
+    }
+
     // 1. 播放列表窗口 (左上)
     win_playlist = newwin(playlist_height, main_width, 1, 1);
     wattron(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));

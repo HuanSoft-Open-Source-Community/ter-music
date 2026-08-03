@@ -347,7 +347,11 @@ int handle_main_view_mouse_event(const MEVENT *event)
         if (control_index < 0) return 0;
 
         g_control_focus = 1;
-        g_current_control_idx = control_index;
+        /* 进度条控件不可选中（且其所在行不在按钮命中区内）：
+         * 仅在点击到按钮控件时才更新当前选中索引 */
+        if (control_index != CONTROL_IDX_PROGRESS) {
+            g_current_control_idx = control_index;
+        }
 
         if (control_index != CONTROL_IDX_VOLUME && control_index != CONTROL_IDX_PROGRESS) {
             activate_current_control();

@@ -505,12 +505,12 @@ void run_event_loop(void)
                     break;
                 case KEY_LEFT:
                     g_current_control_idx--;
-                    if (g_current_control_idx < 0) g_current_control_idx = CONTROL_COUNT - 1;
+                    if (g_current_control_idx < 0) g_current_control_idx = CONTROL_COUNT - 2;
                     render_controls();
                     break;
                 case KEY_RIGHT:
                     g_current_control_idx++;
-                    if (g_current_control_idx >= CONTROL_COUNT) g_current_control_idx = 0;
+                    if (g_current_control_idx >= CONTROL_COUNT - 1) g_current_control_idx = 0;
                     render_controls();
                     break;
                 case ',': seek_relative_seconds(-SEEK_STEP_SECONDS); break;

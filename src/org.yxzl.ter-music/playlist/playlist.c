@@ -47,7 +47,7 @@ int g_selected_index = 0;  // 当前选中的歌曲索引
 // 控制区焦点状态
 // 0: 列表模式 (List), 1: 控制模式 (Control)
 int g_control_focus = 0; 
-// 当前选中的控件索引 (0:上一曲，1:播放/暂停，2:下一曲，3:停止，4:循环，5:音量，6:进度条)
+// 当前选中的控件索引 (0:上一曲，1:播放/暂停，2:下一曲，3:停止，4:循环，5:倍速，6:音量；进度条不可选中)
 int g_current_control_idx = 1;
 
 SortState g_sort_state = {0};
