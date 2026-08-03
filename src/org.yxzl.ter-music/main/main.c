@@ -361,13 +361,25 @@ int main(int argc, char *argv[]) {
     if (temp_loaded > 0) {
         log_info("main", "Restored temp playlist from previous session");
         loaded = 1;
+        /* temp 恢复属于“恢复上次会话”路径，允许后续恢复播放 */
+        attempted_resume_load = 1;
         playlist_copy_folder_path(final_path, sizeof(final_path));
 
-        // 重新扫描目录以更新曲库（检测新增或删除的歌曲）
-        if (final_path[0] != '\0') {
-            struct stat st;
-            if (stat(final_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-                load_playlist(final_path);
+        /* 树根保持用户上次浏览的根目录（last_opened_path），
+         * 而不是曲目所在的子目录；根目录失效时回退 temp 目录。 */
+        if (g_app_config.remember_last_path && g_app_config.last_opened_path[0] != '\0' &&
+            strcmp(final_path, g_app_config.last_opened_path) != 0 &&
+            load_playlist(g_app_config.last_opened_path) > 0) {
+            log_info("main", "Tree root restored to last opened path: '%s'",
+                     g_app_config.last_opened_path);
+            snprintf(final_path, sizeof(final_path), "%s", g_app_config.last_opened_path);
+        } else {
+            // 重新扫描目录以更新曲库（检测新增或删除的歌曲）
+            if (final_path[0] != '\0') {
+                struct stat st;
+                if (stat(final_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    load_playlist(final_path);
+                }
             }
         }
     }
@@ -451,13 +463,25 @@ int main(int argc, char *argv[]) {
 
     if (!loaded && !open_path && g_app_config.resume_last_playback &&
         g_app_config.last_played_folder_path[0] != '\0') {
+        /* 恢复播放时，树根应保持用户上次浏览的根目录（last_opened_path），
+         * 而不是当前曲目所在的子目录（last_played_folder_path）。
+         * 仅当未开启“记住上次路径”或根目录不可用时，才回退到曲目目录。 */
+        const char *resume_dir = g_app_config.last_played_folder_path;
+        if (g_app_config.remember_last_path && g_app_config.last_opened_path[0] != '\0') {
+            resume_dir = g_app_config.last_opened_path;
+        }
         attempted_resume_load = 1;
-        log_info("main", "Attempting resume load from: '%s'", g_app_config.last_played_folder_path);
-        if (load_startup_playlist(g_app_config.last_played_folder_path, final_path, sizeof(final_path))) {
-            log_info("main", "Resume path loaded: '%s'", g_app_config.last_played_folder_path);
+        log_info("main", "Attempting resume load from: '%s'", resume_dir);
+        /* load_startup_playlist() 会先过 has_audio_files()（仅检查直接子文件），
+         * 而树根的音频可能全部位于子目录中（正是需要恢复的场景），
+         * 因此这里直接使用递归扫描的 load_playlist()。 */
+        if (load_playlist(resume_dir) > 0) {
+            g_selected_index = 0;
+            snprintf(final_path, sizeof(final_path), "%s", resume_dir);
             loaded = 1;
+            log_info("main", "Resume path loaded: '%s'", resume_dir);
         } else {
-            log_warn("main", "Resume path not found: '%s'", g_app_config.last_played_folder_path);
+            log_warn("main", "Resume path not found: '%s'", resume_dir);
         }
     }
 
@@ -512,9 +536,9 @@ int main(int argc, char *argv[]) {
             save_config();
         }
 
-        if (g_app_config.resume_last_playback &&
-            !opened_single_file &&
-            strcmp(final_path, g_app_config.last_played_folder_path) == 0) {
+        if (g_app_config.resume_last_playback && !opened_single_file &&
+            ((attempted_resume_load && !open_path) ||
+             strcmp(final_path, g_app_config.last_played_folder_path) == 0)) {
             log_info("main", "Attempting to resume playback session");
             resumed_playback = restore_saved_playback_session();
             if (resumed_playback) {
@@ -535,9 +559,7 @@ int main(int argc, char *argv[]) {
             int first_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
             play_audio(first_idx);
         }
-        if (attempted_resume_load &&
-            !resumed_playback &&
-            strcmp(final_path, g_app_config.last_played_folder_path) != 0) {
+        if (attempted_resume_load && !open_path && !resumed_playback) {
             clear_saved_playback_session();
         }
     } else if (attempted_resume_load) {
