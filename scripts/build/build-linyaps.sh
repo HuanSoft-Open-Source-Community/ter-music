@@ -288,7 +288,7 @@ build_linyaps() {
     local rc=${PIPESTATUS[0]}
     set -e
 
-    if [ $rc -eq 0 ]; then
+    if [ "$rc" -eq 0 ]; then
         log_info "Linyaps 容器构建完成"
         return 0
     fi

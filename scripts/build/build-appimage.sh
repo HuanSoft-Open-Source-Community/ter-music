@@ -284,7 +284,7 @@ build_from_source() {
     local cmake_args=("${SCRIPT_DIR}" -DCMAKE_BUILD_TYPE=Release)
 
     cmake "${cmake_args[@]}"
-    make -j$(nproc)
+    make -j"$(nproc)"
 
     log_info "源码构建完成"
 }

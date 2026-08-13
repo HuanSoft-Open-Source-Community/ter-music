@@ -45,7 +45,7 @@ run_cmd() {
     local -a cmd=("$@")
     if [ -n "$LOG_FILE" ]; then
         "${cmd[@]}" 2>&1 | tee -a "$LOG_FILE"
-        return ${PIPESTATUS[0]}
+        return "${PIPESTATUS[0]}"
     else
         "${cmd[@]}"
         return $?
@@ -65,7 +65,7 @@ log_append() {
 log_print() {
     echo -e "$@"
     if [ -n "$LOG_FILE" ]; then
-        echo -e "$(log_ts) $@" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+        echo -e "$(log_ts) $*" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
     fi
 }
 

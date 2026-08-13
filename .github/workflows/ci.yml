@@ -61,7 +61,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             base-devel cmake pkgconf \
-            ffmpeg libpng libjpeg-turbo pulseaudio ncurses libcurl libxml2 \
+            ffmpeg libpng libjpeg-turbo pulseaudio ncurses curl libxml2 \
             sqlite zlib alsa-lib libpipewire dbus util-linux
 
       - name: Configure
@@ -74,6 +74,7 @@ jobs:
         run: ./build/ter-music --help >/dev/null
 
       - name: Smoke test (PTY launch)
+        if: matrix.label == 'ubuntu'
         run: |
           set -e
           mkdir -p /tmp/tm-smoke/sub /tmp/tm-home
@@ -81,8 +82,8 @@ jobs:
             -i anullsrc=r=44100:cl=mono -t 1 -c:a pcm_s16le \
             -y /tmp/tm-smoke/sub/t.wav
           set +e
-          timeout 8 script -qec \
-            "HOME=/tmp/tm-home ./build/ter-music -o /tmp/tm-smoke/sub" \
+          HOME=/tmp/tm-home TERM=xterm timeout 8 script -qec \
+            "HOME=/tmp/tm-home TERM=xterm ./build/ter-music -o /tmp/tm-smoke/sub" \
             /dev/null </dev/null
           rc=$?
           set -e

@@ -181,7 +181,7 @@ build_from_source() {
     local cmake_args=("${SCRIPT_DIR}" -DCMAKE_BUILD_TYPE=Release)
 
     cmake "${cmake_args[@]}"
-    make -j$(nproc)
+    make -j"$(nproc)"
 
     log_info "源码构建完成"
 }
@@ -260,7 +260,7 @@ copy_dependencies() {
 
     local copied=$(ls -1 "${lib_dir}" | wc -l)
     log_info "依赖库复制完成（共 ${#processed[@]} 个依赖，复制了 $copied 个文件到库目录）"
-    if [ $copied -eq 0 ]; then
+    if [ "$copied" -eq 0 ]; then
         log_error "警告：库目录仍然为空！这可能意味着没有复制任何依赖库"
     fi
 }

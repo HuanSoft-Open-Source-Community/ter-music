@@ -245,7 +245,7 @@ check_dependencies() {
         echo ""
         read -p "是否继续构建（不生成 debuginfo）？[Y/n] " -n 1 -r
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]] && [ -n "$REREPLY" ]]; then
+        if [[ ! $REPLY =~ ^[Yy]$ ]] && [ -n "$REREPLY" ]; then
             exit 1
         fi
     fi
@@ -448,7 +448,7 @@ create_source_tarball() {
     
     for file in "${files[@]}"; do
         if [ -e "${SCRIPT_DIR}/${file}" ]; then
-            cp -r "${SCRIPT_DIR}/${file}" "$package_dir/"
+            cp -R "${SCRIPT_DIR}/${file}" "$package_dir/"
         else
             missing_files+=("$file")
         fi

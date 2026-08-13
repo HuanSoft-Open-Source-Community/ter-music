@@ -216,7 +216,7 @@ else
         run_opts+=(-v "$SCRIPT_DIR/.cache/linglong:/var/lib/linglong")
         # Mount /tmp as tmpfs so that ll-builder can do overlayfs mounts there
         # (Docker root is overlayfs; nested overlay is rejected by the kernel)
-        run_opts+=(--tmpfs /tmp:exec,size=4G)
+        run_opts+=(--tmpfs "/tmp:exec,size=4G")
     else
         run_opts+=(--user "$(id -u):$(id -g)")
     fi
