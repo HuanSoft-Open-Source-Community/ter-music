@@ -15,6 +15,7 @@
 **Other Languages:**
 - [中文（现代版）](translations/README_zh-CN_Modern.md)
 - [中文（文言版）](translations/README_zh-CN_Legacy.md)
+- [Lyrics API (English)](API_LYRICS_en_US.md)
 
 ## 1. Project Introduction
 
@@ -42,6 +43,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
 - 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG via braille art or chafa), can be toggled on/off in Settings
+- 🎵 **MPRIS & Lyrics API**: Desktop media controls with album art and an open D-Bus lyrics API for other programs
 
 ### 1.2 Design Philosophy
 
@@ -70,6 +72,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 📊 **Info Bar**: Displays sample rate, bit depth, bitrate and codec of current track | <br /> |
 | 🌐 **Remote Playback**: Play music via SMB/SFTP/FTP/WebDAV remote protocols | <br /> |
 | 🎨 **Album Cover**: Terminal album art display, toggleable in Settings | <br /> |
+| 🎵 **MPRIS / Lyrics API**: Desktop media controls, album art via `mpris:artUrl`, and a JSON lyrics API over D-Bus | <br /> |
 
 ### 1.4 Use Cases
 
@@ -141,7 +144,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | ----------------- | ------- |
 | `pipewire-0.3-devel` | PipeWire audio backend (dlopen-based — optional at compile time, auto-detected at runtime) |
 | `alsa-lib-devel` | ALSA audio output backend |
-| `dbus-devel` | MPRIS D-Bus media session integration |
+| `dbus-devel` | MPRIS D-Bus media session, album art, and lyrics API integration |
 
 ### 3.2 Fedora / RHEL / CentOS
 
@@ -568,9 +571,31 @@ Ter-Music supports automatic loading of LRC format lyrics files:
 - **Switch lyrics source**: Press `Ctrl+L` to enter lyric seek mode, then press `Tab` to switch between embedded/external lyrics
 - If no lyrics file is found, the lyrics area will display "No lyrics loaded"
 
-### 5.8 Configuration File
+Other applications can read the current A/B lyric lines through the D-Bus
+lyrics API; see [Lyrics API (English)](API_LYRICS_en_US.md).
 
-### 5.8 Configuration File
+### 5.8 MPRIS & Lyrics API
+
+When built with D-Bus (`libdbus-1`), Ter-Music registers an MPRIS media
+session on the session bus:
+
+- Desktop environments (GNOME Shell, KDE Plasma, Cinnamon, Budgie, and others)
+  can show playback controls and track metadata.
+- `mpris:artUrl` is published whenever album art is available, so desktop
+  media widgets can display the cover.
+- Album art is extracted from embedded tags first. If none is found, common
+  same-directory cover files are used (`cover`, `folder`, `front`, `album`,
+  case-insensitive, with `.jpg`, `.jpeg`, `.png`, or `.webp` extensions).
+- Extracted covers are managed JPEG cache files under
+  `/tmp/ter-music-cover-*.jpg`, kept as a recent-N (10) MRU cache and cleaned
+  up when the player exits.
+
+An open lyrics API is available on the same D-Bus object: interface
+`org.yxzl.ter_music.Lyrics`, method `GetLyrics`, and signal `LyricsChanged`.
+See [Lyrics API (English)](API_LYRICS_en_US.md) for the JSON schema and
+examples.
+
+### 5.9 Configuration File
 
 The configuration file is stored at `~/.config/ter-music/config.xml`. The program will automatically create it on first run (and auto-migrate from v1 `config.json` if present).
 
@@ -600,7 +625,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 
 The program automatically saves configuration; changes take effect immediately after modification.
 
-### 5.8.1 Language Pack System
+### 5.9.1 Language Pack System
 
 Ter-Music uses an XML-based internationalization (i18n) system. Built-in language packs are located at `data/lang/` in the source tree and installed to `TER_MUSIC_DATA_DIR/lang/`.
 
@@ -630,7 +655,7 @@ Ter-Music uses an XML-based internationalization (i18n) system. Built-in languag
 
 To add a new language, create an `<id>.xml` file following the format above and place it in one of the search paths (user override at `~/.config/ter-music/lang/` is recommended). The language will appear in the F7 language selection view automatically.
 
-#### 5.8.2 tar.gz Language Pack Distribution
+#### 5.9.2 tar.gz Language Pack Distribution
 
 Language packs can also be distributed as `.tar.gz` (or `.tgz`) archives for easy sharing and one-click installation via the language selection view (press `A` to install, `D` to delete a user-added language).
 
@@ -638,7 +663,7 @@ Language packs can also be distributed as `.tar.gz` (or `.tgz`) archives for eas
 
 | File | Required | Description |
 |------|----------|-------------|
-| `lang.xml` | Yes | Language data file (see §5.8.1 for format) |
+| `lang.xml` | Yes | Language data file (see §5.9.1 for format) |
 | `help.txt` | No | Quick-start help text for this language |
 
 Only files named `lang.xml` and `help.txt` are extracted from the archive; all other files are silently ignored. Files are matched by basename only, so they may reside at any depth within the tarball.
@@ -688,7 +713,7 @@ After successful validation, the language appears in the language selection view
 
 **Note:** If a language with the same `<id>` already exists in `~/.config/ter-music/lang/`, installing a new tar.gz will silently overwrite it. Reinstall the program to restore built-in languages if they were accidentally deleted.
 
-### 5.9 Data Storage Location
+### 5.10 Data Storage Location
 
 All user data is stored in the `~/.config/ter-music/` directory:
 
@@ -697,14 +722,17 @@ All user data is stored in the `~/.config/ter-music/` directory:
 ├── config.xml       # Configuration file (v2.2 XML format, parsed via libxml2)
 ├── library.db       # SQLite database (music library, favorites, playlists, history)
 ├── queue.txt        # Playback queue persistence
-├── album_cover_cache/   # Album cover image cache
 ├── lang/            # User language pack directory (overrides built-in translations)
 └── config.json.bak  # Auto-backup of v1 config on first migration (if present)
 ```
 
 **Note:** The v1.0 JSON-based storage (`config.json`, separate `favorites`, `history`, `dir_history`, `playlists/`) has been fully replaced by the SQLite database `library.db`. Migration is automatic on first v2.0 startup.
 
-### 5.10 Basic Usage Flow
+Album covers are not stored in `~/.config/ter-music/`. Extracted covers are
+temporary managed JPEG files under `/tmp/ter-music-cover-*.jpg`, kept for the
+last 10 tracks and removed when the player exits.
+
+### 5.11 Basic Usage Flow
 
 **Example: First time use**
 
@@ -751,7 +779,7 @@ All user data is stored in the `~/.config/ter-music/` directory:
 4. Press `Enter` on any queue entry to play it
 5. Press `Tab` again to return to file browser
 
-### 5.11 Shortcut Cheat Sheet
+### 5.12 Shortcut Cheat Sheet
 
 | Group | Keys | Function |
 | ------ | ------------------- | -------- |
@@ -798,11 +826,11 @@ All user data is stored in the `~/.config/ter-music/` directory:
 | <br /> | `↑`/`↓` | Select prev/next line (in seek mode) |
 | <br /> | `Enter`/`Space` | Jump to selected line (in seek mode) |
 
-### 5.12 Terminal Resizing
+### 5.13 Terminal Resizing
 
 Ter-Music supports terminal window resizing. When you resize the terminal, the program will automatically readjust the layout and redraw the interface.
 
-### 5.13 Exit the Program
+### 5.14 Exit the Program
 
 There are three ways to exit:
 
@@ -891,7 +919,7 @@ Ter-Music adopts a modular design, main modules include:
   - **backend/alsa.c**: ALSA audio output
 - **playlist/**: Playlist loading, metadata, CUE parsing
   - **playlist.c**: Directory scanning (**recursive** sub-directory scan), metadata reading (FFmpeg + native APEv2 tags),
-    CUE sheet detection
+    CUE sheet detection, album art extraction with MRU cover cache and same-directory fallback
   - **cue_parser.c**: CUE sheet line-by-line parser for split-track support
   - **encoding.c**: CUE file encoding auto-detect and conversion (iconv)
   - **ape_tag.c**: Native APEv2 tag parser for enhanced metadata extraction
@@ -905,7 +933,7 @@ Ter-Music adopts a modular design, main modules include:
   - **schema.h**: XML element/attribute constants
   - **crypto.c**: Remote connection password encryption/decryption
 - **remote.c**: Remote music playback support (SMB/SFTP/FTP/WebDAV/HTTP protocols)
-- **media_session.c**: MPRIS D-Bus media session integration (optional)
+- **media_session.c**: MPRIS D-Bus media session, album art URL, and lyrics API integration (optional)
 - **search.c**: Async search with pinyin support
 - **logger.c**: Logging subsystem
 

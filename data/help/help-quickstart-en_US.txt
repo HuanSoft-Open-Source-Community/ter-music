@@ -180,7 +180,10 @@ ter-music Quick Start Guide
 -------------
   Enable album cover display in Settings.
   Covers are rendered as braille dot art in the terminal.
-  Supports PNG and JPEG formats.
+  Embedded artwork is preferred; otherwise common same-directory files
+  are used (cover/folder/front/album with jpg/jpeg/png/webp extensions).
+  When MPRIS is active, album art is also published as mpris:artUrl
+  so desktop media widgets can display the cover.
 
 17. Info Bar & Audio Backend
 ----------------------------
@@ -196,7 +199,9 @@ ter-music Quick Start Guide
   Config file:  ~/.config/ter-music/config.xml  (v2.2 XML format)
   Library DB:   ~/.config/ter-music/library.db   (SQLite)
   Queue:        ~/.config/ter-music/queue.txt    (persistent queue)
-  Cover cache:  ~/.config/ter-music/album_cover_cache/
+
+  Album cover cache is managed automatically under /tmp/ter-music-cover-*.jpg
+  (last 10 tracks, removed on exit).
 
   Migration from v1 (config.json + JSON files) is automatic on first run.
 
@@ -207,3 +212,20 @@ ter-music Quick Start Guide
   Playback state is saved on exit (can be disabled in Settings).
   Ctrl+C exits safely.
   The settings sidebar uses ENTER to open option menus (no +/- keys needed).
+
+20. MPRIS & Lyrics API
+----------------------
+  With D-Bus available, Ter-Music registers an MPRIS media session for
+  desktop playback controls and album art (mpris:artUrl).
+
+  An open lyrics API is exposed on the same D-Bus object:
+    Interface:  org.yxzl.ter_music.Lyrics
+    Method:     GetLyrics() -> s
+    Signal:     LyricsChanged(s)
+
+  Read the current A/B lyric snapshot with:
+    gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
+      --object-path /org/mpris/MediaPlayer2 \
+      --method org.yxzl.ter_music.Lyrics.GetLyrics
+
+  Full JSON schema: see docs/API_LYRICS_en_US.md in the source tree.

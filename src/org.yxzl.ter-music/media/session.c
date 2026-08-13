@@ -5,6 +5,7 @@
 #include "playlist/playlist.h"
 #include "ui/ui.h"
 #include "ui/braille/braille_art.h"
+#include "ui/lyrics.h"
 #include "media/session.h"
 #include "logger/logger.h"
 
@@ -21,7 +22,9 @@
 #define MPRIS_ROOT_INTERFACE "org.mpris.MediaPlayer2"
 #define MPRIS_PLAYER_INTERFACE "org.mpris.MediaPlayer2.Player"
 #define DBUS_PROPERTIES_INTERFACE "org.freedesktop.DBus.Properties"
+#define LYRICS_API_INTERFACE "org.yxzl.ter_music.Lyrics"
 #define MPRIS_ART_URL_MAX (MAX_PATH_LEN * 3 + 16)
+#define LYRICS_API_JSON_MAX 65536
 
 typedef struct {
     int valid;
@@ -47,7 +50,16 @@ typedef struct {
     MediaSessionSnapshot last_snapshot;
 } MediaSessionState;
 
+typedef struct {
+    int active_slot;         /* -1=none, 0=A, 1=B */
+    int line_index[2];       /* lyric index in g_lyrics.lines, or -1 */
+    char track_id[96];
+    uint64_t revision;
+    char last_json[LYRICS_API_JSON_MAX];
+} LyricsApiState;
+
 static MediaSessionState g_media_session = {0};
+static LyricsApiState g_lyrics_api = {0};
 
 static const char *const k_supported_uri_schemes[] = {"file", NULL};
 static const char *const k_supported_mime_types[] = {
@@ -262,6 +274,291 @@ static int snapshots_equal(const MediaSessionSnapshot *lhs,
            strcmp(lhs->artist, rhs->artist) == 0 &&
            strcmp(lhs->album, rhs->album) == 0 &&
            strcmp(lhs->art_url, rhs->art_url) == 0;
+}
+
+/* ── Lyrics JSON API (org.yxzl.ter-music.Lyrics) ─────────────────── */
+
+static size_t json_append_raw(char *out, size_t out_size, size_t pos,
+                              const char *text) {
+    if (!out || out_size == 0 || pos >= out_size || !text) {
+        return pos;
+    }
+
+    size_t available = out_size - pos;
+    size_t length = strlen(text);
+    if (length >= available) {
+        length = available - 1;
+    }
+    memcpy(out + pos, text, length);
+    pos += length;
+    out[pos] = '\0';
+    return pos;
+}
+
+static size_t json_append_char(char *out, size_t out_size, size_t pos,
+                               char value) {
+    if (!out || out_size == 0 || pos + 1 >= out_size) {
+        return pos;
+    }
+    out[pos++] = value;
+    out[pos] = '\0';
+    return pos;
+}
+
+static size_t json_append_escaped(char *out, size_t out_size, size_t pos,
+                                  const char *text) {
+    pos = json_append_char(out, out_size, pos, '"');
+    for (const unsigned char *ptr = (const unsigned char *)text;
+         ptr && *ptr != '\0';
+         ptr++) {
+        unsigned char value = *ptr;
+        if (value == '"' || value == '\\') {
+            pos = json_append_char(out, out_size, pos, '\\');
+            pos = json_append_char(out, out_size, pos, (char)value);
+        } else if (value == '\b') {
+            pos = json_append_raw(out, out_size, pos, "\\b");
+        } else if (value == '\f') {
+            pos = json_append_raw(out, out_size, pos, "\\f");
+        } else if (value == '\n') {
+            pos = json_append_raw(out, out_size, pos, "\\n");
+        } else if (value == '\r') {
+            pos = json_append_raw(out, out_size, pos, "\\r");
+        } else if (value == '\t') {
+            pos = json_append_raw(out, out_size, pos, "\\t");
+        } else if (value < 0x20) {
+            char escape[8];
+            snprintf(escape, sizeof(escape), "\\u%04X", (unsigned int)value);
+            pos = json_append_raw(out, out_size, pos, escape);
+        } else {
+            pos = json_append_char(out, out_size, pos, (char)value);
+        }
+    }
+    return json_append_char(out, out_size, pos, '"');
+}
+
+static size_t json_append_string_or_null(char *out, size_t out_size,
+                                         size_t pos, const char *text) {
+    if (!text) {
+        return json_append_raw(out, out_size, pos, "null");
+    }
+    return json_append_escaped(out, out_size, pos, text);
+}
+
+static size_t json_append_number(char *out, size_t out_size, size_t pos,
+                                 const char *number) {
+    return json_append_raw(out, out_size, pos, number ? number : "null");
+}
+
+static size_t json_append_line_object(char *out, size_t out_size, size_t pos,
+                                      int index, int timestamp_valid,
+                                      double timestamp, const char *text) {
+    pos = json_append_raw(out, out_size, pos, "{\"index\":");
+    if (index >= 0) {
+        char number[32];
+        snprintf(number, sizeof(number), "%d", index);
+        pos = json_append_number(out, out_size, pos, number);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",\"timestamp\":");
+    if (index >= 0 && timestamp_valid) {
+        char number[64];
+        snprintf(number, sizeof(number), "%.3f", timestamp);
+        for (char *comma = strchr(number, ','); comma != NULL; comma = strchr(comma + 1, ',')) {
+            *comma = '.';
+        }
+        pos = json_append_number(out, out_size, pos, number);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",\"text\":");
+    if (index >= 0) {
+        pos = json_append_string_or_null(out, out_size, pos, text);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+    return json_append_raw(out, out_size, pos, "}");
+}
+
+static void lyrics_api_reset_state(void) {
+    g_lyrics_api.active_slot = -1;
+    g_lyrics_api.line_index[0] = -1;
+    g_lyrics_api.line_index[1] = -1;
+    g_lyrics_api.track_id[0] = '\0';
+    g_lyrics_api.revision = 0;
+    g_lyrics_api.last_json[0] = '\0';
+}
+
+static void lyrics_api_prepare(char *out, size_t out_size, uint64_t revision) {
+    if (!out || out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    char track_id[96] = "";
+    if (current_track_is_available()) {
+        char track_path[MAX_PATH_LEN];
+        if (playlist_get_track_path(g_current_play_index, track_path,
+                                    sizeof(track_path)) == 0) {
+            build_track_id(track_id, sizeof(track_id), track_path);
+        }
+    }
+
+    int track_changed = (strcmp(g_lyrics_api.track_id, track_id) != 0);
+    int has_lyrics = 0;
+    int has_timestamps = 0;
+    int line_a = -1;
+    int line_b = -1;
+    double timestamp_a = 0.0;
+    double timestamp_b = 0.0;
+    char text_a[MAX_LYRIC_TEXT_LEN] = "";
+    char text_b[MAX_LYRIC_TEXT_LEN] = "";
+
+    pthread_mutex_lock(&g_lyrics.lock);
+    has_lyrics = g_lyrics.has_lyrics;
+    has_timestamps = g_lyrics.has_timestamps;
+    int current_index = g_lyrics.current_index;
+    int line_count = g_lyrics.count;
+
+    if (!has_lyrics || line_count <= 0 || current_index < 0) {
+        g_lyrics_api.active_slot = -1;
+        g_lyrics_api.line_index[0] = -1;
+        g_lyrics_api.line_index[1] = -1;
+    } else {
+        if (current_index >= line_count) {
+            current_index = line_count - 1;
+        }
+        int next_index = (current_index + 1 < line_count)
+            ? current_index + 1 : -1;
+        int active_slot = g_lyrics_api.active_slot;
+        int current_matches_active = 0;
+        int current_matches_inactive = 0;
+
+        if (active_slot == 0 || active_slot == 1) {
+            current_matches_active =
+                (g_lyrics_api.line_index[active_slot] == current_index);
+            current_matches_inactive =
+                (g_lyrics_api.line_index[1 - active_slot] == current_index);
+        }
+
+        if (track_changed || (!current_matches_active &&
+                              !current_matches_inactive)) {
+            active_slot = 0;
+            g_lyrics_api.line_index[0] = current_index;
+            g_lyrics_api.line_index[1] = next_index;
+        } else if (current_matches_active) {
+            g_lyrics_api.line_index[1 - active_slot] = next_index;
+        } else {
+            active_slot = 1 - active_slot;
+            g_lyrics_api.line_index[active_slot] = current_index;
+            g_lyrics_api.line_index[1 - active_slot] = next_index;
+        }
+        g_lyrics_api.active_slot = active_slot;
+    }
+
+    line_a = g_lyrics_api.line_index[0];
+    line_b = g_lyrics_api.line_index[1];
+    if (line_a >= 0 && line_a < line_count) {
+        timestamp_a = g_lyrics.lines[line_a].timestamp;
+        snprintf(text_a, sizeof(text_a), "%s", g_lyrics.lines[line_a].text);
+    }
+    if (line_b >= 0 && line_b < line_count) {
+        timestamp_b = g_lyrics.lines[line_b].timestamp;
+        snprintf(text_b, sizeof(text_b), "%s", g_lyrics.lines[line_b].text);
+    }
+    pthread_mutex_unlock(&g_lyrics.lock);
+
+    snprintf(g_lyrics_api.track_id, sizeof(g_lyrics_api.track_id), "%s",
+             track_id);
+
+    size_t pos = 0;
+    pos = json_append_raw(out, out_size, pos, "{\"active_line\":");
+    if (g_lyrics_api.active_slot == 0) {
+        pos = json_append_raw(out, out_size, pos, "\"A\"");
+    } else if (g_lyrics_api.active_slot == 1) {
+        pos = json_append_raw(out, out_size, pos, "\"B\"");
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",\"line_a\":");
+    pos = json_append_line_object(out, out_size, pos, line_a,
+                                  has_timestamps, timestamp_a, text_a);
+    pos = json_append_raw(out, out_size, pos, ",\"line_b\":");
+    pos = json_append_line_object(out, out_size, pos, line_b,
+                                  has_timestamps, timestamp_b, text_b);
+    pos = json_append_raw(out, out_size, pos, ",\"track_id\":");
+    pos = json_append_string_or_null(out, out_size, pos,
+                                     track_id[0] ? track_id : NULL);
+    pos = json_append_raw(out, out_size, pos, ",\"has_lyrics\":");
+    pos = json_append_raw(out, out_size, pos, has_lyrics ? "true" : "false");
+    pos = json_append_raw(out, out_size, pos, ",\"has_timestamps\":");
+    pos = json_append_raw(out, out_size, pos,
+                          has_timestamps ? "true" : "false");
+    pos = json_append_raw(out, out_size, pos, ",\"revision\":");
+
+    char revision_text[32];
+    snprintf(revision_text, sizeof(revision_text), "%llu",
+             (unsigned long long)revision);
+    pos = json_append_number(out, out_size, pos, revision_text);
+    pos = json_append_raw(out, out_size, pos, "}");
+    out[pos] = '\0';
+}
+
+static void emit_lyrics_changed(const char *json) {
+    DBusMessage *signal = dbus_message_new_signal(MPRIS_OBJECT_PATH,
+                                                  LYRICS_API_INTERFACE,
+                                                  "LyricsChanged");
+    if (!signal) {
+        return;
+    }
+
+    const char *value = (json && json[0] != '\0') ? json : "{}";
+    dbus_message_append_args(signal,
+                             DBUS_TYPE_STRING, &value,
+                             DBUS_TYPE_INVALID);
+    media_session_send(signal);
+}
+
+static const char *lyrics_api_sync(void) {
+    char next_json[LYRICS_API_JSON_MAX];
+    lyrics_api_prepare(next_json, sizeof(next_json), g_lyrics_api.revision);
+
+    if (strcmp(next_json, g_lyrics_api.last_json) != 0) {
+        g_lyrics_api.revision++;
+        lyrics_api_prepare(next_json, sizeof(next_json), g_lyrics_api.revision);
+        snprintf(g_lyrics_api.last_json, sizeof(g_lyrics_api.last_json),
+                 "%s", next_json);
+        emit_lyrics_changed(next_json);
+    }
+    return g_lyrics_api.last_json;
+}
+
+static DBusMessage *handle_lyrics_method(DBusMessage *message) {
+    const char *member = dbus_message_get_member(message);
+    if (!member) {
+        return media_session_error(message, DBUS_ERROR_UNKNOWN_METHOD,
+                                   "Missing method name");
+    }
+
+    if (strcmp(member, "GetLyrics") == 0) {
+        const char *json = lyrics_api_sync();
+        DBusMessage *reply = dbus_message_new_method_return(message);
+        if (!reply) {
+            return NULL;
+        }
+
+        const char *value = (json && json[0] != '\0') ? json : "{}";
+        dbus_message_append_args(reply,
+                                 DBUS_TYPE_STRING, &value,
+                                 DBUS_TYPE_INVALID);
+        return reply;
+    }
+
+    return media_session_error(message, DBUS_ERROR_UNKNOWN_METHOD,
+                               "Unknown lyrics method");
 }
 
 static void append_string_array(DBusMessageIter *iter, const char *const *values) {
@@ -882,6 +1179,7 @@ void media_session_init(void) {
     DBusError error;
 
     memset(&g_media_session, 0, sizeof(g_media_session));
+    lyrics_api_reset_state();
 
     dbus_error_init(&error);
     g_media_session.connection = dbus_bus_get(DBUS_BUS_SESSION, &error);
@@ -908,11 +1206,13 @@ void media_session_init(void) {
     log_info("media_session", "D-Bus initialized, bus='%s'", g_media_session.bus_name);
     emit_properties_changed(MPRIS_ROOT_INTERFACE, NULL);
     sync_player_state();
+    lyrics_api_sync();
 }
 
 void media_session_shutdown(void) {
     log_info("media_session", "Shutting down media session");
     if (!g_media_session.connection) {
+        lyrics_api_reset_state();
         memset(&g_media_session, 0, sizeof(g_media_session));
         return;
     }
@@ -928,6 +1228,7 @@ void media_session_shutdown(void) {
     }
 
     dbus_connection_unref(g_media_session.connection);
+    lyrics_api_reset_state();
     memset(&g_media_session, 0, sizeof(g_media_session));
 }
 
@@ -987,6 +1288,8 @@ void media_session_tick(void) {
             reply = handle_root_method(message);
         } else if (dbus_message_has_interface(message, MPRIS_PLAYER_INTERFACE)) {
             reply = handle_player_method(message, &snapshot);
+        } else if (dbus_message_has_interface(message, LYRICS_API_INTERFACE)) {
+            reply = handle_lyrics_method(message);
         }
 
         if (reply) {
@@ -997,6 +1300,7 @@ void media_session_tick(void) {
     }
 
     sync_player_state();
+    lyrics_api_sync();
 }
 
 #else

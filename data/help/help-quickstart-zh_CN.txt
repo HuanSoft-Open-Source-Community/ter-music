@@ -180,7 +180,10 @@ ter-music 快速上手
 ------------
   设置中可开关专辑封面显示。
   封面以点阵图形式绘制在终端中。
-  支持 PNG 和 JPEG 格式。
+  优先读取音频内嵌封面；否则查找同目录常见封面文件
+  （cover/folder/front/album，扩展名支持 jpg/jpeg/png/webp）。
+  启用 MPRIS 时，封面还会以 mpris:artUrl 发布，
+  供桌面媒体组件显示专辑封面。
 
 17. 信息栏与音频后端
 ---------------------
@@ -196,7 +199,9 @@ ter-music 快速上手
   配置文件：  ~/.config/ter-music/config.xml  （v2.2 XML 格式）
   音乐库：    ~/.config/ter-music/library.db   （SQLite）
   队列：      ~/.config/ter-music/queue.txt    （持久化队列）
-  封面缓存：  ~/.config/ter-music/album_cover_cache/
+
+  专辑封面缓存由程序自动管理：/tmp/ter-music-cover-*.jpg
+  （保留最近 10 首，退出时清理）。
 
   首次运行 v2.0 时会自动从 v1（config.json + JSON 文件）迁移。
 
@@ -207,3 +212,20 @@ ter-music 快速上手
   退出时自动保存当前播放状态（可在设置中关闭）。
   Ctrl+C 安全退出。
   设置中使用 Enter 打开选项菜单（不再需要 +/- 键调节）。
+
+20. MPRIS 与歌词 API
+--------------------
+  启用 D-Bus 后，播放器会注册 MPRIS 媒体会话，
+  提供桌面播放控制和专辑封面（mpris:artUrl）。
+
+  同一 D-Bus 对象还提供开放歌词接口：
+    接口：   org.yxzl.ter_music.Lyrics
+    方法：   GetLyrics() -> s
+    信号：   LyricsChanged(s)
+
+  读取当前 A/B 歌词快照：
+    gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
+      --object-path /org/mpris/MediaPlayer2 \
+      --method org.yxzl.ter_music.Lyrics.GetLyrics
+
+  完整 JSON 规范：见源码目录 docs/API_LYRICS_en_US.md

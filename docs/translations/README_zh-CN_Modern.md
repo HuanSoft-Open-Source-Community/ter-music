@@ -14,6 +14,7 @@
 **其他语言版本 / Other Languages:**
 - [English](../README.md)
 - [中文（文言版）](README_zh-CN_Legacy.md)
+- [Lyrics API (English)](../API_LYRICS_en_US.md)
 
 ## 第一章 产品概述
 ### 一 核心功能
@@ -33,6 +34,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - **扩展调色板**：24套预设主题 + 1个自定义槽位，前后角色彩配对保护
 - **持久化存储**：SQLite统一存储（收藏、历史、歌单），自动从v1 JSON迁移
 - 支持专辑封面显示，可在终端中渲染显示封面图片（设置中可开关）
+- **MPRIS 与歌词 API**：通过 D-Bus 提供桌面媒体控制、`mpris:artUrl` 专辑封面，以及供其他程序读取的开放歌词接口
 - 纯键盘快捷键操作，响应迅速
 - 实时显示音频进度条，流畅丝滑，可任意跳转播放位置
 
@@ -60,6 +62,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | 📊 信息栏 | 实时显示当前音频的采样率、位深、比特率、编码格式 |
 | 🌐 远程播放 | 支持SMB/SFTP/FTP/WebDAV/HTTP远程音乐播放 |
 | 🎨 专辑封面 | 终端专辑封面显示，可在设置中开关 |
+| 🎵 MPRIS / 歌词 API | 桌面媒体控制、`mpris:artUrl` 封面，以及基于 D-Bus 的 JSON 歌词接口 |
 
 ### 四 适用场景
 - 无图形界面的Linux系统、嵌入式设备，需要播放音乐但没有窗口界面的场景
@@ -122,7 +125,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | --------- | ---- |
 | `pipewire-0.3-devel` | PipeWire音频后端（dlopen加载，编译时可选，运行时自动检测） |
 | `alsa-lib-devel` | ALSA音频输出后端 |
-| `dbus-devel` | MPRIS D-Bus媒体会话集成 |
+| `dbus-devel` | MPRIS D-Bus 媒体会话、专辑封面与歌词 API 集成 |
 
 ### 二 Fedora / RHEL / CentOS 安装命令
 ```bash
@@ -492,7 +495,23 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - 播放器会随播放进度自动高亮显示当前歌词行
 - 若未找到歌词文件，歌词区会显示"No lyrics loaded"
 
-### 八 配置文件
+其他程序可通过 D-Bus 歌词接口读取当前 A/B 两行歌词，详细说明见
+[Lyrics API (English)](../API_LYRICS_en_US.md)。
+
+### 八 MPRIS 与歌词 API
+
+编译时启用 D-Bus（`libdbus-1`）后，播放器会在会话总线上注册 MPRIS 媒体会话：
+
+- 主流桌面环境（GNOME Shell、KDE Plasma、Cinnamon、Budgie 等）可显示播放控制和曲目信息。
+- 只要存在专辑封面，就会发布 `mpris:artUrl`，桌面媒体组件可显示封面图。
+- 封面优先读取音频内嵌图片；若没有内嵌图片，则按 `cover`、`folder`、`front`、`album`（不区分大小写，扩展名支持 `.jpg`、`.jpeg`、`.png`、`.webp`）查找同目录封面。
+- 提取后的封面统一保存为受管理的 `/tmp/ter-music-cover-*.jpg` 缓存文件，保留最近 10 首的 MRU 缓存，退出时自动清理。
+
+同一 D-Bus 对象还提供开放歌词接口：接口 `org.yxzl.ter_music.Lyrics`，方法
+`GetLyrics`，信号 `LyricsChanged`。JSON 结构与调用示例见
+[Lyrics API (English)](../API_LYRICS_en_US.md)。
+
+### 九 配置文件
 
 配置文件存储在`~/.config/ter-music/config.xml`，播放器首次启动时会自动创建（如存在v1的config.json会自动迁移）。
 
@@ -521,7 +540,7 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 
 播放器会自动保存配置，修改后立即生效。
 
-### 5.8.1 语言包系统
+### 5.9.1 语言包系统
 
 Ter-Music 使用基于 XML 的国际化（i18n）系统。内置语言包位于源码树的 `data/lang/` 目录，安装后位于 `TER_MUSIC_DATA_DIR/lang/`。
 
@@ -551,7 +570,7 @@ Ter-Music 使用基于 XML 的国际化（i18n）系统。内置语言包位于�
 
 要添加新语言，按上述格式创建 `<id>.xml` 文件，放入任一搜索路径（推荐 `~/.config/ter-music/lang/`）。该语言将自动出现在 F7 语言选择视图中。
 
-#### 5.8.2 tar.gz 语言包分发规范
+#### 5.9.2 tar.gz 语言包分发规范
 
 语言包也可通过 `.tar.gz`（或 `.tgz`）压缩包形式分发，方便共享和一键安装。在语言选择视图中按 `A` 键安装，按 `D` 键删除已添加的用户语言包。
 
@@ -559,7 +578,7 @@ Ter-Music 使用基于 XML 的国际化（i18n）系统。内置语言包位于�
 
 | 文件 | 必需 | 说明 |
 |------|------|------|
-| `lang.xml` | 是 | 语言数据文件（格式见 §5.8.1） |
+| `lang.xml` | 是 | 语言数据文件（格式见 §5.9.1） |
 | `help.txt` | 否 | 该语言的快速入门帮助文本 |
 
 只有文件名称为 `lang.xml` 和 `help.txt` 的文件会被提取，其余文件将被自动忽略。文件仅按基本名称匹配，可位于 tar 包内的任意子目录中。
@@ -609,7 +628,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 
 **注意：** 如果 `~/.config/ter-music/lang/` 中已存在相同 `<id>` 的语言包，安装新的 tar.gz 会静默覆盖。如需恢复被误删的内置语言，请重新安装程序。
 
-### 九 数据存储位置
+### 十 数据存储位置
 
 所有用户数据均存储在`~/.config/ter-music/`目录下：
 ```
@@ -617,14 +636,16 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 ├── config.xml       # 配置文件（v2.2 XML格式，libxml2解析）
 ├── library.db       # SQLite数据库（音乐库、收藏、歌单、历史）
 ├── queue.txt        # 播放队列持久化
-├── album_cover_cache/   # 专辑封面缓存
 ├── lang/            # 用户语言包目录（覆盖内置翻译）
 └── config.json.bak  # v1配置文件首次迁移时的自动备份（如有）
 ```
 
 **注意：** v1.0的JSON存储（config.json、独立的favorites、history、dir_history、playlists/目录）已全部替换为SQLite数据库library.db。首次启动v2.0时会自动迁移。
 
-### 十 常用操作流程
+专辑封面不再存于 `~/.config/ter-music/`。提取的封面是受管理的临时 JPEG
+文件，位于 `/tmp/ter-music-cover-*.jpg`，保留最近 10 首，退出时删除。
+
+### 十一 常用操作流程
 **示例：初次使用方法**
 1. 启动播放器：
    ```bash
@@ -665,7 +686,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 4. 在队列条目上按Enter即可播放
 5. 再次按`Tab`返回文件浏览
 
-### 十一 快捷键速览
+### 十二 快捷键速览
 | 分类 | 按键 | 功能 |
 | --- | --- | --- |
 | **全局** | `q` | 退出播放器 |
@@ -709,10 +730,10 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 |  | `↑`/`↓` | 选择上/下一句歌词（定位模式中） |
 |  | `Enter`/`Space` | 跳转到选中的歌词行（定位模式中） |
 
-### 十二 终端窗口大小调整
+### 十三 终端窗口大小调整
 本播放器支持终端窗口大小调整，修改窗口尺寸时，播放器会自动重置布局并重新绘制界面。
 
-### 十三 退出播放器
+### 十四 退出播放器
 退出方法有三种：
 - 在主界面按`q`键
 - 按`Ctrl+C`/`Ctrl+D`/`Ctrl+\`（播放器会优雅退出，支持SIGHUP/SIGTERM/SIGINT信号）
@@ -760,7 +781,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **backend/pulse.c**: PulseAudio音频输出
   - **backend/alsa.c**: ALSA音频输出
 - **playlist/**: 歌单加载、元数据、CUE解析
-  - **playlist.c**: 目录扫描（**递归**子目录扫描）、元数据读取（FFmpeg + APEv2标签）、CUE文件检测
+  - **playlist.c**: 目录扫描（**递归**子目录扫描）、元数据读取（FFmpeg + APEv2标签）、CUE文件检测、专辑封面提取与 MRU 封面缓存、同目录封面回退
   - **cue_parser.c**: CUE文件逐行解析器，支持分轨播放
   - **encoding.c**: CUE文件编码自动检测与转换（iconv）
   - **ape_tag.c**: 原生APEv2标签解析器，增强元数据提取
@@ -773,7 +794,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **schema.h**: XML元素/属性常量定义
   - **crypto.c**: 远程连接密码加密解密处理
 - **remote.c**: 远程音乐播放（SMB/SFTP/FTP/WebDAV/HTTP协议）
-- **media_session.c**: MPRIS D-Bus媒体会话集成（可选）
+- **media_session.c**: MPRIS D-Bus 媒体会话、专辑封面 URL 与歌词 API 集成（可选）
 - **search.c**: 异步搜索功能（支持拼音搜索）
 - **logger.c**: 日志记录子系统
 

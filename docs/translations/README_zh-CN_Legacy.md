@@ -14,6 +14,7 @@
 **他语之版 / Other Languages:**
 - [English](../README.md)
 - [中文（现代版）](README_zh-CN_Modern.md)
+- [Lyrics API (English)](../API_LYRICS_en_US.md)
 
 ## 卷一 本志叙略
 ### 一 枢要功用
@@ -35,6 +36,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **色采之谱**：24套预设主题 + 1个自定槽位，前后色彩配对保护
 - **恒存之储**：SQLite一统（珍存、往迹、曲帙），自动从v1 JSON迁移
 - 专辑封面显明之能，可于点阵中绘封面之图（可于节度中启闭）
+- **MPRIS 与歌词 API**：经D-Bus而通桌面媒体之制、`mpris:artUrl`封面，及开放歌辞之接口
 - 全凭键符捷操，迅疾无伦
 - 音程条贯实时昭显，流转顺滑，可任意跳转
 
@@ -61,6 +63,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | ⏩ 迅疾节度 | 六档迅迟之度，播弄中可随意迁转 |
 | 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约 |
 | 🎨 专辑封面 | 端闱中显乐集之面，可于节度中启闭 |
+| 🎵 MPRIS / 歌词 API | 桌面媒体之制、`mpris:artUrl`封面，及基于D-Bus之JSON歌辞接口 |
 
 ### 四 施用之境
 - 无图之御宇、幽隐之服器，无轩窗界面而欲播乐者
@@ -123,7 +126,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | --------- | -------- |
 | `pipewire-0.3-devel` | PipeWire音声后端（dlopen加载，译纂时可缺，运行时自动检知） |
 | `alsa-lib-devel` | ALSA音声输出后端 |
-| `dbus-devel` | MPRIS D-Bus媒体会话之耦 |
+| `dbus-devel` | MPRIS D-Bus媒体会话、专辑封面与歌词API之耦 |
 
 ### 二 Fedora / RHEL / CentOS 纳置之令
 ```bash
@@ -492,7 +495,23 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 - 若不得歌辞之文，歌辞区将显"No lyrics loaded"
 - **切换歌词来源**：在歌词定位模式下按 `Tab` 可在内嵌/外置间切换
 
-### 八 节度之文
+他器可经D-Bus歌辞接口读当前A/B两行歌辞，详说见
+[Lyrics API (English)](../API_LYRICS_en_US.md)。
+
+### 八 MPRIS 与歌词 API
+
+译纂时启D-Bus（`libdbus-1`）者，器将于会话总线上登记MPRIS媒体会话：
+
+- 主流轩窗之境（GNOME Shell、KDE Plasma、Cinnamon、Budgie之属）可见播弄之制与曲目之文。
+- 若有乐集之面，则发 `mpris:artUrl`，轩窗媒体之件得显其面。
+- 封面先读音声内嵌之图；无者，则按 `cover`、`folder`、`front`、`album`（不辨大小写，扩展名 `.jpg`、`.jpeg`、`.png`、`.webp`）寻同目录之封面。
+- 提取之面统为受管之 `/tmp/ter-music-cover-*.jpg` 暂存，留最近十曲之MRU缓存，退器时净之。
+
+同一D-Bus对象亦供开放歌辞接口：接口 `org.yxzl.ter_music.Lyrics`，方法
+`GetLyrics`，信号 `LyricsChanged`。JSON之构与调用之例见
+[Lyrics API (English)](../API_LYRICS_en_US.md)。
+
+### 九 节度之文
 节度之文存于`~/.config/ter-music/config.xml`（v2.2 XML格式，经libxml2解析）。器初启时将自动创之（若有v1 config.json则自动迁之）。
 
 **节度之项**：
@@ -520,7 +539,7 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 
 器将自动存其节度，改之即生效。
 
-### 八之一 语言包之制
+### 九之一 语言包之制
 
 Ter-Music 用 XML 之国际化（i18n）制。内置语言包在源码 `data/lang/`，纳置于 `TER_MUSIC_DATA_DIR/lang/`。
 
@@ -558,7 +577,7 @@ Ter-Music 用 XML 之国际化（i18n）制。内置语言包在源码 `data/lan
 
 | 文件 | 必需 | 说 |
 |------|------|----|
-| `lang.xml` | 是 | 语言数据文件（格式见八之一） |
+| `lang.xml` | 是 | 语言数据文件（格式见九之一） |
 | `help.txt` | 否 | 该语言之速启助文 |
 
 唯名为 `lang.xml` 与 `help.txt` 者乃提，余者默弃。文件仅以基本名配之，可居 tar 包内任意子录。
@@ -608,21 +627,23 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 
 **注：** 若 `~/.config/ter-music/lang/` 中已存同 `<id>` 之语言包，纳新 tar.gz 将默覆之。欲复误删之内置语言，请重装程序。
 
-### 九 数据存贮之所
+### 十 数据存贮之所
 所有用户数据，皆存于`~/.config/ter-music/`目录之下：
 ```
 ~/.config/ter-music/
 ├── config.xml       # 节度之文（v2.2 XML格式，libxml2解析）
 ├── library.db       # SQLite数据库（音乐库、珍存、曲帙、往迹）
 ├── queue.txt        # 播弄队列恒存
-├── album_cover_cache/  # 专辑封面暂存
 ├── lang/            # 用户语言包目录（覆盖内置翻译）
 └── config.json.bak  # v1节度首迁之自动备份（如有）
 ```
 
 **注：** v1.0之JSON存储（config.json、独立favorites、history、dir_history、playlists/）已尽替以SQLite数据库library.db。v2.0初启时将自动迁移。
 
-### 十 常施用之程叙
+乐集之面不复存于 `~/.config/ter-music/`。所提之面乃受管之临时JPEG文，
+在 `/tmp/ter-music-cover-*.jpg`，留最近十曲，退器时去之。
+
+### 十一 常施用之程叙
 **例：初用之法**
 1. 启其器：
    ```bash
@@ -663,7 +684,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 4. 于队列条目按Enter即播
 5. 再按`Tab`归文件浏览
 
-### 十一 捷键速览
+### 十二 捷键速览
 | 分曹 | 键符 | 所司之事 |
 | --- | --- | --- |
 | **全域** | `q` | 退其器 |
@@ -707,10 +728,10 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 |  | `↑`/`↓` | 择上/下一句 |
 |  | `Enter`/`Space` | 跳转至所选歌辞行 |
 
-### 十二 端闱修广之调
+### 十三 端闱修广之调
 本器通端闱窗牖修广之调，君改其大小时，器将自动重置局度，重绘文界。
 
-### 十三 退其器
+### 十四 退其器
 退之之法有三：
 - 于主界按`q`
 - 按`Ctrl+C`/`Ctrl+D`/`Ctrl+\`（器将正理而退，通SIGHUP/SIGTERM/SIGINT之号）
@@ -756,7 +777,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **backend/pulse.c**：PulseAudio音声输出
   - **backend/alsa.c**：ALSA音声输出
 - **playlist/**：乐目加载、元数据、CUE解析
-  - **playlist.c**：目录搜检（**递归**子目录搜索）、元数据读取（FFmpeg + APEv2标签）、CUE文件检知
+  - **playlist.c**：目录搜检（**递归**子目录搜索）、元数据读取（FFmpeg + APEv2标签）、CUE文件检知、专辑封面提取与MRU暂存、同目录封面回退
   - **cue_parser.c**：CUE文件逐行解析器，分轨播弄
   - **encoding.c**：CUE文字符编码自动检知与转换（iconv）
   - **ape_tag.c**：原生APEv2标签解析器，以增元数据之提取
@@ -769,7 +790,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **schema.h**：XML元素/属性常量定义
   - **crypto.c**：远程连密码加密解密之制
 - **remote.c**：远程播乐之能（SMB/SFTP/FTP/WebDAV/HTTP诸约）
-- **media_session.c**：MPRIS D-Bus媒体会话之耦（可择）
+- **media_session.c**：MPRIS D-Bus媒体会话、专辑封面URL与歌词API之耦（可择）
 - **search.c**：异步搜求之能（拼音搜求）
 - **logger.c**：日志纪事之部
 

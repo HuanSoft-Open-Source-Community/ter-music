@@ -355,7 +355,7 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 > **静态构建（`--static`）**：FFmpeg 在 Docker 容器中从源码编译，无需 `ffmpeg-free-devel` 包。
 > 二进制文件静态链接 FFmpeg，动态链接其他系统库，单包兼容 RHEL 8/9/10。
 
-> **可选后端**：PipeWire（`pipewire-devel`，dlopen 加载，无编译时依赖）、ALSA（`alsa-lib-devel`）、DBus（`dbus-devel`，MPRIS 集成）为可选依赖，CMake 会自动检测。
+> **可选后端**：PipeWire（`pipewire-devel`，dlopen 加载，无编译时依赖）、ALSA（`alsa-lib-devel`）、DBus（`dbus-devel`，MPRIS 媒体会话、专辑封面与歌词 API）为可选依赖，CMake 会自动检测。
 
 ### build-appimage.sh 依赖：
 - `squashfs-tools`
