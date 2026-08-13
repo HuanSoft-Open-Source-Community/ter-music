@@ -64,6 +64,12 @@ jobs:
             ffmpeg libpng libjpeg-turbo pulseaudio ncurses curl libxml2 \
             sqlite zlib alsa-lib libpipewire dbus util-linux
 
+      - name: Adapt includes for Arch ncurses
+        if: matrix.label == 'arch'
+        run: |
+          find . \( -name "*.c" -o -name "*.h" \) -exec \
+            sed -i 's|<ncursesw/ncurses.h>|<ncurses.h>|g' {} +
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
