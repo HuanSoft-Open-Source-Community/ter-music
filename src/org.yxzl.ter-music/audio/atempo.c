@@ -157,9 +157,16 @@ int init_atempo_filter(const AVCodecContext *codec_ctx, float speed)
                                        NULL, NULL, g_atempo_filter.graph);
     if (ret < 0) { avfilter_graph_free(&g_atempo_filter.graph); return -1; }
 
+#if LIBAVUTIL_VERSION_MAJOR >= 60
+    const char *sample_fmt_name = av_get_sample_fmt_name(g_atempo_filter.input_sample_fmt);
+    if (!sample_fmt_name) { avfilter_graph_free(&g_atempo_filter.graph); return -1; }
+    ret = av_opt_set(g_atempo_filter.sink_ctx, "sample_formats", sample_fmt_name,
+                     AV_OPT_SEARCH_CHILDREN);
+#else
     enum AVSampleFormat sample_fmts[] = { g_atempo_filter.input_sample_fmt, AV_SAMPLE_FMT_NONE };
     ret = av_opt_set_int_list(g_atempo_filter.sink_ctx, "sample_fmts", sample_fmts,
                               AV_SAMPLE_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+#endif
     if (ret < 0) { avfilter_graph_free(&g_atempo_filter.graph); return -1; }
 
     AVFilterInOut *outputs = avfilter_inout_alloc();
