@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -1731,15 +1732,128 @@ void preload_visible_tracks(int start, int end) {
 char g_current_album_cover_path[MAX_PATH_LEN] = "";
 int g_current_album_cover_valid = 0;
 
+typedef struct {
+    int valid;
+    uint64_t last_used;
+    char path[MAX_PATH_LEN];
+    char source_key[MAX_PATH_LEN];
+} AlbumCoverCacheEntry;
+
+static AlbumCoverCacheEntry g_album_cover_cache[MAX_ALBUM_COVER_CACHE] = {0};
+static int g_album_cover_cache_count = 0;
+static int g_album_cover_current_idx = -1;
+static uint64_t g_album_cover_clock = 0;
+
 static pthread_mutex_t g_album_cover_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void album_cover_clear_entry_locked(int idx) {
+    if (idx < 0 || idx >= MAX_ALBUM_COVER_CACHE) {
+        return;
+    }
+
+    AlbumCoverCacheEntry *entry = &g_album_cover_cache[idx];
+    if (entry->valid && entry->path[0] != '\0') {
+        unlink(entry->path);
+    }
+    memset(entry, 0, sizeof(*entry));
+}
+
+static void album_cover_clear_current_locked(void) {
+    g_album_cover_current_idx = -1;
+    g_current_album_cover_path[0] = '\0';
+    g_current_album_cover_valid = 0;
+}
+
+static int album_cover_take_slot_locked(void) {
+    int slot = -1;
+    for (int i = 0; i < MAX_ALBUM_COVER_CACHE; i++) {
+        if (!g_album_cover_cache[i].valid) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0) {
+        uint64_t oldest_stamp = UINT64_MAX;
+        for (int i = 0; i < MAX_ALBUM_COVER_CACHE; i++) {
+            if (g_album_cover_cache[i].last_used < oldest_stamp) {
+                oldest_stamp = g_album_cover_cache[i].last_used;
+                slot = i;
+            }
+        }
+    }
+
+    if (slot >= 0) {
+        int was_valid = g_album_cover_cache[slot].valid;
+        album_cover_clear_entry_locked(slot);
+        if (was_valid) {
+            g_album_cover_cache_count--;
+        }
+        if (g_album_cover_current_idx == slot) {
+            album_cover_clear_current_locked();
+        }
+    }
+    return slot;
+}
+
+static int album_cover_register_locked(const char *path, const char *source_key) {
+    if (!path || path[0] == '\0' || !source_key || source_key[0] == '\0') {
+        return -1;
+    }
+
+    int slot = album_cover_take_slot_locked();
+    if (slot < 0) {
+        return -1;
+    }
+
+    AlbumCoverCacheEntry *entry = &g_album_cover_cache[slot];
+    snprintf(entry->path, sizeof(entry->path), "%s", path);
+    snprintf(entry->source_key, sizeof(entry->source_key), "%s", source_key);
+    entry->last_used = ++g_album_cover_clock;
+    entry->valid = 1;
+    g_album_cover_cache_count++;
+
+    g_album_cover_current_idx = slot;
+    snprintf(g_current_album_cover_path, sizeof(g_current_album_cover_path), "%s", path);
+    g_current_album_cover_valid = 1;
+    return 0;
+}
+
+static int album_cover_promote_locked(int idx) {
+    if (idx < 0 || idx >= MAX_ALBUM_COVER_CACHE ||
+        !g_album_cover_cache[idx].valid) {
+        return -1;
+    }
+
+    AlbumCoverCacheEntry *entry = &g_album_cover_cache[idx];
+    entry->last_used = ++g_album_cover_clock;
+    g_album_cover_current_idx = idx;
+    snprintf(g_current_album_cover_path, sizeof(g_current_album_cover_path), "%s", entry->path);
+    g_current_album_cover_valid = 1;
+    return 0;
+}
+
+static int album_cover_find_source_locked(const char *source_key) {
+    if (!source_key || source_key[0] == '\0') {
+        return -1;
+    }
+
+    for (int i = 0; i < MAX_ALBUM_COVER_CACHE; i++) {
+        if (g_album_cover_cache[i].valid &&
+            strcmp(g_album_cover_cache[i].source_key, source_key) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 void cleanup_album_cover_cache(void) {
     pthread_mutex_lock(&g_album_cover_mutex);
-    if (g_current_album_cover_valid && g_current_album_cover_path[0] != '\0') {
-        unlink(g_current_album_cover_path);
-        g_current_album_cover_path[0] = '\0';
-        g_current_album_cover_valid = 0;
+    for (int i = 0; i < MAX_ALBUM_COVER_CACHE; i++) {
+        album_cover_clear_entry_locked(i);
     }
+    g_album_cover_cache_count = 0;
+    album_cover_clear_current_locked();
     pthread_mutex_unlock(&g_album_cover_mutex);
 }
 
@@ -1914,6 +2028,190 @@ static int decode_image_to_jpeg(const unsigned char *data, int size,
     return ret;
 }
 
+static int copy_file_bytes(const char *source_path, const char *dest_path) {
+    FILE *source = fopen(source_path, "rb");
+    if (!source) {
+        return -1;
+    }
+
+    FILE *dest = fopen(dest_path, "wb");
+    if (!dest) {
+        fclose(source);
+        return -1;
+    }
+
+    unsigned char buffer[64 * 1024];
+    size_t read_bytes;
+    int result = 0;
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), source)) > 0) {
+        if (fwrite(buffer, 1, read_bytes, dest) != read_bytes) {
+            result = -1;
+            break;
+        }
+    }
+    if (ferror(source)) {
+        result = -1;
+    }
+
+    fclose(dest);
+    fclose(source);
+    if (result != 0) {
+        unlink(dest_path);
+    }
+    return result;
+}
+
+/* Normalize an existing image file into a managed JPEG cache file. */
+static int cache_cover_source_file(const char *source_path,
+                                   char *output_path,
+                                   size_t output_size) {
+    if (!source_path || !output_path || output_size == 0) {
+        return -1;
+    }
+
+    unsigned char header[2] = {0};
+    FILE *probe = fopen(source_path, "rb");
+    if (!probe) {
+        return -1;
+    }
+    size_t header_size = fread(header, 1, sizeof(header), probe);
+    fclose(probe);
+
+    char temp_path[MAX_PATH_LEN];
+    snprintf(temp_path, sizeof(temp_path), "%sXXXXXX.jpg", ALBUM_COVER_TEMP_PREFIX);
+    int temp_fd = mkstemps(temp_path, 4);
+    if (temp_fd < 0) {
+        return -1;
+    }
+    close(temp_fd);
+
+    int success = 0;
+    if (header_size == sizeof(header) &&
+        header[0] == 0xFF && header[1] == 0xD8) {
+        success = (copy_file_bytes(source_path, temp_path) == 0);
+    } else {
+        FILE *source = fopen(source_path, "rb");
+        if (source) {
+            if (fseek(source, 0, SEEK_END) == 0) {
+                long file_size = ftell(source);
+                if (file_size > 0) {
+                    rewind(source);
+                    unsigned char *data = malloc((size_t)file_size);
+                    if (data) {
+                        size_t read_bytes = fread(data, 1, (size_t)file_size, source);
+                        if (read_bytes == (size_t)file_size &&
+                            decode_image_to_jpeg(data, (int)file_size, temp_path) == 0) {
+                            success = 1;
+                        }
+                        free(data);
+                    }
+                }
+            }
+            fclose(source);
+        }
+    }
+
+    if (success) {
+        snprintf(output_path, output_size, "%s", temp_path);
+        return 0;
+    }
+
+    unlink(temp_path);
+    return -1;
+}
+
+static int cover_candidate_rank(const char *name,
+                                int *base_rank,
+                                int *extension_rank) {
+    static const char *const base_names[] = {
+        "cover", "folder", "front", "album"
+    };
+    static const char *const extensions[] = {
+        ".jpg", ".jpeg", ".png", ".webp"
+    };
+
+    if (!name || !base_rank || !extension_rank) {
+        return 0;
+    }
+
+    const char *dot = strrchr(name, '.');
+    if (!dot || dot == name) {
+        return 0;
+    }
+
+    size_t base_length = (size_t)(dot - name);
+    for (size_t i = 0; i < sizeof(base_names) / sizeof(base_names[0]); i++) {
+        if (strlen(base_names[i]) != base_length ||
+            strncasecmp(name, base_names[i], base_length) != 0) {
+            continue;
+        }
+
+        for (size_t j = 0; j < sizeof(extensions) / sizeof(extensions[0]); j++) {
+            if (strcasecmp(dot, extensions[j]) == 0) {
+                *base_rank = (int)i;
+                *extension_rank = (int)j;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int find_directory_cover(const char *audio_path,
+                                char *output_path,
+                                size_t output_size) {
+    if (!audio_path || remote_is_remote_path(audio_path)) {
+        return -1;
+    }
+
+    char directory[MAX_PATH_LEN];
+    snprintf(directory, sizeof(directory), "%s", audio_path);
+    char *slash = strrchr(directory, '/');
+    if (!slash) {
+        return -1;
+    }
+    slash[1] = '\0';
+
+    DIR *dir = opendir(directory);
+    if (!dir) {
+        return -1;
+    }
+
+    int best_rank = INT_MAX;
+    char best_path[MAX_PATH_LEN] = "";
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!entry->d_name || entry->d_name[0] == '.') {
+            continue;
+        }
+
+        int base_rank = -1;
+        int extension_rank = -1;
+        if (!cover_candidate_rank(entry->d_name, &base_rank, &extension_rank)) {
+            continue;
+        }
+
+        int rank = base_rank * 4 + extension_rank;
+        if (rank >= best_rank) {
+            continue;
+        }
+
+        char candidate[MAX_PATH_LEN];
+        snprintf(candidate, sizeof(candidate), "%s%s", directory, entry->d_name);
+        struct stat st;
+        if (stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
+            best_rank = rank;
+            snprintf(best_path, sizeof(best_path), "%s", candidate);
+        }
+    }
+    closedir(dir);
+
+    if (best_path[0] == '\0') {
+        return -1;
+    }
+    return cache_cover_source_file(best_path, output_path, output_size);
+}
+
 int extract_album_cover(const char *audio_path, char *output_path, size_t output_size) {
     if (!audio_path || !output_path || output_size == 0) {
         return -1;
@@ -2004,8 +2302,13 @@ int get_current_album_cover_path(char *path, size_t path_size) {
     }
 
     pthread_mutex_lock(&g_album_cover_mutex);
-    if (g_current_album_cover_valid && g_current_album_cover_path[0] != '\0') {
-        snprintf(path, path_size, "%s", g_current_album_cover_path);
+    if (g_album_cover_current_idx >= 0 &&
+        g_album_cover_current_idx < MAX_ALBUM_COVER_CACHE &&
+        g_album_cover_cache[g_album_cover_current_idx].valid &&
+        g_album_cover_cache[g_album_cover_current_idx].path[0] != '\0') {
+        AlbumCoverCacheEntry *entry = &g_album_cover_cache[g_album_cover_current_idx];
+        entry->last_used = ++g_album_cover_clock;
+        snprintf(path, path_size, "%s", entry->path);
         pthread_mutex_unlock(&g_album_cover_mutex);
         return 0;
     }
@@ -2019,17 +2322,35 @@ void update_album_cover_for_track(const char *track_path) {
         return;
     }
 
-    cleanup_album_cover_cache();
-
     // 清空字符画缓存，以便新歌曲加载时重新生成
     g_braille_art_buffer[0] = '\0';
     g_album_cover_size = 0;
 
-    char temp_path[MAX_PATH_LEN];
-    if (extract_album_cover(track_path, temp_path, sizeof(temp_path)) == 0) {
+    pthread_mutex_lock(&g_album_cover_mutex);
+    int existing = album_cover_find_source_locked(track_path);
+    if (existing >= 0) {
+        album_cover_promote_locked(existing);
+        pthread_mutex_unlock(&g_album_cover_mutex);
+        return;
+    }
+    pthread_mutex_unlock(&g_album_cover_mutex);
+
+    char cover_path[MAX_PATH_LEN] = "";
+    int have_cover = (extract_album_cover(track_path, cover_path, sizeof(cover_path)) == 0);
+    if (!have_cover) {
+        have_cover = (find_directory_cover(track_path, cover_path, sizeof(cover_path)) == 0);
+    }
+
+    if (have_cover) {
         pthread_mutex_lock(&g_album_cover_mutex);
-        snprintf(g_current_album_cover_path, sizeof(g_current_album_cover_path), "%s", temp_path);
-        g_current_album_cover_valid = 1;
+        int registered = album_cover_register_locked(cover_path, track_path);
+        pthread_mutex_unlock(&g_album_cover_mutex);
+        if (registered != 0) {
+            unlink(cover_path);
+        }
+    } else {
+        pthread_mutex_lock(&g_album_cover_mutex);
+        album_cover_clear_current_locked();
         pthread_mutex_unlock(&g_album_cover_mutex);
     }
 }

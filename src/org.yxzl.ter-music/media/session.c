@@ -4,9 +4,11 @@
 #include "audio/play_queue.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "ui/braille/braille_art.h"
 #include "media/session.h"
 #include "logger/logger.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +21,7 @@
 #define MPRIS_ROOT_INTERFACE "org.mpris.MediaPlayer2"
 #define MPRIS_PLAYER_INTERFACE "org.mpris.MediaPlayer2.Player"
 #define DBUS_PROPERTIES_INTERFACE "org.freedesktop.DBus.Properties"
+#define MPRIS_ART_URL_MAX (MAX_PATH_LEN * 3 + 16)
 
 typedef struct {
     int valid;
@@ -34,6 +37,7 @@ typedef struct {
     char title[MAX_META_LEN];
     char artist[MAX_META_LEN];
     char album[MAX_META_LEN];
+    char art_url[MPRIS_ART_URL_MAX];
 } MediaSessionSnapshot;
 
 typedef struct {
@@ -165,6 +169,39 @@ static void build_track_id(char *dest, size_t dest_size, const char *track_path)
     snprintf(dest, dest_size, "/org/mpris/MediaPlayer2/Track_%016llx", hash);
 }
 
+static void build_file_uri(const char *path, char *uri, size_t uri_size) {
+    if (!uri || uri_size == 0) {
+        return;
+    }
+    uri[0] = '\0';
+    if (!path || path[0] == '\0') {
+        return;
+    }
+
+    size_t position = 0;
+    const char *prefix = "file://";
+    for (size_t i = 0; prefix[i] != '\0' && position + 1 < uri_size; i++) {
+        uri[position++] = prefix[i];
+    }
+
+    for (const unsigned char *ptr = (const unsigned char *)path;
+         *ptr != '\0' && position + 1 < uri_size;
+         ptr++) {
+        unsigned char value = *ptr;
+        if (isalnum(value) || value == '/' || value == '-' ||
+            value == '_' || value == '.' || value == '~') {
+            uri[position++] = (char)value;
+        } else if (position + 3 < uri_size) {
+            uri[position++] = '%';
+            uri[position++] = "0123456789ABCDEF"[value >> 4];
+            uri[position++] = "0123456789ABCDEF"[value & 0x0F];
+        } else {
+            break;
+        }
+    }
+    uri[position] = '\0';
+}
+
 static void capture_snapshot(MediaSessionSnapshot *snapshot) {
     if (!snapshot) {
         return;
@@ -199,6 +236,11 @@ static void capture_snapshot(MediaSessionSnapshot *snapshot) {
     snprintf(snapshot->title, sizeof(snapshot->title), "%s", track.title);
     snprintf(snapshot->artist, sizeof(snapshot->artist), "%s", track.artist);
     snprintf(snapshot->album, sizeof(snapshot->album), "%s", track.album);
+
+    char cover_path[MAX_PATH_LEN];
+    if (get_current_album_cover_path(cover_path, sizeof(cover_path)) == 0) {
+        build_file_uri(cover_path, snapshot->art_url, sizeof(snapshot->art_url));
+    }
 }
 
 static int snapshots_equal(const MediaSessionSnapshot *lhs,
@@ -218,7 +260,8 @@ static int snapshots_equal(const MediaSessionSnapshot *lhs,
            strcmp(lhs->track_id, rhs->track_id) == 0 &&
            strcmp(lhs->title, rhs->title) == 0 &&
            strcmp(lhs->artist, rhs->artist) == 0 &&
-           strcmp(lhs->album, rhs->album) == 0;
+           strcmp(lhs->album, rhs->album) == 0 &&
+           strcmp(lhs->art_url, rhs->art_url) == 0;
 }
 
 static void append_string_array(DBusMessageIter *iter, const char *const *values) {
@@ -332,6 +375,9 @@ static void append_metadata_entries(DBusMessageIter *dict_iter,
     append_string_variant(dict_iter, "xesam:album", snapshot->album);
     append_string_array_variant(dict_iter, "xesam:artist", artist_values);
     append_int64_variant(dict_iter, "mpris:length", snapshot->length_us);
+    if (snapshot->art_url[0] != '\0') {
+        append_string_variant(dict_iter, "mpris:artUrl", snapshot->art_url);
+    }
 }
 
 static void append_metadata_variant(DBusMessageIter *dict_iter,

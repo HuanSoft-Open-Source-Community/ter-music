@@ -1044,6 +1044,7 @@ void cleanup(void)
 
     endwin();
     audio_backend_shutdown();
+    reset_album_cover_cache();
     remote_cleanup();
 }
 
