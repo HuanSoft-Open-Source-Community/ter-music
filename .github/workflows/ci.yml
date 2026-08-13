@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - testing
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu
+            container: ""
+          - label: fedora
+            container: "fedora:latest"
+          - label: arch
+            container: "archlinux:latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.label == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libavcodec-dev libavformat-dev libswresample-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
+            libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+            libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev \
+            zlib1g-dev ffmpeg
+
+      - name: Install dependencies (Fedora)
+        if: matrix.label == 'fedora'
+        run: |
+          dnf install -y \
+            gcc make cmake pkgconf-pkg-config \
+            ffmpeg-free-devel libpng-devel libjpeg-turbo-devel \
+            pulseaudio-libs-devel ncurses-devel libcurl-devel libxml2-devel \
+            sqlite-devel alsa-lib-devel pipewire-devel dbus-devel \
+            util-linux ffmpeg-free
+
+      - name: Install dependencies (Arch)
+        if: matrix.label == 'arch'
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel cmake pkgconf \
+            ffmpeg libpng libjpeg-turbo pulseaudio ncurses libcurl libxml2 \
+            sqlite zlib alsa-lib libpipewire dbus util-linux
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j2
+
+      - name: Smoke test (--help)
+        run: ./build/ter-music --help >/dev/null
+
+      - name: Smoke test (PTY launch)
+        run: |
+          set -e
+          mkdir -p /tmp/tm-smoke/sub /tmp/tm-home
+          ffmpeg -hide_banner -loglevel error -f lavfi \
+            -i anullsrc=r=44100:cl=mono -t 1 -c:a pcm_s16le \
+            -y /tmp/tm-smoke/sub/t.wav
+          set +e
+          timeout 8 script -qec \
+            "HOME=/tmp/tm-home ./build/ter-music -o /tmp/tm-smoke/sub" \
+            /dev/null </dev/null
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            echo "PTY smoke test failed with exit code $rc" >&2
+            exit 1
+          fi
+
+  strict:
+    name: strict-warnings
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libavcodec-dev libavformat-dev libswresample-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
+            libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+            libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev \
+            zlib1g-dev
+
+      - name: Configure (strict warnings)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+
+      - name: Build
+        run: cmake --build build -j2
+
+      - name: Smoke test
+        run: ./build/ter-music --help >/dev/null
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Shellcheck
+        run: shellcheck scripts/build/*.sh scripts/docker/*.sh
+
+      - name: Syntax check
+        run: bash -n scripts/build/*.sh scripts/docker/*.sh
+
+  required-checks:
+    name: required-checks
+    if: always()
+    needs: [build, strict, shellcheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all CI jobs passed
+        env:
+          BUILD: ${{ needs.build.result }}
+          STRICT: ${{ needs.strict.result }}
+          SHELLCHECK: ${{ needs.shellcheck.result }}
+        run: |
+          [ "$BUILD" = "success" ] || { echo "build: $BUILD" >&2; exit 1; }
+          [ "$STRICT" = "success" ] || { echo "strict: $STRICT" >&2; exit 1; }
+          [ "$SHELLCHECK" = "success" ] || { echo "shellcheck: $SHELLCHECK" >&2; exit 1; }

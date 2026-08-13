@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches APP_VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver=$(sed -n \
+            's/^#define APP_VERSION "v\([0-9.]*\)".*/\1/p' \
+            include/org.yxzl.ter-music/types.h)
+          if [ -z "$ver" ] || [ "$tag" != "$ver" ]; then
+            echo "Tag v${tag} does not match APP_VERSION v${ver}" >&2
+            exit 1
+          fi
+          echo "Tag v${tag} matches APP_VERSION v${ver}"
+
+  packages:
+    needs: version-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all package types
+        run: bash scripts/build/launch-auto-build.sh \
+          --arch amd64 --types deb,rpm,linyaps,appimage,portable
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ter-music-packages
+          if-no-files-found: error
+          path: |
+            build/deb/**/*.deb
+            build/rpm/**/*.rpm
+            build/appimage/**/*.AppImage
+            build/portable/**/*.tar.gz
+            build/linyaps/**/*.uab
+            build/linyaps/**/*_binary.layer
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          if-no-files-found: ignore
+          path: .tmp/logs/**/*
+
+  release:
+    needs: packages
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: ter-music-packages
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          shopt -s globstar nullglob
+          files=(dist/**/*.deb dist/**/*.rpm dist/**/*.AppImage \
+                 dist/**/*.tar.gz dist/**/*.uab dist/**/*.layer)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No package artifacts found" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" --generate-notes

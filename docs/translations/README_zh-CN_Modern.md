@@ -4,6 +4,8 @@
 ![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 ![Language: C](https://img.shields.io/badge/Language-C-blue.svg)
 ![Platform: Linux](https://img.shields.io/badge/Platform-Linux-green.svg)
+[![CI](https://github.com/HuanSoft-Open-Source-Community/ter-music/actions/workflows/ci.yml/badge.svg)](https://github.com/HuanSoft-Open-Source-Community/ter-music/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/HuanSoft-Open-Source-Community/ter-music?sort=semver)](https://github.com/HuanSoft-Open-Source-Community/ter-music/releases)
 ![Docker](https://img.shields.io/badge/Docker-支持-2496ED.svg)
 ![Python](https://img.shields.io/badge/Python-3.x-3776AB.svg)
 ![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg)
