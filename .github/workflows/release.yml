@@ -41,8 +41,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build all package types
-        run: bash scripts/build/launch-auto-build.sh \
-          --arch amd64 --types deb,rpm,linyaps,appimage,portable
+        run: |
+          bash scripts/build/launch-auto-build.sh \
+            --arch amd64 --types deb,rpm,linyaps,appimage,portable
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
