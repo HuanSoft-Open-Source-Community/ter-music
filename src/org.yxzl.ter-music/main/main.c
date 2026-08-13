@@ -115,10 +115,47 @@ static int has_audio_files(const char *path) {
     return found;
 }
 
-static int load_startup_playlist(const char *path, char *final_path, size_t final_path_size) {
+/* 将物理曲目索引转换为当前播放列表显示所用的行索引：
+ * 树形浏览模式 → 可见行索引（自动展开祖先目录使曲目可见）；
+ * 排序模式 → 排序后的视觉位置；其余情况 → 物理索引本身。 */
+static void set_selection_for_track(int physical_idx)
+{
+    if (physical_idx < 0) {
+        g_selected_index = 0;
+        return;
+    }
+
+    if (playlist_tree_is_active()) {
+        g_selected_index = playlist_reveal_track(physical_idx);
+        if (g_selected_index < 0) {
+            g_selected_index = 0;
+        }
+        return;
+    }
+
+    if (g_sort_state.active) {
+        g_selected_index = 0;
+        for (int i = 0; i < g_playlist.count; i++) {
+            if (g_sort_state.sorted_indices[i] == physical_idx) {
+                g_selected_index = i;
+                break;
+            }
+        }
+        return;
+    }
+
+    g_selected_index = physical_idx;
+}
+
+static int load_startup_playlist(const char *path, char *final_path, size_t final_path_size,
+                                 int *play_index) {
     struct stat s;
     if (!path || path[0] == '\0') {
         return 0;
+    }
+
+    if (play_index) {
+        *play_index = -1;
     }
 
     if (stat(path, &s) != 0) {
@@ -143,21 +180,14 @@ static int load_startup_playlist(const char *path, char *final_path, size_t fina
         }
 
         // 定位被打开的文件
-        g_selected_index = playlist_find_track_index_by_path(path);
-        if (g_selected_index < 0) {
-            g_selected_index = 0;
+        int physical_idx = playlist_find_track_index_by_path(path);
+        if (physical_idx < 0) {
+            physical_idx = 0;
         }
-        // 排序激活时，将物理索引转换为视觉位置
-        if (g_sort_state.active) {
-            int visual = 0;
-            for (int i = 0; i < g_playlist.count; i++) {
-                if (g_sort_state.sorted_indices[i] == g_selected_index) {
-                    visual = i;
-                    break;
-                }
-            }
-            g_selected_index = visual;
+        if (play_index) {
+            *play_index = physical_idx;
         }
+        set_selection_for_track(physical_idx);
 
         snprintf(final_path, final_path_size, "%s", dir_buf);
         return 1;
@@ -202,20 +232,9 @@ static int restore_saved_playback_session(void) {
         return 0;
     }
 
-    g_selected_index = track_index;
     g_initial_seek_position = g_app_config.last_played_position;
+    set_selection_for_track(track_index);
     play_audio(track_index);
-    // 排序激活时，将物理索引转换为视觉位置
-    if (g_sort_state.active) {
-        int visual = 0;
-        for (int i = 0; i < g_playlist.count; i++) {
-            if (g_sort_state.sorted_indices[i] == track_index) {
-                visual = i;
-                break;
-            }
-        }
-        g_selected_index = visual;
-    }
     return 1;
 }
 
@@ -355,6 +374,7 @@ int main(int argc, char *argv[]) {
     int attempted_resume_load = 0;
     int resumed_playback = 0;
     int opened_single_file = 0;
+    int opened_track_index = -1;
     char final_path[MAX_PATH_LEN] = "";
 
     int temp_loaded = load_temp_playlist();
@@ -427,7 +447,8 @@ int main(int argc, char *argv[]) {
         struct stat s;
         if (stat(expanded_path, &s) == 0) {
             if (S_ISREG(s.st_mode) || S_ISDIR(s.st_mode)) {
-                if (load_startup_playlist(expanded_path, final_path, sizeof(final_path))) {
+                if (load_startup_playlist(expanded_path, final_path, sizeof(final_path),
+                                          &opened_track_index)) {
                     log_info("main", "Local path loaded: '%s', final_path='%s'", expanded_path, final_path);
                     loaded = 1;
                     if (S_ISREG(s.st_mode)) {
@@ -492,7 +513,7 @@ int main(int argc, char *argv[]) {
 
         if (getcwd(current_dir, sizeof(current_dir)) &&
             find_audio_directory_recursive(current_dir, auto_found_path, sizeof(auto_found_path), 0) &&
-            load_startup_playlist(auto_found_path, final_path, sizeof(final_path))) {
+            load_startup_playlist(auto_found_path, final_path, sizeof(final_path), NULL)) {
             log_info("main", "Auto-detected music folder: '%s'", auto_found_path);
             loaded = 1;
 
@@ -507,7 +528,8 @@ int main(int argc, char *argv[]) {
     
     if (!loaded && g_app_config.default_startup_path[0] != '\0') {
         log_info("main", "Trying default startup path: '%s'", g_app_config.default_startup_path);
-        if (load_startup_playlist(g_app_config.default_startup_path, final_path, sizeof(final_path))) {
+        if (load_startup_playlist(g_app_config.default_startup_path, final_path, sizeof(final_path),
+                                  NULL)) {
             log_info("main", "Loaded from default path: '%s'", g_app_config.default_startup_path);
             loaded = 1;
 
@@ -522,7 +544,8 @@ int main(int argc, char *argv[]) {
     
     if (!loaded && g_app_config.remember_last_path && g_app_config.last_opened_path[0] != '\0') {
         log_info("main", "Trying last opened path: '%s'", g_app_config.last_opened_path);
-        if (load_startup_playlist(g_app_config.last_opened_path, final_path, sizeof(final_path))) {
+        if (load_startup_playlist(g_app_config.last_opened_path, final_path, sizeof(final_path),
+                                  NULL)) {
             log_info("main", "Loaded from last opened path");
             loaded = 1;
         }
@@ -555,9 +578,20 @@ int main(int argc, char *argv[]) {
 
         if (!resumed_playback && playlist_count() > 0 &&
             (g_app_config.auto_play_on_start || opened_single_file)) {
-            log_info("main", "Auto-playing first track");
-            int first_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
-            play_audio(first_idx);
+            int auto_idx = -1;
+            if (opened_single_file) {
+                auto_idx = opened_track_index;
+                if (auto_idx < 0) {
+                    auto_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
+                }
+            } else if (g_app_config.auto_play_on_start) {
+                auto_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
+            }
+            if (auto_idx >= 0) {
+                log_info("main", "Auto-playing track idx=%d", auto_idx);
+                play_audio(auto_idx);
+                set_selection_for_track(auto_idx);
+            }
         }
         if (attempted_resume_load && !open_path && !resumed_playback) {
             clear_saved_playback_session();

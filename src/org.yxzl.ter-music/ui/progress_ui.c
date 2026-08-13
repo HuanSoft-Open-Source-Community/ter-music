@@ -2,7 +2,7 @@
  * @file progress_ui.c
  * @brief 进度条更新和快进快退
  *
- * 从 ui.c 拆分，负责进度条的增量重绘和播放列表滚动偏移计算。
+ * 从 ui.c 拆分，负责进度条的增量重绘。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  * @date 2026-06-02
@@ -23,8 +23,6 @@
 
 
 extern WINDOW *win_controls;
-extern int g_playlist_tab_mode;
-extern int g_queue_selected_index;
 
 #define UI_PROGRESS_REFRESH_MS 80
 
@@ -39,40 +37,6 @@ void seek_relative_seconds(int delta_seconds)
     if (new_pos < 0) new_pos = 0;
     if (new_pos > g_total_duration) new_pos = g_total_duration;
     if (new_pos != g_current_position) seek_audio((double)new_pos);
-}
-
-/* ============================================================
- * Playlist scroll offset
- * ============================================================ */
-
-int get_playlist_scroll_offset(void)
-{
-    if (!win_playlist) return 0;
-
-    int h, w;
-    getmaxyx(win_playlist, h, w);
-    (void)w;
-
-    int content_height = h - 2;
-    int visible_lines = content_height - 6;
-    if (visible_lines <= 0) return 0;
-
-    if (g_search_state.active || g_search_state.in_progress) {
-        int offset = 0;
-        if (g_search_state.selected_index >= visible_lines)
-            offset = g_search_state.selected_index - visible_lines + 1;
-        return offset;
-    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-        int offset = 0;
-        if (g_queue_selected_index >= visible_lines)
-            offset = g_queue_selected_index - visible_lines + 1;
-        return offset;
-    } else {
-        int offset = 0;
-        if (g_selected_index >= visible_lines)
-            offset = g_selected_index - visible_lines + 1;
-        return offset;
-    }
 }
 
 /* ============================================================

@@ -763,6 +763,55 @@ void playlist_toggle_directory_expand(int tree_idx) {
     }
 }
 
+/* 展开包含指定曲目的所有祖先目录，返回该曲目在可见列表中的行号。
+ * 曲目不可见/不存在（含 MAX_TREE_NODES 可见上限）时返回 -1。 */
+int playlist_reveal_track(int track_idx) {
+    int node_idx = -1;
+    int changed = 0;
+
+    playlist_lock();
+    if (track_idx >= 0 && track_idx < g_playlist.count && g_playlist.tree_mode) {
+        for (int i = 0; i < g_playlist.tree_node_count; i++) {
+            if (g_playlist.tree_nodes[i].type == TREE_NODE_FILE &&
+                g_playlist.tree_nodes[i].track_index == track_idx) {
+                node_idx = i;
+                break;
+            }
+        }
+    }
+
+    if (node_idx >= 0) {
+        int p = g_playlist.tree_nodes[node_idx].parent_index;
+        while (p >= 0 && p < g_playlist.tree_node_count) {
+            if (g_playlist.tree_nodes[p].type == TREE_NODE_DIRECTORY &&
+                !g_playlist.tree_nodes[p].expanded) {
+                g_playlist.tree_nodes[p].expanded = 1;
+                changed = 1;
+            }
+            p = g_playlist.tree_nodes[p].parent_index;
+        }
+    }
+    playlist_unlock();
+
+    if (node_idx < 0) {
+        return -1;
+    }
+    if (changed) {
+        rebuild_visible_list(&g_playlist);
+    }
+
+    int visible = -1;
+    playlist_lock();
+    for (int i = 0; i < g_playlist.visible_count; i++) {
+        if (g_playlist.visible_indices[i] == node_idx) {
+            visible = i;
+            break;
+        }
+    }
+    playlist_unlock();
+    return visible;
+}
+
 void decode_html_entities(char *str);
 
 static void copy_metadata_field(char *dest, size_t dest_size, const char *value) {

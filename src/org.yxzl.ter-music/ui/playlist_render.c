@@ -124,6 +124,52 @@ void sanitize_ascii_text(char *dest, size_t dest_size, const char *src)
 }
 
 /* ============================================================
+ * Playlist scroll offset
+ * ============================================================ */
+
+/* 计算滚动起点并钳制：选中索引保持在 [0, total_tracks-1]，
+ * 起点保持在 [0, max(0, total_tracks - visible_lines)]，
+ * 避免越界索引在列表尾部留下空白行。 */
+static int clamp_playlist_start(int total_tracks, int current_selected, int visible_lines)
+{
+    if (visible_lines <= 0) return 0;
+    if (current_selected < 0) current_selected = 0;
+    if (total_tracks > 0 && current_selected >= total_tracks)
+        current_selected = total_tracks - 1;
+
+    int start = current_selected >= visible_lines
+                ? current_selected - visible_lines + 1
+                : 0;
+    int max_start = total_tracks - visible_lines;
+    if (max_start < 0) max_start = 0;
+    if (start > max_start) start = max_start;
+    return start;
+}
+
+int get_playlist_scroll_offset(void)
+{
+    if (!win_playlist) return 0;
+
+    int h, w;
+    getmaxyx(win_playlist, h, w);
+    (void)w;
+
+    int content_height = h - 2;
+    int visible_lines = content_height - 6;
+
+    if (g_search_state.active || g_search_state.in_progress) {
+        int total = g_search_state.result_count;
+        if (total < 0) total = 0;
+        return clamp_playlist_start(total, g_search_state.selected_index, visible_lines);
+    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+        return clamp_playlist_start(g_play_queue.count, g_queue_selected_index, visible_lines);
+    } else {
+        int total = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
+        return clamp_playlist_start(total, g_selected_index, visible_lines);
+    }
+}
+
+/* ============================================================
  * Playlist content rendering
  * ============================================================ */
 
@@ -219,14 +265,20 @@ void render_playlist_content(void)
         int visible_lines = content_height - 6;
 
         if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-            if (g_queue_selected_index >= visible_lines)
-                start_idx = g_queue_selected_index - visible_lines + 1;
+            if (total_tracks > 0 && g_queue_selected_index >= total_tracks)
+                g_queue_selected_index = total_tracks - 1;
+            if (g_queue_selected_index < 0) g_queue_selected_index = 0;
+            start_idx = clamp_playlist_start(total_tracks, g_queue_selected_index, visible_lines);
         } else if (snap_active || snap_in_progress) {
-            if (snap_selected >= visible_lines)
-                start_idx = snap_selected - visible_lines + 1;
+            if (total_tracks > 0 && snap_selected >= total_tracks)
+                snap_selected = total_tracks - 1;
+            if (snap_selected < 0) snap_selected = 0;
+            start_idx = clamp_playlist_start(total_tracks, snap_selected, visible_lines);
         } else {
-            if (g_selected_index >= visible_lines)
-                start_idx = g_selected_index - visible_lines + 1;
+            if (total_tracks > 0 && g_selected_index >= total_tracks)
+                g_selected_index = total_tracks - 1;
+            if (g_selected_index < 0) g_selected_index = 0;
+            start_idx = clamp_playlist_start(total_tracks, g_selected_index, visible_lines);
         }
 
         if (tree_active) {

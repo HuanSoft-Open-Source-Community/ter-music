@@ -47,5 +47,6 @@ int  get_visible_node_track_index(int visible_idx);
 int  get_tree_node_depth(int tree_idx);
 const char *get_tree_node_name(int tree_idx);
 void playlist_toggle_directory_expand(int tree_idx);
+int  playlist_reveal_track(int track_idx);
 
 #endif
