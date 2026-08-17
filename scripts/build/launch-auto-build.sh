@@ -583,7 +583,7 @@ build_artifact_path() {
         rpm)
             local rarch
             rarch=$(rpm_arch "$arch")
-            echo "${SCRIPT_DIR}/build/rpm/${rarch}/ter-music-${VERSION}-1.el9.${rarch}.rpm"
+            echo "${SCRIPT_DIR}/build/rpm/${rarch}/ter-music-${VERSION}-1.el8.${rarch}.rpm"
             ;;
         linyaps)
             local narch

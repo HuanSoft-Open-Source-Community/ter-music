@@ -443,7 +443,7 @@ create_source_tarball() {
     rm -rf "$source_dir"
     mkdir -p "$package_dir"
     
-    local files=("src" "include" "data" "resources" "cmake" "CMakeLists.txt" "docs/README.md" "LICENSE")
+    local files=("src" "include" "data" "resources" "CMakeLists.txt" "docs/README.md" "LICENSE")
     local missing_files=()
     
     for file in "${files[@]}"; do

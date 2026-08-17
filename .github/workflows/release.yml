@@ -40,6 +40,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # appimage/portable 在本机 runner 上直接编译（native 构建），
+      # 需要系统 FFmpeg 开发库；与 ci.yml 的 ubuntu 依赖保持一致。
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config libavcodec-dev libavformat-dev libswresample-dev libavutil-dev libavfilter-dev libswscale-dev libpng-dev libjpeg-dev libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev zlib1g-dev squashfs-tools
+
       - name: Build all package types
         run: |
           bash scripts/build/launch-auto-build.sh \
