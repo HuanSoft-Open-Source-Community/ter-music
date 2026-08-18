@@ -1,3 +1,9 @@
+ter-music (2.2.0-1) unstable; urgency=medium
+
+  * Bump version to 2.2.0.
+
+ -- Yanxi Bamboo Forest <yxzl666xx@outlook.com>  Tue, 18 Aug 2026 00:00:00 +0800
+
 ter-music (2.1.0-1) unstable; urgency=medium
 
   * 10-band ISO graphic equalizer with biquad IIR DSP.

@@ -156,7 +156,7 @@ check_download_tool() {
 }
 
 detect_version() {
-    local default_version="2.1.0"
+    local default_version="2.2.0"
 
     if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
         local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)

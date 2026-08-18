@@ -12,7 +12,7 @@
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 PROJECT_NAME="ter-music"
-DEFAULT_VERSION="2.1.0"
+DEFAULT_VERSION="2.2.0"
 
 # ── 颜色输出 ──────────────────────────────────────────────
 GREEN='\033[0;32m'

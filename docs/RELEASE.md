@@ -151,4 +151,4 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux �
 - [ ] CI（ci.yml）全绿
 - [ ] 5 类产物齐备：.deb、.rpm（+src.rpm）、.AppImage、portable .tar.gz、.uab/.layer
 - [ ] 在干净 Debian / Fedora 环境各验证一次安装与启动（`--help`）
-- [ ] `gh release create` 成功后核对资产列表与 v2.1.0 一致
+- [ ] `gh release create` 成功后核对资产列表与 v2.2.0 一致

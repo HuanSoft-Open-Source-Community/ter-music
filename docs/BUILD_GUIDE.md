@@ -48,13 +48,13 @@
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本，构建全部包（amd64 默认）
-./scripts/build/launch-auto-build.sh -v 2.1.0
+./scripts/build/launch-auto-build.sh -v 2.2.0
 
 # 指定包类型
-./scripts/build/launch-auto-build.sh -v 2.1.0 -t deb,rpm
+./scripts/build/launch-auto-build.sh -v 2.2.0 -t deb,rpm
 
 # 跳过 Docker 镜像预构建（镜像已存在时加速）
-./scripts/build/launch-auto-build.sh -v 2.1.0 --skip-images
+./scripts/build/launch-auto-build.sh -v 2.2.0 --skip-images
 
 # 仅构建 Docker 镜像，不构建包
 ./scripts/build/launch-auto-build.sh --rebuild-images --skip-builds
@@ -215,14 +215,14 @@ cd ter-music-portable
 **使用方法：**
 ```bash
 # 推荐：通过 launch-auto-build.sh 一键构建
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.1.0
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0
 
 # 或手动调用（需 Docker）
 ./scripts/docker/docker-build.sh -p \
   -s build-linyaps.sh \
   -f scripts/docker/Dockerfile.uab \
   -n ter-music-uab-builder \
-  -- -v 2.1.0 -a x86_64 --in-container
+  -- -v 2.2.0 -a x86_64 --in-container
 
 # 进入容器交互式调试
 ./scripts/docker/docker-build.sh -p -i \
@@ -244,7 +244,7 @@ cd ter-music-portable
 
 **安装：**
 ```bash
-ll-cli install build/linyaps/x86_64/org.yxzl.ter-music_2.1.0_x86_64.uab
+ll-cli install build/linyaps/x86_64/org.yxzl.ter-music_2.2.0_x86_64.uab
 ll-cli run org.yxzl.ter-music
 ```
 
@@ -434,10 +434,10 @@ sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev lib
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本，自动构建全部包
-./scripts/build/launch-auto-build.sh -v 2.1.0
+./scripts/build/launch-auto-build.sh -v 2.2.0
 
 # 跳过 Docker 镜像预构建（镜像已存在时加速）
-./scripts/build/launch-auto-build.sh -v 2.1.0 --skip-images
+./scripts/build/launch-auto-build.sh -v 2.2.0 --skip-images
 ```
 
 如果只需构建单个包类型，也可以直接使用对应的构建脚本：
