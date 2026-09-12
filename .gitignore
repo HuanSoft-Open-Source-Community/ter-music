@@ -54,6 +54,8 @@ oadoc/
 .trae
 .reasonix/
 .claude/
+.workbuddy/
+.local/
 .tmp/*
 .*_temp/
 .appimagetool/*
