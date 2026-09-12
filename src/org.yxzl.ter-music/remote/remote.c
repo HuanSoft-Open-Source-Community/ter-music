@@ -181,7 +181,7 @@ int remote_parse_url(const char *url, RemoteConnectionConfig *conn) {
         conn->base_path[1] = '\0';
     }
 
-    snprintf(conn->name, sizeof(conn->name), "%.64s", host_part);
+    snprintf(conn->name, sizeof(conn->name), "%.63s", host_part);
     log_debug("remote", "URL parsed: protocol=%d host=%s port=%d base='%s'",
               conn->protocol, conn->host, conn->port, conn->base_path);
     return 0;
@@ -313,7 +313,7 @@ static CURL *create_curl_handle(const RemoteConnectionConfig *conn,
 
     if (conn->protocol == REMOTE_PROTOCOL_SFTP && conn->private_key_path[0]) {
         curl_easy_setopt(curl, CURLOPT_SSH_PRIVATE_KEYFILE, conn->private_key_path);
-        curl_easy_setopt(curl, CURLOPT_SSH_AUTH_TYPES, CURLSSH_AUTH_PUBLICKEY);
+        curl_easy_setopt(curl, CURLOPT_SSH_AUTH_TYPES, (long)CURLSSH_AUTH_PUBLICKEY);
     }
 
     return curl;
