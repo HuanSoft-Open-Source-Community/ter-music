@@ -10,6 +10,15 @@
 2. Git tag 名必须与 APP_VERSION 一致（`vX.Y.Z` 格式），发布时按此打 tag。
 3. 确认 CI 全绿：`gh run list --workflow ci.yml`。
 
+> **原则：验收通过后才打 tag，绝不提前打 tag。**
+> 构建产物、测试、验收全部在 tag 之前完成（构建脚本用 `git archive HEAD`
+> 取源码，不依赖 tag）；tag 只在确认可发布后创建，且必须打在构建所用的
+> 同一个 commit 上（打 tag 前 `git rev-parse HEAD` 与构建时比对）。
+>
+> **陷阱：打 tag 之前构建必须显式传 `-v X.Y.Z`。**
+> 构建脚本的 `detect_version()` 优先级是「最新 git tag > types.h > 默认值」，
+> 而此刻最新 tag 还是上一个版本——不显式传 `-v` 会打出旧版本号的包。
+
 ---
 
 ## 一、Debian 机器构建 .deb
@@ -103,15 +112,19 @@ bash scripts/build/build-portable.sh -v X.Y.Z -a x86_64
 
 ---
 
-## 五、上传 GitHub Release（手动）
+## 五、验收、打 tag、上传 GitHub Release（手动）
 
-收集齐 5 类产物后打 tag 并创建 Release：
+收集齐 5 类产物后，**先在干净环境完成安装与启动验收**（见文末检查清单），
+全部通过才执行以下步骤：
 
 ```bash
-# 打 tag（必须与 APP_VERSION 一致）
+# 1. 确认 HEAD 与构建所用 commit 一致（验收期间不能有新提交混入）
+git rev-parse HEAD
+
+# 2. 打 tag（必须与 APP_VERSION 一致）并推送
 git tag vX.Y.Z && git push origin vX.Y.Z
 
-# 创建 Release 并上传产物
+# 3. 创建 Release 并上传产物
 gh release create vX.Y.Z \
     build/deb/amd64/*.deb \
     build/deb/source/ter-music_X.Y.Z-1.dsc \
@@ -126,9 +139,44 @@ gh release create vX.Y.Z \
     --generate-notes
 ```
 
+> 万一验收后发现必须重新构建：删掉本地 tag（未推送时）或重打 tag 前
+> 确认远端无人基于旧 tag 构建；tag 一旦推送并被 AUR 使用就**不可移动**。
+
 ---
 
-## 替代方案：本地 Docker 静态构建（跨版本兼容单包）
+## 六、更新 AUR（ter-music-cn，最后一步）
+
+> **AUR 更新必须在 tag 推送之后进行。** 仓库里的 `PKGBUILD` / `.SRCINFO`
+> 早已指向 `#tag=vX.Y.Z`（前向引用），若 tag 尚未推送，AUR 用户构建会
+> 直接失败（历史上曾因乱打 tag / tag 与 AUR 不同步出过构建问题，务必
+> 按顺序执行）。
+
+```bash
+# 1. 确认 tag 已推送（无输出则说明 tag 不存在，禁止继续）
+git ls-remote --tags origin vX.Y.Z
+
+# 2. 拉取 AUR 独立仓库
+git clone ssh://aur@aur.archlinux.org/ter-music-cn.git aur-ter-music-cn
+
+# 3. 同步打包文件（pkgver 应已在本仓库 bump 阶段改好）
+cp PKGBUILD .SRCINFO aur-ter-music-cn/
+cd aur-ter-music-cn
+
+# 4. 本地完整预演：真实拉取 tag 源并构建，验证可复现
+makepkg -sro
+
+# 5. 提交推送
+git add PKGBUILD .SRCINFO
+git commit -m "Update to X.Y.Z"
+git push
+```
+
+> tag 一经推送即不可删除或移动（AUR 构建可复现性依赖 tag 不变）。
+> 若推送后发现严重问题，只能 bump 到下一个版本号重走流程。
+
+---
+
+## 七、替代方案：本地 Docker 静态构建（跨版本兼容单包）
 
 需要"一个包兼容多个发行版版本"（静态链接 FFmpeg，消除 soname 差异）时，使用既有本地 Docker 体系：
 
@@ -147,8 +195,14 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux �
 
 ## 发布检查清单
 
-- [ ] `APP_VERSION`（types.h）与 tag 一致
-- [ ] CI（ci.yml）全绿
-- [ ] 5 类产物齐备：.deb、.rpm（+src.rpm）、.AppImage、portable .tar.gz、.uab/.layer
-- [ ] 在干净 Debian / Fedora 环境各验证一次安装与启动（`--help`）
-- [ ] `gh release create` 成功后核对资产列表与 v2.2.0 一致
+按执行顺序逐项勾选：
+
+1. [ ] 补全 `debian/changelog` 本次变更条目（不允许只有 "Bump version"）
+2. [ ] `APP_VERSION`（types.h）与待打 tag 一致
+3. [ ] CI（ci.yml）全绿
+4. [ ] 5 类产物齐备：.deb、.rpm（+src.rpm）、.AppImage、portable .tar.gz、.uab/.layer
+5. [ ] 在干净 Debian / Fedora 环境各验证一次安装与启动（`--help`）
+6. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
+7. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
+8. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
+9. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）
