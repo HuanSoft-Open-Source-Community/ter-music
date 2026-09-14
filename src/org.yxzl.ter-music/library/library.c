@@ -1194,6 +1194,23 @@ int library_get_track_count(void) {
     return count;
 }
 
+/* ========== 分页查询模块所需的句柄与锁 ========== */
+
+void *library_db_handle(void)
+{
+    return (void *)g_db;
+}
+
+void library_lock(void)
+{
+    pthread_mutex_lock(&g_library_mutex);
+}
+
+void library_unlock(void)
+{
+    pthread_mutex_unlock(&g_library_mutex);
+}
+
 /* ========== Public API: Browsing Dimensions ========== */
 
 char **library_get_artists(int *count) {
@@ -1624,6 +1641,21 @@ void library_history_add(const char *track_path, int position) {
     sqlite3_bind_int(stmt, 1, MAX_HISTORY_COUNT);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_library_mutex);
+}
+
+void library_history_clear(void)
+{
+    if (!g_db) return;
+
+    pthread_mutex_lock(&g_library_mutex);
+    char *errmsg = NULL;
+    int rc = sqlite3_exec(g_db, "DELETE FROM play_history", NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        log_warn("library", "library_history_clear failed: %s",
+                 errmsg ? errmsg : "unknown error");
+        sqlite3_free(errmsg);
+    }
     pthread_mutex_unlock(&g_library_mutex);
 }
 

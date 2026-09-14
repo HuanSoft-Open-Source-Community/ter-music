@@ -410,6 +410,26 @@ static const char *const k_rpc_methods[] = {
     "Queue.Rebuild",
     "Queue.Shuffle",
     "Queue.PlayAt",
+    /* Library */
+    "Library.Rescan",
+    "Library.Status",
+    "Library.GetTree",
+    "Library.GetPage",
+    "Library.Search",
+    /* Favorites */
+    "Favorites.Add",
+    "Favorites.Remove",
+    "Favorites.Has",
+    "Favorites.List",
+    /* History */
+    "History.Add",
+    "History.List",
+    "History.Clear",
+    /* DirHistory */
+    "DirHistory.Add",
+    "DirHistory.Remove",
+    "DirHistory.List",
+    "DirHistory.Clear",
     NULL
 };
 

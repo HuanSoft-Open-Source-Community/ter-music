@@ -147,6 +147,8 @@ InfoInstance rpc_instance_info(void);
 DBusMessage *rpc_lyrics_handle(DBusMessage *message);
 DBusMessage *rpc_playlist_handle(DBusMessage *message);
 DBusMessage *rpc_queue_handle(DBusMessage *message);
+/* Library/Favorites/History/DirHistory 共用一个入口（按接口名分发） */
+DBusMessage *rpc_library_handle_all(DBusMessage *message);
 DBusMessage *rpc_info_handle(DBusMessage *message);
 DBusMessage *rpc_control_handle(DBusMessage *message);
 
@@ -154,6 +156,7 @@ DBusMessage *rpc_control_handle(DBusMessage *message);
 const char *rpc_lyrics_introspection(void);
 const char *rpc_playlist_introspection(void);
 const char *rpc_queue_introspection(void);
+const char *rpc_library_introspection(void);
 const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
 
@@ -196,6 +199,7 @@ void rpc_control_emit_error(const char *source, const char *name, const char *me
 /* 播放列表 / 队列的变更广播与状态 */
 void rpc_playlist_emit_changed(const char *reason);
 const char *rpc_playlist_filter(void);
+void rpc_library_emit_changed(const char *reason);
 void rpc_queue_emit_changed(void);
 unsigned long long rpc_queue_revision(void);
 

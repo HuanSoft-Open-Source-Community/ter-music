@@ -818,6 +818,7 @@ static void build_introspection(void)
         rpc_control_introspection(),
         rpc_playlist_introspection(),
         rpc_queue_introspection(),
+        rpc_library_introspection(),
         k_introspection_tail,
         NULL
     };
@@ -1116,6 +1117,11 @@ void media_session_tick(void) {
             reply = rpc_playlist_handle(message);
         } else if (dbus_message_has_interface(message, RPC_IFACE_QUEUE)) {
             reply = rpc_queue_handle(message);
+        } else if (dbus_message_has_interface(message, RPC_IFACE_LIBRARY) ||
+                   dbus_message_has_interface(message, RPC_IFACE_FAVORITES) ||
+                   dbus_message_has_interface(message, RPC_IFACE_HISTORY) ||
+                   dbus_message_has_interface(message, RPC_IFACE_DIRHISTORY)) {
+            reply = rpc_library_handle_all(message);
         }
 
         if (reply) {

@@ -197,6 +197,51 @@ int library_get_lyrics_source(const char *track_path);
  */
 void library_set_lyrics_source(const char *track_path, int source);
 
+/* ========== Paged Queries (D-Bus Library.GetPage / GetTree) ========== */
+/*
+ * 浏览视图的分页查询：与既有 *_get_* 接口并存，区别在于带 offset/limit，
+ * 由 SQLite 的 LIMIT/OFFSET 完成，因此 1 万曲目下翻页也不会把整表读进内存。
+ * 行数上限由调用方给出（cap），返回实际写入行数，-1 表示错误。
+ */
+
+typedef enum {
+    LIBRARY_QUERY_ARTISTS = 0,   /* 聚合：name = 艺术家，track_count = 曲目数 */
+    LIBRARY_QUERY_ALBUMS,        /* 聚合：artist + album + track_count */
+    LIBRARY_QUERY_GENRES,        /* 聚合：name = 流派，track_count = 曲目数 */
+    LIBRARY_QUERY_TRACKS,        /* 全部曲目 */
+    LIBRARY_QUERY_SEARCH         /* FTS5/LIKE 搜索结果（query 必填） */
+} LibraryQueryKind;
+
+typedef struct {
+    int kind;
+    char artist[MAX_META_LEN];   /* 专辑/曲目过滤（可空） */
+    char album[MAX_META_LEN];
+    char genre[MAX_META_LEN];
+    char query[MAX_META_LEN];    /* LIBRARY_QUERY_SEARCH 的关键词 */
+} LibraryQuery;
+
+typedef struct {
+    int rowid;                   /* 曲目行；聚合行为 0 */
+    int track_count;             /* 聚合行的计数；曲目行为 0 */
+    int duration_seconds;
+    char name[MAX_META_LEN];     /* 艺术家/流派名；曲目行为标题 */
+    char artist[MAX_META_LEN];
+    char album[MAX_META_LEN];
+    char path[MAX_PATH_LEN];
+} LibraryRow;
+
+/* 分页查询实现（library_query.c）需要的底层句柄与锁：用 void* 声明，
+ * 避免把 sqlite3.h 泄漏给 library.h 的全部使用者；调用方需自行加锁。 */
+void *library_db_handle(void);
+void library_lock(void);
+void library_unlock(void);
+
+/* 满足条件的总行数（用于分页总数，不读取行内容） */
+int library_query_count(const LibraryQuery *query);
+/* 取一页（offset/count）；out 至少可容纳 cap 行 */
+int library_query_page(const LibraryQuery *query, int offset, int count,
+                       LibraryRow *out, int cap);
+
 /* ========== Browsing Dimensions ========== */
 
 /**
@@ -265,6 +310,7 @@ void library_dir_history_clear(void);
 void library_history_add(const char *track_path, int position);
 int library_history_get_count(void);
 int library_history_get_all(HistoryEntry *entries, int max_entries);
+void library_history_clear(void);
 
 /* ========== User Playlists (SQLite-backed) ========== */
 

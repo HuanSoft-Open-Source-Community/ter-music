@@ -136,6 +136,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/playlist/ape_tag.c
     src/org.yxzl.ter-music/search/search.c
     src/org.yxzl.ter-music/library/library.c
+    src/org.yxzl.ter-music/library/library_query.c
     src/org.yxzl.ter-music/library/browser/browser.c
     src/org.yxzl.ter-music/ui/ui.c
     src/org.yxzl.ter-music/ui/utf8.c
@@ -168,6 +169,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/media/rpc_playlist.c
     src/org.yxzl.ter-music/media/rpc_queue.c
     src/org.yxzl.ter-music/media/rpc_job.c
+    src/org.yxzl.ter-music/media/rpc_library.c
     src/org.yxzl.ter-music/info/info.c
     src/org.yxzl.ter-music/cli/cli.c
     src/org.yxzl.ter-music/cli/cli_client.c
