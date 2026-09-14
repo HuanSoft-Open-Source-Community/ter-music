@@ -10,6 +10,7 @@
 
 #include "types.h"
 #include "audio/audio.h"
+#include "player/player.h"
 #include "ui/dialog.h"
 #include "ui/ui.h"
 #include "i18n/i18n.h"
@@ -173,7 +174,7 @@ void handle_history_input(int ch)
 
                     const char *path = g_dir_history.entries[g_content_selected_idx].path;
                     extern void stop_audio(void);
-                    stop_audio();
+                    player_stop();
                     int count = load_playlist(path);
 
                     if (count > 0) {

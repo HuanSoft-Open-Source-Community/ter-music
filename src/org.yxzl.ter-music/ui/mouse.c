@@ -11,6 +11,7 @@
 
 #include "types.h"
 #include "i18n/i18n.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
@@ -91,21 +92,21 @@ int get_playlist_index_from_window_row(int window_y, int *display_index, int *ac
     }
 
     if (g_sort_state.active) {
-        if (clicked_display_index < 0 || clicked_display_index >= playlist_count()) return 0;
+        if (clicked_display_index < 0 || clicked_display_index >= player_playlist_count()) return 0;
         if (display_index) *display_index = clicked_display_index;
         if (actual_index)  *actual_index = g_sort_state.sorted_indices[clicked_display_index];
         return 1;
     }
 
     /* Tree mode: index is a visible line, actual is the track index */
-    else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-        if (clicked_display_index < 0 || clicked_display_index >= playlist_visible_count()) return 0;
+    else if (player_playlist_tree_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+        if (clicked_display_index < 0 || clicked_display_index >= player_playlist_visible_count()) return 0;
         if (display_index) *display_index = clicked_display_index;
         if (actual_index)  *actual_index = get_visible_node_track_index(clicked_display_index);
         return 1;
     }
 
-    if (clicked_display_index < 0 || clicked_display_index >= playlist_count()) return 0;
+    if (clicked_display_index < 0 || clicked_display_index >= player_playlist_count()) return 0;
     if (display_index) *display_index = clicked_display_index;
     if (actual_index)  *actual_index = clicked_display_index;
     return 1;
@@ -305,35 +306,34 @@ int handle_main_view_mouse_event(const MEVENT *event)
                 pthread_mutex_unlock(&g_search_mutex);
             }
             g_search_state.selected_index = display_index;
-            play_audio(actual_index);
+            player_play(actual_index);
             g_search_state.active = 0;
             g_selected_index = g_sort_state.active ? 0 : actual_index;
             render_playlist_content();
         } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
             g_queue_selected_index = display_index;
-            if (display_index >= 0 && display_index < g_play_queue.count) {
-                g_play_queue.current_position = display_index;
-                play_audio(g_play_queue.indices[display_index]);
+            if (display_index >= 0 && display_index < player_queue_count()) {
+                player_queue_play(display_index);
             }
         } else {
             g_selected_index = display_index;
             /* Tree mode: toggle directory or play file */
-            if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+            if (player_playlist_tree_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
                 && !g_search_state.active) {
                 int node_type = get_visible_node_type(display_index);
                 if (node_type == TREE_NODE_DIRECTORY) {
                     int tree_idx = get_visible_node_tree_index(display_index);
-                    playlist_toggle_directory_expand(tree_idx);
-                    if (g_selected_index >= playlist_visible_count())
-                        g_selected_index = playlist_visible_count() - 1;
+                    player_playlist_toggle_expand(tree_idx);
+                    if (g_selected_index >= player_playlist_visible_count())
+                        g_selected_index = player_playlist_visible_count() - 1;
                     if (g_selected_index < 0) g_selected_index = 0;
                     render_playlist_content();
                     return 1;
                 }
                 int track_idx = get_visible_node_track_index(display_index);
-                if (track_idx >= 0) play_audio(track_idx);
+                if (track_idx >= 0) player_play(track_idx);
             } else {
-                play_audio(actual_index);
+                player_play(actual_index);
             }
         }
         render_controls();
@@ -375,7 +375,7 @@ int handle_main_view_mouse_event(const MEVENT *event)
         g_lyric_cursor_index = lyric_index;
         pthread_mutex_unlock(&g_lyrics.lock);
 
-        seek_audio(target_timestamp);
+        player_seek_seconds(target_timestamp);
         render_lyrics();
         return 1;
     }

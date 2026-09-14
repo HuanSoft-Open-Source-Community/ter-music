@@ -9,6 +9,7 @@
  */
 
 #include "types.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "ui/menu_internal.h"
 #include "audio/audio.h"
@@ -32,11 +33,11 @@ extern WINDOW *win_controls;
 
 void seek_relative_seconds(int delta_seconds)
 {
-    if (delta_seconds == 0 || g_play_state == PLAY_STATE_STOPPED || g_total_duration <= 0) return;
-    int new_pos = g_current_position + delta_seconds;
+    if (delta_seconds == 0 || player_play_state() == PLAY_STATE_STOPPED || player_duration_seconds() <= 0) return;
+    int new_pos = player_position_seconds() + delta_seconds;
     if (new_pos < 0) new_pos = 0;
-    if (new_pos > g_total_duration) new_pos = g_total_duration;
-    if (new_pos != g_current_position) seek_audio((double)new_pos);
+    if (new_pos > player_duration_seconds()) new_pos = player_duration_seconds();
+    if (new_pos != player_position_seconds()) player_seek_seconds((int)(new_pos));
 }
 
 /* ============================================================
@@ -50,16 +51,17 @@ void update_progress_bar(void)
     static int last_duration = -1;
     static PlayState last_state = PLAY_STATE_STOPPED;
 
-    if (g_play_state == PLAY_STATE_STOPPED || g_total_duration <= 0 || !win_controls || g_current_view != VIEW_MAIN) {
+    if (player_play_state() == PLAY_STATE_STOPPED || player_duration_seconds() <= 0 || !win_controls || g_current_view != VIEW_MAIN) {
         return;
     }
 
-    if (g_play_state == PLAY_STATE_PLAYING && progress_tracker_is_ready()) {
+    if (player_play_state() == PLAY_STATE_PLAYING && progress_tracker_is_ready()) {
         int tracked_position = progress_tracker_get_position_seconds();
         if (tracked_position < 0) tracked_position = 0;
-        if (g_total_duration > 0 && tracked_position > g_total_duration)
-            tracked_position = g_total_duration;
-        g_current_position = tracked_position;
+        if (player_duration_seconds() > 0 && tracked_position > player_duration_seconds())
+            tracked_position = player_duration_seconds();
+        /* 位置由播放线程/门面维护：界面只读取（本地后端的外推也一样） */
+        (void)tracked_position;
     }
 
     /* 弹出菜单时仅保留逻辑计算，暂停进度条 UI 渲染 */
@@ -69,22 +71,22 @@ void update_progress_bar(void)
     getmaxyx(win_controls, h, w);
     if (h < 5 || w < 20) return;
 
-    int current_pos = g_current_position;
+    int current_pos = player_position_seconds();
     if (current_pos < 0) current_pos = 0;
-    if (current_pos > g_total_duration) current_pos = g_total_duration;
+    if (current_pos > player_duration_seconds()) current_pos = player_duration_seconds();
 
     uint64_t now_ms = get_ui_time_ms();
     int position_changed = (current_pos != last_position);
-    int force_redraw = position_changed || g_total_duration != last_duration || g_play_state != last_state;
+    int force_redraw = position_changed || player_duration_seconds() != last_duration || player_play_state() != last_state;
     if (!force_redraw && (now_ms - last_refresh_ms) < UI_PROGRESS_REFRESH_MS) return;
 
-    int progress_percent = (current_pos * 100) / g_total_duration;
+    int progress_percent = (current_pos * 100) / player_duration_seconds();
     if (progress_percent > 100) progress_percent = 100;
 
     int current_min = current_pos / 60;
     int current_sec = current_pos % 60;
-    int total_min = g_total_duration / 60;
-    int total_sec = g_total_duration % 60;
+    int total_min = player_duration_seconds() / 60;
+    int total_sec = player_duration_seconds() % 60;
     current_min %= 100;
     total_min %= 100;
 
@@ -140,6 +142,6 @@ void update_progress_bar(void)
 
     last_refresh_ms = now_ms;
     last_position = current_pos;
-    last_duration = g_total_duration;
-    last_state = g_play_state;
+    last_duration = player_duration_seconds();
+    last_state = player_play_state();
 }

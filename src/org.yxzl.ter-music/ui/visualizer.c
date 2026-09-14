@@ -9,6 +9,7 @@
  */
 
 #include "types.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "ui/menu_internal.h"
 #include "ui/braille/braille_art.h"
@@ -175,7 +176,7 @@ static void render_wave_particle_visualizer(int start_col, int graph_width)
     if (last_update_ms > 0 && now_ms > last_update_ms) {
         inactive_decay = (int)((now_ms - last_update_ms) / 90ULL);
         if ((now_ms - last_update_ms) < 250ULL &&
-            (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED)) {
+            (player_play_state() == PLAY_STATE_PLAYING || player_play_state() == PLAY_STATE_PAUSED)) {
             is_visualizer_active = 1;
         }
     }

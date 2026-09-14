@@ -118,6 +118,7 @@ endif()
 add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/main/main.c
     src/org.yxzl.ter-music/core/core.c
+    src/org.yxzl.ter-music/player/player_local.c
     src/org.yxzl.ter-music/audio/audio.c
     src/org.yxzl.ter-music/audio/atempo.c
     src/org.yxzl.ter-music/audio/equalizer.c

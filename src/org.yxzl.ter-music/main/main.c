@@ -14,6 +14,7 @@
 #include "app/open.h"
 #include "cli/cli.h"
 #include "core/core.h"
+#include "player/player.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -478,6 +479,14 @@ int main(int argc, char *argv[]) {
         app_clear_saved_session();
     }
     
+    /* 前端门面：界面只经 player_* 访问核心状态与命令。
+     * 迁移期用本地后端（＝今天的直调实现）；M4 起默认改为远程后端。 */
+    if (player_init(PLAYER_BACKEND_LOCAL, NULL) != 0) {
+        fprintf(stderr, "错误：无法初始化播放器门面。\n");
+        cleanup();
+        return 1;
+    }
+
     /* 歌词状态由 ui/lyrics.c 持有，核心经钩子推进（注册在 run_event_loop 内亦可，
      * 这里显式注册，便于 grep 到前端与核心的边界） */
     core_set_lyrics_tick(update_lyrics_display);
@@ -486,6 +495,7 @@ int main(int argc, char *argv[]) {
     run_event_loop();
 
     log_info("main", "Event loop exited, beginning shutdown");
+    player_shutdown();
     play_queue_save(&g_play_queue);
     save_temp_playlist();
     cleanup();

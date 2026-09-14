@@ -10,6 +10,7 @@
 
 #include "types.h"
 #include "audio/audio.h"
+#include "player/player.h"
 #include "ui/dialog.h"
 #include "ui/ui.h"
 #include "i18n/i18n.h"
@@ -301,7 +302,7 @@ void handle_playlist_input(int ch)
                             Track *t = &pl->tracks[g_content_selected_idx];
                             int found = playlist_find_track_index_by_path(t->path);
                             if (found >= 0) {
-                                play_audio(found);
+                                player_play(found);
                                 exit_current_view();
                             } else {
                                 show_status_message(i18n_get("playlist_mgr.track_not_in_queue"));

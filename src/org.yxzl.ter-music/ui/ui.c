@@ -18,6 +18,7 @@
 #include "ui/ui.h"
 #include "core/core.h"
 #include "info/info.h"
+#include "player/player.h"
 #include "i18n/i18n.h"
 #include "ui/dialog.h"
 #include "audio/audio.h"
@@ -269,6 +270,42 @@ void init_ncurses(void)
  * Event loop
  * ============================================================ */
 
+/* 把门面的修订号变化翻译成界面脏标记：事件循环里没有任何回调风暴，
+ * 远程后端的异步到达也走同一条路径。 */
+static void sync_player_revisions(void)
+{
+    static uint64_t state = 0;
+    static uint64_t queue = 0;
+    static uint64_t playlist = 0;
+    static uint64_t lyrics = 0;
+    static uint64_t config = 0;
+
+    uint64_t now_state = player_state_revision();
+    uint64_t now_queue = player_queue_revision();
+    uint64_t now_playlist = player_playlist_revision();
+    uint64_t now_lyrics = player_lyrics_revision();
+    uint64_t now_config = player_config_revision();
+
+    int dirty = 0;
+    if (now_playlist != playlist) dirty |= UI_DIRTY_PLAYLIST;
+    if (now_queue != queue)      dirty |= UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS;
+    if (now_state != state)      dirty |= UI_DIRTY_CONTROLS;
+    if (now_lyrics != lyrics)    dirty |= UI_DIRTY_LYRICS;
+    if (dirty) {
+        request_ui_refresh(dirty);
+    }
+    if (now_config != config) {
+        apply_color_theme();
+        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    }
+
+    state = now_state;
+    queue = now_queue;
+    playlist = now_playlist;
+    lyrics = now_lyrics;
+    config = now_config;
+}
+
 /* 配置重载后的界面侧处理：核心已应用配置，这里只重刷配色与脏标记。
  * 与“状态消息”监听同构，均由核心在重载路径回调。 */
 static void ui_on_config_reloaded(void)
@@ -304,6 +341,9 @@ void run_event_loop(void)
     while (1) {
         /* 核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */
         core_tick();
+        /* 门面刷新：本地后端重算快照并与上次比较，修订号变化即请求重绘 */
+        player_pump();
+        sync_player_revisions();
         process_pending_ui_refresh();
 
         /* 响应终端关闭、SIGTERM/SIGINT 等退出信号 */

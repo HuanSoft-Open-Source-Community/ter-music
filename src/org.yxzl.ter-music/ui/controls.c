@@ -9,6 +9,7 @@
  */
 
 #include "types.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "i18n/i18n.h"
 #include "ui/menu_internal.h"
@@ -88,7 +89,7 @@ void build_control_label(int index, char *dest, size_t dest_size)
         return;
     }
     if (index == CONTROL_IDX_SPEED) {
-        snprintf(dest, dest_size, "%s:%.2fx", get_control_label(index), (double)g_playback_speed);
+        snprintf(dest, dest_size, "%s:%.2fx", get_control_label(index), (double)player_speed());
         return;
     }
     if (index == CONTROL_IDX_VOLUME) {
@@ -156,7 +157,7 @@ static int calculate_available_play_modes(void)
 {
     int count = BASIC_MODE_COUNT;
     if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-        if (g_current_play_index >= 0 || g_selected_index >= 0)
+        if (player_track_index() >= 0 || g_selected_index >= 0)
             count += FOLDER_MODE_COUNT;
     }
     if (g_app_config.advanced_play_modes_enabled)
@@ -173,7 +174,7 @@ static PlayMode get_available_play_mode_at(int index)
     int advanced_offset = folder_offset + FOLDER_MODE_COUNT;
 
     if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER &&
-        (g_current_play_index >= 0 || g_selected_index >= 0)) {
+        (player_track_index() >= 0 || g_selected_index >= 0)) {
         if (index >= folder_offset && index < folder_offset + FOLDER_MODE_COUNT)
             return (PlayMode)(index - folder_offset + PLAY_MODE_FOLDER_SEQUENTIAL);
         advanced_offset = folder_offset + FOLDER_MODE_COUNT;
@@ -260,23 +261,21 @@ static void apply_popup_selection(void)
 {
     switch (g_popup.type) {
         case POPUP_LOOP_MODE:
-            set_play_mode(get_available_play_mode_at(g_popup.selected_index));
+            player_set_play_mode(get_available_play_mode_at(g_popup.selected_index));
             break;
         case POPUP_SPEED: {
+            /* 倍速是引擎侧即时项：走门面（本地后端会同时落盘并热应用） */
             g_speed_index = g_popup.selected_index;
-            g_playback_speed = g_speed_ratios[g_speed_index];
-            g_app_config.default_playback_speed = g_playback_speed;
-            save_config();
+            player_set_speed(g_speed_ratios[g_speed_index]);
             char msg[64];
             snprintf(msg, sizeof(msg), "%s: %.2fx",
-                     i18n_get("controls.label.speed"), (double)g_playback_speed);
+                     i18n_get("controls.label.speed"), (double)player_speed());
             update_controls_status(msg);
-            apply_playback_speed_change();
             break;
         }
         case POPUP_VOLUME: {
             int new_vol = g_popup.selected_index * VOLUME_POPUP_STEP;
-            set_volume_percent(new_vol);
+            player_set_volume(new_vol);
             break;
         }
         default: break;
@@ -319,43 +318,43 @@ void activate_current_control(void)
 {
     switch (g_current_control_idx) {
         case CONTROL_IDX_PREV:
-            prev_track();
+            player_prev();
             break;
         case CONTROL_IDX_PLAY_PAUSE: {
-            PlayState current_state = g_play_state;
+            PlayState current_state = player_play_state();
             int is_thread_running = g_play_thread_running;
 
             if (current_state == PLAY_STATE_PLAYING && is_thread_running) {
-                pause_audio();
+                player_pause();
             } else if (current_state == PLAY_STATE_PAUSED && is_thread_running) {
-                resume_audio();
+                player_resume();
             } else if (current_state == PLAY_STATE_STOPPED) {
-                int playlist_total = playlist_count();
-                if (playlist_is_loaded() && playlist_total > 0) {
-                    int target_index = (g_current_play_index >= 0)
-                        ? g_current_play_index
+                int playlist_total = player_playlist_count();
+                if (player_playlist_loaded() && playlist_total > 0) {
+                    int target_index = (player_track_index() >= 0)
+                        ? player_track_index()
                         : g_selected_index;
-                    if (g_sort_state.active && g_current_play_index < 0) {
+                    if (g_sort_state.active && player_track_index() < 0) {
                         target_index = g_sort_state.sorted_indices[g_selected_index];
                     }
                     /* Tree mode: translate visible index to track index */
-                    if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
-                        && g_current_play_index < 0) {
+                    if (player_playlist_tree_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+                        && player_track_index() < 0) {
                         int ti = get_visible_node_track_index(g_selected_index);
                         if (ti >= 0) target_index = ti;
                     }
                     if (target_index >= 0 && target_index < playlist_total) {
-                        play_audio(target_index);
+                        player_play(target_index);
                     }
                 }
             }
             break;
         }
         case CONTROL_IDX_NEXT:
-            next_track();
+            player_next();
             break;
         case CONTROL_IDX_STOP:
-            stop_audio();
+            player_stop();
             break;
         case CONTROL_IDX_LOOP:
             if (g_popup.active) {
@@ -588,21 +587,21 @@ void render_controls(void)
     wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
 
     // Progress bar
-    if (g_play_state != PLAY_STATE_STOPPED && g_total_duration > 0) {
+    if (player_play_state() != PLAY_STATE_STOPPED && player_duration_seconds() > 0) {
         int progress_row = get_controls_progress_row(h);
 
         if (h >= 5 && w >= 20) {
-            int current_pos = g_current_position;
+            int current_pos = player_position_seconds();
             if (current_pos < 0) current_pos = 0;
-            if (current_pos > g_total_duration) current_pos = g_total_duration;
+            if (current_pos > player_duration_seconds()) current_pos = player_duration_seconds();
 
-            int progress_percent = (current_pos * 100) / g_total_duration;
+            int progress_percent = (current_pos * 100) / player_duration_seconds();
             if (progress_percent > 100) progress_percent = 100;
 
             int current_min = current_pos / 60;
             int current_sec = current_pos % 60;
-            int total_min = g_total_duration / 60;
-            int total_sec = g_total_duration % 60;
+            int total_min = player_duration_seconds() / 60;
+            int total_sec = player_duration_seconds() % 60;
             current_min %= 100;
             total_min %= 100;
 

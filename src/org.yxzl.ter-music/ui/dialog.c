@@ -4,6 +4,7 @@
  */
 #include "types.h"
 #include <ncursesw/ncurses.h>
+#include "player/player.h"
 #include "ui/dialog.h"
 #include "ui/ui.h"
 #include "i18n/i18n.h"
@@ -295,9 +296,9 @@ static void prompt_folder_input(int append_mode) {
         
         struct stat s;
         if (stat(expanded_path, &s) == 0 && S_ISDIR(s.st_mode)) {
-            int had_existing_playlist = playlist_is_loaded() && playlist_count() > 0;
+            int had_existing_playlist = player_playlist_loaded() && player_playlist_count() > 0;
             if (!append_mode) {
-                stop_audio();
+                player_stop();
             }
             int count = append_mode ? append_playlist(expanded_path) : load_playlist(expanded_path);
             if (count > 0) {
@@ -335,7 +336,7 @@ static void prompt_folder_input(int append_mode) {
         } else {
             update_controls_status(i18n_get("dialog.path_invalid"));
             if (!append_mode) {
-                stop_audio();
+                player_stop();
                 reset_playlist_state();
             }
             render_playlist_content();
