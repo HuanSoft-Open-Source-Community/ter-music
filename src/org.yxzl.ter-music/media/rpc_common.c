@@ -352,6 +352,7 @@ const char *rpc_core_json(void)
 static const char *const k_rpc_methods[] = {
     /* Lyrics */
     "Lyrics.GetLyrics",
+    "Lyrics.GetDocument",
     /* Info */
     "Info.GetInfo",
     "Info.GetTrackInfo",

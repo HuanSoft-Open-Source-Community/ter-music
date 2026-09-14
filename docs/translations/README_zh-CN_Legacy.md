@@ -639,6 +639,14 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
   `InfoChanged`、`ProgressChanged`（每秒至多一发）与 `CoverChanged`。
 - `org.yxzl.ter_music.Control`：传输、跳转、音量、迅疾之度、播弄之制、
   `OpenPath`、`PlayIndex`、`GetPlaylist`、`ReloadConfig` 与 `Quit`。
+- `org.yxzl.ter_music.Playlist` 与 `.Queue`：载列、序次、筛择乐籍，并可阅
+  与改播弄之队；二者皆以“可径绘之分页”应（回书不逾二百五十六千字节，
+  每页常二百行）。
+- `org.yxzl.ter_music.Library` 及 `.Favorites`、`.History`、`.DirHistory`：
+  览乐师、专集、流派、曲目，索之、重扫之，并收存与史录之读改。
+- `org.yxzl.ter_music.Config`：惟此一门可改其制；密语往来皆用密文。
+- `org.yxzl.ter_music.Remote`：远方服务器之增删改与浏览。
+- `Info.GetInfo` 以 `core.api_version` 与所备方法之目相质，客可先验其合否。
 - `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer` 俱已备，
   故 `busctl --user introspect`／`gdbus introspect` 可行。
 - MPRIS之Metadata复载 `xesam:url`（文卷之URI，或远程之原URL）与

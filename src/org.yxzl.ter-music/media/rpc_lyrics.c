@@ -227,6 +227,116 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
         return reply;
     }
 
+    if (strcmp(member, "GetDocument") == 0) {
+        dbus_int32_t offset = 0;
+        dbus_int32_t count = RPC_PAGE_DEFAULT;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error,
+                                   DBUS_TYPE_INT32, &offset,
+                                   DBUS_TYPE_INT32, &count,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        int clamped_offset = 0;
+        int clamped_count = 0;
+        if (rpc_page_clamp(offset, count, &clamped_offset, &clamped_count) != 0) {
+            return rpc_error(message, RPC_ERROR_INVALID_ARGS, "count exceeds the page limit");
+        }
+
+        char track_id[96] = "";
+        if (rpc_track_available()) {
+            char track_path[MAX_PATH_LEN];
+            if (playlist_get_track_path(g_current_play_index, track_path,
+                                        sizeof(track_path)) == 0) {
+                info_build_track_id(track_id, sizeof(track_id), track_path);
+            }
+        }
+
+        /* 单页最多 1000 行 × 每行 ~512 字节，堆分配（避免大栈帧） */
+        size_t capacity = RPC_PAYLOAD_MAX / 2;
+        char *json = malloc(capacity);
+        if (!json) {
+            return rpc_error(message, DBUS_ERROR_NO_MEMORY, "Out of memory");
+        }
+
+        int total = 0;
+        int has_lyrics = 0;
+        int has_timestamps = 0;
+        int current_index = -1;
+        int source = LYRICS_SOURCE_AUTO;
+        int written = 0;
+
+        pthread_mutex_lock(&g_lyrics.lock);
+        total = g_lyrics.count;
+        has_lyrics = g_lyrics.has_lyrics;
+        has_timestamps = g_lyrics.has_timestamps;
+        current_index = g_lyrics.current_index;
+        source = g_lyrics.source;
+
+        size_t pos = 0;
+        pos = json_append_char(json, capacity, pos, '{');
+        pos = json_append_key(json, capacity, pos, "revision");
+        pos = json_append_int(json, capacity, pos, (long long)g_lyrics_api.revision);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "track_id");
+        pos = json_append_string_or_null(json, capacity, pos, track_id[0] ? track_id : NULL);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "has_lyrics");
+        pos = json_append_bool(json, capacity, pos, has_lyrics);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "has_timestamps");
+        pos = json_append_bool(json, capacity, pos, has_timestamps);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "source");
+        pos = json_append_escaped(json, capacity, pos, info_lyrics_source_id(source));
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "total");
+        pos = json_append_int(json, capacity, pos, total);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "offset");
+        pos = json_append_int(json, capacity, pos, clamped_offset);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "current_index");
+        if (has_lyrics && current_index >= 0 && current_index < total) {
+            pos = json_append_int(json, capacity, pos, current_index);
+        } else {
+            pos = json_append_raw(json, capacity, pos, "null");
+        }
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "lines");
+        pos = json_append_char(json, capacity, pos, '[');
+
+        for (int i = clamped_offset; i < total && written < clamped_count; i++) {
+            if (written > 0) {
+                pos = json_append_char(json, capacity, pos, ',');
+            }
+            pos = json_append_line_object(json, capacity, pos, i, has_timestamps,
+                                          g_lyrics.lines[i].timestamp,
+                                          g_lyrics.lines[i].text);
+            written++;
+        }
+
+        pos = json_append_char(json, capacity, pos, ']');
+        pos = json_append_char(json, capacity, pos, '}');
+        json[pos] = '\0';
+        pthread_mutex_unlock(&g_lyrics.lock);
+
+        DBusMessage *reply;
+        if (pos + 1 > RPC_PAYLOAD_MAX) {
+            reply = rpc_error(message, RPC_ERROR_TOO_LARGE,
+                              "lyrics page exceeds the payload limit; request fewer lines");
+        } else {
+            reply = rpc_reply_string(message, json);
+        }
+        free(json);
+        return reply;
+    }
+
     return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
                                "Unknown lyrics method");
 }
@@ -236,6 +346,11 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
 static const char *const k_lyrics_introspection =
     "  <interface name=\"org.yxzl.ter_music.Lyrics\">\n"
     "    <method name=\"GetLyrics\">\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"GetDocument\">\n"
+    "      <arg name=\"offset\" type=\"i\" direction=\"in\"/>\n"
+    "      <arg name=\"count\" type=\"i\" direction=\"in\"/>\n"
     "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
     "    </method>\n"
     "    <signal name=\"LyricsChanged\">\n"

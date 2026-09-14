@@ -648,6 +648,38 @@ print("%s|%s|%s" % (rc["password_set"], "password" in rc, bool(rc["password_encr
     rpc_py call org.yxzl.ter_music.Config.Reset >/dev/null
 }
 
+
+# ── 检查 8：docs/API_DBUS_en_US.md 与 core.methods 一致 ─────────────
+check_doc_matches_code() {
+    local info
+    info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    if ! printf '%s' "$info" | grep -q '"api_version"'; then
+        echo "  skip 缺少 core.methods"
+        return
+    fi
+
+    local doc="$REPO_ROOT/docs/API_DBUS_en_US.md"
+    if [ ! -f "$doc" ]; then
+        bad "找不到 $doc"
+        return
+    fi
+
+    printf '%s' "$info" | python3 -c '
+import ast, json, sys
+doc = json.loads(ast.literal_eval(sys.stdin.read().strip())[0])
+print(json.dumps(doc["core"]["methods"]))
+' > "$WORK_DIR/methods.json"
+
+    local output
+    output="$(python3 "$SCRIPT_DIR/doc_api_check.py" "$doc" "$WORK_DIR/methods.json" 2>&1)"
+    if [ $? -eq 0 ]; then
+        ok "$output"
+    else
+        bad "文档与实现漂移："
+        printf '%s\n' "$output" | sed 's/^/       /'
+    fi
+}
+
 # ── 主流程 ─────────────────────────────────────────────────────────
 info "准备隔离环境"
 setup_fixtures
@@ -686,6 +718,9 @@ check_library
 
 info "检查 7：Config / Remote（M2.6）"
 check_config_remote
+
+info "检查 8：文档与实现一致（M2.7）"
+check_doc_matches_code
 
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"

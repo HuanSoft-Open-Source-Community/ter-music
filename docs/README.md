@@ -763,6 +763,17 @@ player:
   1 Hz) and `CoverChanged`.
 - `org.yxzl.ter_music.Control`: transport, seek, volume, speed, play mode,
   `OpenPath`, `PlayIndex`, `GetPlaylist`, `ReloadConfig` and `Quit`.
+- `org.yxzl.ter_music.Playlist` and `.Queue`: load/sort/filter the playlist
+  and read or edit the play queue, both returning render-ready pages
+  (256 KB response cap, 200-row default page).
+- `org.yxzl.ter_music.Library` with `.Favorites`, `.History` and
+  `.DirHistory`: browse artists/albums/genres/tracks, search, rescan, and
+  read or edit favorites and history.
+- `org.yxzl.ter_music.Config`: read and patch the configuration (the only
+  writer); passwords are exchanged as ciphertext only.
+- `org.yxzl.ter_music.Remote`: manage remote server entries and browse them.
+- `Info.GetInfo` advertises `core.api_version` plus the implemented method
+  list, so clients can check compatibility before using anything else.
 - `org.freedesktop.DBus.Introspectable` and `org.freedesktop.DBus.Peer` are
   implemented, so `busctl --user introspect` / `gdbus introspect` work.
 - MPRIS metadata additionally carries `xesam:url` (file URI or the original

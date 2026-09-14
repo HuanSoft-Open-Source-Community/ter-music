@@ -663,6 +663,14 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
   和 `CoverChanged`。
 - `org.yxzl.ter_music.Control`：传输控制、跳转、音量、倍速、播放模式、
   `OpenPath`、`PlayIndex`、`GetPlaylist`、`ReloadConfig` 与 `Quit`。
+- `org.yxzl.ter_music.Playlist` 与 `.Queue`：加载/排序/过滤播放列表，读取与
+  编辑播放队列；两者都返回“渲染就绪”的分页（响应上限 256 KB、默认每页 200 行）。
+- `org.yxzl.ter_music.Library` 及 `.Favorites`、`.History`、`.DirHistory`：
+  浏览艺术家/专辑/流派/曲目、搜索、重新扫描，以及收藏与历史的读写。
+- `org.yxzl.ter_music.Config`：配置的唯一写入口；密码只以密文往返。
+- `org.yxzl.ter_music.Remote`：远程服务器条目的增删改与浏览。
+- `Info.GetInfo` 通过 `core.api_version` 与已实现方法清单做版本握手，
+  客户端可先校验兼容性再调用。
 - 已实现 `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer`，
   因此 `busctl --user introspect` / `gdbus introspect` 可直接使用。
 - MPRIS 元数据额外携带 `xesam:url`（文件 URI 或原始远程 URL）与
