@@ -1,3 +1,19 @@
+ter-music (2.3.0-1) unstable; urgency=medium
+
+  * Command-line mode: ter-music play/pause/seek/volume/speed/mode/show and
+    the detached background player (daemon start|stop|restart|status|reload).
+  * D-Bus service API: org.yxzl.ter_music.Info and .Control next to the
+    existing MPRIS and Lyrics interfaces, sharing one snapshot with the CLI.
+  * Configurable info display (config v5): preset, fields, text cover size and
+    charset, progress style and lyric lines, with a new Settings page.
+  * Fix a startup SIGSEGV on directory trees deeper than ~7 levels caused by
+    multi-megabyte stack frames in the recursive scan and playlist loading.
+  * Resolve config/data/cache directories through XDG so Linyaps packages keep
+    their data on the host, and ship the D-Bus activation file plus systemd
+    user unit in the package.
+
+ -- Yanxi Bamboo Forest <yxzl666xx@outlook.com>  Mon, 14 Sep 2026 00:00:00 +0800
+
 ter-music (2.2.0-1) unstable; urgency=medium
 
   * Bump version to 2.2.0.
