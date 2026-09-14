@@ -82,6 +82,7 @@ VERSION=""
 ARCHS=()
 TYPES=()              # 空 = 全部
 KEEP_TEMP="false"
+EXTRA_INNER_ARGS=""   # -e/--extra-args：原样追加到内部构建脚本参数
 SKIP_IMAGES="false"
 REBUILD_IMAGES="false"
 SKIP_BUILDS="false"
@@ -159,6 +160,8 @@ show_help() {
     -a, --arch ARCH           目标架构: amd64（逗号分隔，默认：amd64）
     -t, --types TYPES         包类型: deb,rpm,linyaps,appimage,portable（逗号分隔，默认：全部）
     -k, --keep-temp           保留临时构建文件（用于调试）
+    -e, --extra-args "ARGS"   原样追加到内部构建脚本参数，如 -e "--refresh"
+
 
     --skip-images             跳过 Docker 镜像预构建阶段
     --rebuild-images          强制重新构建所有 Docker 镜像
@@ -227,6 +230,10 @@ parse_args() {
             -k|--keep-temp)
                 KEEP_TEMP="true"
                 shift
+                ;;
+            -e|--extra-args)
+                EXTRA_INNER_ARGS="$2"
+                shift 2
                 ;;
             --skip-images)
                 SKIP_IMAGES="true"
@@ -534,6 +541,9 @@ execute_single_build() {
 
         # 透传 keep-temp
         [ "$KEEP_TEMP" = "true" ] && inner_args="$inner_args --keep-temp"
+
+        # 透传额外参数（-e/--extra-args）
+        [ -n "$EXTRA_INNER_ARGS" ] && inner_args="$inner_args ${EXTRA_INNER_ARGS}"
 
         # 内部构建脚本参数（-- 分隔）
         if [ -n "$inner_args" ]; then

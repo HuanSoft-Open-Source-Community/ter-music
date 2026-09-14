@@ -59,7 +59,17 @@ show_help() {
     -v, --version VERSION  指定版本号（默认：自动检测）
     -a, --arch ARCH     指定目标架构（默认：自动检测）
     -k, --keep-temp     保留临时构建文件（用于调试）
+    -o, --offline       强制离线：不拉取源码与依赖（要求 base/runtime 已在本地缓存中）
+    -r, --refresh       强制拉取依赖：从软件源刷新 base/runtime（默认仅在缓存为空时拉取）
     --in-container     在 Docker 容器内运行（跳过依赖检查）
+
+缓存说明:
+    Linyaps 的 base/runtime 与构建层缓存在 .tmp/linyaps/runtime/linglong-builder
+    （由 docker-build.sh 挂载到容器的 /root/.cache/linglong-builder）。
+    首次构建会下载数百 MB，之后构建直接复用，不再重新下载。
+    缓存非空时默认自动进入离线模式（等价于 --offline）：既避免重复下载，
+    也规避 Docker 中 pull 阶段重新合并依赖后 Runtime Check / ld cache 失败的问题。
+    需要拉取新的 base/runtime（例如修改了 linglong.yaml 的 base 版本）时加 --refresh。
 
 示例:
     $0                  使用自动检测版本和架构构建 Linyaps 包
@@ -201,7 +211,7 @@ build: |
   cd ${PROJECT_NAME}
   mkdir -p build
   cd build
-  cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\${PREFIX} -DCMAKE_INSTALL_RPATH='\$ORIGIN/../lib'
+  cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\${PREFIX} -DCMAKE_INSTALL_RPATH='\$ORIGIN/../lib' -DINSTALL_LINYAPS_INTEGRATION=ON
   make -j\$(nproc)
   make install
   mkdir -p \${PREFIX}/lib
@@ -278,13 +288,42 @@ build_linyaps() {
     log_info "执行 ll-builder 构建..."
     cd "$project_root"
 
+    # 容器内构建时先刷新 merged 层记录：
+    # ll-builder 会把每个 ref 的 merged 层缓存在 ~/.cache/linglong-builder/merged，
+    # 复用旧 merged 层时，后续 Runtime Check 与 UAB 导出（ld cache）需要在容器内
+    # 挂载 overlayfs，而 Docker 容器的 /tmp 本身位于 overlayfs 上，不能作为另一个
+    # overlay 的 upperdir（内核返回 EINVAL），于是出现
+    # "kernel overlay mount failed: Invalid argument" → Runtime check failed →
+    # "failed to generate ld cache"。清空 merged 记录后 ll-builder 会用本地 layers
+    # 重新生成 merged 层（硬链接，秒级，不联网），上述两步即可正常通过。
+    if [ "$IN_CONTAINER" = "true" ]; then
+        refresh_merged_state
+    fi
+
     # 捕获 ll-builder 输出以便分析失败原因
     local build_log="${TEMP_DIR}/ll-builder-output.log"
 
     # 运行 ll-builder（保留 stderr 以显示构建过程）
-    # 使用 --skip-fetch-source 因为源码已在本地，无需从网络拉取
+    # 依赖拉取策略（详见 show_help 的“缓存说明”）：
+    #   --offline       强制离线
+    #   --refresh       强制从软件源拉取 base/runtime
+    #   默认            本地缓存非空时自动离线，缓存为空时正常拉取
+    # 源码始终已在本地（--skip-fetch-source），无需从网络获取。
+    local builder_args=(--skip-fetch-source)
+    if [ "${OFFLINE_BUILD}" = "true" ]; then
+        builder_args=(--offline)
+        log_info "离线构建：不拉取源码与依赖（使用本地缓存）"
+    elif [ "${REFRESH_DEPS}" = "true" ]; then
+        log_info "强制刷新依赖：将从软件源拉取 base/runtime"
+    elif linyaps_cache_ready; then
+        builder_args=(--offline)
+        USED_AUTO_OFFLINE="true"
+        log_info "检测到本地 Linyaps 缓存，自动离线构建（跳过依赖拉取，不重新下载）"
+        log_info "  缓存目录: ${LINYAPS_CACHE_DIR}"
+        log_info "  如需拉取新的 base/runtime，请使用 --refresh"
+    fi
     set +e
-    ll-builder build --skip-fetch-source 2>&1 | tee "$build_log"
+    ll-builder build "${builder_args[@]}" 2>&1 | tee "$build_log"
     local rc=${PIPESTATUS[0]}
     set -e
 
@@ -301,9 +340,16 @@ build_linyaps() {
     if grep -q '\[Commit Contents\]' "$build_log" 2>/dev/null && \
        grep -q 'committing' "$build_log" 2>/dev/null && \
        grep -qE 'Runtime check failed|stage runtime check error|OverlayFS mount failed' "$build_log" 2>/dev/null; then
-        log_warn "编译和提交成功，但 Runtime Check 失败（Docker 内 OverlayFS 限制，可忽略）"
+        log_warn "编译和提交成功，但 Runtime Check 失败"
         log_warn "继续执行 UAB 导出..."
         return 0
+    fi
+
+    # 自动离线构建失败时，最常见原因是本地缓存缺少所需的 base/runtime
+    if [ "${USED_AUTO_OFFLINE}" = "true" ] && \
+       grep -qiE 'not found|no such|failed to pull|unreachable|connection refused|no route' "$build_log" 2>/dev/null; then
+        log_error "自动离线构建失败：本地缓存可能缺少所需的 base/runtime"
+        log_info "请加 --refresh 重新拉取依赖后重试（或删除 ${LINYAPS_CACHE_DIR} 后重新构建）"
     fi
 
     log_error "Linyaps 构建失败"
@@ -415,13 +461,15 @@ fix_output_ownership() {
             chown -R "${HOST_UID}:${HOST_GID}" "${SCRIPT_DIR}/build/release" 2>/dev/null || \
                 chmod -R u+rwX,go+rX "${SCRIPT_DIR}/build/release" 2>/dev/null || true
         fi
-        # 修复 .cache/linglong（Docker 挂载持久化 OSTree repo），避免 root-owned 文件
-        # 阻止后续容器启动时 repo 初始化
-        local linglong_cache="${SCRIPT_DIR}/.cache/linglong"
-        if [ -d "$linglong_cache" ]; then
-            chown -R "${HOST_UID}:${HOST_GID}" "$linglong_cache" 2>/dev/null || \
-                chmod -R u+rwX,go+rX "$linglong_cache" 2>/dev/null || true
-        fi
+        # 修复 Linyaps 构建缓存所有权（Docker 内以 root 运行会留下 root-owned 文件，
+        # 阻止后续容器复用缓存）
+        local cache_dir
+        for cache_dir in "${SCRIPT_DIR}/.tmp/linyaps/runtime" "${SCRIPT_DIR}/.cache/linglong"; do
+            if [ -d "$cache_dir" ]; then
+                chown -R "${HOST_UID}:${HOST_GID}" "$cache_dir" 2>/dev/null || \
+                    chmod -R u+rwX,go+rX "$cache_dir" 2>/dev/null || true
+            fi
+        done
     fi
 }
 
@@ -474,6 +522,7 @@ main() {
     local keep_temp="false"
     local target_arch=""
     local in_container="false"
+    local offline="false"
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -493,8 +542,18 @@ main() {
                 keep_temp="true"
                 shift
                 ;;
+            -o|--offline)
+                offline="true"
+                OFFLINE_BUILD="true"
+                shift
+                ;;
+            -r|--refresh)
+                REFRESH_DEPS="true"
+                shift
+                ;;
             --in-container)
                 in_container="true"
+                IN_CONTAINER="true"
                 shift
                 ;;
             *)
@@ -576,6 +635,64 @@ main() {
         log_error "Linyaps 构建过程失败"
         cleanup "$keep_temp"
         exit 1
+    fi
+}
+
+# OFFLINE_BUILD / REFRESH_DEPS 由 --offline / --refresh 设置，供 build_linyaps() 读取
+OFFLINE_BUILD="${OFFLINE_BUILD:-false}"
+REFRESH_DEPS="${REFRESH_DEPS:-false}"
+USED_AUTO_OFFLINE="false"
+IN_CONTAINER="${IN_CONTAINER:-false}"
+
+# ll-builder 的本地层/依赖缓存（容器内由 docker-build.sh 挂载到 /root/.cache/linglong-builder）
+LINYAPS_CACHE_DIR="${HOME}/.cache/linglong-builder"
+
+# 本地缓存是否已具备 base/runtime：ll-builder 用 states.json 记录已缓存的层
+linyaps_cache_ready() {
+    [ -s "${LINYAPS_CACHE_DIR}/states.json" ]
+}
+
+# 清空 states.json 中的 merged 层记录，让 ll-builder 用本地 layers 重新生成 merged 层。
+# 只改缓存记录（备份为 states.json.bak），不动 layers 本体，因此不触发任何下载。
+refresh_merged_state() {
+    local states="${LINYAPS_CACHE_DIR}/states.json"
+
+    [ -f "$states" ] || return 0
+
+    if ! command -v perl >/dev/null 2>&1; then
+        log_warn "未找到 perl，跳过 merged 层刷新（若 Runtime Check/导出失败，可删除 ${LINYAPS_CACHE_DIR} 后重建）"
+        return 0
+    fi
+
+    cp -f "$states" "${states}.bak" 2>/dev/null || true
+
+    if perl -0777 -e '
+my $f = shift;
+open(my $fh, "<", $f) or exit 1;
+local $/; my $s = <$fh>; close $fh;
+my $i = index($s, "\"merged\"");
+exit 0 if $i < 0;
+my $j = index($s, "[", $i);
+exit 0 if $j < 0;
+my ($d, $q, $e, $k) = (0, 0, 0, $j);
+for (; $k < length($s); $k++) {
+    my $c = substr($s, $k, 1);
+    if ($q) {
+        if ($e) { $e = 0 } elsif ($c eq "\\") { $e = 1 } elsif ($c eq "\"") { $q = 0 }
+        next;
+    }
+    if ($c eq "\"") { $q = 1; next }
+    if ($c eq "[") { $d++; next }
+    if ($c eq "]") { $d--; last if $d == 0 }
+}
+exit 2 if $d != 0;
+open(my $oh, ">", $f) or exit 1;
+print $oh substr($s, 0, $j), "[]", substr($s, $k + 1);
+close $oh;
+' "$states"; then
+        log_info "已刷新 merged 层记录：复用本地 layers 重新合并（无需下载）"
+    else
+        log_warn "merged 层记录刷新失败，继续构建（备份见 ${states}.bak）"
     fi
 }
 

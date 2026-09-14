@@ -13,16 +13,85 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 
 #include "types.h"
+#include "config/config.h"
 #include "config/schema.h"
 #include "config/crypto.h"
 #include "playlist/encoding.h"
 #include "logger/logger.h"
 #include "audio/equalizer.h"
 #include "i18n/i18n.h"
+
+/* ── 应用目录解析（XDG） ────────────────────────────────────────── */
+
+/* 递归创建目录（等价 mkdir -p），失败时忽略（调用方自行判断可写性） */
+static void mkdir_p(const char *path)
+{
+    if (!path || path[0] == '\0') {
+        return;
+    }
+
+    char buffer[MAX_PATH_LEN];
+    snprintf(buffer, sizeof(buffer), "%s", path);
+
+    for (char *cursor = buffer + 1; *cursor != '\0'; cursor++) {
+        if (*cursor != '/') {
+            continue;
+        }
+        *cursor = '\0';
+        mkdir(buffer, 0755);
+        *cursor = '/';
+    }
+    mkdir(buffer, 0755);
+}
+
+static const char *app_dir_resolve(const char *xdg_var, const char *home_suffix,
+                                   int ensure)
+{
+    static char buffers[3][MAX_PATH_LEN];
+    static int slot = 0;
+
+    char *out = buffers[slot];
+    slot = (slot + 1) % 3;
+    out[0] = '\0';
+
+    const char *base = xdg_var ? getenv(xdg_var) : NULL;
+    if (base && base[0] == '/') {
+        /* XDG 变量必须是绝对路径，否则按规范忽略 */
+        snprintf(out, MAX_PATH_LEN, "%s/" APP_NAME, base);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home || home[0] == '\0') {
+            return NULL;
+        }
+        snprintf(out, MAX_PATH_LEN, "%s/%s/" APP_NAME, home, home_suffix);
+    }
+
+    if (ensure) {
+        mkdir_p(out);
+    }
+    return out;
+}
+
+const char *app_config_dir(int ensure)
+{
+    return app_dir_resolve("XDG_CONFIG_HOME", ".config", ensure);
+}
+
+const char *app_data_dir(int ensure)
+{
+    return app_dir_resolve("XDG_DATA_HOME", ".local/share", ensure);
+}
+
+const char *app_cache_dir(int ensure)
+{
+    return app_dir_resolve("XDG_CACHE_HOME", ".cache", ensure);
+}
 
 /* ── Forward declarations of internal helpers ─────────────────────── */
 

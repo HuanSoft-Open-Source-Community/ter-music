@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.mpris.MediaPlayer2.ter_music
+Exec=/opt/apps/org.yxzl.ter-music/files/bin/ter-music daemon foreground --no-autoplay

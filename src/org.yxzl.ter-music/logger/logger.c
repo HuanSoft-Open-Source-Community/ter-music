@@ -1,9 +1,11 @@
 #include "logger/logger.h"
+#include "config/config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <pthread.h>
 
 static FILE *g_log_file = NULL;
@@ -13,8 +15,28 @@ static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 void logger_init(void) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
-    char path[256];
-    strftime(path, sizeof(path), "./ter-music-debug-%Y-%m-%d-%H%M%S.log", t);
+    char name[160];
+    char path[512];
+
+    strftime(name, sizeof(name), "ter-music-debug-%Y-%m-%d-%H%M%S.log", t);
+
+    /* daemon 由 CLI 设置 TER_MUSIC_LOG_DIR，使日志落到配置目录；
+     * 未设置时保持原有的“当前目录”行为（TUI 与 --debug 不变）；
+     * 当前目录不可写（如 Linyaps 容器内 CWD=/ 只读）时回退到 XDG 缓存目录，
+     * 否则调试日志会静默丢失。 */
+    const char *log_dir = getenv("TER_MUSIC_LOG_DIR");
+    if (log_dir && log_dir[0] != '\0') {
+        snprintf(path, sizeof(path), "%s/%s", log_dir, name);
+    } else if (access(".", W_OK) == 0) {
+        snprintf(path, sizeof(path), "./%s", name);
+    } else {
+        const char *cache_dir = app_cache_dir(1);
+        if (cache_dir) {
+            snprintf(path, sizeof(path), "%s/%s", cache_dir, name);
+        } else {
+            snprintf(path, sizeof(path), "/tmp/%s", name);
+        }
+    }
 
     pthread_mutex_lock(&g_log_mutex);
     g_log_file = fopen(path, "a");

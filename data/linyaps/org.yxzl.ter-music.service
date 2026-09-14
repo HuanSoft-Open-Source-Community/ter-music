@@ -1,0 +1,13 @@
+[Unit]
+Description=Ter-Music background playback (Linyaps)
+Documentation=https://github.com/HuanSoft-Open-Source-Community/ter-music
+After=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=ter-music daemon foreground
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

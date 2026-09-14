@@ -11,6 +11,7 @@
 
 #include "types.h"
 #include "i18n/i18n.h"
+#include "config/config.h"
 #include "logger/logger.h"
 
 #include <libxml/parser.h>
@@ -102,9 +103,10 @@ static const char *i18n_user_lang_dir(void)
 {
     static char path[MAX_PATH_LEN] = "";
     if (!path[0]) {
-        const char *home = getenv("HOME");
-        if (home)
-            snprintf(path, sizeof(path), "%s/.config/ter-music/lang", home);
+        /* 遵循 XDG_CONFIG_HOME（config 层解析，兼容沙箱重定向） */
+        const char *dir = app_config_dir(0);
+        if (dir)
+            snprintf(path, sizeof(path), "%s/lang", dir);
     }
     return path[0] ? path : NULL;
 }
@@ -558,9 +560,9 @@ static const char *i18n_user_help_dir(void)
 {
     static char path[MAX_PATH_LEN] = "";
     if (!path[0]) {
-        const char *home = getenv("HOME");
-        if (home)
-            snprintf(path, sizeof(path), "%s/.config/ter-music/help", home);
+        const char *dir = app_config_dir(0);
+        if (dir)
+            snprintf(path, sizeof(path), "%s/help", dir);
     }
     return path[0] ? path : NULL;
 }
@@ -813,10 +815,10 @@ double i18n_coverage(const char *lang_id)
         char help_path[MAX_PATH_LEN];
         int help_found = 0;
 
-        const char *home = getenv("HOME");
-        if (home) {
+        const char *config_dir = app_config_dir(0);
+        if (config_dir) {
             snprintf(help_path, sizeof(help_path),
-                     "%s/.config/ter-music/help/help-quickstart-%s.txt", home, lang_id);
+                     "%s/help/help-quickstart-%s.txt", config_dir, lang_id);
             if (access(help_path, F_OK) == 0) help_found = 1;
         }
 

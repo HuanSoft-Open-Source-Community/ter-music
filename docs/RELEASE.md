@@ -208,7 +208,21 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux �
    - `ulimit -s 512` 下启动 TUI 亦须正常（修复后启动路径栈需求 < 1 MB）
    - 复查栈帧：编译时加 `-fstack-usage`，不得出现 > 256 KB 的静态栈帧
      （`scan_directory_recursive` 曾为 1.26 MB、`library_load_into_playlist` 曾为 5.17 MB）
-7. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
-8. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
-9. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
-10. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）
+7. [ ] 在 Linyaps 环境验证 CLI 与后台播放（`ll-cli install` 后执行）：
+   - 安装后先确认集成文件已导出（缺一即判失败）：
+     - `ls /var/lib/linglong/entries/share/dbus-1/services/org.mpris.MediaPlayer2.ter_music.service`
+     - `grep '^ExecStart' /var/lib/linglong/entries/lib/systemd/user/org.yxzl.ter-music.service`
+     - 两者都应含 `ll-cli run org.yxzl.ter-music`（ll-builder 重写的结果）；
+       激活文件必须来自包内 `files/share/dbus-1/services/`（放在 `share/services/` 不会被导出）
+   - `ll-cli run org.yxzl.ter-music -- ter-music version`
+   - `ll-cli run org.yxzl.ter-music -- ter-music daemon start`（经 D-Bus 激活；`ll-cli ps` 应列出应用）
+   - 容器已在运行时读取信息须用 `ll-cli enter`（`ll-cli run` 的输出会接到该容器上）：
+     `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show --one-line`
+   - 宿主侧 `systemctl --user start org.yxzl.ter-music`（常驻服务，`ExecStart` 应被重写为 `ll-cli run …`）
+   - 宿主侧 `busctl --user introspect org.mpris.MediaPlayer2.ter_music /org/mpris/MediaPlayer2`
+     应可见 `org.yxzl.ter_music` 的 `Info`／`Control`／`Lyrics` 三个接口
+   - `ll-cli run org.yxzl.ter-music -- ter-music daemon stop` 后 `ll-cli ps` 不再列出该应用
+8. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
+9. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
+10. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
+11. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）

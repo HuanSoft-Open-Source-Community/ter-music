@@ -58,8 +58,7 @@ static volatile int g_scan_cancel = 0;
 static volatile int g_scan_progress = 0;
 static volatile int g_scan_total = 0;
 
-/* Default config directory */
-#define CONFIG_DIR "/.config/ter-music"
+/* 配置目录由 config 层按 XDG 解析（app_config_dir），此处不再硬编码 ~/.config */
 #define DB_FILENAME "library.db"
 
 /* ========== Schema DDL ========== */
@@ -181,15 +180,12 @@ static void *scan_thread_func(void *arg);
 
 /* ========== Helper: construct DB path ========== */
 static void build_db_path(char *buf, size_t buf_size) {
-    const char *home = getenv("HOME");
-    if (!home) {
-        home = "/tmp";
-    }
-    snprintf(buf, buf_size, "%s%s", home, CONFIG_DIR);
-    /* Ensure directory exists */
-    struct stat st = {0};
-    if (stat(buf, &st) == -1) {
+    const char *dir = app_config_dir(1);
+    if (!dir) {
+        snprintf(buf, buf_size, "/tmp/ter-music");
         mkdir(buf, 0755);
+    } else {
+        snprintf(buf, buf_size, "%s", dir);
     }
     size_t len = strlen(buf);
     snprintf(buf + len, buf_size - len, "/%s", DB_FILENAME);

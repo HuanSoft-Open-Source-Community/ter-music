@@ -236,6 +236,8 @@ cd ter-music-portable
 | `-v, --version VERSION` | 指定版本号 |
 | `-a, --arch ARCH` | 目标架构（默认 x86_64） |
 | `-k, --keep-temp` | 保留临时构建文件 |
+| `-o, --offline` | 强制离线：不拉取源码与依赖，完全使用本地缓存（要求 base/runtime 已在缓存中） |
+| `-r, --refresh` | 强制从软件源刷新 base/runtime（默认仅在缓存为空时拉取） |
 | `--in-container` | 在 Docker 容器内运行，跳过宿主机依赖检查 |
 
 **输出：**
@@ -245,8 +247,99 @@ cd ter-music-portable
 **安装：**
 ```bash
 ll-cli install build/linyaps/x86_64/org.yxzl.ter-music_2.2.0_x86_64.uab
-ll-cli run org.yxzl.ter-music
+
+# 运行（容器内二进制通过 ll-cli 调用）
+ll-cli run org.yxzl.ter-music                              # TUI
+ll-cli run org.yxzl.ter-music -- ter-music show            # CLI 信息显示
+ll-cli run org.yxzl.ter-music -- ter-music play ~/Music    # 播放（无实例时经 D-Bus 激活后台播放）
+
+# 后台播放（宿主侧）
+systemctl --user enable --now org.yxzl.ter-music           # 常驻用户服务
+systemctl --user status org.yxzl.ter-music
+ll-cli ps                                                  # 查看容器
+ll-cli kill org.yxzl.ter-music                             # 结束容器
 ```
+
+**Linyaps 专用集成文件**（由 `-DINSTALL_LINYAPS_INTEGRATION=ON` 控制，仅 Linyaps 包安装，
+其他打包格式不受影响）：
+
+| 包内路径 | 导出到宿主 | 作用 |
+| --- | --- | --- |
+| `files/lib/systemd/user/org.yxzl.ter-music.service` | `entries/lib/systemd/user/`（经 `$XDG_DATA_DIRS/systemd/user` 链接，`systemctl --user daemon-reload` 后可见） | 常驻后台播放服务；`ExecStart` 被 ll-builder 重写为 `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground` |
+| `files/share/dbus-1/services/org.mpris.MediaPlayer2.ter_music.service` | `$XDG_DATA_DIRS/dbus-1/services/`（导出为 `entries/share/dbus-1/services/`） | D-Bus 按需激活后台播放；沙箱内 `ter-music daemon start` / `play` 依赖它 |
+
+> 沙箱内不能使用 `fork()+setsid()` 制造脱离进程（会随容器回收），因此
+> `daemon start` 在检测到 `/run/linglong/container-init` 时改为请求 D-Bus 激活；
+> 激活不可用时打印 `systemctl --user` 与 `daemon foreground` 指引并返回 5。
+> 可用 `TER_MUSIC_SANDBOX=1/0` 强制覆盖沙箱判定（便于测试）。
+>
+> **在已运行的容器中执行命令**：应用容器（后台 daemon 或 TUI）已在运行时，
+> `ll-cli run … -- <命令>` 会把该命令的输出接到*该容器*的标准输出上，终端看不到内容；
+> 读取状态请用 `ll-cli enter`（终端保持连接，容器内无 `DBUS_SESSION_BUS_ADDRESS`，
+> CLI 会自行解析会话总线）：
+```bash
+ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+# 或用日志查看容器输出
+journalctl --user -u org.yxzl.ter-music -f
+```
+
+**构建缓存（避免重复下载）**
+
+Linyaps 构建需要 base/runtime 环境（数百 MB～1 GB 级），`ll-builder` 会把它们与构建层
+缓存在容器内的 `/root/.cache/linglong-builder`。该目录由 `docker-build.sh` 挂载到宿主机，
+因此**首次构建下载一次，之后构建直接复用**：
+
+| 宿主机路径 | 容器内路径 | 内容 |
+| --- | --- | --- |
+| `.tmp/linyaps/runtime/linglong-builder` | `/root/.cache/linglong-builder` | base/runtime 的 OSTree 对象与构建层（下载缓存，主要收益点） |
+| `.tmp/linyaps/runtime/var-lib-linglong` | `/var/lib/linglong` | 容器内 ll-builder 的工作存储；与宿主 `/var/lib/linglong`（已安装应用）隔离，实测构建后为空 |
+
+```bash
+# 查看缓存占用
+du -sh .tmp/linyaps/runtime
+
+# 常规构建：缓存非空时自动离线，不重复下载（推荐）
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0
+
+# 强制离线（缓存为空时快速失败，便于 CI 断言“不联网”）
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0 -e "--offline"
+# 或直接调用
+./scripts/docker/docker-build.sh -s build-linyaps.sh -f scripts/docker/Dockerfile.uab \
+  -n ter-music-uab-builder -p -- -v 2.2.0 -a x86_64 --in-container --offline
+
+# 强制刷新依赖（例如 linglong.yaml 中 base 版本变更后）
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0 -e "--refresh"
+
+# 清空缓存（下次构建会重新下载）
+rm -rf .tmp/linyaps/runtime
+```
+
+> 说明：
+> - `.tmp/*` 已在 `.gitignore` 中，缓存不会被提交。
+> - **缓存非空时默认自动离线**（日志显示“检测到本地 Linyaps 缓存，自动离线构建”）：
+>   既不再重复下载，也避开下面提到的容器内 overlayfs 限制。需要新的 base/runtime
+>   时用 `-e "--refresh"`（直接调用脚本时为 `--refresh`）。
+> - 首次使用新版脚本时若宿主已存在旧的 `~/.cache/linglong-builder`，会**一次性复制**导入，
+>   避免重新下载；旧版少量缓存 `.cache/linglong` 亦会迁移。
+> - `buildext.apt.buildDepends`（编译依赖）由 `ll-builder` 在构建沙箱内每次安装，
+>   属于 apt 包而非 Linyaps 依赖，暂不在本缓存范围内。
+
+**容器内 overlayfs 限制与自动处理**
+
+Docker 容器的 `/`、`/tmp` 本身是 overlayfs，而 overlayfs 不能作为另一个 overlay 的
+`upperdir`（内核返回 `EINVAL`：`overlay: filesystem on ... not supported as upperdir`）。
+`ll-builder` 在 Runtime Check 与 UAB 导出阶段需要挂载 overlay 根文件系统，因此在容器内：
+
+- 复用上一次构建留下的 merged 层时，会出现
+  `kernel overlay mount failed: Invalid argument` →
+  `Runtime Check failed` → `failed to generate ld cache` → UAB 导出失败；
+- 由本次构建重新生成 merged 层时，上述两步正常。
+
+脚本据此在容器内构建前**自动刷新 merged 层记录**
+（`build-linyaps.sh` 的 `refresh_merged_state()`，日志显示“已刷新 merged 层记录”）：
+只把 `states.json` 中的 merged 记录清空（备份为 `states.json.bak`），
+由 `ll-builder` 用本地 `layers` 重新合并（以硬链接为主，耗时很短，不联网），
+`layers` 本体与已下载的 base/runtime 完全不动。因此常规构建稳定产出 UAB 且不重新下载。
 
 **Docker 镜像说明：**
 - 镜像名：`ter-music-uab-builder`

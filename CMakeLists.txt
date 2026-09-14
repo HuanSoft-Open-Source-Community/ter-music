@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(ter-music LANGUAGES C)
 
+# Linyaps（如意玲珑）应用 ID：与 scripts/build/build-linyaps.sh 的 APP_ID 保持一致
+set(TER_MUSIC_APP_ID "org.yxzl.ter-music")
+
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -9,6 +12,13 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # 其他库（ncurses、libcurl、libpng、libjpeg、pulse）的 soname
 # 在 EL8/9/10 间稳定，使用动态链接即可。
 option(STATIC_LINKING "Statically link FFmpeg only, other libs dynamic" OFF)
+
+# Linyaps（如意玲珑）专用集成文件：systemd 用户单元（常驻后台播放）与
+# D-Bus 激活服务（按需拉起后台播放）。这些文件只在 Linyaps 包中安装，
+# 因为它们的 Exec/ExecStart 会被 ll-builder 重写为 `ll-cli run <appid> -- ...`，
+# 其中包含仅容器内存在的路径；其他打包格式保持原样（默认 OFF）。
+option(INSTALL_LINYAPS_INTEGRATION
+       "Install Linyaps integration files (systemd user unit, D-Bus activation)" OFF)
 
 if(STATIC_LINKING)
     message(STATUS "静态链接模式已启用（仅 FFmpeg 静态）")
@@ -275,6 +285,24 @@ install(FILES resources/icons/hicolor/scalable/apps/${PROJECT_NAME}.svg
 install(FILES data/help/help-quickstart-zh_CN.txt data/help/help-quickstart-en_US.txt
         DESTINATION share/ter-music/help
 )
+
+# Linyaps 集成（可选）：systemd 用户单元与 D-Bus 激活服务
+if(INSTALL_LINYAPS_INTEGRATION)
+    # $PREFIX/lib/systemd/user → 构建时被拷贝到 share/systemd/user 并导出到
+    # 宿主 $XDG_DATA_DIRS/systemd/user，ExecStart 被重写为 ll-cli run 形式
+    install(FILES data/linyaps/org.yxzl.ter-music.service
+            DESTINATION lib/systemd/user
+    )
+    # $PREFIX/share/dbus-1/services → 被 ll-builder 导出到宿主的
+    # /var/lib/linglong/entries/share/dbus-1/services（$XDG_DATA_DIRS/dbus-1/services），
+    # 使 org.mpris.MediaPlayer2.ter_music 可按需 D-Bus 激活。
+    # 注意：必须是 share/dbus-1/services，Linyaps 只导出该目录下的会话服务文件
+    #（share/services 不会被导出，实测安装后宿主无激活文件）。
+    install(FILES data/linyaps/org.mpris.MediaPlayer2.ter_music.service
+            DESTINATION share/dbus-1/services
+    )
+    message(STATUS "Linyaps integration: systemd user unit + D-Bus activation enabled")
+endif()
 
 # Install language translation files
 install(FILES data/lang/zh_CN.xml data/lang/en_US.xml

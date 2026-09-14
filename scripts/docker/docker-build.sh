@@ -211,9 +211,38 @@ else
         run_opts+=(--privileged)
         run_opts+=(--security-opt seccomp=unconfined)
         run_opts+=(--security-opt apparmor=unconfined)
-        # Persist linglong cache to avoid re-downloading base layer each run
-        mkdir -p "$SCRIPT_DIR/.cache/linglong"
-        run_opts+=(-v "$SCRIPT_DIR/.cache/linglong:/var/lib/linglong")
+
+        # ── 持久化 Linyaps 构建缓存（避免每次构建重新下载 base/runtime） ──
+        # ll-builder 以 root 运行，其下载缓存位于容器内 /root/.cache/linglong-builder
+        # （base/runtime 的 OSTree 对象与构建产物层，可达数百 MB～1 GB+）；
+        # /var/lib/linglong 是 ll-cli 侧的安装存储。两者都必须挂载到宿主机，
+        # 否则 --rm 容器退出后缓存全部丢失，每次构建都要重新下载。
+        CACHE_ROOT="$SCRIPT_DIR/.tmp/linyaps/runtime"
+        mkdir -p "$CACHE_ROOT/linglong-builder" "$CACHE_ROOT/var-lib-linglong"
+        run_opts+=(-v "$CACHE_ROOT/linglong-builder:/root/.cache/linglong-builder")
+        run_opts+=(-v "$CACHE_ROOT/var-lib-linglong:/var/lib/linglong")
+
+        # 一次性迁移：旧版本把少量的 /var/lib/linglong 缓存放在 .cache/linglong
+        if [ -d "$SCRIPT_DIR/.cache/linglong" ] && \
+           [ -z "$(ls -A "$CACHE_ROOT/var-lib-linglong" 2>/dev/null)" ]; then
+            cp -a "$SCRIPT_DIR/.cache/linglong/." "$CACHE_ROOT/var-lib-linglong/" 2>/dev/null || true
+        fi
+
+        # 一次性导入：宿主上已存在的 ll-builder 缓存（此前宿主构建留下的）。
+        # 采用独立复制而非硬链接：容器以 root 运行，可能改写属主/权限，
+        # 硬链接会让宿主缓存一并受影响。
+        if [ -d "$HOME/.cache/linglong-builder" ] && \
+           [ ! -e "$CACHE_ROOT/linglong-builder/layers" ]; then
+            log_info "导入已有 ll-builder 缓存（一次性）: $HOME/.cache/linglong-builder → $CACHE_ROOT/linglong-builder"
+            if cp -a "$HOME/.cache/linglong-builder/." "$CACHE_ROOT/linglong-builder/" 2>/dev/null; then
+                log_info "缓存导入完成"
+            else
+                log_warn "缓存导入失败（将重新下载依赖）"
+            fi
+        fi
+
+        cache_size=$(du -sh "$CACHE_ROOT" 2>/dev/null | cut -f1)
+        log_info "Linyaps 构建缓存: $CACHE_ROOT (${cache_size:-0})"
         # Mount /tmp as tmpfs so that ll-builder can do overlayfs mounts there
         # (Docker root is overlayfs; nested overlay is rejected by the kernel)
         run_opts+=(--tmpfs "/tmp:exec,size=4G")
@@ -243,10 +272,12 @@ else
         chown -R "$(id -u):$(id -g)" "${SCRIPT_DIR}/build" 2>/dev/null || \
             chmod -R u+rwX,go+rX "${SCRIPT_DIR}/build" 2>/dev/null || true
     fi
-    if [ -d "${SCRIPT_DIR}/.cache/linglong" ]; then
-        chown -R "$(id -u):$(id -g)" "${SCRIPT_DIR}/.cache/linglong" 2>/dev/null || \
-            chmod -R u+rwX,go+rX "${SCRIPT_DIR}/.cache/linglong" 2>/dev/null || true
-    fi
+    for cache_dir in "${SCRIPT_DIR}/.tmp/linyaps/runtime" "${SCRIPT_DIR}/.cache/linglong"; do
+        if [ -d "$cache_dir" ]; then
+            chown -R "$(id -u):$(id -g)" "$cache_dir" 2>/dev/null || \
+                chmod -R u+rwX,go+rX "$cache_dir" 2>/dev/null || true
+        fi
+    done
 
     exit $build_rc
 fi
