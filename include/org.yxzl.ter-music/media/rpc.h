@@ -22,6 +22,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "types.h"
+#include "info/info.h"
+
+#ifdef HAVE_DBUS
+#include <dbus/dbus.h>
+#endif
+
 /* ── 版本与握手 ─────────────────────────────────────────────────────
  * 1 = M2 之前的接口面（Info/Control/Lyrics 第一版，Info JSON 里 schema=1）；
  * 2 = 本里程碑定义的接口面：Info 增加 core 对象，新增 Playlist/Queue/
@@ -80,5 +87,76 @@ int rpc_page_clamp(long long offset, long long count, int *offset_out, int *coun
 int rpc_method_count(void);
 const char *rpc_method_at(int index);
 const char *rpc_methods_json(void);
+
+#ifdef HAVE_DBUS
+
+/* ── 核心侧播放快照 ─────────────────────────────────────────────────
+ * MPRIS 属性变更检测与 Info 信号都由它派生，故定义在此共用。 */
+#define RPC_ART_URL_MAX (MAX_PATH_LEN * 3 + 16)
+
+typedef struct {
+    int valid;
+    int current_index;
+    int playlist_total;
+    PlayState play_state;
+    int loop_mode;  /* PlayMode value */
+    int volume_percent;
+    int can_seek;
+    int64_t position_us;
+    int64_t length_us;
+    char track_id[96];
+    char title[MAX_META_LEN];
+    char artist[MAX_META_LEN];
+    char album[MAX_META_LEN];
+    char art_url[RPC_ART_URL_MAX];
+} RpcPlaybackSnapshot;
+
+/* ── 会话访问器（定义于 session.c） ─────────────────────────────── */
+DBusConnection *rpc_session_connection(void);  /* 未激活时为 NULL */
+int rpc_session_active(void);
+int rpc_session_has_primary_name(void);
+const char *rpc_session_bus_name(void);
+
+/* ── 共享发送 / 错误 / 回复（定义于 rpc_common.c） ───────────────── */
+void rpc_send(DBusMessage *message);           /* 发送并 unref；未激活时仅 unref */
+DBusMessage *rpc_error(DBusMessage *message, const char *error_name, const char *text);
+DBusMessage *rpc_reply_string(DBusMessage *message, const char *value);
+DBusMessage *rpc_reply_bool(DBusMessage *message, int ok);
+DBusMessage *rpc_reply_int(DBusMessage *message, int value);
+
+/* ── 共享引擎动作（MPRIS 与 Control 复用） ──────────────────────── */
+int rpc_track_available(void);
+int rpc_action_play(void);
+int rpc_action_play_pause(void);
+int rpc_action_play_selected(void);
+int rpc_action_seek_to_us(int64_t position_us);
+int rpc_action_seek_by_us(int64_t delta_us);
+int rpc_action_set_volume_percent(int percent);
+int rpc_action_set_speed(double rate);
+int rpc_action_play_index(int index);
+int rpc_action_open_path(const char *path, int autoplay);
+
+/* ── 共享取值 ───────────────────────────────────────────────────── */
+const char *rpc_playback_status_name(PlayState state);      /* MPRIS 状态名 */
+void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot);
+InfoInstance rpc_instance_info(void);
+
+/* ── 接口处理器与同步钩子 ───────────────────────────────────────── */
+DBusMessage *rpc_lyrics_handle(DBusMessage *message);
+DBusMessage *rpc_info_handle(DBusMessage *message);
+DBusMessage *rpc_control_handle(DBusMessage *message);
+
+/* 自省片段：各接口提供自己的 <interface> 段，session.c 负责拼装 */
+const char *rpc_lyrics_introspection(void);
+const char *rpc_info_introspection(void);
+const char *rpc_control_introspection(void);
+
+void rpc_lyrics_reset(void);
+const char *rpc_lyrics_sync(void);
+void rpc_info_reset(void);
+void rpc_info_sync(void);
+void rpc_info_emit_progress(const RpcPlaybackSnapshot *snapshot);
+
+#endif /* HAVE_DBUS */
 
 #endif /* MEDIA_RPC_H */
