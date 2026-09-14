@@ -12,6 +12,10 @@ extern int g_play_thread_running;
 extern char g_default_audio_device[128];
 extern int g_active_backend;
 extern float g_playback_speed;
+
+/* 播放线程维护（实现位于 audio/audio.c；此前误声明在 ui/ui.h） */
+void reap_finished_playback_thread(void);
+void process_pending_playback_action(void);
 extern int g_audio_sample_rate;
 extern int g_audio_bit_rate;
 extern int g_audio_bit_depth;
@@ -22,6 +26,7 @@ void toggle_playback_speed(void);
 void apply_playback_speed_change(void);
 void init_ffmpeg();
 void init_audio_device();
+void audio_backend_shutdown(void);
 int audio_backend_is_available(int backend);
 void play_audio(int index);
 void pause_audio();

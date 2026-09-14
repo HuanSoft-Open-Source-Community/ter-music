@@ -8,6 +8,7 @@
 #include "config/config.h"
 #include "i18n/i18n.h"
 #include <string.h>
+#include <strings.h>
 
 extern int g_ascii_fallback_ui;
 #include <wchar.h>
@@ -16,6 +17,25 @@ extern int g_ascii_fallback_ui;
 
 int use_ascii_fallback_ui(void) {
     return g_ascii_fallback_ui;
+}
+
+static int locale_uses_utf8(void)
+{
+    const char *codeset = nl_langinfo(CODESET);
+    if (!codeset) return 0;
+    return strcasecmp(codeset, "UTF-8") == 0 || strcasecmp(codeset, "UTF8") == 0;
+}
+
+void ensure_utf8_locale(void)
+{
+    const char *fallbacks[] = {"C.UTF-8", "zh_CN.UTF-8", "en_US.UTF-8", NULL};
+    setlocale(LC_ALL, "");
+    if (locale_uses_utf8()) return;
+    for (int i = 0; fallbacks[i] != NULL; i++) {
+        if (setlocale(LC_ALL, fallbacks[i]) && locale_uses_utf8()) return;
+    }
+
+    setlocale(LC_CTYPE, "");
 }
 
 int utf8_str_truncate(char *dest, const char *src, int max_cols) {

@@ -9,7 +9,9 @@
 #include "logger/logger.h"
 #include "media/session.h"
 #include "ui/menus.h"
+#include "ui/lyrics.h"
 #include "remote/remote.h"
+#include "core/core.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,9 +31,7 @@ extern int load_playlist(const char *path);
 extern void prompt_open_folder();
 
 int g_debug_enabled = 0;
-volatile sig_atomic_t g_config_reload_requested = 0;
-/* 终端关闭/终止信号触发安全退出标志，供事件循环轮询 */
-volatile sig_atomic_t g_should_exit = 0;
+/* g_config_reload_requested / g_should_exit 定义在 core/core.c（声明见 core/core.h） */
 
 /* 崩溃处理用的独立信号栈（sigaltstack）。
  * 若崩溃原因是栈溢出，信号处理器会在已耗尽的栈上运行、立即二次触发，
@@ -637,6 +637,10 @@ int main(int argc, char *argv[]) {
         clear_saved_playback_session();
     }
     
+    /* 歌词状态由 ui/lyrics.c 持有，核心经钩子推进（注册在 run_event_loop 内亦可，
+     * 这里显式注册，便于 grep 到前端与核心的边界） */
+    core_set_lyrics_tick(update_lyrics_display);
+
     log_info("main", "Starting event loop");
     run_event_loop();
 

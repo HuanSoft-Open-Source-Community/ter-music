@@ -35,7 +35,7 @@ PlayHistory g_play_history = {0};
 Favorites g_favorites = {0};
 DirHistory g_dir_history = {0};
 PlaylistManager g_playlist_manager = {0};
-AppConfig g_app_config = {0};
+/* g_app_config 定义已迁至 config/config.c（声明见 config/config.h） */
 int g_content_selected_idx = 0;
 FocusArea g_focus_area = FOCUS_SIDEBAR;
 
