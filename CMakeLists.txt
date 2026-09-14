@@ -161,6 +161,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/braille/image_loader.c
     src/org.yxzl.ter-music/ui/scrollbar.c
     src/org.yxzl.ter-music/media/session.c
+    src/org.yxzl.ter-music/media/rpc_common.c
     src/org.yxzl.ter-music/info/info.c
     src/org.yxzl.ter-music/cli/cli.c
     src/org.yxzl.ter-music/cli/cli_client.c
