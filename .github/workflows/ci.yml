@@ -79,6 +79,47 @@ jobs:
       - name: Smoke test (--help)
         run: ./build/ter-music --help >/dev/null
 
+      - name: Smoke test (CLI commands)
+        run: |
+          set -e
+          ./build/ter-music version
+          ./build/ter-music help >/dev/null
+          rc=0; ./build/ter-music pause || rc=$?
+          [ "$rc" -eq 3 ] || { echo "pause without instance: rc=$rc (expected 3)"; exit 1; }
+          rc=0; ./build/ter-music show || rc=$?
+          [ "$rc" -eq 3 ] || { echo "show without instance: rc=$rc (expected 3)"; exit 1; }
+
+      - name: CLI / daemon / D-Bus smoke test
+        if: matrix.label == 'ubuntu'
+        run: |
+          if ! command -v dbus-run-session >/dev/null 2>&1; then
+            echo "dbus-run-session unavailable, skipping D-Bus smoke test"
+            exit 0
+          fi
+          set -e
+          rm -rf /tmp/tm-cli
+          mkdir -p /tmp/tm-cli/music /tmp/tm-cli/home
+          ffmpeg -hide_banner -loglevel error -f lavfi \
+            -i anullsrc=r=44100:cl=mono -t 2 -c:a pcm_s16le \
+            -y /tmp/tm-cli/music/a.wav
+          # 无音频设备时播放会失败，但 daemon 必须保持存活且 D-Bus 接口可用
+          dbus-run-session -- bash -euc '
+            export HOME=/tmp/tm-cli/home
+            TM=./build/ter-music
+            $TM daemon start --open /tmp/tm-cli/music
+            sleep 1
+            $TM show --json | grep -q "\"running\":true"
+            $TM show --one-line
+            $TM mode list_repeat
+            $TM volume 50
+            gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
+              --object-path /org/mpris/MediaPlayer2 \
+              --method org.yxzl.ter_music.Info.InstanceInfo >/dev/null
+            $TM daemon status
+            $TM daemon reload
+            $TM daemon stop
+          '
+
       - name: Smoke test (PTY launch)
         if: matrix.label == 'ubuntu'
         run: |

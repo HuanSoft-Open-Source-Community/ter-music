@@ -18,7 +18,7 @@ extern "C" {
 
 /* ── Version identifiers ──────────────────────────────────────────── */
 #define CONFIG_XML_VERSION          "2.2"
-#define CONFIG_CURRENT_VERSION      4
+#define CONFIG_CURRENT_VERSION      5   /* 与 types.h 保持同步 */
 #define CONFIG_MIN_SUPPORTED_VER    2
 
 /* ── Root element ─────────────────────────────────────────────────── */
@@ -71,6 +71,17 @@ extern "C" {
 #define XML_PREF_AUDIO_BACKEND      "audio_backend"
 #define XML_PREF_SORT_MODE          "sort_mode"
 #define XML_PREF_CUE_ENCODING       "cue_encoding"
+
+/* ── Info display (CLI `ter-music show` / D-Bus), config v5 ───────── */
+#define XML_PREF_INFO_PRESET         "info_preset"
+#define XML_PREF_INFO_FIELDS         "info_fields"
+#define XML_PREF_INFO_SHOW_COVER     "info_show_cover"
+#define XML_PREF_INFO_COVER_COLS     "info_cover_cols"
+#define XML_PREF_INFO_COVER_ROWS     "info_cover_rows"
+#define XML_PREF_INFO_COVER_CHARSET  "info_cover_charset"
+#define XML_PREF_INFO_SHOW_PROGRESS  "info_show_progress"
+#define XML_PREF_INFO_PROGRESS_STYLE "info_progress_style"
+#define XML_PREF_INFO_LYRICS_LINES   "info_lyrics_lines"
 
 /* ── Equalizer ────────────────────────────────────────────────────── */
 #define XML_SECTION_EQUALIZER       "equalizer"

@@ -218,6 +218,68 @@ int generate_braille_art_dynamic(const char *image_path,
     return 0;
 }
 
+int generate_ascii_art_dynamic(const char *image_path,
+                                uint8_t threshold,
+                                int target_width,
+                                int target_height,
+                                char *output,
+                                size_t output_size) {
+    if (!image_path || !output || output_size == 0) return -1;
+    if (target_width <= 0 || target_height <= 0) return -1;
+
+    unsigned char *rgba = NULL;
+    int w, h;
+
+    if (load_image(image_path, &rgba, &w, &h) != 0) {
+        return -1;
+    }
+    if (w <= 0 || h <= 0 || w > MAX_COVER_IMAGE_DIM || h > MAX_COVER_IMAGE_DIM) {
+        free(rgba);
+        return -1;
+    }
+
+    /* 每个字符 2×1 像素：与盲文（2×4 像素/字符）保持相同长宽比 */
+    int pixel_width = target_width * 2;
+    int pixel_height = target_height;
+
+    unsigned char *gray = malloc((size_t)w * (size_t)h);
+    unsigned char *resized = malloc((size_t)pixel_width * (size_t)pixel_height);
+
+    if (!gray || !resized) {
+        free(rgba); free(gray); free(resized);
+        return -1;
+    }
+
+    rgba_to_gray(rgba, w, h, gray);
+    free(rgba);
+    rgba = NULL;
+
+    resize_gray(gray, w, h, resized, pixel_width, pixel_height);
+    free(gray);
+    gray = NULL;
+
+    size_t offset = 0;
+    for (int row = 0; row < target_height; row++) {
+        for (int col = 0; col < target_width; col++) {
+            int px = col * 2;
+            int py = row;
+            /* 左右两像素取均值后再与阈值比较（盒式滤波） */
+            int average = (resized[py * pixel_width + px] +
+                           resized[py * pixel_width + px + 1]) / 2;
+            if (offset + 2 < output_size) {
+                output[offset++] = (average >= (int)threshold) ? '#' : ' ';
+            }
+        }
+        if (offset + 1 < output_size) {
+            output[offset++] = '\n';
+        }
+    }
+    output[offset] = '\0';
+
+    free(resized);
+    return 0;
+}
+
 int get_braille_art_lines(const char *braille_art, char **lines, int max_lines) {
     if (!braille_art || !lines || max_lines <= 0) return 0;
 
