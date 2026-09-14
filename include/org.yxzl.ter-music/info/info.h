@@ -54,7 +54,8 @@
 /* ── 封面字符集 ─────────────────────────────────────────────────── */
 #define INFO_COVER_BRAILLE 0
 #define INFO_COVER_ASCII   1
-#define INFO_COVER_CHARSET_COUNT 2
+#define INFO_COVER_HALF    2   /* 半块字符（▀ ▄ █） */
+#define INFO_COVER_CHARSET_COUNT 3
 
 /* ── 歌词行数 ───────────────────────────────────────────────────── */
 #define INFO_LYRICS_OFF     0
@@ -219,8 +220,11 @@ int info_render_text(const InfoRenderOptions *opts, char *out, size_t out_size);
 int info_render_one_line(const InfoRenderOptions *opts, char *out, size_t out_size);
 
 /* 完整 JSON 快照（含 text 字段）。out 建议 INFO_JSON_MAX 字节 */
+/* 完整 JSON 快照。core_json 非空时原样写入 "core" 字段（D-Bus 接口用它
+ * 携带 api_version/methods 供前端握手）；CLI 等其他调用方传 NULL。
+ * core_json 必须是合法 JSON 对象文本，本函数不做校验。 */
 int info_render_json(char *out, size_t out_size, const InfoInstance *instance,
-                     unsigned long long revision);
+                     unsigned long long revision, const char *core_json);
 int info_render_track_json(char *out, size_t out_size);
 int info_render_progress_json(char *out, size_t out_size);
 int info_render_lyrics_json(char *out, size_t out_size);

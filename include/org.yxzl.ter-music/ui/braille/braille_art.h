@@ -51,6 +51,14 @@ int generate_ascii_art_dynamic(const char *image_path,
                                 char *output,
                                 size_t output_size);
 
+/* 半块字符画（▀ ▄ █ 与空格）：每个字符 1×2 像素，与盲文/ASCII 版同长宽比 */
+int generate_halfblock_art_dynamic(const char *image_path,
+                                    uint8_t threshold,
+                                    int target_width,
+                                    int target_height,
+                                    char *output,
+                                    size_t output_size);
+
 int calculate_optimal_cover_size(int controls_height);
 
 int get_braille_art_lines(const char *braille_art, char **lines, int max_lines);

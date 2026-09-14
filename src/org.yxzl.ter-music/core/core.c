@@ -27,6 +27,7 @@ static void (*g_lyrics_tick)(void) = NULL;
 static void (*g_config_listener)(void) = NULL;
 static void (*g_status_listener)(const char *message) = NULL;
 static char g_status_last[CORE_STATUS_MAX] = "";
+static unsigned long long g_status_seq = 0;
 
 void core_set_lyrics_tick(void (*tick)(void))
 {
@@ -48,6 +49,11 @@ const char *core_status_last(void)
     return g_status_last;
 }
 
+unsigned long long core_status_seq(void)
+{
+    return g_status_seq;
+}
+
 void core_status_push(const char *message)
 {
     if (!message) {
@@ -56,6 +62,7 @@ void core_status_push(const char *message)
 
     strncpy(g_status_last, message, sizeof(g_status_last) - 1);
     g_status_last[sizeof(g_status_last) - 1] = '\0';
+    g_status_seq++;
 
     if (g_status_listener) {
         g_status_listener(message);

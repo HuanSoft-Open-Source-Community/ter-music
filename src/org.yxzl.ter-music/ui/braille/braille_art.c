@@ -118,6 +118,76 @@ void print_braille_art(const uint32_t *braille, int rows, int cols) {
     }
 }
 
+/* 半块字符画（▀ ▄ █ 与空格）。
+ * 每个字符覆盖 1×2 像素（上下各一半），与盲文版 2×4 像素/字符同样是
+ * 1:1 的字符长宽比，因此在等宽字体下与盲文/ASCII 版占用相同版面。 */
+int generate_halfblock_art_dynamic(const char *image_path,
+                                    uint8_t threshold,
+                                    int target_width,
+                                    int target_height,
+                                    char *output,
+                                    size_t output_size) {
+    if (!image_path || !output || output_size == 0) return -1;
+    if (target_width <= 0 || target_height <= 0) return -1;
+
+    unsigned char *rgba = NULL;
+    int w, h;
+
+    if (load_image(image_path, &rgba, &w, &h) != 0) {
+        return -1;
+    }
+    if (w <= 0 || h <= 0 || w > MAX_COVER_IMAGE_DIM || h > MAX_COVER_IMAGE_DIM) {
+        free(rgba);
+        return -1;
+    }
+
+    int pixel_width = target_width;
+    int pixel_height = target_height * 2;
+
+    unsigned char *gray = malloc((size_t)w * (size_t)h);
+    unsigned char *resized = malloc((size_t)pixel_width * (size_t)pixel_height);
+
+    if (!gray || !resized) {
+        free(rgba); free(gray); free(resized);
+        return -1;
+    }
+
+    rgba_to_gray(rgba, w, h, gray);
+    free(rgba);
+    rgba = NULL;
+
+    resize_gray(gray, w, h, resized, pixel_width, pixel_height);
+    free(gray);
+    gray = NULL;
+
+    size_t offset = 0;
+    for (int row = 0; row < target_height; row++) {
+        for (int col = 0; col < target_width; col++) {
+            int top = resized[(row * 2) * pixel_width + col];
+            int bottom = resized[(row * 2 + 1) * pixel_width + col];
+            int top_on = (top >= (int)threshold);
+            int bottom_on = (bottom >= (int)threshold);
+            const char *glyph = " ";
+            if (top_on && bottom_on) glyph = "\u2588";      /* █ */
+            else if (top_on) glyph = "\u2580";             /* ▀ */
+            else if (bottom_on) glyph = "\u2584";          /* ▄ */
+
+            size_t length = strlen(glyph);
+            if (offset + length + 1 < output_size) {
+                memcpy(output + offset, glyph, length);
+                offset += length;
+            }
+        }
+        if (offset + 1 < output_size) {
+            output[offset++] = '\n';
+        }
+    }
+    output[offset] = '\0';
+
+    free(resized);
+    return 0;
+}
+
 int calculate_optimal_cover_size(int controls_height) {
     if (controls_height < 10) {
         return BRAILLE_MIN_SIZE;

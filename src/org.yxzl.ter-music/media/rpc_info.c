@@ -56,6 +56,12 @@ static struct {
     int cover_valid;
     char cover_path[MAX_PATH_LEN];
     char track_path[MAX_PATH_LEN];
+    /* 状态消息（Core.StatusMessage）与可视化帧（Info.VisualizerFrame） */
+    unsigned long long status_seq;
+    unsigned long long visualizer_revision;
+    unsigned long long last_visualizer_ms;
+    int visualizer_levels[VISUALIZER_BAND_COUNT];
+    int visualizer_peaks[VISUALIZER_BAND_COUNT];
 } g_info = {0};
 
 
@@ -144,10 +150,80 @@ void rpc_info_reset(void)
     memset(&g_info, 0, sizeof(g_info));
 }
 
+/* 状态消息：core 侧每次 push 使 seq 递增，这里转发为 Control.StatusMessage。
+ * 与 InfoChanged 一样采用“比较后发送”，因此不需要额外监听器。 */
+static void rpc_info_sync_status(void)
+{
+    unsigned long long seq = core_status_seq();
+    if (seq == g_info.status_seq) {
+        return;
+    }
+    g_info.status_seq = seq;
+    rpc_control_emit_status(seq, core_status_last());
+}
+
+/* 可视化帧（Info.VisualizerFrame）：仅在采样修订号变化（音频在推进）时，
+ * 按 RPC_VISUALIZER_INTERVAL_MS 节流发送；空闲/暂停时不产生总线流量。 */
+static void rpc_info_sync_visualizer(void)
+{
+    int levels[VISUALIZER_BAND_COUNT];
+    int peaks[VISUALIZER_BAND_COUNT];
+    uint64_t last_update_ms = 0;
+
+    get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+    if (last_update_ms == 0 || last_update_ms == g_info.last_visualizer_ms) {
+        return;
+    }
+
+    uint64_t now_ms = get_ui_time_ms();
+    if (g_info.visualizer_revision > 0 &&
+        (now_ms - g_info.last_visualizer_ms) < RPC_VISUALIZER_INTERVAL_MS) {
+        return;
+    }
+
+    g_info.last_visualizer_ms = last_update_ms;
+    g_info.visualizer_revision++;
+    memcpy(g_info.visualizer_levels, levels, sizeof(levels));
+    memcpy(g_info.visualizer_peaks, peaks, sizeof(peaks));
+
+    DBusMessage *signal = dbus_message_new_signal(MPRIS_OBJECT_PATH,
+                                                  INFO_API_INTERFACE,
+                                                  "VisualizerFrame");
+    if (!signal) {
+        return;
+    }
+
+    DBusMessageIter iter;
+    DBusMessageIter array_iter;
+    dbus_uint32_t revision = (dbus_uint32_t)g_info.visualizer_revision;
+
+    dbus_message_iter_init_append(signal, &iter);
+    dbus_message_iter_append_basic(&iter, DBUS_TYPE_UINT32, &revision);
+    for (int channel = 0; channel < 2; channel++) {
+        const int *source = channel == 0 ? g_info.visualizer_levels
+                                         : g_info.visualizer_peaks;
+        dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "y", &array_iter);
+        for (int i = 0; i < VISUALIZER_BAND_COUNT; i++) {
+            int value = source[i];
+            if (value < 0) value = 0;
+            if (value > 255) value = 255;
+            unsigned char byte = (unsigned char)value;
+            dbus_message_iter_append_basic(&array_iter, DBUS_TYPE_BYTE, &byte);
+        }
+        dbus_message_iter_close_container(&iter, &array_iter);
+    }
+
+    rpc_send(signal);
+}
+
 void rpc_info_sync(void) {
     if (!rpc_session_active()) {
         return;
     }
+
+    /* 状态消息与可视化帧：与 InfoChanged 同一轮检测（比较后发送） */
+    rpc_info_sync_status();
+    rpc_info_sync_visualizer();
 
     char track_path[MAX_PATH_LEN] = "";
     if (rpc_track_available()) {
@@ -200,7 +276,7 @@ void rpc_info_sync(void) {
     char *json = malloc(INFO_JSON_MAX);
     if (json) {
         InfoInstance instance = rpc_instance_info();
-        info_render_json(json, INFO_JSON_MAX, &instance, g_info.revision);
+        info_render_json(json, INFO_JSON_MAX, &instance, g_info.revision, rpc_core_json());
         snprintf(g_info.last_json, sizeof(g_info.last_json), "%s", json);
         emit_info_changed(json);
         free(json);
@@ -226,7 +302,7 @@ DBusMessage *rpc_info_handle(DBusMessage *message) {
         if (!json) {
             return rpc_error(message, DBUS_ERROR_NO_MEMORY, "Out of memory");
         }
-        info_render_json(json, INFO_JSON_MAX, &instance, g_info.revision);
+        info_render_json(json, INFO_JSON_MAX, &instance, g_info.revision, rpc_core_json());
         DBusMessage *reply = rpc_reply_string(message, json);
         free(json);
         return reply;
@@ -286,9 +362,11 @@ DBusMessage *rpc_info_handle(DBusMessage *message) {
                 charset_value = INFO_COVER_BRAILLE;
             } else if (strcmp(charset, "ascii") == 0) {
                 charset_value = INFO_COVER_ASCII;
+            } else if (strcmp(charset, "half") == 0) {
+                charset_value = INFO_COVER_HALF;
             } else {
                 return rpc_error(message, DBUS_ERROR_INVALID_ARGS,
-                                           "charset must be 'braille' or 'ascii'");
+                                           "charset must be 'braille', 'ascii' or 'half'");
             }
         }
 
@@ -337,6 +415,55 @@ DBusMessage *rpc_info_handle(DBusMessage *message) {
         return reply;
     }
 
+    if (strcmp(member, "GetVisualizer") == 0) {
+        int levels[VISUALIZER_BAND_COUNT];
+        int peaks[VISUALIZER_BAND_COUNT];
+        uint64_t last_update_ms = 0;
+        get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+
+        char json[4096];
+        size_t pos = 0;
+        pos = json_append_char(json, sizeof(json), pos, '{');
+        pos = json_append_key(json, sizeof(json), pos, "revision");
+        pos = json_append_int(json, sizeof(json), pos, (long long)g_info.visualizer_revision);
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "bands");
+        pos = json_append_int(json, sizeof(json), pos, VISUALIZER_BAND_COUNT);
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "levels");
+        pos = json_append_char(json, sizeof(json), pos, '[');
+        for (int i = 0; i < VISUALIZER_BAND_COUNT; i++) {
+            if (i > 0) pos = json_append_char(json, sizeof(json), pos, ',');
+            pos = json_append_int(json, sizeof(json), pos, levels[i]);
+        }
+        pos = json_append_char(json, sizeof(json), pos, ']');
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "peaks");
+        pos = json_append_char(json, sizeof(json), pos, '[');
+        for (int i = 0; i < VISUALIZER_BAND_COUNT; i++) {
+            if (i > 0) pos = json_append_char(json, sizeof(json), pos, ',');
+            pos = json_append_int(json, sizeof(json), pos, peaks[i]);
+        }
+        pos = json_append_char(json, sizeof(json), pos, ']');
+        pos = json_append_char(json, sizeof(json), pos, '}');
+        json[pos] = '\0';
+        return rpc_reply_string(message, json);
+    }
+
+    if (strcmp(member, "GetStatus") == 0) {
+        char json[CORE_STATUS_MAX + 128];
+        size_t pos = 0;
+        pos = json_append_char(json, sizeof(json), pos, '{');
+        pos = json_append_key(json, sizeof(json), pos, "seq");
+        pos = json_append_int(json, sizeof(json), pos, (long long)core_status_seq());
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "message");
+        pos = json_append_string_or_null(json, sizeof(json), pos, core_status_last());
+        pos = json_append_char(json, sizeof(json), pos, '}');
+        json[pos] = '\0';
+        return rpc_reply_string(message, json);
+    }
+
     return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
                                "Unknown info method");
 }
@@ -370,6 +497,12 @@ static const char *const k_info_introspection =
     "      <arg name=\"options\" type=\"s\" direction=\"in\"/>\n"
     "      <arg name=\"text\" type=\"s\" direction=\"out\"/>\n"
     "    </method>\n"
+    "    <method name=\"GetVisualizer\">\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"GetStatus\">\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
     "    <signal name=\"InfoChanged\">\n"
     "      <arg name=\"json\" type=\"s\"/>\n"
     "    </signal>\n"
@@ -383,6 +516,11 @@ static const char *const k_info_introspection =
     "      <arg name=\"charset\" type=\"s\"/>\n"
     "      <arg name=\"cols\" type=\"i\"/>\n"
     "      <arg name=\"rows\" type=\"i\"/>\n"
+    "    </signal>\n"
+    "    <signal name=\"VisualizerFrame\">\n"
+    "      <arg name=\"revision\" type=\"u\"/>\n"
+    "      <arg name=\"levels\" type=\"ay\"/>\n"
+    "      <arg name=\"peaks\" type=\"ay\"/>\n"
     "    </signal>\n"
     "  </interface>\n";
 

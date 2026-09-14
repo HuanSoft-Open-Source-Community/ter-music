@@ -87,6 +87,7 @@ int rpc_page_clamp(long long offset, long long count, int *offset_out, int *coun
 int rpc_method_count(void);
 const char *rpc_method_at(int index);
 const char *rpc_methods_json(void);
+const char *rpc_core_json(void);   /* Info.GetInfo 的 core 字段 */
 
 #ifdef HAVE_DBUS
 
@@ -150,6 +151,10 @@ DBusMessage *rpc_control_handle(DBusMessage *message);
 const char *rpc_lyrics_introspection(void);
 const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
+
+/* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
+void rpc_control_emit_status(unsigned long long seq, const char *message);
+void rpc_control_emit_error(const char *source, const char *name, const char *message);
 
 void rpc_lyrics_reset(void);
 const char *rpc_lyrics_sync(void);

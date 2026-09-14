@@ -36,8 +36,50 @@
 #include <dbus/dbus.h>
 
 #define MPRIS_OBJECT_PATH "/org/mpris/MediaPlayer2"
-#define CONTROL_API_INTERFACE RPC_IFACE_Control
+#define CONTROL_API_INTERFACE RPC_IFACE_CONTROL
 
+
+/* ── 前端可见的状态/错误信号（Control 接口） ───────────────────────
+ * 状态消息的源头在 core（core_status_push），作业/远程失败在 rpc_job.c 与
+ * rpc_remote.c；它们都通过这两个助手广播，避免各自拼信号。 */
+
+void rpc_control_emit_status(unsigned long long seq, const char *message)
+{
+    DBusMessage *signal = dbus_message_new_signal(MPRIS_OBJECT_PATH,
+                                                  CONTROL_API_INTERFACE,
+                                                  "StatusMessage");
+    if (!signal) {
+        return;
+    }
+
+    dbus_uint32_t sequence = (dbus_uint32_t)seq;
+    const char *value = message ? message : "";
+    dbus_message_append_args(signal,
+                             DBUS_TYPE_UINT32, &sequence,
+                             DBUS_TYPE_STRING, &value,
+                             DBUS_TYPE_INVALID);
+    rpc_send(signal);
+}
+
+void rpc_control_emit_error(const char *source, const char *name, const char *message)
+{
+    DBusMessage *signal = dbus_message_new_signal(MPRIS_OBJECT_PATH,
+                                                  CONTROL_API_INTERFACE,
+                                                  "Error");
+    if (!signal) {
+        return;
+    }
+
+    const char *safe_source = source ? source : "";
+    const char *safe_name = name ? name : RPC_ERROR_FAILED;
+    const char *safe_message = message ? message : "";
+    dbus_message_append_args(signal,
+                             DBUS_TYPE_STRING, &safe_source,
+                             DBUS_TYPE_STRING, &safe_name,
+                             DBUS_TYPE_STRING, &safe_message,
+                             DBUS_TYPE_INVALID);
+    rpc_send(signal);
+}
 
 DBusMessage *rpc_control_handle(DBusMessage *message) {
     const char *member = dbus_message_get_member(message);
@@ -240,6 +282,15 @@ DBusMessage *rpc_control_handle(DBusMessage *message) {
 
 static const char *const k_control_introspection =
     "  <interface name=\"org.yxzl.ter_music.Control\">\n"
+    "    <signal name=\"StatusMessage\">\n"
+    "      <arg name=\"seq\" type=\"u\"/>\n"
+    "      <arg name=\"message\" type=\"s\"/>\n"
+    "    </signal>\n"
+    "    <signal name=\"Error\">\n"
+    "      <arg name=\"source\" type=\"s\"/>\n"
+    "      <arg name=\"name\" type=\"s\"/>\n"
+    "      <arg name=\"message\" type=\"s\"/>\n"
+    "    </signal>\n"
     "    <method name=\"Play\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "    <method name=\"Pause\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "    <method name=\"PlayPause\"><arg type=\"b\" direction=\"out\"/></method>\n"

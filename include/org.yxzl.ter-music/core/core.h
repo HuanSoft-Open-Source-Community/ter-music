@@ -45,6 +45,9 @@ void core_set_config_listener(void (*listener)(void));
 void core_status_push(const char *message);
 void core_set_status_listener(void (*listener)(const char *message));
 const char *core_status_last(void);
+/* 状态消息序号：每次 push 递增。前端据此判断“是否有新消息”，
+ * 不必比较文本（同一条消息被再次推送时也应被看到）。 */
+unsigned long long core_status_seq(void);
 
 /* ── 歌词推进钩子 ───────────────────────────────────────────────── */
 /* 歌词状态目前仍由 ui/lyrics.c 持有（其归属将在前端改造阶段迁移到核心）。

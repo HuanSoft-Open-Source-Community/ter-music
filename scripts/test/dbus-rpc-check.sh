@@ -119,11 +119,22 @@ introspect() {
         --object-path /org/mpris/MediaPlayer2 2>&1
 }
 
+# 同上，但保留退出码供调用方判断成败
+introspect_rc() {
+    local out
+    out="$(timeout 10 gdbus introspect --session \
+        --dest org.mpris.MediaPlayer2.ter_music \
+        --object-path /org/mpris/MediaPlayer2 2>&1)"
+    local rc=$?
+    printf '%s' "$out"
+    return $rc
+}
+
 # ── 检查 1：接口与方法齐备 ─────────────────────────────────────────
 check_interfaces() {
     local xml
-    xml="$(introspect)"
-    if [ -z "$xml" ] || [ "${xml#*Error}" != "$xml" ]; then
+    xml="$(introspect_rc)"
+    if [ $? -ne 0 ]; then
         bad "自省失败：$(printf '%s' "$xml" | head -1)"
         return
     fi
@@ -147,9 +158,10 @@ check_method_list() {
 
     local declared
     declared="$(printf '%s' "$json" | python3 -c '
-import json,sys
+import ast, json, sys
+raw = sys.stdin.read().strip()
 try:
-    doc = json.load(sys.stdin)
+    doc = json.loads(ast.literal_eval(raw)[0])
 except Exception as exc:
     print("JSON-PARSE-ERROR", exc)
     raise SystemExit(0)
@@ -175,7 +187,9 @@ print("\n".join(methods))
         [ -z "$method" ] && continue
         checked=$((checked + 1))
         local member="${method##*.}"
-        if ! printf '%s' "$xml" | grep -q "method $member"; then
+        # gdbus introspect 把方法打印为裸签名行（"    Name(args);"），
+        # 不带 method 前缀，因此按“行首/非标识符字符 + 名字 + (”匹配
+        if ! printf '%s' "$xml" | grep -qE "(^|[^A-Za-z_])$member\\("; then
             bad "core.methods 声明了未实现的方法 $method"
             missing=$((missing + 1))
         fi
@@ -184,6 +198,83 @@ print("\n".join(methods))
     if [ "$missing" -eq 0 ]; then
         ok "core.methods 与实际发布一致（$checked 个方法）"
     fi
+}
+
+
+# ── 检查 3：Info 扩展（core 握手对象、可视化、状态、封面字符集） ──
+json_field() {
+    # json_field <json> <python 表达式>，用于在 shell 里取 JSON 字段
+    printf '%s' "$1" | python3 -c '
+import ast, json, sys
+raw = sys.stdin.read().strip()
+try:
+    doc = json.loads(ast.literal_eval(raw)[0])
+except Exception as exc:
+    print("ERR:%s" % exc)
+    raise SystemExit(0)
+try:
+    print(eval(sys.argv[1], {"doc": doc}))
+except Exception as exc:
+    print("ERR:%s" % exc)
+' "$2"
+}
+
+check_info_extensions() {
+    local info api_version
+    info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    api_version="$(json_field "$info" 'doc["core"]["api_version"]')"
+    if [ "$api_version" = "2" ]; then
+        ok "core.api_version=2（握手版本）"
+    else
+        bad "core.api_version 期望 2，实际 '$api_version'"
+    fi
+
+    local methods
+    methods="$(json_field "$info" 'len(doc["core"]["methods"])')"
+    case "$methods" in
+        ''|ERR:*) bad "core.methods 缺失：$methods" ;;
+        *) ok "core.methods 声明 $methods 个方法" ;;
+    esac
+
+    # GetVisualizer：bands 数量与数组长度必须一致
+    local viz bands levels
+    viz="$(dbus_call org.yxzl.ter_music.Info GetVisualizer)"
+    bands="$(json_field "$viz" 'doc["bands"]')"
+    levels="$(json_field "$viz" 'len(doc["levels"])')"
+    if [ "$bands" = "$levels" ] && [ -n "$bands" ]; then
+        ok "GetVisualizer bands=$bands 与 levels 长度一致"
+    else
+        bad "GetVisualizer bands=$bands levels=$levels 不一致"
+    fi
+
+    # GetStatus：seq 为整数且 message 为字符串
+    local status seq
+    status="$(dbus_call org.yxzl.ter_music.Info GetStatus)"
+    seq="$(json_field "$status" 'doc["seq"]')"
+    case "$seq" in
+        ''|ERR:*) bad "GetStatus 缺少 seq：$seq" ;;
+        *) ok "GetStatus seq=$seq" ;;
+    esac
+
+    # GetCoverArt：非法字符集必须被拒绝
+    local err
+    err="$(dbus_call org.yxzl.ter_music.Info GetCoverArt bogus 8 4)"
+    if printf '%s' "$err" | grep -q "InvalidArgs"; then
+        ok "GetCoverArt 拒绝未知字符集"
+    else
+        bad "GetCoverArt 未拒绝未知字符集：$(printf '%s' "$err" | head -1)"
+    fi
+
+    # GetCoverArt：三种字符集都要能用（无封面时返回空串也算通过）
+    local charset out
+    for charset in braille ascii half; do
+        out="$(dbus_call org.yxzl.ter_music.Info GetCoverArt "$charset" 8 4)"
+        if printf '%s' "$out" | grep -q "^(\|('"; then
+            ok "GetCoverArt charset=$charset 可调用"
+        else
+            bad "GetCoverArt charset=$charset 调用失败：$(printf '%s' "$out" | head -1)"
+        fi
+    done
 }
 
 # ── 主流程 ─────────────────────────────────────────────────────────
@@ -209,6 +300,9 @@ check_interfaces
 
 info "检查 2：方法清单一致性"
 check_method_list
+
+info "检查 3：Info 扩展（M2.2）"
+check_info_extensions
 
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"

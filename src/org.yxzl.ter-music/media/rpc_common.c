@@ -314,6 +314,35 @@ DBusMessage *rpc_reply_string(DBusMessage *message, const char *value) {
     return reply;
 }
 
+/* ── core 对象（Info.GetInfo 的 "core" 字段） ───────────────────────
+ * 前端接入时用它判断核心是否兼容：api_version 不满足即拒绝接入。 */
+
+const char *rpc_core_json(void)
+{
+    static char buffer[4096];
+    size_t pos = 0;
+
+    pos = json_append_char(buffer, sizeof(buffer), pos, '{');
+    pos = json_append_key(buffer, sizeof(buffer), pos, "api_version");
+    pos = json_append_int(buffer, sizeof(buffer), pos, TER_MUSIC_API_VERSION);
+    pos = json_append_raw(buffer, sizeof(buffer), pos, ",");
+    pos = json_append_key(buffer, sizeof(buffer), pos, "payload_max");
+    pos = json_append_int(buffer, sizeof(buffer), pos, RPC_PAYLOAD_MAX);
+    pos = json_append_raw(buffer, sizeof(buffer), pos, ",");
+    pos = json_append_key(buffer, sizeof(buffer), pos, "page_default");
+    pos = json_append_int(buffer, sizeof(buffer), pos, RPC_PAGE_DEFAULT);
+    pos = json_append_raw(buffer, sizeof(buffer), pos, ",");
+    pos = json_append_key(buffer, sizeof(buffer), pos, "page_max");
+    pos = json_append_int(buffer, sizeof(buffer), pos, RPC_PAGE_MAX);
+    pos = json_append_raw(buffer, sizeof(buffer), pos, ",");
+    pos = json_append_key(buffer, sizeof(buffer), pos, "methods");
+    pos = json_append_raw(buffer, sizeof(buffer), pos, rpc_methods_json());
+    pos = json_append_char(buffer, sizeof(buffer), pos, '}');
+    buffer[pos] = '\0';
+
+    return buffer;
+}
+
 /* ── 方法清单（握手） ───────────────────────────────────────────────
  *
  * 前端在接入时用 Info.GetInfo 的 core.methods 判断核心是否具备它要用的
@@ -328,10 +357,11 @@ static const char *const k_rpc_methods[] = {
     "Info.GetTrackInfo",
     "Info.GetProgress",
     "Info.GetLyricsLines",
-    "Info.GetInstanceInfo",
     "Info.InstanceInfo",
     "Info.GetCoverArt",
     "Info.GetDisplay",
+    "Info.GetVisualizer",
+    "Info.GetStatus",
     /* Control */
     "Control.Play",
     "Control.Pause",

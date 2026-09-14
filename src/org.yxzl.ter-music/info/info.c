@@ -407,7 +407,9 @@ const char *info_progress_style_id(int style)
 
 const char *info_cover_charset_id(int charset)
 {
-    return (charset == INFO_COVER_ASCII) ? "ascii" : "braille";
+    if (charset == INFO_COVER_ASCII) return "ascii";
+    if (charset == INFO_COVER_HALF) return "half";
+    return "braille";
 }
 
 const char *info_lyrics_source_id(int source)
@@ -783,7 +785,7 @@ int info_cover_text(int cols, int rows, int charset, char *out, size_t out_size)
     if (cols > INFO_COVER_COLS_MAX) cols = INFO_COVER_COLS_MAX;
     if (rows < INFO_COVER_ROWS_MIN) rows = INFO_COVER_ROWS_MIN;
     if (rows > INFO_COVER_ROWS_MAX) rows = INFO_COVER_ROWS_MAX;
-    if (charset != INFO_COVER_ASCII) {
+    if (charset != INFO_COVER_ASCII && charset != INFO_COVER_HALF) {
         charset = INFO_COVER_BRAILLE;
     }
 
@@ -801,6 +803,10 @@ int info_cover_text(int cols, int rows, int charset, char *out, size_t out_size)
         rc = generate_ascii_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
                                         cols, rows, g_cover_cache.text,
                                         sizeof(g_cover_cache.text));
+    } else if (charset == INFO_COVER_HALF) {
+        rc = generate_halfblock_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
+                                            cols, rows, g_cover_cache.text,
+                                            sizeof(g_cover_cache.text));
     } else {
         rc = generate_braille_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
                                           cols, rows, g_cover_cache.text,
@@ -1717,7 +1723,7 @@ int info_render_lyrics_json(char *out, size_t out_size)
 }
 
 int info_render_json(char *out, size_t out_size, const InfoInstance *instance,
-                     unsigned long long revision)
+                     unsigned long long revision, const char *core_json)
 {
     if (!out || out_size == 0) {
         return -1;
@@ -1775,6 +1781,15 @@ int info_render_json(char *out, size_t out_size, const InfoInstance *instance,
         } else {
             pos = json_append_raw(out, out_size, pos, "{}");
         }
+    }
+
+    /* core：接口版本与支持的方法集（仅 D-Bus 调用方注入；CLI 传 NULL） */
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "core");
+    if (core_json && core_json[0] == '{') {
+        pos = json_append_raw(out, out_size, pos, core_json);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "{}");
     }
 
     pos = json_append_raw(out, out_size, pos, ",");
