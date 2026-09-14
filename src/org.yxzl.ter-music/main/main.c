@@ -33,6 +33,43 @@ volatile sig_atomic_t g_config_reload_requested = 0;
 /* 终端关闭/终止信号触发安全退出标志，供事件循环轮询 */
 volatile sig_atomic_t g_should_exit = 0;
 
+/* 崩溃处理用的独立信号栈（sigaltstack）。
+ * 若崩溃原因是栈溢出，信号处理器会在已耗尽的栈上运行、立即二次触发，
+ * 结果只剩内核的 "Segmentation fault"，看不到任何 backtrace——
+ * Linyaps 沙箱内的启动崩溃就是这样被掩盖的。改用独立栈后处理器才能跑完。 */
+static void *g_crash_stack = NULL;
+
+void crash_handler(int sig);
+
+static void crash_install_alt_stack(void) {
+    const size_t stack_size = SIGSTKSZ < 65536 ? 65536 : (size_t)SIGSTKSZ;
+    g_crash_stack = malloc(stack_size);
+    if (!g_crash_stack) {
+        return;
+    }
+
+    stack_t alt_stack;
+    memset(&alt_stack, 0, sizeof(alt_stack));
+    alt_stack.ss_sp = g_crash_stack;
+    alt_stack.ss_size = stack_size;
+    alt_stack.ss_flags = 0;
+    if (sigaltstack(&alt_stack, NULL) != 0) {
+        free(g_crash_stack);
+        g_crash_stack = NULL;
+        return;
+    }
+
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = crash_handler;
+    action.sa_flags = SA_ONSTACK | SA_RESETHAND;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGSEGV, &action, NULL);
+    sigaction(SIGABRT, &action, NULL);
+    sigaction(SIGBUS, &action, NULL);
+    sigaction(SIGFPE, &action, NULL);
+}
+
 void crash_handler(int sig) {
     log_error("main", "Fatal signal %d received! Performing emergency shutdown", sig);
     logger_shutdown();
@@ -298,8 +335,8 @@ static void print_usage(const char *prog_name) {
 }
 
 int main(int argc, char *argv[]) {
-    signal(SIGSEGV, crash_handler);
-    signal(SIGABRT, crash_handler);
+    /* 崩溃处理器必须装在独立信号栈上：栈溢出时才能打印 backtrace */
+    crash_install_alt_stack();
     signal(SIGHUP, sighup_handler);
     signal(SIGTERM, sigterm_handler);
     signal(SIGINT, sigterm_handler);

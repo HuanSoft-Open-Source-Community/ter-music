@@ -1378,15 +1378,22 @@ int library_load_into_playlist(const int *rowids, int count, int append) {
 
     if (count > MAX_TRACKS) count = MAX_TRACKS;
 
-    /* Build a new Playlist from rowids */
-    Playlist new_pl = {0};
+    /* Build a new Playlist from rowids.
+     * Playlist 结构约 5.17 MB（tree_nodes[5000] + tracks[1000][512] 等）：
+     * 旧实现把它放在栈上（实测该帧 5,174,224 字节，占默认 8 MB 栈的 63%），
+     * 与目录扫描等深层调用叠加时会直接栈溢出，故改为堆分配。 */
+    Playlist *new_pl = calloc(1, sizeof(Playlist));
+    if (!new_pl) {
+        log_error("library", "Out of memory allocating playlist (%zu bytes)", sizeof(Playlist));
+        return -1;
+    }
 
     if (append) {
         playlist_lock();
         /* Copy existing playlist */
-        memcpy(&new_pl, &g_playlist, sizeof(Playlist));
+        memcpy(new_pl, &g_playlist, sizeof(Playlist));
         /* Keep has_multiple_sources if we already had it or are appending */
-        if (new_pl.count > 0) new_pl.has_multiple_sources = 1;
+        if (new_pl->count > 0) new_pl->has_multiple_sources = 1;
         playlist_unlock();
     }
 
@@ -1396,18 +1403,19 @@ int library_load_into_playlist(const int *rowids, int count, int append) {
         "SELECT path FROM tracks WHERE rowid = ?", -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         pthread_mutex_unlock(&g_library_mutex);
+        free(new_pl);
         return -1;
     }
 
     int loaded = 0;
-    for (int i = 0; i < count && new_pl.count < MAX_TRACKS; i++) {
+    for (int i = 0; i < count && new_pl->count < MAX_TRACKS; i++) {
         sqlite3_bind_int(stmt, 1, rowids[i]);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             const char *path = (const char *)sqlite3_column_text(stmt, 0);
             if (path && path[0]) {
-                strncpy(new_pl.tracks[new_pl.count], path, MAX_PATH_LEN - 1);
-                new_pl.tracks[new_pl.count][MAX_PATH_LEN - 1] = '\0';
-                new_pl.count++;
+                strncpy(new_pl->tracks[new_pl->count], path, MAX_PATH_LEN - 1);
+                new_pl->tracks[new_pl->count][MAX_PATH_LEN - 1] = '\0';
+                new_pl->count++;
                 loaded++;
             }
         }
@@ -1418,26 +1426,27 @@ int library_load_into_playlist(const int *rowids, int count, int append) {
 
     /* Set folder_path: use directory of first track */
     if (loaded > 0) {
-        const char *first_path = new_pl.tracks[0];
+        const char *first_path = new_pl->tracks[0];
         const char *slash = strrchr(first_path, '/');
         if (slash) {
             size_t len = (size_t)(slash - first_path);
-            memcpy(new_pl.folder_path, first_path, len);
-            new_pl.folder_path[len] = '\0';
+            memcpy(new_pl->folder_path, first_path, len);
+            new_pl->folder_path[len] = '\0';
         }
-        new_pl.is_loaded = 1;
+        new_pl->is_loaded = 1;
     }
 
     /* Replace g_playlist */
     if (loaded > 0) {
         playlist_lock();
-        g_playlist = new_pl;
+        g_playlist = *new_pl;
         if (g_selected_index >= g_playlist.count) g_selected_index = 0;
         playlist_unlock();
         search_clear();
         recompute_sort_order();
     }
 
+    free(new_pl);
     return loaded;
 }
 

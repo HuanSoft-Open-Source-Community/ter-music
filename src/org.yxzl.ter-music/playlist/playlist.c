@@ -382,9 +382,86 @@ static void rebuild_visible_list(Playlist *playlist);
 
 /* ── Recursive directory scanner (tree-mode) ── */
 
+/* 单目录条目收集上限（防御性；正常音乐目录远小于此值） */
+#define SCAN_MAX_ENTRIES 65536
+/* 目录递归深度上限：防止异常深的目录树耗尽资源（正常音乐目录远小于此值） */
+#define SCAN_MAX_DEPTH 64
+/* 单个条目名长度：文件名上限 NAME_MAX=255，加结束符即 256 */
+#define SCAN_ENTRY_NAME_LEN 256
+
+/* 目录条目收集缓冲（堆分配，容量按需增长）。
+ *
+ * 旧实现把 char[4096][256] + int[4096]（约 1.26 MB）直接放在递归函数栈上，
+ * 每一层目录递归都会再占一份：8 MB 默认栈约 6 层即溢出，宿主 ~/Documents
+ * （相对深度 10）会让进程直接 SIGSEGV——Linyaps 沙箱内表现为启动即崩溃
+ * （ll-box retval=139，且因栈已耗尽 crash_handler 无法输出 backtrace）。
+ * 改为堆分配后，栈帧降到 1 KB 量级，内存占用只与实际条目数相关。 */
+typedef struct {
+    char (*names)[SCAN_ENTRY_NAME_LEN];
+    int  *types;                 /* 0=file, 1=dir */
+    int   count;
+    int   capacity;
+} ScanEntryBuffer;
+
+static void scan_entry_buffer_init(ScanEntryBuffer *buffer) {
+    buffer->names = NULL;
+    buffer->types = NULL;
+    buffer->count = 0;
+    buffer->capacity = 0;
+}
+
+static void scan_entry_buffer_free(ScanEntryBuffer *buffer) {
+    free(buffer->names);
+    free(buffer->types);
+    scan_entry_buffer_init(buffer);
+}
+
+/* 返回 1 成功；0 已达上限；-1 内存不足 */
+static int scan_entry_buffer_push(ScanEntryBuffer *buffer, const char *name, int is_dir) {
+    if (buffer->count >= SCAN_MAX_ENTRIES) {
+        return 0;
+    }
+
+    if (buffer->count == buffer->capacity) {
+        int next = buffer->capacity > 0 ? buffer->capacity * 2 : 64;
+        if (next > SCAN_MAX_ENTRIES) {
+            next = SCAN_MAX_ENTRIES;
+        }
+
+        char (*names)[SCAN_ENTRY_NAME_LEN] =
+            realloc(buffer->names, (size_t)next * SCAN_ENTRY_NAME_LEN);
+        if (!names) {
+            return -1;
+        }
+        buffer->names = names;
+
+        int *types = realloc(buffer->types, (size_t)next * sizeof(*types));
+        if (!types) {
+            return -1;
+        }
+        buffer->types = types;
+        buffer->capacity = next;
+    }
+
+    snprintf(buffer->names[buffer->count], SCAN_ENTRY_NAME_LEN, "%s", name);
+    buffer->types[buffer->count] = is_dir;
+    buffer->count++;
+    return 1;
+}
+
 static int scan_directory_recursive(Playlist *playlist, const char *path,
                                      int depth, int parent_index, int append_mode) {
     if (!playlist || playlist->tree_node_count >= MAX_TREE_NODES) {
+        return 0;
+    }
+
+    if (depth > SCAN_MAX_DEPTH) {
+        static int depth_warned = 0;
+        if (!depth_warned) {
+            depth_warned = 1;
+            log_warn("playlist", "Directory tree deeper than %d levels; deeper directories are skipped",
+                     SCAN_MAX_DEPTH);
+        }
         return 0;
     }
 
@@ -411,12 +488,11 @@ static int scan_directory_recursive(Playlist *playlist, const char *path,
     int added_tracks = 0;
     struct dirent *entry;
 
-    /* First pass: collect entries for sorting */
-    char entry_names[4096][256]; /* reasonable max per directory */
-    int entry_types[4096];       /* 0=file, 1=dir */
-    int entry_count = 0;
+    /* First pass: collect entries for sorting（堆缓冲，见 ScanEntryBuffer 注释） */
+    ScanEntryBuffer entries;
+    scan_entry_buffer_init(&entries);
 
-    while ((entry = readdir(dir)) != NULL && entry_count < 4096) {
+    while ((entry = readdir(dir)) != NULL && entries.count < SCAN_MAX_ENTRIES) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
@@ -433,49 +509,56 @@ static int scan_directory_recursive(Playlist *playlist, const char *path,
                 is_dir = 1;
             }
         }
-        if (is_dir) {
-            snprintf(entry_names[entry_count], sizeof(entry_names[0]), "%s", entry->d_name);
-            entry_types[entry_count] = 1;
-            entry_count++;
-        } else if ((entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) &&
-                   is_audio_file(entry->d_name)) {
-            snprintf(entry_names[entry_count], sizeof(entry_names[0]), "%s", entry->d_name);
-            entry_types[entry_count] = 0;
-            entry_count++;
+        if (!is_dir &&
+            !((entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) &&
+              is_audio_file(entry->d_name))) {
+            continue;
+        }
+
+        int pushed = scan_entry_buffer_push(&entries, entry->d_name, is_dir);
+        if (pushed == 0) {
+            log_warn("playlist", "Directory '%s' has more than %d entries; the rest are skipped",
+                     path, SCAN_MAX_ENTRIES);
+            break;
+        }
+        if (pushed < 0) {
+            log_warn("playlist", "Out of memory while scanning '%s' (%d entries); the rest are skipped",
+                     path, entries.count);
+            break;
         }
     }
     closedir(dir);
 
     /* Sort: directories first, then alphabetical within each group */
-    for (int i = 0; i < entry_count - 1; i++) {
-        for (int j = i + 1; j < entry_count; j++) {
+    for (int i = 0; i < entries.count - 1; i++) {
+        for (int j = i + 1; j < entries.count; j++) {
             int swap = 0;
-            if (entry_types[i] != entry_types[j]) {
+            if (entries.types[i] != entries.types[j]) {
                 /* Directories come first */
-                if (entry_types[j] == 1) swap = 1;
+                if (entries.types[j] == 1) swap = 1;
             } else {
-                if (strcasecmp(entry_names[i], entry_names[j]) > 0) swap = 1;
+                if (strcasecmp(entries.names[i], entries.names[j]) > 0) swap = 1;
             }
             if (swap) {
-                char tmp_name[256];
-                snprintf(tmp_name, sizeof(tmp_name), "%s", entry_names[i]);
-                snprintf(entry_names[i], sizeof(entry_names[0]), "%s", entry_names[j]);
-                snprintf(entry_names[j], sizeof(entry_names[0]), "%s", tmp_name);
-                int tmp_type = entry_types[i];
-                entry_types[i] = entry_types[j];
-                entry_types[j] = tmp_type;
+                char tmp_name[SCAN_ENTRY_NAME_LEN];
+                snprintf(tmp_name, sizeof(tmp_name), "%s", entries.names[i]);
+                snprintf(entries.names[i], SCAN_ENTRY_NAME_LEN, "%s", entries.names[j]);
+                snprintf(entries.names[j], SCAN_ENTRY_NAME_LEN, "%s", tmp_name);
+                int tmp_type = entries.types[i];
+                entries.types[i] = entries.types[j];
+                entries.types[j] = tmp_type;
             }
         }
     }
 
     /* Second pass: process sorted entries */
-    for (int i = 0; i < entry_count; i++) {
+    for (int i = 0; i < entries.count; i++) {
         if (playlist->tree_node_count >= MAX_TREE_NODES) break;
 
         char full_path[MAX_PATH_LEN];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry_names[i]);
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entries.names[i]);
 
-        if (entry_types[i] == 1) {
+        if (entries.types[i] == 1) {
             /* Sub-directory: recurse */
             if (playlist->tree_node_count < MAX_TREE_NODES) {
                 int sub_tracks = scan_directory_recursive(playlist, full_path,
@@ -504,7 +587,7 @@ static int scan_directory_recursive(Playlist *playlist, const char *path,
                     fn->expanded = 0;
                     fn->parent_index = dir_node;
                     fn->track_index = start_idx + c;
-                    snprintf(fn->name, sizeof(fn->name), "%s", entry_names[i]);
+                    snprintf(fn->name, sizeof(fn->name), "%s", entries.names[i]);
                     snprintf(fn->full_path, sizeof(fn->full_path), "%s", full_path);
                 }
                 added_tracks += cue_added;
@@ -525,13 +608,15 @@ static int scan_directory_recursive(Playlist *playlist, const char *path,
             fn->expanded = 0;
             fn->parent_index = dir_node;
             fn->track_index = playlist->count;
-            snprintf(fn->name, sizeof(fn->name), "%s", entry_names[i]);
+            snprintf(fn->name, sizeof(fn->name), "%s", entries.names[i]);
             snprintf(fn->full_path, sizeof(fn->full_path), "%s", full_path);
 
             playlist->count++;
             added_tracks++;
         }
     }
+
+    scan_entry_buffer_free(&entries);
 
     /* If directory contributed no tracks at all (empty or only empty subdirs),
      * keep the directory node but mark it as having no useful children */
@@ -1032,11 +1117,18 @@ static int load_cue_subtracks(Playlist *playlist, const char *cue_dir,
 
     /* Check if this CUE file was already parsed */
     if (strcmp(g_cue_sheet.loaded_cue_path, cue_path) != 0) {
-        CueSheet fresh;
-        if (cue_parse_file(cue_path, &fresh) <= 0) return 0;
+        /* CueSheet 含 CueTrack[200]，约 260 KB：本函数会被目录递归扫描调用，
+         * 放栈上会与递归深度叠加，故改为堆分配。 */
+        CueSheet *fresh = calloc(1, sizeof(CueSheet));
+        if (!fresh) return 0;
+        if (cue_parse_file(cue_path, fresh) <= 0) {
+            free(fresh);
+            return 0;
+        }
         playlist_lock();
-        g_cue_sheet = fresh;
+        g_cue_sheet = *fresh;
         playlist_unlock();
+        free(fresh);
     }
 
     int added = 0;
@@ -1235,17 +1327,22 @@ void get_audio_metadata(const char *path, char *title, char *artist, char *album
     // 读取 APEv2 标签作为补充/覆盖源
     // APE > FFmpeg > 文件名 —— APE 标签值覆盖 FFmpeg 读取的值
     {
-        APEItem ape_items[APE_MAX_ITEMS];
-        int ape_count = parse_ape_tags(path, ape_items, APE_MAX_ITEMS);
-        for (int i = 0; i < ape_count; i++) {
-            if (ape_items[i].is_binary) continue;
-            if (strcmp(ape_items[i].key, "TITLE") == 0) {
-                copy_metadata_field(title, MAX_META_LEN, ape_items[i].value);
-            } else if (strcmp(ape_items[i].key, "ARTIST") == 0) {
-                copy_metadata_field(artist, MAX_META_LEN, ape_items[i].value);
-            } else if (strcmp(ape_items[i].key, "ALBUM") == 0) {
-                copy_metadata_field(album, MAX_META_LEN, ape_items[i].value);
+        /* 每项 APEItem 约 8 KB（value[8192]），64 项即 0.5 MB：放在栈上会与深调用链
+         * 叠加（实测该帧 542 KB），改为堆分配。 */
+        APEItem *ape_items = calloc(APE_MAX_ITEMS, sizeof(*ape_items));
+        if (ape_items) {
+            int ape_count = parse_ape_tags(path, ape_items, APE_MAX_ITEMS);
+            for (int i = 0; i < ape_count; i++) {
+                if (ape_items[i].is_binary) continue;
+                if (strcmp(ape_items[i].key, "TITLE") == 0) {
+                    copy_metadata_field(title, MAX_META_LEN, ape_items[i].value);
+                } else if (strcmp(ape_items[i].key, "ARTIST") == 0) {
+                    copy_metadata_field(artist, MAX_META_LEN, ape_items[i].value);
+                } else if (strcmp(ape_items[i].key, "ALBUM") == 0) {
+                    copy_metadata_field(album, MAX_META_LEN, ape_items[i].value);
+                }
             }
+            free(ape_items);
         }
     }
 

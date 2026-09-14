@@ -1057,15 +1057,19 @@ static int extract_embedded_lyrics(const char *audio_path)
 
     /* ── Step 2: APE tag fallback ── */
     if (!found) {
-        APEItem ape_items[APE_MAX_ITEMS];
-        int ape_count = parse_ape_tags(audio_path, ape_items, APE_MAX_ITEMS);
-        for (int i = 0; i < ape_count; i++) {
-            if (ape_items[i].is_binary) continue;
-            if (strcmp(ape_items[i].key, "LYRICS") == 0 &&
-                ape_items[i].value[0] != '\0') {
-                lyrics_text = strdup(ape_items[i].value);
-                if (lyrics_text) { found = 1; break; }
+        /* APEItem 每项约 8 KB，64 项即 0.5 MB：栈上实测该帧 542 KB，改为堆分配 */
+        APEItem *ape_items = calloc(APE_MAX_ITEMS, sizeof(*ape_items));
+        if (ape_items) {
+            int ape_count = parse_ape_tags(audio_path, ape_items, APE_MAX_ITEMS);
+            for (int i = 0; i < ape_count; i++) {
+                if (ape_items[i].is_binary) continue;
+                if (strcmp(ape_items[i].key, "LYRICS") == 0 &&
+                    ape_items[i].value[0] != '\0') {
+                    lyrics_text = strdup(ape_items[i].value);
+                    if (lyrics_text) { found = 1; break; }
+                }
             }
+            free(ape_items);
         }
     }
 

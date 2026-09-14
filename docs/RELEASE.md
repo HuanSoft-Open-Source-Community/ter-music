@@ -202,7 +202,13 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux �
 3. [ ] CI（ci.yml）全绿
 4. [ ] 5 类产物齐备：.deb、.rpm（+src.rpm）、.AppImage、portable .tar.gz、.uab/.layer
 5. [ ] 在干净 Debian / Fedora 环境各验证一次安装与启动（`--help`）
-6. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
-7. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
-8. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
-9. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）
+6. [ ] 栈安全回归（历史上曾因深目录栈溢出导致启动即段错误）：
+   - 用 ≥10 层嵌套目录（如 `~/Documents`）启动 TUI，须正常加载播放列表、不得崩溃；
+     沙箱（`ll-cli run`）与原生各测一次
+   - `ulimit -s 512` 下启动 TUI 亦须正常（修复后启动路径栈需求 < 1 MB）
+   - 复查栈帧：编译时加 `-fstack-usage`，不得出现 > 256 KB 的静态栈帧
+     （`scan_directory_recursive` 曾为 1.26 MB、`library_load_into_playlist` 曾为 5.17 MB）
+7. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
+8. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
+9. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
+10. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）
