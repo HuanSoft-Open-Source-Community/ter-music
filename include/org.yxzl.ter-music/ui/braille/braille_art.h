@@ -41,6 +41,16 @@ int generate_braille_art_dynamic(const char *image_path,
                                   char *output,
                                   size_t output_size);
 
+/* ASCII 字符画（不依赖盲文字体终端的回退方案）。
+ * 每个字符覆盖 2×1 像素，与盲文版保持相同的长宽比；
+ * 亮点输出 '#'，暗点输出空格 */
+int generate_ascii_art_dynamic(const char *image_path,
+                                uint8_t threshold,
+                                int target_width,
+                                int target_height,
+                                char *output,
+                                size_t output_size);
+
 int calculate_optimal_cover_size(int controls_height);
 
 int get_braille_art_lines(const char *braille_art, char **lines, int max_lines);

@@ -42,9 +42,17 @@ const char *get_play_mode_str(void);
 void cleanup();
 void seek_audio(double position);
 int get_and_clear_initial_seek_position(void);
+/* 设置“播放起始跳转位置”（秒）：用于恢复上次播放进度，由播放线程消费后清零 */
+void audio_set_initial_seek_position(int seconds);
 int get_volume_percent(void);
 void set_volume_percent(int volume);
 void adjust_volume(int delta);
 void persist_playback_session_state(void);
+
+/* 当前播放位置 / 总时长（秒）。无播放时返回 0。
+ * 以访问器形式暴露，避免非 TUI 模块（info/cli）为读取两个全局量
+ * 而包含 ui/ui.h（该头文件引入 ncurses）。 */
+int audio_get_position_seconds(void);
+int audio_get_duration_seconds(void);
 
 #endif

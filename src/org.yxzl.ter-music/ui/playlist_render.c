@@ -11,6 +11,7 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "info/info.h"
 #include "i18n/i18n.h"
 #include "ui/menu_internal.h"
 #include "ui/scrollbar.h"
@@ -566,19 +567,12 @@ void render_playlist_content(void)
                 mvwprintw(win_playlist, status_line + 5, left_col_x, "%s%s", i18n_get("player.album"), truncated_album);
             }
 
-            // Center column: audio technical info
+            // Center column: audio technical info（与 CLI 信息块共用格式化实现）
             char rate_str[32] = "--", depth_str[32] = "--", bitrate_str[32] = "--", codec_display[32] = "--";
-            if (g_audio_sample_rate > 0) snprintf(rate_str, sizeof(rate_str), "%dHz", g_audio_sample_rate);
-            if (g_audio_bit_depth > 0)   snprintf(depth_str, sizeof(depth_str), "%dbit", g_audio_bit_depth);
-            if (g_audio_bit_rate > 0)    snprintf(bitrate_str, sizeof(bitrate_str), "%dkbps", g_audio_bit_rate / 1000);
-            if (g_audio_codec_name[0] != '\0') {
-                char upper[32];
-                int ci;
-                for (ci = 0; g_audio_codec_name[ci] && ci < (int)sizeof(upper) - 1; ci++)
-                    upper[ci] = (ci == 0) ? toupper((unsigned char)g_audio_codec_name[ci]) : g_audio_codec_name[ci];
-                upper[ci] = '\0';
-                snprintf(codec_display, sizeof(codec_display), "%s", upper);
-            }
+            info_format_audio_fields(rate_str, sizeof(rate_str),
+                                     depth_str, sizeof(depth_str),
+                                     bitrate_str, sizeof(bitrate_str),
+                                     codec_display, sizeof(codec_display));
 
             mvwprintw(win_playlist, status_line + 1, center_col_x, "%s%s", i18n_get("player.sample_rate"), rate_str);
             mvwprintw(win_playlist, status_line + 2, center_col_x, "%s%s", i18n_get("player.bit_depth"), depth_str);

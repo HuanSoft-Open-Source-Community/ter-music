@@ -225,6 +225,15 @@ void init_default_config(void)
     g_app_config.sort_mode             = SORT_DEFAULT;
     /* 信息显示（CLI `ter-music show` / D-Bus）默认值：
      * 与 config.c 中 xml_get_int 的默认值保持一致 */
+    g_app_config.info_preset           = 0;       /* 全量 */
+    g_app_config.info_fields_mask      = 0x07FF;  /* INFO_FIELD_ALL */
+    g_app_config.info_show_cover       = 1;
+    g_app_config.info_cover_cols       = 16;
+    g_app_config.info_cover_rows       = 8;
+    g_app_config.info_cover_charset    = 0;       /* 盲文 */
+    g_app_config.info_show_progress    = 1;
+    g_app_config.info_progress_style   = 0;       /* 进度条+时间 */
+    g_app_config.info_lyrics_lines     = 2;       /* 当前句+下一句 */
     g_app_config.config_version        = 0;
     g_app_config.remote_connection_count = 0;
     memset(g_app_config.remote_connections, 0, sizeof(g_app_config.remote_connections));
@@ -404,6 +413,15 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_CUE_ENCODING,    cfg->cue_encoding);
 
         /* ── Info display (CLI `ter-music show` / D-Bus) ────────── */
+        SAVE_INT(XML_PREF_INFO_PRESET,         cfg->info_preset);
+        SAVE_INT(XML_PREF_INFO_FIELDS,         cfg->info_fields_mask);
+        SAVE_INT(XML_PREF_INFO_SHOW_COVER,     cfg->info_show_cover);
+        SAVE_INT(XML_PREF_INFO_COVER_COLS,     cfg->info_cover_cols);
+        SAVE_INT(XML_PREF_INFO_COVER_ROWS,     cfg->info_cover_rows);
+        SAVE_INT(XML_PREF_INFO_COVER_CHARSET,  cfg->info_cover_charset);
+        SAVE_INT(XML_PREF_INFO_SHOW_PROGRESS,  cfg->info_show_progress);
+        SAVE_INT(XML_PREF_INFO_PROGRESS_STYLE, cfg->info_progress_style);
+        SAVE_INT(XML_PREF_INFO_LYRICS_LINES,   cfg->info_lyrics_lines);
 #undef SAVE_INT
     }
 
@@ -581,6 +599,15 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
 
         /* ── Info display (config v5)。旧配置缺少这些元素时使用下列默认值，
          *    与 menus.c:init_default_config() 保持一致。 */
+        cfg->info_preset              = xml_get_int(prefs, XML_PREF_INFO_PRESET, 0);
+        cfg->info_fields_mask         = xml_get_int(prefs, XML_PREF_INFO_FIELDS, 0x07FF);
+        cfg->info_show_cover          = xml_get_int(prefs, XML_PREF_INFO_SHOW_COVER, 1);
+        cfg->info_cover_cols          = xml_get_int(prefs, XML_PREF_INFO_COVER_COLS, 16);
+        cfg->info_cover_rows          = xml_get_int(prefs, XML_PREF_INFO_COVER_ROWS, 8);
+        cfg->info_cover_charset       = xml_get_int(prefs, XML_PREF_INFO_COVER_CHARSET, 0);
+        cfg->info_show_progress       = xml_get_int(prefs, XML_PREF_INFO_SHOW_PROGRESS, 1);
+        cfg->info_progress_style      = xml_get_int(prefs, XML_PREF_INFO_PROGRESS_STYLE, 0);
+        cfg->info_lyrics_lines        = xml_get_int(prefs, XML_PREF_INFO_LYRICS_LINES, 2);
     }
 
     /* ── <remote_connections> ───────────────────────────────────── */

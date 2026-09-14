@@ -11,6 +11,8 @@
 #include "ui/menus.h"
 #include "ui/lyrics.h"
 #include "remote/remote.h"
+#include "app/open.h"
+#include "cli/cli.h"
 #include "core/core.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,188 +101,12 @@ void sigterm_handler(int sig) {
     g_should_exit = 1;
 }
 
-static void expand_user_path(const char *input, char *output, size_t output_size) {
-    if (!output || output_size == 0) {
-        return;
-    }
-
-    output[0] = '\0';
-    if (!input || input[0] == '\0') {
-        return;
-    }
-
-    if (input[0] == '~') {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(output, output_size, "%s%s", home, input + 1);
-            return;
-        }
-    }
-
-    snprintf(output, output_size, "%s", input);
-}
-
-static int has_audio_files(const char *path) {
-    DIR *dir = opendir(path);
-    if (!dir) return 0;
-    
-    const char *audio_extensions[] = {
-        ".mp3", ".MP3", ".wav", ".WAV", ".flac", ".FLAC",
-        ".ogg", ".OGG", ".m4a", ".M4A", ".aac", ".AAC",
-        ".wma", ".WMA", ".ape", ".APE", ".opus", ".OPUS", NULL
-    };
-    
-    struct dirent *entry;
-    int found = 0;
-    
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        
-        const char *ext = strrchr(entry->d_name, '.');
-        if (ext) {
-            for (int i = 0; audio_extensions[i] != NULL; i++) {
-                if (strcmp(ext, audio_extensions[i]) == 0) {
-                    found = 1;
-                    break;
-                }
-            }
-        }
-        if (found) break;
-    }
-    
-    closedir(dir);
-    return found;
-}
-
-/* 将物理曲目索引转换为当前播放列表显示所用的行索引：
- * 树形浏览模式 → 可见行索引（自动展开祖先目录使曲目可见）；
- * 排序模式 → 排序后的视觉位置；其余情况 → 物理索引本身。 */
-static void set_selection_for_track(int physical_idx)
-{
-    if (physical_idx < 0) {
-        g_selected_index = 0;
-        return;
-    }
-
-    if (playlist_tree_is_active()) {
-        g_selected_index = playlist_reveal_track(physical_idx);
-        if (g_selected_index < 0) {
-            g_selected_index = 0;
-        }
-        return;
-    }
-
-    if (g_sort_state.active) {
-        g_selected_index = 0;
-        for (int i = 0; i < g_playlist.count; i++) {
-            if (g_sort_state.sorted_indices[i] == physical_idx) {
-                g_selected_index = i;
-                break;
-            }
-        }
-        return;
-    }
-
-    g_selected_index = physical_idx;
-}
-
-static int load_startup_playlist(const char *path, char *final_path, size_t final_path_size,
-                                 int *play_index) {
-    struct stat s;
-    if (!path || path[0] == '\0') {
-        return 0;
-    }
-
-    if (play_index) {
-        *play_index = -1;
-    }
-
-    if (stat(path, &s) != 0) {
-        return 0;
-    }
-
-    if (S_ISREG(s.st_mode)) {
-        // 提取父目录路径
-        char dir_buf[MAX_PATH_LEN];
-        const char *slash = strrchr(path, '/');
-        if (slash && slash > path) {
-            size_t len = (size_t)(slash - path);
-            memcpy(dir_buf, path, len);
-            dir_buf[len] = '\0';
-        } else {
-            snprintf(dir_buf, sizeof(dir_buf), ".");
-        }
-
-        // 加载整个目录以显示同级音乐
-        if (load_playlist(dir_buf) <= 0) {
-            return 0;
-        }
-
-        // 定位被打开的文件
-        int physical_idx = playlist_find_track_index_by_path(path);
-        if (physical_idx < 0) {
-            physical_idx = 0;
-        }
-        if (play_index) {
-            *play_index = physical_idx;
-        }
-        set_selection_for_track(physical_idx);
-
-        snprintf(final_path, final_path_size, "%s", dir_buf);
-        return 1;
-    }
-
-    if (!S_ISDIR(s.st_mode)) {
-        return 0;
-    }
-
-    if (!has_audio_files(path)) {
-        return 0;
-    }
-
-    if (load_playlist(path) <= 0) {
-        return 0;
-    }
-
-    g_selected_index = 0;
-    snprintf(final_path, final_path_size, "%s", path);
-    return 1;
-}
-
-static void clear_saved_playback_session(void) {
-    g_app_config.resume_last_playback = 0;
-    g_app_config.last_played_position = 0;
-    g_app_config.last_played_folder_path[0] = '\0';
-    g_app_config.last_played_track_path[0] = '\0';
-    save_config();
-}
-
-static int find_track_index_by_path(const char *track_path) {
-    return playlist_find_track_index_by_path(track_path);
-}
-
-static int restore_saved_playback_session(void) {
-    if (!g_app_config.resume_last_playback || g_app_config.last_played_track_path[0] == '\0') {
-        return 0;
-    }
-
-    int track_index = find_track_index_by_path(g_app_config.last_played_track_path);
-    if (track_index < 0) {
-        return 0;
-    }
-
-    g_initial_seek_position = g_app_config.last_played_position;
-    set_selection_for_track(track_index);
-    play_audio(track_index);
-    return 1;
-}
-
 static int find_audio_directory_recursive(const char *path, char *found_path, size_t found_path_size, int depth) {
     if (!path || !found_path || found_path_size == 0 || depth > 8) {
         return 0;
     }
 
-    if (has_audio_files(path)) {
+    if (app_dir_has_audio_files(path)) {
         snprintf(found_path, found_path_size, "%s", path);
         return 1;
     }
@@ -317,11 +143,17 @@ static int find_audio_directory_recursive(const char *path, char *found_path, si
 }
 
 static void print_usage(const char *prog_name) {
-    printf("用法：%s [选项]\n\n", prog_name);
-    printf("选项：\n");
+    printf("用法：%s [选项]            进入 TUI 界面\n", prog_name);
+    printf("      %s <命令> [选项]      使用 CLI 模式（播放控制 / 信息显示 / 后台播放）\n\n", prog_name);
+    printf("TUI 选项：\n");
     printf("  -o, --open <path>    启动时打开指定音乐目录、音频文件或远程URL\n");
     printf("  -d, --debug          启用调试日志（输出到 ter-music-debug.log）\n");
     printf("  -h, --help           显示帮助信息\n");
+    printf("\nCLI 命令（用 `%s help` 查看完整列表）：\n", prog_name);
+    printf("  play/pause/resume/toggle/stop/next/prev   基础播放控制\n");
+    printf("  seek/volume/speed/mode                    跳转、音量、倍速、播放模式\n");
+    printf("  show [--json|--watch|--one-line|...]      输出当前播放信息\n");
+    printf("  daemon start|stop|restart|status|reload   后台播放进程管理\n");
     printf("\n");
     printf("远程 URL 示例：\n");
     printf("  %s ftp://user:pass@host/path/to/music\n", prog_name);
@@ -341,16 +173,37 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, sigterm_handler);
     signal(SIGINT, sigterm_handler);
 
+    /* CLI 子命令前置分发：必须早于 isatty 检查、logger_init 与 ncurses 初始化，
+     * 因为 CLI 客户端不需要终端，daemon 运行时也没有终端。 */
+    if (argc > 1 && strcmp(argv[1], "tui") == 0) {
+        argc--;
+        argv++;
+    } else if (argc > 1 && cli_is_command(argv[1])) {
+        return cli_run(argc, argv);
+    }
+
+    /* 友好提示：首个参数既不是已知子命令，也不像路径/URL 且并不存在时，
+     * 多半是命令拼写错误（不改变既有行为，仅追加一行 stderr 提示）。 */
+    if (argc > 1 && argv[1][0] != '-' && argv[1][0] != '\0' &&
+        strchr(argv[1], '/') == NULL && strstr(argv[1], "://") == NULL) {
+        struct stat probe;
+        if (stat(argv[1], &probe) != 0) {
+            fprintf(stderr, "提示：'%s' 既不是已知命令，也不是存在的路径（用 `%s help` 查看命令列表）。\n",
+                    argv[1], argv[0]);
+        }
+    }
+
     char *open_path = NULL;
     int opt;
     struct option long_options[] = {
         {"open", required_argument, 0, 'o'},
         {"help", no_argument, 0, 'h'},
         {"debug", no_argument, 0, 'd'},
+        {"version", no_argument, 0, 'v'},
         {0, 0, 0, 0}
     };
 
-    while ((opt = getopt_long(argc, argv, "o:hd", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "o:hdv", long_options, NULL)) != -1) {
         switch (opt) {
             case 'o':
                 open_path = optarg;
@@ -358,6 +211,9 @@ int main(int argc, char *argv[]) {
             case 'd':
                 g_debug_enabled = 1;
                 break;
+            case 'v':
+                printf("%s %s\n", APP_NAME, APP_VERSION);
+                return 0;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -478,41 +334,26 @@ int main(int argc, char *argv[]) {
             }
         } else {
         log_info("main", "Loading local path from --open: %s", open_path);
-        char expanded_path[MAX_PATH_LEN];
-        expand_user_path(open_path, expanded_path, sizeof(expanded_path));
 
-        struct stat s;
-        if (stat(expanded_path, &s) == 0) {
-            if (S_ISREG(s.st_mode) || S_ISDIR(s.st_mode)) {
-                if (load_startup_playlist(expanded_path, final_path, sizeof(final_path),
-                                          &opened_track_index)) {
-                    log_info("main", "Local path loaded: '%s', final_path='%s'", expanded_path, final_path);
-                    loaded = 1;
-                    if (S_ISREG(s.st_mode)) {
-                        opened_single_file = 1;
-                    }
-                } else {
-                    log_warn("main", "Failed to load local path: '%s'", expanded_path);
-                    const char *error_msg = S_ISREG(s.st_mode)
-                        ? i18n_get("main.warn.cannot_open")
-                        : i18n_get("main.warn.no_playable");
-                    
-                    mvprintw(2, 2, "%s", error_msg);
-                    mvprintw(3, 2, "%s",
-                             i18n_get("main.continue_default"));
-                    refresh();
-                    used_fallback = 1;
-                }
+        AppOpenResult open_result = app_open_path(open_path, final_path, sizeof(final_path),
+                                                  &opened_track_index, &opened_single_file);
+        if (open_result == APP_OPEN_OK) {
+            log_info("main", "Local path loaded: '%s', final_path='%s'", open_path, final_path);
+            loaded = 1;
+        } else {
+            log_warn("main", "Failed to load local path '%s' (result=%d)", open_path,
+                     (int)open_result);
+            const char *error_msg;
+            if (open_result == APP_OPEN_ERR_FILE_LOAD) {
+                error_msg = i18n_get("main.warn.cannot_open");
+                mvprintw(2, 2, "%s", error_msg);
+            } else if (open_result == APP_OPEN_ERR_NO_AUDIO) {
+                error_msg = i18n_get("main.warn.no_playable");
+                mvprintw(2, 2, "%s", error_msg);
             } else {
                 mvprintw(2, 2, i18n_get("main.warn.invalid_path"), open_path);
-                mvprintw(3, 2, "%s", i18n_get("main.continue_default"));
-                refresh();
-                used_fallback = 1;
             }
-        } else {
-            mvprintw(2, 2, i18n_get("main.warn.invalid_path"), open_path);
-            mvprintw(3, 2, "%s",
-                     i18n_get("main.continue_default"));
+            mvprintw(3, 2, "%s", i18n_get("main.continue_default"));
             refresh();
             used_fallback = 1;
         }
@@ -530,7 +371,7 @@ int main(int argc, char *argv[]) {
         }
         attempted_resume_load = 1;
         log_info("main", "Attempting resume load from: '%s'", resume_dir);
-        /* load_startup_playlist() 会先过 has_audio_files()（仅检查直接子文件），
+        /* app_open_path() 会先过 app_dir_has_audio_files()（仅检查直接子文件），
          * 而树根的音频可能全部位于子目录中（正是需要恢复的场景），
          * 因此这里直接使用递归扫描的 load_playlist()。 */
         if (load_playlist(resume_dir) > 0) {
@@ -550,7 +391,7 @@ int main(int argc, char *argv[]) {
 
         if (getcwd(current_dir, sizeof(current_dir)) &&
             find_audio_directory_recursive(current_dir, auto_found_path, sizeof(auto_found_path), 0) &&
-            load_startup_playlist(auto_found_path, final_path, sizeof(final_path), NULL)) {
+            app_open_path(auto_found_path, final_path, sizeof(final_path), NULL, NULL) == APP_OPEN_OK) {
             log_info("main", "Auto-detected music folder: '%s'", auto_found_path);
             loaded = 1;
 
@@ -565,8 +406,8 @@ int main(int argc, char *argv[]) {
     
     if (!loaded && g_app_config.default_startup_path[0] != '\0') {
         log_info("main", "Trying default startup path: '%s'", g_app_config.default_startup_path);
-        if (load_startup_playlist(g_app_config.default_startup_path, final_path, sizeof(final_path),
-                                  NULL)) {
+        if (app_open_path(g_app_config.default_startup_path, final_path, sizeof(final_path),
+                          NULL, NULL) == APP_OPEN_OK) {
             log_info("main", "Loaded from default path: '%s'", g_app_config.default_startup_path);
             loaded = 1;
 
@@ -581,8 +422,8 @@ int main(int argc, char *argv[]) {
     
     if (!loaded && g_app_config.remember_last_path && g_app_config.last_opened_path[0] != '\0') {
         log_info("main", "Trying last opened path: '%s'", g_app_config.last_opened_path);
-        if (load_startup_playlist(g_app_config.last_opened_path, final_path, sizeof(final_path),
-                                  NULL)) {
+        if (app_open_path(g_app_config.last_opened_path, final_path, sizeof(final_path),
+                          NULL, NULL) == APP_OPEN_OK) {
             log_info("main", "Loaded from last opened path");
             loaded = 1;
         }
@@ -600,13 +441,13 @@ int main(int argc, char *argv[]) {
             ((attempted_resume_load && !open_path) ||
              strcmp(final_path, g_app_config.last_played_folder_path) == 0)) {
             log_info("main", "Attempting to resume playback session");
-            resumed_playback = restore_saved_playback_session();
+            resumed_playback = app_resume_saved_playback();
             if (resumed_playback) {
                 log_info("main", "Playback session restored: track idx=%d pos=%d",
                          g_current_play_index, g_app_config.last_played_position);
             } else {
                 log_info("main", "Resume playback failed, clearing saved session");
-                clear_saved_playback_session();
+                app_clear_saved_session();
             }
         }
 
@@ -627,14 +468,14 @@ int main(int argc, char *argv[]) {
             if (auto_idx >= 0) {
                 log_info("main", "Auto-playing track idx=%d", auto_idx);
                 play_audio(auto_idx);
-                set_selection_for_track(auto_idx);
+                app_set_selection_for_track(auto_idx);
             }
         }
         if (attempted_resume_load && !open_path && !resumed_playback) {
-            clear_saved_playback_session();
+            app_clear_saved_session();
         }
     } else if (attempted_resume_load) {
-        clear_saved_playback_session();
+        app_clear_saved_session();
     }
     
     /* 歌词状态由 ui/lyrics.c 持有，核心经钩子推进（注册在 run_event_loop 内亦可，

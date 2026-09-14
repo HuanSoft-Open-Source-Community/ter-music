@@ -17,6 +17,7 @@
 #include "types.h"
 #include "ui/ui.h"
 #include "core/core.h"
+#include "info/info.h"
 #include "i18n/i18n.h"
 #include "ui/dialog.h"
 #include "audio/audio.h"
@@ -1044,6 +1045,7 @@ void cleanup(void)
     endwin();
     audio_backend_shutdown();
     reset_album_cover_cache();
+    info_release_cover_cache();
     remote_cleanup();
 }
 

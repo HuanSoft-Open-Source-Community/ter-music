@@ -21,6 +21,7 @@
 #include "logger/logger.h"
 #include "remote/remote.h"
 #include "config/crypto.h"
+#include "info/info.h"
 #include "playlist/playlist.h"
 #include "playlist/encoding.h"
 #include "i18n/i18n.h"
@@ -52,6 +53,8 @@ static int g_sel_src   = -1;    /* SETTINGS_IDX_* that triggered it */
 static int g_sel_idx   = 0;     /* currently highlighted option index */
 static int g_sel_count = 0;     /* total option count */
 static WINDOW *g_sel_win = NULL; /* popup sub-window */
+static int g_sel_multiselect = 0; /* 1 = 多选模式（信息显示字段） */
+static int g_sel_work_mask = 0;   /* 多选模式下的工作掩码 */
 
 /* Speed globals from audio.c (used by selection menu) */
 extern float g_speed_ratios[];
@@ -102,7 +105,15 @@ static const char *settings_options[] = {
     "settings.opt.eq_2khz",
     "settings.opt.eq_4khz",
     "settings.opt.eq_8khz",
-    "settings.opt.eq_16khz"
+    "settings.opt.eq_16khz",
+    "settings.opt.info_preset",
+    "settings.opt.info_fields",
+    "settings.opt.info_cover",
+    "settings.opt.info_cover_size",
+    "settings.opt.info_cover_charset",
+    "settings.opt.info_progress",
+    "settings.opt.info_progress_style",
+    "settings.opt.info_lyrics"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -144,9 +155,17 @@ static const char *settings_options_ascii[] = {
     "2 kHz",
     "4 kHz",
     "8 kHz",
-    "16 kHz"
+    "16 kHz",
+    "Info Display Preset",
+    "Basic Info Fields",
+    "Show Text Cover",
+    "Cover Size",
+    "Cover Charset",
+    "Show Progress",
+    "Progress Style",
+    "Lyric Lines"
 };
-#define SETTINGS_OPTION_COUNT 40
+#define SETTINGS_OPTION_COUNT 48
 
 enum {
     SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
@@ -189,7 +208,16 @@ enum {
     SETTINGS_IDX_EQ_BAND_7           = 37,  /* 4 kHz */
     SETTINGS_IDX_EQ_BAND_8           = 38,  /* 8 kHz */
     SETTINGS_IDX_EQ_BAND_9           = 39,  /* 16 kHz */
-    SETTINGS_IDX_EQ_PRESET           = 40
+    SETTINGS_IDX_EQ_PRESET           = 40,
+    /* ── 信息显示（CLI `ter-music show` / D-Bus，见 info/info.h） ── */
+    SETTINGS_IDX_INFO_PRESET         = 41,
+    SETTINGS_IDX_INFO_FIELDS         = 42,
+    SETTINGS_IDX_INFO_COVER          = 43,
+    SETTINGS_IDX_INFO_COVER_SIZE     = 44,
+    SETTINGS_IDX_INFO_COVER_CHARSET  = 45,
+    SETTINGS_IDX_INFO_PROGRESS       = 46,
+    SETTINGS_IDX_INFO_PROGRESS_STYLE = 47,
+    SETTINGS_IDX_INFO_LYRICS         = 48
 };
 
 typedef struct {
@@ -251,6 +279,17 @@ static const int settings_eq_option_indices[] = {
     SETTINGS_IDX_EQ_BAND_9
 };
 
+static const int settings_info_option_indices[] = {
+    SETTINGS_IDX_INFO_PRESET,
+    SETTINGS_IDX_INFO_FIELDS,
+    SETTINGS_IDX_INFO_COVER,
+    SETTINGS_IDX_INFO_COVER_SIZE,
+    SETTINGS_IDX_INFO_COVER_CHARSET,
+    SETTINGS_IDX_INFO_PROGRESS,
+    SETTINGS_IDX_INFO_PROGRESS_STYLE,
+    SETTINGS_IDX_INFO_LYRICS
+};
+
 /* Forward declarations for sel menu / re-render helpers */
 static void create_sel_window(void);
 static void close_sel_menu(int apply);
@@ -290,6 +329,9 @@ static SettingsSectionSpec get_settings_section_spec_for_sidebar(int sidebar_idx
         case 6:
             return (SettingsSectionSpec){settings_eq_option_indices,
                 (int)(sizeof(settings_eq_option_indices) / sizeof(settings_eq_option_indices[0]))};
+        case 7:  /* 信息显示（CLI / D-Bus） */
+            return (SettingsSectionSpec){settings_info_option_indices,
+                (int)(sizeof(settings_info_option_indices) / sizeof(settings_info_option_indices[0]))};
         default:
             return (SettingsSectionSpec){NULL, 0};
     }
@@ -343,6 +385,169 @@ static int is_valid_path(const char *path)
     }
     if (path[0] == '~' && strlen(path) > 1 && path[1] != '/') return 0;
     return 1;
+}
+
+/* ============================================================
+ * 信息显示（CLI `ter-music show` / D-Bus）辅助
+ * ============================================================ */
+
+/* 封面尺寸候选（列 x 行）；受 INFO_COVER_COLS/ROWS 约束 */
+static const int k_info_cover_sizes[][2] = {
+    { 4,  2}, { 8,  4}, {12,  6}, {16,  8},
+    {20, 10}, {24, 12}, {30, 15}, {40, 20}
+};
+static const int k_info_cover_size_count =
+    (int)(sizeof(k_info_cover_sizes) / sizeof(k_info_cover_sizes[0]));
+
+static const char *info_preset_label(int preset)
+{
+    switch (preset) {
+        case INFO_PRESET_FULL:    return i18n_get("settings.info.preset.full");
+        case INFO_PRESET_COMPACT: return i18n_get("settings.info.preset.compact");
+        default:                  return i18n_get("settings.info.preset.custom");
+    }
+}
+
+static const char *info_progress_style_label(int style)
+{
+    switch (style) {
+        case INFO_PROGRESS_BAR_TIME:     return i18n_get("settings.info.progress.bar");
+        case INFO_PROGRESS_TIME:         return i18n_get("settings.info.progress.time");
+        case INFO_PROGRESS_PERCENT:      return i18n_get("settings.info.progress.percent");
+        default:                         return i18n_get("settings.info.progress.time_percent");
+    }
+}
+
+static const char *info_charset_label(int charset)
+{
+    return (charset == INFO_COVER_ASCII)
+        ? i18n_get("settings.info.charset.ascii")
+        : i18n_get("settings.info.charset.braille");
+}
+
+static const char *info_lyrics_label(int lines)
+{
+    switch (lines) {
+        case INFO_LYRICS_OFF:     return i18n_get("settings.info.lyrics.none");
+        case INFO_LYRICS_CURRENT: return i18n_get("settings.info.lyrics.current");
+        default:                  return i18n_get("settings.info.lyrics.current_next");
+    }
+}
+
+/* 已启用字段的名称列表（用于设置页摘要显示） */
+static void info_fields_summary(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    size_t pos = 0;
+    for (int i = 0; i < info_field_count(); i++) {
+        const InfoFieldDef *field = info_field_at(i);
+        if (!field || (g_app_config.info_fields_mask & field->bit) == 0) {
+            continue;
+        }
+        int written = snprintf(out + pos, out_size - pos, "%s%s",
+                               pos == 0 ? "" : ",", i18n_get(field->label_key));
+        if (written < 0 || (size_t)written >= out_size - pos) {
+            break;
+        }
+        pos += (size_t)written;
+    }
+
+    if (pos == 0) {
+        snprintf(out, out_size, "%s", i18n_get("general.none"));
+    }
+}
+
+/* 应用预设：只决定“显示哪些内容”，封面尺寸/字符集属于用户偏好 */
+static void info_apply_preset_to_config(int preset)
+{
+    g_app_config.info_preset = preset;
+    if (preset == INFO_PRESET_FULL) {
+        g_app_config.info_fields_mask = INFO_FIELD_ALL;
+        g_app_config.info_show_cover = 1;
+        g_app_config.info_show_progress = 1;
+        g_app_config.info_progress_style = INFO_PROGRESS_BAR_TIME;
+        g_app_config.info_lyrics_lines = INFO_LYRICS_BOTH;
+    } else if (preset == INFO_PRESET_COMPACT) {
+        g_app_config.info_fields_mask = INFO_FIELD_COMPACT;
+        g_app_config.info_show_cover = 0;
+        g_app_config.info_show_progress = 1;
+        g_app_config.info_progress_style = INFO_PROGRESS_TIME_PERCENT;
+        g_app_config.info_lyrics_lines = INFO_LYRICS_CURRENT;
+    }
+}
+
+/* 分项被修改后预设不再是全量/精简，切到自定义 */
+static void info_mark_custom(void)
+{
+    if (g_app_config.info_preset != INFO_PRESET_CUSTOM) {
+        g_app_config.info_preset = INFO_PRESET_CUSTOM;
+    }
+}
+
+/* 选择菜单中“信息显示”相关选项的显示文本（create_sel_window 与
+ * draw_sel_menu 共用，避免两份重复的 opts[] 构建代码） */
+static void info_sel_option_text(int src, int index, char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    switch (src) {
+        case SETTINGS_IDX_INFO_PRESET:
+            if (index >= 0 && index < INFO_PRESET_COUNT)
+                snprintf(out, out_size, "%s", info_preset_label(index));
+            break;
+        case SETTINGS_IDX_INFO_FIELDS: {
+            const InfoFieldDef *field = info_field_at(index);
+            if (field)
+                snprintf(out, out_size, "[%c] %s",
+                         (g_sel_work_mask & field->bit) ? 'x' : ' ',
+                         i18n_get(field->label_key));
+            break;
+        }
+        case SETTINGS_IDX_INFO_COVER_SIZE:
+            if (index >= 0 && index < k_info_cover_size_count)
+                snprintf(out, out_size, "%dx%d",
+                         k_info_cover_sizes[index][0], k_info_cover_sizes[index][1]);
+            break;
+        case SETTINGS_IDX_INFO_COVER_CHARSET:
+            if (index >= 0 && index < INFO_COVER_CHARSET_COUNT)
+                snprintf(out, out_size, "%s", index == INFO_COVER_ASCII
+                         ? i18n_get("settings.info.charset.ascii")
+                         : i18n_get("settings.info.charset.braille"));
+            break;
+        case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+            if (index >= 0 && index < INFO_PROGRESS_STYLE_COUNT)
+                snprintf(out, out_size, "%s", info_progress_style_label(index));
+            break;
+        case SETTINGS_IDX_INFO_LYRICS:
+            if (index >= 0 && index <= INFO_LYRICS_MAX)
+                snprintf(out, out_size, "%s", info_lyrics_label(index));
+            break;
+        default:
+            break;
+    }
+}
+
+/* 当前封面尺寸在候选表中的索引（不匹配时取最接近的一档） */
+static int info_cover_size_index(void)
+{
+    int best = 0;
+    int best_distance = 1 << 30;
+    for (int i = 0; i < k_info_cover_size_count; i++) {
+        int distance = abs(g_app_config.info_cover_cols - k_info_cover_sizes[i][0]) +
+                       abs(g_app_config.info_cover_rows - k_info_cover_sizes[i][1]);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = i;
+        }
+    }
+    return best;
 }
 
 static void format_settings_option_line(int option_index, char *line, size_t line_size)
@@ -483,6 +688,39 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
                 snprintf(line, line_size, "%s%s%d dB",
                          i18n_get(current_settings_options[option_index]), separator, gain);
         }
+    } else if (option_index == SETTINGS_IDX_INFO_PRESET) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 info_preset_label(g_app_config.info_preset));
+    } else if (option_index == SETTINGS_IDX_INFO_FIELDS) {
+        char summary[192];
+        info_fields_summary(summary, sizeof(summary));
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator, summary);
+    } else if (option_index == SETTINGS_IDX_INFO_COVER) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 menu_bool_text(g_app_config.info_show_cover));
+    } else if (option_index == SETTINGS_IDX_INFO_COVER_SIZE) {
+        snprintf(line, line_size, "%s%s%dx%d",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 g_app_config.info_cover_cols, g_app_config.info_cover_rows);
+    } else if (option_index == SETTINGS_IDX_INFO_COVER_CHARSET) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 info_charset_label(g_app_config.info_cover_charset));
+    } else if (option_index == SETTINGS_IDX_INFO_PROGRESS) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 menu_bool_text(g_app_config.info_show_progress));
+    } else if (option_index == SETTINGS_IDX_INFO_PROGRESS_STYLE) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 info_progress_style_label(g_app_config.info_progress_style));
+    } else if (option_index == SETTINGS_IDX_INFO_LYRICS) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 info_lyrics_label(g_app_config.info_lyrics_lines));
     } else {
         snprintf(line, line_size, "%s", i18n_get(current_settings_options[option_index]));
     }
@@ -696,6 +934,75 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             show_status_message(msg);
             break;
         }
+        case SETTINGS_IDX_INFO_PRESET:
+            /* 左右键在 全量/精简/自定义 间循环 */
+            if (delta < 0) {
+                g_app_config.info_preset =
+                    (g_app_config.info_preset - 1 + INFO_PRESET_COUNT) % INFO_PRESET_COUNT;
+            } else {
+                g_app_config.info_preset =
+                    (g_app_config.info_preset + 1) % INFO_PRESET_COUNT;
+            }
+            info_apply_preset_to_config(g_app_config.info_preset);
+            save_config();
+            show_status_message(i18n_get("settings.info.saved"));
+            break;
+        case SETTINGS_IDX_INFO_COVER:
+            g_app_config.info_show_cover = !g_app_config.info_show_cover;
+            info_mark_custom();
+            save_config();
+            break;
+        case SETTINGS_IDX_INFO_PROGRESS:
+            g_app_config.info_show_progress = !g_app_config.info_show_progress;
+            info_mark_custom();
+            save_config();
+            break;
+        case SETTINGS_IDX_INFO_COVER_SIZE: {
+            int index = info_cover_size_index();
+            if (delta <= 0) {
+                index = (index + k_info_cover_size_count - 1) % k_info_cover_size_count;
+            } else {
+                index = (index + 1) % k_info_cover_size_count;
+            }
+            g_app_config.info_cover_cols = k_info_cover_sizes[index][0];
+            g_app_config.info_cover_rows = k_info_cover_sizes[index][1];
+            info_mark_custom();
+            save_config();
+            break;
+        }
+        case SETTINGS_IDX_INFO_COVER_CHARSET:
+            if (delta < 0) {
+                g_app_config.info_cover_charset =
+                    (g_app_config.info_cover_charset - 1 + INFO_COVER_CHARSET_COUNT) % INFO_COVER_CHARSET_COUNT;
+            } else {
+                g_app_config.info_cover_charset =
+                    (g_app_config.info_cover_charset + 1) % INFO_COVER_CHARSET_COUNT;
+            }
+            info_mark_custom();
+            save_config();
+            break;
+        case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+            if (delta < 0) {
+                g_app_config.info_progress_style =
+                    (g_app_config.info_progress_style - 1 + INFO_PROGRESS_STYLE_COUNT) % INFO_PROGRESS_STYLE_COUNT;
+            } else {
+                g_app_config.info_progress_style =
+                    (g_app_config.info_progress_style + 1) % INFO_PROGRESS_STYLE_COUNT;
+            }
+            info_mark_custom();
+            save_config();
+            break;
+        case SETTINGS_IDX_INFO_LYRICS:
+            if (delta < 0) {
+                g_app_config.info_lyrics_lines =
+                    (g_app_config.info_lyrics_lines - 1 + (INFO_LYRICS_MAX + 1)) % (INFO_LYRICS_MAX + 1);
+            } else {
+                g_app_config.info_lyrics_lines =
+                    (g_app_config.info_lyrics_lines + 1) % (INFO_LYRICS_MAX + 1);
+            }
+            info_mark_custom();
+            save_config();
+            break;
         case SETTINGS_IDX_AUDIO_BACKEND: {
             int options[] = {AUDIO_BACKEND_AUTO, AUDIO_BACKEND_PIPEWIRE,
                              AUDIO_BACKEND_PULSE, AUDIO_BACKEND_ALSA};
@@ -881,6 +1188,50 @@ static void close_sel_menu(int apply)
                 break;
             }
 
+            case SETTINGS_IDX_INFO_PRESET:
+                info_apply_preset_to_config(g_sel_idx);
+                save_config();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
+            case SETTINGS_IDX_INFO_FIELDS:
+                g_app_config.info_fields_mask = g_sel_work_mask & INFO_FIELD_ALL;
+                info_mark_custom();
+                save_config();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
+            case SETTINGS_IDX_INFO_COVER_SIZE:
+                if (g_sel_idx >= 0 && g_sel_idx < k_info_cover_size_count) {
+                    g_app_config.info_cover_cols = k_info_cover_sizes[g_sel_idx][0];
+                    g_app_config.info_cover_rows = k_info_cover_sizes[g_sel_idx][1];
+                }
+                info_mark_custom();
+                save_config();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
+            case SETTINGS_IDX_INFO_COVER_CHARSET:
+                g_app_config.info_cover_charset = g_sel_idx;
+                info_mark_custom();
+                save_config();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
+            case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+                g_app_config.info_progress_style = g_sel_idx;
+                info_mark_custom();
+                save_config();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
+            case SETTINGS_IDX_INFO_LYRICS:
+                g_app_config.info_lyrics_lines = g_sel_idx;
+                info_mark_custom();
+                save_config();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
             case SETTINGS_IDX_EQ_PRESET:
                 eq_apply_preset(g_sel_idx);
                 /* Sync config with new EQ state */
@@ -927,6 +1278,7 @@ static void close_sel_menu(int apply)
 
     g_sel_active = 0;
     g_sel_src = -1;
+    g_sel_multiselect = 0;
 }
 
 /* ============================================================
@@ -938,6 +1290,9 @@ static void open_sel_menu(int option_index)
     if (g_sel_active) close_sel_menu(0);
 
     int count = 0, cur = 0;
+
+    g_sel_multiselect = 0;
+    g_sel_work_mask = g_app_config.info_fields_mask;
 
     switch (option_index) {
         case SETTINGS_IDX_DEFAULT_PLAY_MODE:
@@ -977,6 +1332,31 @@ static void open_sel_menu(int option_index)
         case SETTINGS_IDX_LYRICS_ALIGNMENT:
             count = 3;
             cur   = g_app_config.lyrics_alignment;
+            break;
+        case SETTINGS_IDX_INFO_PRESET:
+            count = INFO_PRESET_COUNT;
+            cur   = g_app_config.info_preset;
+            break;
+        case SETTINGS_IDX_INFO_FIELDS:
+            count = info_field_count();
+            cur   = 0;
+            g_sel_multiselect = 1;
+            break;
+        case SETTINGS_IDX_INFO_COVER_SIZE:
+            count = k_info_cover_size_count;
+            cur   = info_cover_size_index();
+            break;
+        case SETTINGS_IDX_INFO_COVER_CHARSET:
+            count = INFO_COVER_CHARSET_COUNT;
+            cur   = g_app_config.info_cover_charset;
+            break;
+        case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+            count = INFO_PROGRESS_STYLE_COUNT;
+            cur   = g_app_config.info_progress_style;
+            break;
+        case SETTINGS_IDX_INFO_LYRICS:
+            count = INFO_LYRICS_MAX + 1;
+            cur   = g_app_config.info_lyrics_lines;
             break;
         case SETTINGS_IDX_LATENCY: {
             int lat[] = {20,40,60,80,100,120,150,200,250};
@@ -1113,6 +1493,14 @@ static void create_sel_window(void)
                     snprintf(opts[i], 48, "%s", i18n_get(preset_keys[i]));
                 break;
             }
+            case SETTINGS_IDX_INFO_PRESET:
+            case SETTINGS_IDX_INFO_FIELDS:
+            case SETTINGS_IDX_INFO_COVER_SIZE:
+            case SETTINGS_IDX_INFO_COVER_CHARSET:
+            case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+            case SETTINGS_IDX_INFO_LYRICS:
+                info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
+                break;
             }
             default:
                 if (src >= 0 && src < 12) {
@@ -1249,6 +1637,14 @@ static void draw_sel_menu(void)
                     snprintf(opts[i], 48, "%s", i18n_get(preset_keys[i]));
                 break;
             }
+            case SETTINGS_IDX_INFO_PRESET:
+            case SETTINGS_IDX_INFO_FIELDS:
+            case SETTINGS_IDX_INFO_COVER_SIZE:
+            case SETTINGS_IDX_INFO_COVER_CHARSET:
+            case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+            case SETTINGS_IDX_INFO_LYRICS:
+                info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
+                break;
                 if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
             }
             default:
@@ -1306,6 +1702,15 @@ static void draw_sel_menu(void)
         case SETTINGS_IDX_LATENCY:           title = i18n_get("popup.latency"); break;
         case SETTINGS_IDX_CUE_ENCODING:      title = i18n_get("popup.cue_enc"); break;
         case SETTINGS_IDX_EQ_PRESET:        title = i18n_get("popup.eq_preset"); break;
+        case SETTINGS_IDX_INFO_PRESET:
+        case SETTINGS_IDX_INFO_FIELDS:
+        case SETTINGS_IDX_INFO_COVER_SIZE:
+        case SETTINGS_IDX_INFO_COVER_CHARSET:
+        case SETTINGS_IDX_INFO_PROGRESS_STYLE:
+        case SETTINGS_IDX_INFO_LYRICS:
+            if (src >= 0 && src < SETTINGS_OPTION_COUNT)
+                title = i18n_get(settings_options[src]);
+            break;
         default:
             if (src >= 0 && src < 12)
                 title = i18n_get("popup.color");
@@ -1363,8 +1768,42 @@ static int handle_sel_input(int ch)
         case KEY_DOWN:
             if (g_sel_idx < g_sel_count - 1) { g_sel_idx++; draw_sel_menu(); refresh(); }
             return 1;
+        case 'a':
+        case 'A':
+            if (g_sel_multiselect) {
+                g_sel_work_mask = INFO_FIELD_ALL;
+                draw_sel_menu();
+                refresh();
+                return 1;
+            }
+            return 0;
+        case 'n':
+        case 'N':
+            if (g_sel_multiselect) {
+                g_sel_work_mask = 0;
+                draw_sel_menu();
+                refresh();
+                return 1;
+            }
+            return 0;
         case ' ':
+            if (g_sel_multiselect) {
+                const InfoFieldDef *field = info_field_at(g_sel_idx);
+                if (field) {
+                    g_sel_work_mask ^= field->bit;
+                    draw_sel_menu();
+                    refresh();
+                }
+                return 1;
+            }
+            /* FALLTHROUGH：单选菜单中空格等同回车 */
+            /* fall through */
         case 10:
+            if (g_sel_multiselect) {
+                close_sel_menu(1);
+                rerender_settings_view();
+                return 1;
+            }
             /* Custom color slot: prompt for a numeric value */
             if (g_sel_src >= 0 && g_sel_src < 12 &&
                 g_sel_idx == g_sel_count - 1) {
@@ -1430,6 +1869,8 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_SHOW_ALBUM_COVER ||
         g_settings_current_option == SETTINGS_IDX_SEAMLESS_PRELOAD ||
         g_settings_current_option == SETTINGS_IDX_ADVANCED_PLAY_MODES ||
+        g_settings_current_option == SETTINGS_IDX_INFO_COVER ||
+        g_settings_current_option == SETTINGS_IDX_INFO_PROGRESS ||
         g_settings_current_option == SETTINGS_IDX_EQ_ENABLED) {
         adjust_or_toggle_settings_option(g_settings_current_option, 0);
         return;
@@ -1442,7 +1883,13 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_LYRICS_ALIGNMENT ||
         g_settings_current_option == SETTINGS_IDX_AUDIO_BACKEND ||
         g_settings_current_option == SETTINGS_IDX_SORT_MODE ||
-        g_settings_current_option == SETTINGS_IDX_CUE_ENCODING) {
+        g_settings_current_option == SETTINGS_IDX_CUE_ENCODING ||
+        g_settings_current_option == SETTINGS_IDX_INFO_PRESET ||
+        g_settings_current_option == SETTINGS_IDX_INFO_FIELDS ||
+        g_settings_current_option == SETTINGS_IDX_INFO_COVER_SIZE ||
+        g_settings_current_option == SETTINGS_IDX_INFO_COVER_CHARSET ||
+        g_settings_current_option == SETTINGS_IDX_INFO_PROGRESS_STYLE ||
+        g_settings_current_option == SETTINGS_IDX_INFO_LYRICS) {
         open_sel_menu(g_settings_current_option);
         return;
     }
@@ -2295,6 +2742,14 @@ void render_settings_content(void)
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
         render_eq_visual();
         attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    } else if (g_menu_selected_idx == 7) {  /* 信息显示（CLI / D-Bus） */
+        mvprintw(start_y, content_start_x, "%s",
+                 i18n_get("settings.info.hint"));
+        start_y += 2;
+        render_settings_option_group(start_y, content_start_x, max_y, spec);
+        start_y += spec.count + 1;
+        mvprintw(start_y, content_start_x, "%s",
+                 i18n_get("settings.info.fields_hint"));
     } else {
         mvprintw(start_y, content_start_x, "%s",
                  i18n_get("settings.hotkeys.enter_return"));

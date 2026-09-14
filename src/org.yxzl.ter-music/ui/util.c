@@ -113,9 +113,10 @@ const char *settings_sidebar_items[] = {
     "sidebar.settings.hotkeys",
     "sidebar.settings.remote_devices",
     "sidebar.settings.equalizer",
+    "sidebar.settings.info_display",
     "general.back"
 };
-const int SETTINGS_ITEM_COUNT = 8;
+const int SETTINGS_ITEM_COUNT = 9;
 
 const char *history_sidebar_items[] = {
     "sidebar.history.folder_history",

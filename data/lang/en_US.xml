@@ -29,6 +29,7 @@
   <string key="sidebar.settings.hotkeys">Hotkeys</string>
   <string key="sidebar.settings.remote_devices">Remote Devices</string>
   <string key="sidebar.settings.equalizer">Equalizer</string>
+  <string key="sidebar.settings.info_display">Info Display</string>
 
   <string key="sidebar.history.folder_history">Folder History</string>
   <string key="sidebar.history.clear_history">Clear History</string>
@@ -121,6 +122,43 @@
   <string key="settings.opt.audio_backend">Audio Backend</string>
   <string key="settings.opt.sort_mode">Sort Mode</string>
   <string key="settings.opt.cue_encoding">CUE Encoding</string>
+
+  <!-- ===== Info display (CLI / D-Bus) ===== -->
+  <string key="settings.opt.info_preset">Info Display Preset</string>
+  <string key="settings.opt.info_fields">Basic Info Fields</string>
+  <string key="settings.opt.info_cover">Show Text Cover</string>
+  <string key="settings.opt.info_cover_size">Cover Size</string>
+  <string key="settings.opt.info_cover_charset">Cover Charset</string>
+  <string key="settings.opt.info_progress">Show Progress</string>
+  <string key="settings.opt.info_progress_style">Progress Style</string>
+  <string key="settings.opt.info_lyrics">Lyric Lines</string>
+  <string key="settings.info.hint">Info display: ↑/↓ select, ENTER to expand, ←/TAB back; this section affects only `ter-music show` and D-Bus output</string>
+  <string key="settings.info.fields_hint">Space/Enter toggles a field, a = all, n = none, Enter applies, ESC cancels</string>
+  <string key="settings.info.saved">Info display settings saved</string>
+  <string key="settings.info.preset.full">Full</string>
+  <string key="settings.info.preset.compact">Compact</string>
+  <string key="settings.info.preset.custom">Custom</string>
+  <string key="settings.info.progress.bar">Bar + Time</string>
+  <string key="settings.info.progress.time">Time Only</string>
+  <string key="settings.info.progress.percent">Percent Only</string>
+  <string key="settings.info.progress.time_percent">Time + Percent</string>
+  <string key="settings.info.charset.braille">Braille</string>
+  <string key="settings.info.charset.ascii">ASCII</string>
+  <string key="settings.info.lyrics.none">Off</string>
+  <string key="settings.info.lyrics.current">Current Only</string>
+  <string key="settings.info.lyrics.current_next">Current + Next</string>
+  <string key="settings.info.fields.state">State</string>
+  <string key="settings.info.fields.mode">Mode</string>
+  <string key="settings.info.fields.index">Number</string>
+  <string key="settings.info.fields.title">Title</string>
+  <string key="settings.info.fields.artist">Artist</string>
+  <string key="settings.info.fields.album">Album</string>
+  <string key="settings.info.fields.format">Format</string>
+  <string key="settings.info.fields.path">Path</string>
+  <string key="settings.info.fields.volume">Volume</string>
+  <string key="settings.info.fields.speed">Speed</string>
+  <string key="settings.info.fields.queue">Queue Position</string>
+
   <string key="settings.opt.auto_play">Auto Play</string>
   <string key="settings.opt.remember_path">Remember Path</string>
   <string key="settings.opt.clear_history">Clear History on Start</string>
@@ -245,6 +283,14 @@
   <string key="player.volume_fmt">Volume: %d%%</string>
   <string key="player.speed_fmt">Speed</string>
   <string key="player.queue_label">Queue</string>
+  <string key="info.field.index">Number: </string>
+  <string key="info.field.queue">Queue: </string>
+  <string key="info.field.path">Path: </string>
+  <string key="info.field.volume">Volume: </string>
+  <string key="info.field.speed">Speed: </string>
+  <string key="info.field.format">Format: </string>
+  <string key="info.lyrics.current">Now: </string>
+  <string key="info.lyrics.next">Next: </string>
 
   <!-- ===== Playlist view ===== -->
   <string key="playlist.empty">Playlist is empty.</string>

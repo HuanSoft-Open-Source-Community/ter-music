@@ -167,7 +167,7 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 4
+#define CONFIG_CURRENT_VERSION 5   /* 与 config/schema.h 保持同步 */
 
 /* ── Lyrics source preference ── */
 #define LYRICS_SOURCE_AUTO     0   /* default: embedded first, then external */
@@ -319,6 +319,17 @@ typedef struct {
     int eq_enabled;              /* 0/1 — equaliser master switch */
     int eq_preamp;               /* pre-amp gain in dB, -12..12 */
     int eq_band_gains[EQ_BAND_COUNT]; /* per-band gain in dB, -12..12 */
+
+    /* ── CLI / D-Bus 信息显示（config v5，常量见 info/info.h） ── */
+    int info_preset;             /* 0=全量 1=精简 2=自定义 */
+    int info_fields_mask;        /* INFO_FIELD_* 位掩码 */
+    int info_show_cover;         /* 0/1 字符封面 */
+    int info_cover_cols;         /* 封面列数 4..40 */
+    int info_cover_rows;         /* 封面行数 2..20 */
+    int info_cover_charset;      /* 0=盲文 1=ASCII */
+    int info_show_progress;      /* 0/1 进度行 */
+    int info_progress_style;     /* 0=bar 1=time 2=percent 3=time+percent */
+    int info_lyrics_lines;       /* 0=关 1=当前句 2=当前句+下一句 */
 } AppConfig;
 
 typedef struct {

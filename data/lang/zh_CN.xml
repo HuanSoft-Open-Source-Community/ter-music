@@ -29,6 +29,7 @@
   <string key="sidebar.settings.hotkeys">快捷键</string>
   <string key="sidebar.settings.remote_devices">远程设备</string>
   <string key="sidebar.settings.equalizer">均衡器</string>
+  <string key="sidebar.settings.info_display">信息显示</string>
 
   <string key="sidebar.history.folder_history">目录历史</string>
   <string key="sidebar.history.clear_history">清空历史</string>
@@ -121,6 +122,43 @@
   <string key="settings.opt.audio_backend">音频后端</string>
   <string key="settings.opt.sort_mode">排序方式</string>
   <string key="settings.opt.cue_encoding">CUE编码</string>
+
+  <!-- ===== Info display (CLI / D-Bus) ===== -->
+  <string key="settings.opt.info_preset">信息显示预设</string>
+  <string key="settings.opt.info_fields">基本信息字段</string>
+  <string key="settings.opt.info_cover">显示字符封面</string>
+  <string key="settings.opt.info_cover_size">封面尺寸</string>
+  <string key="settings.opt.info_cover_charset">封面字符集</string>
+  <string key="settings.opt.info_progress">显示进度</string>
+  <string key="settings.opt.info_progress_style">进度样式</string>
+  <string key="settings.opt.info_lyrics">歌词行数</string>
+  <string key="settings.info.hint">信息显示：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单；本节只影响 ter-music show 与 D-Bus 输出</string>
+  <string key="settings.info.fields_hint">空格/回车切换字段，a 全选，n 清空，回车完成，ESC 取消</string>
+  <string key="settings.info.saved">信息显示设置已保存</string>
+  <string key="settings.info.preset.full">全量</string>
+  <string key="settings.info.preset.compact">精简</string>
+  <string key="settings.info.preset.custom">自定义</string>
+  <string key="settings.info.progress.bar">进度条+时间</string>
+  <string key="settings.info.progress.time">仅时间</string>
+  <string key="settings.info.progress.percent">仅百分比</string>
+  <string key="settings.info.progress.time_percent">时间+百分比</string>
+  <string key="settings.info.charset.braille">盲文</string>
+  <string key="settings.info.charset.ascii">ASCII</string>
+  <string key="settings.info.lyrics.none">关闭</string>
+  <string key="settings.info.lyrics.current">仅当前句</string>
+  <string key="settings.info.lyrics.current_next">当前句+下一句</string>
+  <string key="settings.info.fields.state">状态</string>
+  <string key="settings.info.fields.mode">模式</string>
+  <string key="settings.info.fields.index">序号</string>
+  <string key="settings.info.fields.title">标题</string>
+  <string key="settings.info.fields.artist">艺术家</string>
+  <string key="settings.info.fields.album">专辑</string>
+  <string key="settings.info.fields.format">格式</string>
+  <string key="settings.info.fields.path">路径</string>
+  <string key="settings.info.fields.volume">音量</string>
+  <string key="settings.info.fields.speed">倍速</string>
+  <string key="settings.info.fields.queue">队列位置</string>
+
   <string key="settings.opt.auto_play">自动播放</string>
   <string key="settings.opt.remember_path">记住路径</string>
   <string key="settings.opt.clear_history">启动时清空历史</string>
@@ -245,6 +283,14 @@
   <string key="player.volume_fmt">音量：%d%%</string>
   <string key="player.speed_fmt">倍速</string>
   <string key="player.queue_label">队列</string>
+  <string key="info.field.index">序号：</string>
+  <string key="info.field.queue">队列：</string>
+  <string key="info.field.path">路径：</string>
+  <string key="info.field.volume">音量：</string>
+  <string key="info.field.speed">倍速：</string>
+  <string key="info.field.format">格式：</string>
+  <string key="info.lyrics.current">当前：</string>
+  <string key="info.lyrics.next">下一：</string>
 
   <!-- ===== Playlist view ===== -->
   <string key="playlist.empty">播放列表为空。</string>

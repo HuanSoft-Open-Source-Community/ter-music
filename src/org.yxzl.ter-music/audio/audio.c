@@ -295,6 +295,21 @@ int get_volume_percent(void)
     return volume;
 }
 
+void audio_set_initial_seek_position(int seconds)
+{
+    g_initial_seek_position = seconds > 0 ? seconds : 0;
+}
+
+int audio_get_position_seconds(void)
+{
+    return g_current_position > 0 ? g_current_position : 0;
+}
+
+int audio_get_duration_seconds(void)
+{
+    return g_total_duration > 0 ? g_total_duration : 0;
+}
+
 void set_volume_percent(int volume)
 {
     int clamped = clamp_volume_percent(volume);
