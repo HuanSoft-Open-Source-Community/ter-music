@@ -11,6 +11,7 @@
 #include "playlist/playlist.h"
 #include "ui/ui.h"
 #include "i18n/i18n.h"
+#include "config/config.h"   /* ensure_config_dir_exists / get_config_dir */
 #include "ui/menus.h"
 #include "logger/logger.h"
 #include <stdio.h>

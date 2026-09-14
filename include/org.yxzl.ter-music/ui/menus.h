@@ -41,10 +41,8 @@ int remove_from_favorites(int index);
 void add_dir_history_entry(const char *path);
 void clear_dir_history(void);
 
-void load_config(void);
-void save_config(void);
-void init_default_config(void);
-void reload_config(void);
+/* 配置读写（load/save/defaults/路径）已迁至 config/config.h；
+ * 配置重载流程属核心职责（core_tick），界面只提供配色/刷新回调。 */
 
 int create_user_playlist(const char *name);
 int delete_user_playlist(int index);
@@ -52,8 +50,7 @@ int add_track_to_playlist(int playlist_idx, Track *track);
 int remove_track_from_playlist(int playlist_idx, int track_idx);
 int rename_user_playlist(int index, const char *new_name);
 
-void ensure_config_dir_exists(void);
-const char *get_config_dir(void);
+/* ensure_config_dir_exists() / get_config_dir() 已迁至 config/config.h */
 
 /* JSON parser helpers — used by config_migration.c for v1→v2 config upgrade only */
 char* extract_json_string(const char *json, const char *key, char *output, size_t output_size);

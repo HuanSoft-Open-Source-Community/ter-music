@@ -16,6 +16,7 @@
 
 #include "types.h"
 #include "ui/ui.h"
+#include "core/core.h"
 #include "i18n/i18n.h"
 #include "ui/dialog.h"
 #include "audio/audio.h"
@@ -65,8 +66,6 @@ extern int g_playlist_tab_mode;
 extern int g_queue_selected_index;
 extern int g_saved_browser_index;
 
-/* audio backend shutdown (defined in audio.c) */
-void audio_backend_shutdown(void);
 
 uint64_t get_ui_time_ms(void) {
     struct timespec ts;
@@ -127,23 +126,13 @@ static const int konami_expected[KONAMI_SEQ_LENGTH] = {
  * Locale / UTF-8 helpers
  * ============================================================ */
 
+/* ensure_utf8_locale() 见 ui/utf8.c（公开给非 TUI 模块复用） */
+
 static int locale_uses_utf8(void)
 {
     const char *codeset = nl_langinfo(CODESET);
     if (!codeset) return 0;
     return strcasecmp(codeset, "UTF-8") == 0 || strcasecmp(codeset, "UTF8") == 0;
-}
-
-static void ensure_utf8_locale(void)
-{
-    const char *fallbacks[] = {"C.UTF-8", "zh_CN.UTF-8", "en_US.UTF-8", NULL};
-    setlocale(LC_ALL, "");
-    if (locale_uses_utf8()) return;
-    for (int i = 0; fallbacks[i] != NULL; i++) {
-        if (setlocale(LC_ALL, fallbacks[i]) && locale_uses_utf8()) return;
-    }
-
-    setlocale(LC_CTYPE, "");
 }
 
 static int locale_supports_cjk_width(void)
@@ -279,6 +268,15 @@ void init_ncurses(void)
  * Event loop
  * ============================================================ */
 
+/* 配置重载后的界面侧处理：核心已应用配置，这里只重刷配色与脏标记。
+ * 与“状态消息”监听同构，均由核心在重载路径回调。 */
+static void ui_on_config_reloaded(void)
+{
+    log_info("ui", "Applying UI-side config reload (theme + panel refresh)");
+    apply_color_theme();
+    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+}
+
 void run_event_loop(void)
 {
     extern volatile sig_atomic_t g_should_exit;
@@ -295,16 +293,17 @@ void run_event_loop(void)
     uint64_t esc_pending_time = 0;
     static uint64_t last_rainbow_update_ms = 0;
 
-    while (1) {
-        reap_finished_playback_thread();
-        process_pending_playback_action();
-        process_pending_ui_refresh();
-        media_session_tick();
+    /* 歌词状态由本模块持有，核心经钩子调用其推进函数 */
+    core_set_lyrics_tick(update_lyrics_display);
+    /* 状态消息：核心推送时同步到界面状态栏 */
+    core_set_status_listener(show_status_message);
+    /* 配置重载：核心应用后由界面重刷配色与内容 */
+    core_set_config_listener(ui_on_config_reloaded);
 
-        if (g_config_reload_requested) {
-            g_config_reload_requested = 0;
-            reload_config();
-        }
+    while (1) {
+        /* 核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */
+        core_tick();
+        process_pending_ui_refresh();
 
         /* 响应终端关闭、SIGTERM/SIGINT 等退出信号 */
         if (g_should_exit) {

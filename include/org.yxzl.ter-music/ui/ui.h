@@ -2,6 +2,7 @@
 #define UI_H
 
 #include "types.h"
+#include "ui/utf8.h"
 #include <ncursesw/ncurses.h>
 
 /* ── Extern globals ── */
@@ -58,8 +59,8 @@ void update_progress_bar(void);
 void update_controls_status(const char *msg);
 void request_ui_refresh(int dirty_mask);
 void process_pending_ui_refresh(void);
-void reap_finished_playback_thread(void);
-void process_pending_playback_action(void);
+/* reap_finished_playback_thread() / process_pending_playback_action() 属音频层，
+ * 声明已移至 audio/audio.h */
 void reset_visualizer_state(void);
 void push_visualizer_samples(const int32_t *samples, int frame_count, int channels);
 void get_visualizer_snapshot(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms);
@@ -96,10 +97,6 @@ int  get_control_index_from_window_point(int window_y, int window_x);
 int  get_lyric_index_from_window_row(int window_y, int *lyric_index, double *timestamp);
 int  get_menu_hint_fkey_from_column(int screen_x);
 
-/* ── UTF-8 utility functions (defined in ui/utf8.c) ── */
-int  utf8_str_truncate(char *dest, const char *src, int max_cols);
-int  utf8_str_width(const char *src);
-int  utf8_str_substring(char *dest, const char *src, int start_col, int max_cols);
-int  utf8_str_pad(char *dest, size_t dest_size, const char *src, int width);
-size_t utf8_next_char(const char *src, wchar_t *wc_out, int *width_out);
+/* ── UTF-8 utility functions (declared in ui/utf8.h, defined in ui/utf8.c) ── */
+
 #endif

@@ -21,6 +21,7 @@
 #include "types.h"
 #include "config/config.h"
 #include "config/schema.h"
+#include "config/migration.h"
 #include "config/crypto.h"
 #include "playlist/encoding.h"
 #include "logger/logger.h"
@@ -109,7 +110,187 @@ static xmlNodePtr xml_find_child(const xmlNode *parent, const char *name);
 #define C_GREEN  2
 #define C_CYAN   6
 
+/* ── 配置数据与路径（配置归属本模块；定义原在 ui/util.c 与 ui/menus.c）── */
+AppConfig g_app_config = {0};
+
+static char config_dir[MAX_PATH_LEN];
+static char config_file[MAX_PATH_LEN];
+
+/* 安全拼接 base + suffix：超长时返回 -1 而不静默截断
+ *（原先用 snprintf 直接拼接，路径过长会安静地生成错误路径，
+ * 例如把 config.xml 截成 config.x，随后读写到不该碰的文件）。 */
+static int config_path_join(char *dest, size_t dest_size,
+                            const char *base, const char *suffix)
+{
+    size_t base_len = strlen(base);
+    size_t suffix_len = strlen(suffix);
+    if (base_len + suffix_len + 1 > dest_size) {
+        return -1;
+    }
+    memcpy(dest, base, base_len);
+    memcpy(dest + base_len, suffix, suffix_len + 1);
+    return 0;
+}
+
 /* ── Public API ───────────────────────────────────────────────────── */
+/* ============================================================
+ * 配置归属（load / save / defaults / 路径）
+ *
+ * 这些函数原先位于 ui/menus.c，导致 audio/、cli/、main/ 等非界面模块
+ * 需要包含界面头文件才能读写配置（核心反向依赖界面）。配置属于核心职责，
+ * 故迁移到 config 层；界面只保留主题配色与刷新等表现相关逻辑。
+ * ============================================================ */
+
+void ensure_config_dir_exists(void)
+{
+    /* 目录解析统一交给 config 层：遵循 XDG_CONFIG_HOME，并在 Linyaps 等
+     * 沙箱环境中自动落到宿主 ~/.linglong/<appid>/… 的重定向目录。 */
+    const char *dir = app_config_dir(1);
+    if (!dir) return;
+
+    snprintf(config_dir, sizeof(config_dir), "%s", dir);
+    if (config_path_join(config_file, sizeof(config_file), config_dir, "/config.xml") != 0) {
+        log_warn("config", "Config path too long, ignoring: '%s'", config_dir);
+        config_file[0] = '\0';
+    }
+}
+
+const char *get_config_dir(void)
+{
+    return config_dir[0] ? config_dir : NULL;
+}
+
+void init_default_config(void)
+{
+    memset(&g_app_config, 0, sizeof(AppConfig));
+
+    const char *xdg_music_home = getenv("XDG_MUSIC_HOME");
+    if (xdg_music_home && xdg_music_home[0] != '\0') {
+        strncpy(g_app_config.default_startup_path, xdg_music_home, MAX_PATH_LEN - 1);
+        g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            struct stat st;
+            char candidate[MAX_PATH_LEN];
+
+            static const char *music_dirs[] = {
+                "/Music", "/音乐", "/Música", "/Musique", "/Musik"
+            };
+            int found = 0;
+            for (size_t i = 0; i < sizeof(music_dirs) / sizeof(music_dirs[0]); i++) {
+                snprintf(candidate, sizeof(candidate), "%s%s", home, music_dirs[i]);
+                if (stat(candidate, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    strncpy(g_app_config.default_startup_path, candidate, MAX_PATH_LEN - 1);
+                    g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                snprintf(g_app_config.default_startup_path, MAX_PATH_LEN, "%s/Music", home);
+            }
+        }
+    }
+
+    g_app_config.theme.playlist_fg   = C_WHITE;
+    g_app_config.theme.playlist_bg   = -1;  /* transparent */
+    g_app_config.theme.controls_fg   = C_YELLOW;
+    g_app_config.theme.controls_bg   = -1;  /* transparent */
+    g_app_config.theme.lyrics_fg     = C_GREEN;
+    g_app_config.theme.lyrics_bg     = -1;  /* transparent */
+    g_app_config.theme.sidebar_fg    = C_CYAN;
+    g_app_config.theme.sidebar_bg    = -1;  /* transparent */
+    g_app_config.theme.highlight_fg  = C_BLACK;
+    g_app_config.theme.highlight_bg  = C_WHITE;
+    g_app_config.theme.border_fg     = C_CYAN;
+    g_app_config.theme.border_bg     = -1;  /* transparent */
+
+    g_app_config.auto_play_on_start    = 0;
+    g_app_config.remember_last_path    = 1;
+    g_app_config.clear_history_on_startup = 0;
+    g_app_config.resume_last_playback  = 0;
+    g_app_config.last_played_position  = 0;
+    g_app_config.last_played_folder_path[0] = '\0';
+    g_app_config.last_played_track_path[0]  = '\0';
+    strcpy(g_app_config.ui_language, "zh_CN");
+    g_app_config.volume_percent        = 100;
+    g_app_config.audio_latency_ms      = 80;
+    g_app_config.show_lyrics_panel     = 1;
+    g_app_config.default_play_mode     = PLAY_MODE_SEQUENTIAL;
+    g_app_config.advanced_play_modes_enabled = 0;
+    g_app_config.default_playback_speed = 1.0f;
+    g_app_config.show_album_cover      = 1;
+    g_app_config.lyrics_alignment      = 0;
+    g_app_config.sort_mode             = SORT_DEFAULT;
+    /* 信息显示（CLI `ter-music show` / D-Bus）默认值：
+     * 与 config.c 中 xml_get_int 的默认值保持一致 */
+    g_app_config.config_version        = 0;
+    g_app_config.remote_connection_count = 0;
+    memset(g_app_config.remote_connections, 0, sizeof(g_app_config.remote_connections));
+}
+
+void load_config(void)
+{
+    log_info("menu_views", "Loading config from '%s'", config_file);
+
+    /* Try native XML format first */
+    init_default_config();
+    int loaded = 0;
+    if (config_load_from_xml(config_file, &g_app_config) == 0) {
+        loaded = 1;
+    }
+
+    /* XML not found — check for old JSON config needing migration */
+    if (!loaded && config_needs_migration()) {
+        log_info("menu_views", "Performing v1 (JSON) → v2 (XML) migration");
+        if (config_migrate_v1_to_v2() == 0) {
+            if (config_load_from_xml(config_file, &g_app_config) == 0) {
+                log_info("menu_views", "Migration successful, config loaded");
+                loaded = 1;
+            }
+        }
+        if (!loaded)
+            log_warn("menu_views", "Migration attempted but failed to load migrated config");
+    }
+
+    if (!loaded) {
+        /* Nothing worked — stick with defaults already set by init_default_config */
+        log_debug("menu_views", "No valid config found, using defaults");
+    }
+
+    /* Migrate old configs (version < 3): change bg=0 (old C_BLACK default)
+     * to -1 (COLOR_DEFAULT / transparent) for all background color fields. */
+    if (g_app_config.config_version < 4) {
+        log_info("menu_views", "Migrating config v%d → v4: bg=0 → -1 (transparent)",
+                 g_app_config.config_version);
+        #define MIGRATE_BG(field) if ((field) == 0) (field) = -1
+        MIGRATE_BG(g_app_config.theme.playlist_bg);
+        MIGRATE_BG(g_app_config.theme.controls_bg);
+        MIGRATE_BG(g_app_config.theme.lyrics_bg);
+        MIGRATE_BG(g_app_config.theme.sidebar_bg);
+        MIGRATE_BG(g_app_config.theme.border_bg);
+        #undef MIGRATE_BG
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+}
+
+void save_config(void)
+{
+    log_debug("menu_views", "Saving config to '%s'", config_file);
+    g_app_config.config_version = CONFIG_CURRENT_VERSION;
+    /* Atomic write: write to temp file first, then rename */
+    char tmp_path[MAX_PATH_LEN];
+    if (config_path_join(tmp_path, sizeof(tmp_path), config_file, ".tmp") != 0) {
+        log_error("config", "Config path too long, not saving: '%s'", config_file);
+        return;
+    }
+    if (config_save_to_xml(tmp_path, &g_app_config) == 0) {
+        rename(tmp_path, config_file);
+    }
+}
+
 
 int config_validate_xml(const char *path)
 {
@@ -221,6 +402,8 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_AUDIO_BACKEND,   cfg->audio_backend);
         SAVE_INT(XML_PREF_SORT_MODE,       cfg->sort_mode);
         SAVE_INT(XML_PREF_CUE_ENCODING,    cfg->cue_encoding);
+
+        /* ── Info display (CLI `ter-music show` / D-Bus) ────────── */
 #undef SAVE_INT
     }
 
@@ -395,6 +578,9 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->audio_backend            = xml_get_int(prefs, XML_PREF_AUDIO_BACKEND, AUDIO_BACKEND_AUTO);
         cfg->sort_mode                = xml_get_int(prefs, XML_PREF_SORT_MODE, SORT_DEFAULT);
         cfg->cue_encoding             = xml_get_int(prefs, XML_PREF_CUE_ENCODING, CUE_ENCODING_AUTO);
+
+        /* ── Info display (config v5)。旧配置缺少这些元素时使用下列默认值，
+         *    与 menus.c:init_default_config() 保持一致。 */
     }
 
     /* ── <remote_connections> ───────────────────────────────────── */

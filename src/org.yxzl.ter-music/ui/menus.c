@@ -22,6 +22,7 @@
 #include "ui/ui.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
+#include "core/core.h"
 #include "logger/logger.h"
 #include "search/search.h"
 #include "ui/scrollbar.h"
@@ -60,8 +61,6 @@ extern int prompt_text_input(WINDOW *win, int row, int col, const char *prompt,
  * Config file paths (static to this module)
  * ============================================================ */
 
-static char config_dir[MAX_PATH_LEN];
-static char config_file[MAX_PATH_LEN];
 
 /* ============================================================
  * JSON parser helpers
@@ -145,89 +144,8 @@ double extract_json_float(const char *json, const char *key)
  * Config — load / save / init
  * ============================================================ */
 
-void ensure_config_dir_exists(void)
-{
-    const char *home = getenv("HOME");
-    if (!home) return;
 
-    snprintf(config_dir, sizeof(config_dir), "%s/.config/ter-music", home);
-    snprintf(config_file, sizeof(config_file), "%s/config.xml", config_dir);
 
-    mkdir(config_dir, 0755);
-}
-
-const char *get_config_dir(void)
-{
-    return config_dir[0] ? config_dir : NULL;
-}
-
-void init_default_config(void)
-{
-    memset(&g_app_config, 0, sizeof(AppConfig));
-
-    const char *xdg_music_home = getenv("XDG_MUSIC_HOME");
-    if (xdg_music_home && xdg_music_home[0] != '\0') {
-        strncpy(g_app_config.default_startup_path, xdg_music_home, MAX_PATH_LEN - 1);
-        g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
-    } else {
-        const char *home = getenv("HOME");
-        if (home) {
-            struct stat st;
-            char candidate[MAX_PATH_LEN];
-
-            static const char *music_dirs[] = {
-                "/Music", "/音乐", "/Música", "/Musique", "/Musik"
-            };
-            int found = 0;
-            for (size_t i = 0; i < sizeof(music_dirs) / sizeof(music_dirs[0]); i++) {
-                snprintf(candidate, sizeof(candidate), "%s%s", home, music_dirs[i]);
-                if (stat(candidate, &st) == 0 && S_ISDIR(st.st_mode)) {
-                    strncpy(g_app_config.default_startup_path, candidate, MAX_PATH_LEN - 1);
-                    g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                snprintf(g_app_config.default_startup_path, MAX_PATH_LEN, "%s/Music", home);
-            }
-        }
-    }
-
-    g_app_config.theme.playlist_fg   = COLOR_WHITE;
-    g_app_config.theme.playlist_bg   = -1;  /* transparent */
-    g_app_config.theme.controls_fg   = COLOR_YELLOW;
-    g_app_config.theme.controls_bg   = -1;  /* transparent */
-    g_app_config.theme.lyrics_fg     = COLOR_GREEN;
-    g_app_config.theme.lyrics_bg     = -1;  /* transparent */
-    g_app_config.theme.sidebar_fg    = COLOR_CYAN;
-    g_app_config.theme.sidebar_bg    = -1;  /* transparent */
-    g_app_config.theme.highlight_fg  = COLOR_BLACK;
-    g_app_config.theme.highlight_bg  = COLOR_WHITE;
-    g_app_config.theme.border_fg     = COLOR_CYAN;
-    g_app_config.theme.border_bg     = -1;  /* transparent */
-
-    g_app_config.auto_play_on_start    = 0;
-    g_app_config.remember_last_path    = 1;
-    g_app_config.clear_history_on_startup = 0;
-    g_app_config.resume_last_playback  = 0;
-    g_app_config.last_played_position  = 0;
-    g_app_config.last_played_folder_path[0] = '\0';
-    g_app_config.last_played_track_path[0]  = '\0';
-    strcpy(g_app_config.ui_language, "zh_CN");
-    g_app_config.volume_percent        = 100;
-    g_app_config.audio_latency_ms      = 80;
-    g_app_config.show_lyrics_panel     = 1;
-    g_app_config.default_play_mode     = PLAY_MODE_SEQUENTIAL;
-    g_app_config.advanced_play_modes_enabled = 0;
-    g_app_config.default_playback_speed = 1.0f;
-    g_app_config.show_album_cover      = 1;
-    g_app_config.lyrics_alignment      = 0;
-    g_app_config.sort_mode             = SORT_DEFAULT;
-    g_app_config.config_version        = 0;
-    g_app_config.remote_connection_count = 0;
-    memset(g_app_config.remote_connections, 0, sizeof(g_app_config.remote_connections));
-}
 
 void apply_color_theme(void)
 {
@@ -247,76 +165,11 @@ void apply_color_theme(void)
 #undef CLR
 }
 
-void load_config(void)
-{
-    log_info("menu_views", "Loading config from '%s'", config_file);
 
-    /* Try native XML format first */
-    init_default_config();
-    int loaded = 0;
-    if (config_load_from_xml(config_file, &g_app_config) == 0) {
-        loaded = 1;
-    }
 
-    /* XML not found — check for old JSON config needing migration */
-    if (!loaded && config_needs_migration()) {
-        log_info("menu_views", "Performing v1 (JSON) → v2 (XML) migration");
-        if (config_migrate_v1_to_v2() == 0) {
-            if (config_load_from_xml(config_file, &g_app_config) == 0) {
-                log_info("menu_views", "Migration successful, config loaded");
-                loaded = 1;
-            }
-        }
-        if (!loaded)
-            log_warn("menu_views", "Migration attempted but failed to load migrated config");
-    }
-
-    if (!loaded) {
-        /* Nothing worked — stick with defaults already set by init_default_config */
-        log_debug("menu_views", "No valid config found, using defaults");
-    }
-
-    /* Migrate old configs (version < 3): change bg=0 (old COLOR_BLACK default)
-     * to -1 (COLOR_DEFAULT / transparent) for all background color fields. */
-    if (g_app_config.config_version < 4) {
-        log_info("menu_views", "Migrating config v%d → v4: bg=0 → -1 (transparent)",
-                 g_app_config.config_version);
-        #define MIGRATE_BG(field) if ((field) == 0) (field) = -1
-        MIGRATE_BG(g_app_config.theme.playlist_bg);
-        MIGRATE_BG(g_app_config.theme.controls_bg);
-        MIGRATE_BG(g_app_config.theme.lyrics_bg);
-        MIGRATE_BG(g_app_config.theme.sidebar_bg);
-        MIGRATE_BG(g_app_config.theme.border_bg);
-        #undef MIGRATE_BG
-        g_app_config.config_version = CONFIG_CURRENT_VERSION;
-        save_config();
-    }
-
-    g_playback_speed = g_app_config.default_playback_speed;
-}
-
-void save_config(void)
-{
-    log_debug("menu_views", "Saving config to '%s'", config_file);
-    g_app_config.config_version = CONFIG_CURRENT_VERSION;
-    /* Atomic write: write to temp file first, then rename */
-    char tmp_path[MAX_PATH_LEN];
-    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", config_file);
-    if (config_save_to_xml(tmp_path, &g_app_config) == 0) {
-        rename(tmp_path, config_file);
-    }
-}
-
-void reload_config(void)
-{
-    log_info("menu_views", "Reloading config on SIGHUP");
-    init_default_config();
-    load_config();
-    apply_color_theme();
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
-    g_play_mode = (PlayMode)g_app_config.default_play_mode;
-    show_status_message("配置已重新加载 / Config reloaded");
-}
+/* 配置重载流程已整体移入核心：core_tick() 检测标志 → core_config_apply() →
+ * 回调前端监听（ui/ui.c 的 ui_on_config_reloaded 重刷配色与脏标记）→ 推送状态消息。
+ * 界面模块不再承担“重载配置”这一核心职责。 */
 
 /* ============================================================
  * Data management — history / favorites / dir history / playlists
@@ -855,9 +708,8 @@ void try_migrate_from_json(void)
 void init_all_persistent_data(void)
 {
     ensure_config_dir_exists();
-    load_config();
+    core_config_apply();   /* 配置读取 + 运行时应用（倍速/播放模式） */
     apply_color_theme();
-    g_play_mode = (PlayMode)g_app_config.default_play_mode;
 
     library_init();
 
