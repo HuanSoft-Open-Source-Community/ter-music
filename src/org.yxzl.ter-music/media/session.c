@@ -819,6 +819,8 @@ static void build_introspection(void)
         rpc_playlist_introspection(),
         rpc_queue_introspection(),
         rpc_library_introspection(),
+        rpc_config_introspection(),
+        rpc_remote_introspection(),
         k_introspection_tail,
         NULL
     };
@@ -1122,6 +1124,10 @@ void media_session_tick(void) {
                    dbus_message_has_interface(message, RPC_IFACE_HISTORY) ||
                    dbus_message_has_interface(message, RPC_IFACE_DIRHISTORY)) {
             reply = rpc_library_handle_all(message);
+        } else if (dbus_message_has_interface(message, RPC_IFACE_CONFIG)) {
+            reply = rpc_config_handle(message);
+        } else if (dbus_message_has_interface(message, RPC_IFACE_REMOTE)) {
+            reply = rpc_remote_handle(message);
         }
 
         if (reply) {

@@ -38,6 +38,8 @@ EXPECTED_INTERFACES=(
     "org.yxzl.ter_music.Favorites"
     "org.yxzl.ter_music.History"
     "org.yxzl.ter_music.DirHistory"
+    "org.yxzl.ter_music.Config"
+    "org.yxzl.ter_music.Remote"
 )
 
 usage() {
@@ -109,6 +111,11 @@ start_daemon() {
     fi
     DAEMON_PID="$pid"
     [ -n "$DAEMON_PID" ]
+}
+
+# python 客户端：gdbus/busctl 无法传负整数参数，也无法保持连接
+rpc_py() {
+    timeout 20 python3 "$SCRIPT_DIR/rpc_client.py" "$@" 2>&1
 }
 
 dbus_call() {
@@ -541,6 +548,106 @@ check_library() {
     fi
 }
 
+
+# ── 检查 7：Config / Remote ─────────────────────────────────────────
+check_config_remote() {
+    local all volume
+    all="$(rpc_py call org.yxzl.ter_music.Config.GetAll)"
+    volume="$(printf '%s' "$all" | python3 -c '
+import json,sys
+try:
+    doc = json.load(sys.stdin)
+    print(doc["preferences"]["volume_percent"])
+except Exception as exc:
+    print("ERR:%s" % exc)
+')"
+    case "$volume" in
+        ''|ERR:*) bad "Config.GetAll 失败：$volume" ;;
+        *) ok "Config.GetAll 可读（volume_percent=$volume）" ;;
+    esac
+
+    # 局部设置：落盘 + 运行时生效
+    rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":37,"default_playback_speed":1.75}}' >/dev/null
+    local applied
+    applied="$(rpc_py call org.yxzl.ter_music.Control.GetSpeed)"
+    local stored
+    stored="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c '
+import json,sys
+doc = json.load(sys.stdin)
+print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["default_playback_speed"]))
+')"
+    if [ "$stored" = "37/1.75" ] && printf '%s' "$applied" | grep -q "1.75"; then
+        ok "Config.Set 局部生效并落盘（volume/speed=$stored，运行时 speed=$applied）"
+    else
+        bad "Config.Set 异常：stored=$stored applied=$applied"
+    fi
+
+    # 未知键整体失败且不生效
+    local before after
+    before="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
+    local unknown_rc
+    unknown_rc="$(rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":91,"nope":1}}')"
+    after="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
+    if printf '%s' "$unknown_rc" | grep -q "Unsupported" && [ "$before" = "$after" ]; then
+        ok "未知键被拒绝且整体不生效（volume 仍为 $after）"
+    else
+        bad "未知键处理异常：rc=$unknown_rc before=$before after=$after"
+    fi
+
+    # 越界值钳制
+    rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":999}}' >/dev/null
+    local clamped
+    clamped="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
+    [ "$clamped" = "100" ] && ok "越界值被钳制到 100" || bad "钳制失败：$clamped"
+
+    # Remote：新增服务器 + 密码不回明文
+    rpc_py call org.yxzl.ter_music.Remote.SaveServer -1 \
+        'json:{"name":"t","protocol":"sftp","host":"127.0.0.1","port":2222,"password":"s3cret"}' >/dev/null
+    local servers leak
+    servers="$(rpc_py call org.yxzl.ter_music.Remote.ListServers)"
+    leak="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c '
+import json,sys
+doc = json.load(sys.stdin)
+rc = doc["remote_connections"][0]
+print("%s|%s|%s" % (rc["password_set"], "password" in rc, bool(rc["password_encrypted"])))
+')"
+    if printf '%s' "$servers" | grep -q '"count":1' && [ "$leak" = "True|False|True" ]; then
+        ok "Remote.SaveServer 生效，密码仅以密文回传（$leak）"
+    else
+        bad "Remote 密码处理异常：servers=$servers leak=$leak"
+    fi
+
+    local bad_proto
+    bad_proto="$(rpc_py call org.yxzl.ter_music.Remote.SaveServer -1 'json:{"name":"x","protocol":"gopher","host":"h"}')"
+    printf '%s' "$bad_proto" | grep -q "InvalidArgs" && ok "Remote 拒绝未知协议" || bad "Remote 未拒绝未知协议"
+
+    rpc_py call org.yxzl.ter_music.Remote.DeleteServer 0 >/dev/null
+    local remaining
+    remaining="$(rpc_py call org.yxzl.ter_music.Remote.ListServers | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')"
+    [ "$remaining" = "0" ] && ok "Remote.DeleteServer 生效" || bad "删除后仍有 $remaining 条"
+
+    # 前端注册表（保持连接）
+    (rpc_py attach tui 5 >/dev/null 2>&1 &)
+    sleep 1
+    local frontends
+    frontends="$(rpc_py call org.yxzl.ter_music.Control.FrontendInfo | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')"
+    [ "${frontends:-0}" -ge 1 ] 2>/dev/null && ok "长连接前端登记成功（count=$frontends）" || bad "长连接前端未登记：$frontends"
+
+    # 信号：Config.Set 应同时广播 ConfigChanged 与 StatusMessage
+    (rpc_py monitor 3 > "$WORK_DIR/m26-signals.txt" 2>&1 &)
+    sleep 0.6
+    rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":52}}' >/dev/null
+    sleep 2.6
+    if grep -q "Config.ConfigChanged" "$WORK_DIR/m26-signals.txt" &&
+       grep -q "Control.StatusMessage" "$WORK_DIR/m26-signals.txt"; then
+        ok "Config.Set 广播 ConfigChanged + StatusMessage"
+    else
+        bad "未捕获预期信号：$(tr '\n' ' ' < "$WORK_DIR/m26-signals.txt")"
+    fi
+
+    rpc_py call org.yxzl.ter_music.Config.Reset >/dev/null
+}
+
 # ── 主流程 ─────────────────────────────────────────────────────────
 info "准备隔离环境"
 setup_fixtures
@@ -576,6 +683,9 @@ check_playlist_queue
 
 info "检查 6：曲库与收藏/历史（M2.5）"
 check_library
+
+info "检查 7：Config / Remote（M2.6）"
+check_config_remote
 
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"

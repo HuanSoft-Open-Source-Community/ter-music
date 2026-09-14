@@ -149,6 +149,8 @@ DBusMessage *rpc_playlist_handle(DBusMessage *message);
 DBusMessage *rpc_queue_handle(DBusMessage *message);
 /* Library/Favorites/History/DirHistory 共用一个入口（按接口名分发） */
 DBusMessage *rpc_library_handle_all(DBusMessage *message);
+DBusMessage *rpc_config_handle(DBusMessage *message);
+DBusMessage *rpc_remote_handle(DBusMessage *message);
 DBusMessage *rpc_info_handle(DBusMessage *message);
 DBusMessage *rpc_control_handle(DBusMessage *message);
 
@@ -157,6 +159,8 @@ const char *rpc_lyrics_introspection(void);
 const char *rpc_playlist_introspection(void);
 const char *rpc_queue_introspection(void);
 const char *rpc_library_introspection(void);
+const char *rpc_config_introspection(void);
+const char *rpc_remote_introspection(void);
 const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
 
@@ -200,6 +204,7 @@ void rpc_control_emit_error(const char *source, const char *name, const char *me
 void rpc_playlist_emit_changed(const char *reason);
 const char *rpc_playlist_filter(void);
 void rpc_library_emit_changed(const char *reason);
+void rpc_config_emit_changed(const char *patch_json);
 void rpc_queue_emit_changed(void);
 unsigned long long rpc_queue_revision(void);
 

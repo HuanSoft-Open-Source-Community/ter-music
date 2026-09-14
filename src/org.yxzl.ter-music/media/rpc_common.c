@@ -430,6 +430,19 @@ static const char *const k_rpc_methods[] = {
     "DirHistory.Remove",
     "DirHistory.List",
     "DirHistory.Clear",
+    /* Config */
+    "Config.GetAll",
+    "Config.Set",
+    "Config.Reload",
+    "Config.Reset",
+    /* Remote */
+    "Remote.ListServers",
+    "Remote.SaveServer",
+    "Remote.DeleteServer",
+    "Remote.List",
+    "Remote.Status",
+    "Remote.Connect",
+    "Remote.Disconnect",
     NULL
 };
 
