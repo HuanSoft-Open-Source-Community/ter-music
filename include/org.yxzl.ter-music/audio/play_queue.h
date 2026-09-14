@@ -20,6 +20,12 @@ void play_queue_advance(PlayQueue *q, PlayMode mode);
 void play_queue_rewind(PlayQueue *q, PlayMode mode);
 
 int  play_queue_get_track_at(const PlayQueue *q, int position, int *track_index);
+
+/* 全局队列（g_play_queue）的无参访问器：避免调用方直接摸字段 */
+int  play_queue_count(void);         /* 队列长度 */
+int  play_queue_position(void);      /* 当前播放位置，-1 = 无 */
+int  play_queue_index_at(int position);  /* 该位置的曲目下标，-1 = 越界/空 */
+void play_queue_set_position(int position);
 int  play_queue_is_active(const PlayQueue *q);
 int  play_queue_contains(const PlayQueue *q, int track_index);
 

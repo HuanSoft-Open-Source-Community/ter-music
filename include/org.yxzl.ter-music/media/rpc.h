@@ -24,6 +24,7 @@
 
 #include "types.h"
 #include "info/info.h"
+#include "remote/remote.h"
 
 #ifdef HAVE_DBUS
 #include <dbus/dbus.h>
@@ -144,19 +145,59 @@ InfoInstance rpc_instance_info(void);
 
 /* ── 接口处理器与同步钩子 ───────────────────────────────────────── */
 DBusMessage *rpc_lyrics_handle(DBusMessage *message);
+DBusMessage *rpc_playlist_handle(DBusMessage *message);
+DBusMessage *rpc_queue_handle(DBusMessage *message);
 DBusMessage *rpc_info_handle(DBusMessage *message);
 DBusMessage *rpc_control_handle(DBusMessage *message);
 
 /* 自省片段：各接口提供自己的 <interface> 段，session.c 负责拼装 */
 const char *rpc_lyrics_introspection(void);
+const char *rpc_playlist_introspection(void);
+const char *rpc_queue_introspection(void);
 const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
+
+/* ── 后台任务（media/rpc_job.c） ────────────────────────────────────
+ * 阻塞 IO（目录扫描、远程列举/连接）走单工作线程；结果由媒体循环在
+ * rpc_job_tick() 内单点换入，随后广播信号。 */
+typedef enum {
+    RPC_JOB_NONE = 0,
+    RPC_JOB_PLAYLIST_LOAD,     /* path = 目录/文件路径 */
+    RPC_JOB_PLAYLIST_APPEND,   /* path = 目录/文件路径 */
+    RPC_JOB_REMOTE_LIST,       /* subpath = 远程子路径（连接配置先 set） */
+    RPC_JOB_REMOTE_CONNECT     /* subpath = 远程子路径（连接配置先 set） */
+} RpcJobKind;
+
+typedef enum {
+    RPC_JOB_IDLE = 0,
+    RPC_JOB_RUNNING,
+    RPC_JOB_FAILED
+} RpcJobState;
+
+int  rpc_job_start(RpcJobKind kind, const char *path, const char *subpath, int autoplay);
+void rpc_job_set_connection(const RemoteConnectionConfig *connection);
+void rpc_job_tick(void);            /* 媒体循环内调用 */
+void rpc_job_cancel(void);
+int  rpc_job_state(void);
+int  rpc_job_kind(void);
+int  rpc_job_progress(void);
+int  rpc_job_total(void);
+const char *rpc_job_error(void);
+const char *rpc_job_path(void);
+/* 远程列举结果（所有权归 rpc_job.c，消费方只读） */
+RemoteDirEntry *rpc_job_entries(int *count, int *error, const char **path);
 
 /* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
 void rpc_control_tick(void);       /* 清理超时未心跳的前端登记 */
 int rpc_frontend_count(void);      /* 当前在线前端数 */
 void rpc_control_emit_status(unsigned long long seq, const char *message);
 void rpc_control_emit_error(const char *source, const char *name, const char *message);
+
+/* 播放列表 / 队列的变更广播与状态 */
+void rpc_playlist_emit_changed(const char *reason);
+const char *rpc_playlist_filter(void);
+void rpc_queue_emit_changed(void);
+unsigned long long rpc_queue_revision(void);
 
 void rpc_lyrics_reset(void);
 const char *rpc_lyrics_sync(void);

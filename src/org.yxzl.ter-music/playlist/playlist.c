@@ -813,6 +813,16 @@ int get_visible_node_track_index(int visible_idx) {
     return track;
 }
 
+int get_tree_node_expanded(int tree_idx) {
+    int expanded = 0;
+    playlist_lock();
+    if (tree_idx >= 0 && tree_idx < g_playlist.tree_node_count) {
+        expanded = g_playlist.tree_nodes[tree_idx].expanded;
+    }
+    playlist_unlock();
+    return expanded;
+}
+
 int get_tree_node_depth(int tree_idx) {
     int d = 0;
     playlist_lock();
@@ -1414,6 +1424,256 @@ int load_single_file(const char *file_path) {
     else if (playlist_count() > 0)
         play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
     return 1;
+}
+
+
+/* 目录扫描进度回调（仅工作线程访问，见 playlist_build_local） */
+static PlaylistBuildProgress playlist_build_progress_cb = NULL;
+static void *playlist_build_progress_ud = NULL;
+
+/* ============================================================
+ * 渲染就绪的分页（D-Bus Playlist.GetPage 与前端共用）
+ * ============================================================ */
+
+/* 平铺模式下收集匹配 filter 的曲目下标；filter 为空则取全部。
+ * 返回写入 out 的数量（不超过 cap）。 */
+static int collect_filtered_indices(const char *filter, int *out, int cap)
+{
+    int total = playlist_count();
+    int written = 0;
+    int has_filter = (filter && filter[0] != '\0');
+
+    for (int i = 0; i < total && written < cap; i++) {
+        if (has_filter && !track_matches_query(i, filter)) {
+            continue;
+        }
+        out[written++] = i;
+    }
+    return written;
+}
+
+int playlist_page_total(const char *filter)
+{
+    if (filter && filter[0] != '\0') {
+        static int scratch[MAX_TRACKS];
+        return collect_filtered_indices(filter, scratch, MAX_TRACKS);
+    }
+    if (playlist_tree_is_active()) {
+        return playlist_visible_count();
+    }
+    return playlist_count();
+}
+
+/* 用曲目元数据填充一行（目录行由调用方填 name/depth） */
+static void fill_track_row(PlaylistRow *row, int track_index)
+{
+    Track track;
+    memset(&track, 0, sizeof(track));
+    get_track_metadata(track_index, &track);
+
+    row->type = 0;
+    row->track_index = track_index;
+    row->is_cue = (track.cue_offset > 0 && track.cue_track_number > 0);
+    snprintf(row->title, sizeof(row->title), "%s", track.title);
+    snprintf(row->artist, sizeof(row->artist), "%s", track.artist);
+    snprintf(row->album, sizeof(row->album), "%s", track.album);
+
+    char path[MAX_PATH_LEN];
+    if (playlist_get_track_path(track_index, path, sizeof(path)) == 0) {
+        const char *slash = strrchr(path, '/');
+        snprintf(row->name, sizeof(row->name), "%s", slash ? slash + 1 : path);
+    } else {
+        row->name[0] = '\0';
+    }
+}
+
+int playlist_page(int offset, int count, const char *filter,
+                  PlaylistRow *out, int cap)
+{
+    if (!out || cap <= 0 || offset < 0 || count <= 0 || count > cap) {
+        return -1;
+    }
+
+    int total = playlist_page_total(filter);
+    if (offset >= total) {
+        return 0;
+    }
+    if (offset + count > total) {
+        count = total - offset;
+    }
+
+    int has_filter = (filter && filter[0] != '\0');
+    int tree_mode = !has_filter && playlist_tree_is_active();
+
+    /* 过滤/平铺模式：先取匹配下标（有界，最多 MAX_TRACKS） */
+    static int flat_indices[MAX_TRACKS];
+    int flat_count = 0;
+    if (!tree_mode) {
+        flat_count = collect_filtered_indices(filter, flat_indices, MAX_TRACKS);
+        if (!has_filter) {
+            for (int i = 0; i < flat_count; i++) {
+                flat_indices[i] = i;
+            }
+        }
+    }
+
+    for (int i = 0; i < count; i++) {
+        int row_index = offset + i;
+        PlaylistRow *row = &out[i];
+        memset(row, 0, sizeof(*row));
+        row->row = row_index;
+        row->tree_index = -1;
+        row->track_index = -1;
+
+        if (tree_mode) {
+            int tree_index = get_visible_node_tree_index(row_index);
+            int node_type = get_visible_node_type(row_index);
+            row->tree_index = tree_index;
+            row->depth = get_tree_node_depth(tree_index);
+            if (node_type == TREE_NODE_DIRECTORY) {
+                row->type = 1;
+                row->expanded = get_tree_node_expanded(tree_index);
+                const char *name = get_tree_node_name(tree_index);
+                snprintf(row->name, sizeof(row->name), "%s", name ? name : "");
+            } else {
+                int track_index = get_visible_node_track_index(row_index);
+                if (track_index >= 0) {
+                    fill_track_row(row, track_index);
+                }
+            }
+        } else {
+            if (row_index >= flat_count) {
+                break;
+            }
+            fill_track_row(row, flat_indices[row_index]);
+        }
+    }
+
+    return count;
+}
+
+/* ============================================================
+ * 构建 / 安装分离（供 RPC 后台任务使用）
+ * ============================================================ */
+
+Playlist *playlist_build_local(const char *path, int append,
+                               PlaylistBuildProgress progress, void *userdata)
+{
+    if (!path || path[0] == '\0') {
+        return NULL;
+    }
+
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return NULL;
+    }
+
+    Playlist *next = calloc(1, sizeof(*next));
+    if (!next) {
+        return NULL;
+    }
+
+    if (append) {
+        playlist_lock();
+        *next = g_playlist;
+        playlist_unlock();
+        if (next->count == 0) {
+            /* 没有可追加的现有内容：退化为全新加载 */
+            append = 0;
+            memset(next, 0, sizeof(*next));
+        }
+    }
+
+    next->tree_mode = 1;
+    playlist_build_progress_cb = progress;
+    playlist_build_progress_ud = userdata;
+    int added = scan_playlist_directory_into(next, path, append);
+    playlist_build_progress_cb = NULL;
+    playlist_build_progress_ud = NULL;
+
+    if (added < 0) {
+        free(next);
+        return NULL;
+    }
+
+    if (progress) {
+        progress(next->count, next->count, userdata);
+    }
+
+    if (next->count > 0) {
+        if (next->folder_path[0] == '\0') {
+            snprintf(next->folder_path, sizeof(next->folder_path), "%s", path);
+        }
+        next->is_loaded = 1;
+    }
+    return next;
+}
+
+Playlist *playlist_build_remote(const RemoteConnectionConfig *conn, const char *subpath)
+{
+    if (!conn) {
+        return NULL;
+    }
+
+    RemoteDirEntry *entries = NULL;
+    int entry_count = 0;
+    if (remote_list_directory(conn, subpath, &entries, &entry_count) < 0) {
+        log_warn("playlist", "playlist_build_remote: list failed for '%s'",
+                 subpath ? subpath : "");
+        return NULL;
+    }
+
+    Playlist *next = calloc(1, sizeof(*next));
+    if (!next) {
+        remote_free_entries(entries, entry_count);
+        return NULL;
+    }
+
+    char base_url[4096];
+    remote_build_url(conn, subpath, base_url, sizeof(base_url));
+
+    for (int i = 0; i < entry_count && next->count < MAX_TRACKS; i++) {
+        if (!is_audio_file(entries[i].name)) {
+            continue;
+        }
+        char encoded_name[768];
+        remote_encode_url_path(entries[i].name, encoded_name, sizeof(encoded_name));
+        char track_url[4096];
+        snprintf(track_url, sizeof(track_url), "%s/%s", base_url, encoded_name);
+        snprintf(next->tracks[next->count], MAX_PATH_LEN, "%s", track_url);
+        next->count++;
+    }
+
+    remote_free_entries(entries, entry_count);
+
+    if (next->count > 0) {
+        snprintf(next->folder_path, sizeof(next->folder_path), "%s", base_url);
+        next->is_loaded = 1;
+    }
+    return next;
+}
+
+void playlist_install(Playlist *built)
+{
+    if (!built) {
+        return;
+    }
+
+    playlist_lock();
+    g_playlist = *built;
+    playlist_unlock();
+    free(built);
+
+    search_clear();
+    recompute_sort_order();
+
+    play_queue_clear(&g_play_queue);
+    if (g_current_play_index >= 0)
+        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
+    else if (playlist_count() > 0)
+        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+
+    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
 }
 
 int load_playlist(const char *path) {

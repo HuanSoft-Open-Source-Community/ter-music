@@ -387,6 +387,29 @@ static const char *const k_rpc_methods[] = {
     "Control.GetPlaylist",
     "Control.ReloadConfig",
     "Control.Quit",
+    /* Playlist */
+    "Playlist.Load",
+    "Playlist.Append",
+    "Playlist.Clear",
+    "Playlist.Sort",
+    "Playlist.SetFilter",
+    "Playlist.Search",
+    "Playlist.GetTree",
+    "Playlist.GetPage",
+    "Playlist.ToggleExpand",
+    "Playlist.RevealIndex",
+    "Playlist.Status",
+    /* Queue */
+    "Queue.Get",
+    "Queue.Append",
+    "Queue.InsertAfter",
+    "Queue.RemoveAt",
+    "Queue.MoveUp",
+    "Queue.MoveDown",
+    "Queue.Clear",
+    "Queue.Rebuild",
+    "Queue.Shuffle",
+    "Queue.PlayAt",
     NULL
 };
 

@@ -320,6 +320,33 @@ int play_queue_get_track_at(const PlayQueue *q, int position, int *track_index)
     return 0;
 }
 
+int play_queue_count(void)
+{
+    return g_play_queue.count;
+}
+
+int play_queue_position(void)
+{
+    return g_play_queue.current_position;
+}
+
+int play_queue_index_at(int position)
+{
+    int track_index = -1;
+    if (play_queue_get_track_at(&g_play_queue, position, &track_index) != 0) {
+        return -1;
+    }
+    return track_index;
+}
+
+void play_queue_set_position(int position)
+{
+    if (position < 0 || position >= g_play_queue.count) {
+        return;
+    }
+    g_play_queue.current_position = position;
+}
+
 int play_queue_is_active(const PlayQueue *q)
 {
     return q && q->count > 0 && q->current_position >= 0;

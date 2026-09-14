@@ -32,6 +32,8 @@ EXPECTED_INTERFACES=(
     "org.yxzl.ter_music.Lyrics"
     "org.yxzl.ter_music.Info"
     "org.yxzl.ter_music.Control"
+    "org.yxzl.ter_music.Playlist"
+    "org.yxzl.ter_music.Queue"
 )
 
 usage() {
@@ -363,6 +365,83 @@ check_frontends() {
     fi
 }
 
+
+# ── 检查 5：Playlist / Queue（分页边界、过滤、队列编辑） ─────────────
+check_playlist_queue() {
+    local tree total
+    tree="$(dbus_call org.yxzl.ter_music.Playlist GetTree)"
+    total="$(json_field "$tree" 'doc["count"]')"
+    case "$total" in
+        ''|ERR:*) bad "GetTree 失败：$tree" ; return ;;
+        *) ok "GetTree count=$total" ;;
+    esac
+
+    # 分页：offset 越界返回 0 行而不是报错
+    local page count
+    page="$(dbus_call org.yxzl.ter_music.Playlist GetPage 100000 10)"
+    count="$(json_field "$page" 'doc["count"]')"
+    [ "$count" = "0" ] && ok "GetPage 越界 offset 返回空页" || bad "GetPage 越界返回 count=$count"
+
+    # 分页：count 超上限应被拒绝
+    local over
+    over="$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 5000)"
+    if printf '%s' "$over" | grep -q "InvalidArgs"; then
+        ok "GetPage 拒绝超过上限的 count（1000）"
+    else
+        bad "GetPage 未拒绝超大 count"
+    fi
+
+    # 过滤：SetFilter 后 GetPage 反映过滤结果，清空后恢复。
+    # 注意 GetTree.count 是曲目数，GetPage.total 是可见行数（树模式含目录行），
+    # 因此用同一接口的前后对比，而不是与 GetTree 比较。
+    local baseline
+    baseline="$(json_field "$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 10)" 'doc["total"]')"
+    dbus_call org.yxzl.ter_music.Playlist SetFilter "a" >/dev/null
+    local filtered_n
+    filtered_n="$(json_field "$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 10)" 'doc["total"]')"
+    dbus_call org.yxzl.ter_music.Playlist SetFilter "" >/dev/null
+    local restored
+    restored="$(json_field "$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 10)" 'doc["total"]')"
+    if [ "$restored" = "$baseline" ] && [ "$filtered_n" -lt "$baseline" ]; then
+        ok "SetFilter 生效（$filtered_n < $baseline 行）并可清空恢复"
+    else
+        bad "SetFilter 行为异常：baseline=$baseline filtered=$filtered_n restored=$restored"
+    fi
+
+    # 队列：Get 与写操作
+    local queue qcount
+    queue="$(dbus_call org.yxzl.ter_music.Queue Get 0 200)"
+    qcount="$(json_field "$queue" 'doc["count"]')"
+    case "$qcount" in
+        ''|ERR:*) bad "Queue.Get 失败：$queue"; return ;;
+        *) ok "Queue.Get count=$qcount" ;;
+    esac
+
+    local rc
+    rc="$(dbus_call org.yxzl.ter_music.Queue Append 0)"
+    printf '%s' "$rc" | grep -q "true" && ok "Queue.Append 接受合法曲目" || bad "Queue.Append 失败：$rc"
+
+    rc="$(dbus_call org.yxzl.ter_music.Queue Append 999999)"
+    printf '%s' "$rc" | grep -q "OutOfRange" && ok "Queue.Append 拒绝越界曲目" || bad "Queue.Append 未拒绝越界：$rc"
+
+    rc="$(dbus_call org.yxzl.ter_music.Queue MoveUp 999999)"
+    printf '%s' "$rc" | grep -q "OutOfRange" && ok "Queue.MoveUp 拒绝越界位置" || bad "Queue.MoveUp 未拒绝越界：$rc"
+
+    # 队列变更信号
+    gdbus monitor --session --dest org.mpris.MediaPlayer2.ter_music \
+        --object-path /org/mpris/MediaPlayer2 > "$WORK_DIR/queue-monitor.txt" 2>&1 &
+    local monitor_pid=$!
+    sleep 0.8
+    dbus_call org.yxzl.ter_music.Queue Append 0 >/dev/null
+    sleep 0.8
+    kill "$monitor_pid" 2>/dev/null
+    if grep -q "QueueChanged" "$WORK_DIR/queue-monitor.txt"; then
+        ok "队列写操作广播 QueueChanged"
+    else
+        bad "未捕获 QueueChanged 信号"
+    fi
+}
+
 # ── 主流程 ─────────────────────────────────────────────────────────
 info "准备隔离环境"
 setup_fixtures
@@ -392,6 +471,9 @@ check_info_extensions
 
 info "检查 4：前端注册表（M2.3）"
 check_frontends
+
+info "检查 5：Playlist / Queue（M2.4）"
+check_playlist_queue
 
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"

@@ -165,6 +165,9 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/media/rpc_info.c
     src/org.yxzl.ter-music/media/rpc_control.c
     src/org.yxzl.ter-music/media/rpc_lyrics.c
+    src/org.yxzl.ter-music/media/rpc_playlist.c
+    src/org.yxzl.ter-music/media/rpc_queue.c
+    src/org.yxzl.ter-music/media/rpc_job.c
     src/org.yxzl.ter-music/info/info.c
     src/org.yxzl.ter-music/cli/cli.c
     src/org.yxzl.ter-music/cli/cli_client.c
