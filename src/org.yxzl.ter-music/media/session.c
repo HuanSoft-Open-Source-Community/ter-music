@@ -1122,6 +1122,7 @@ void media_session_tick(void) {
     sync_player_state();
     rpc_lyrics_sync();
     rpc_info_sync();
+    rpc_control_tick();
 
     {
         RpcPlaybackSnapshot progress_snapshot;

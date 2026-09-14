@@ -277,6 +277,92 @@ check_info_extensions() {
     done
 }
 
+
+# ── 检查 4：前端注册表（Attach/Ping/Detach/FrontendInfo） ───────────
+check_frontends() {
+    local attached token
+    attached="$(dbus_call org.yxzl.ter_music.Control Attach tui)"
+    token="$(json_field "$attached" 'doc["token"]')"
+    if [ -z "$token" ] || [ "${token#ERR:}" != "$token" ]; then
+        bad "Attach 未返回 token：$(printf '%s' "$attached" | head -1)"
+        return
+    fi
+    ok "Attach 返回 token=$token"
+
+    local version
+    version="$(json_field "$attached" 'doc["api_version"]')"
+    [ "$version" = "2" ] && ok "Attach 返回 api_version=2" || bad "Attach api_version=$version"
+
+    # 第二个前端
+    local attached2
+    attached2="$(dbus_call org.yxzl.ter_music.Control Attach cli)"
+    local token2
+    token2="$(json_field "$attached2" 'doc["token"]')"
+
+    local list count
+    list="$(dbus_call org.yxzl.ter_music.Control FrontendInfo)"
+    count="$(json_field "$list" 'doc["count"]')"
+    if [ "$count" -ge 2 ] 2>/dev/null; then
+        ok "FrontendInfo 列出 $count 个前端"
+    else
+        bad "FrontendInfo count=$count（期望 >=2）"
+    fi
+
+    # 角色校验
+    local bad_role
+    bad_role="$(dbus_call org.yxzl.ter_music.Control Attach robot)"
+    if printf '%s' "$bad_role" | grep -q "InvalidArgs"; then
+        ok "Attach 拒绝非法 role"
+    else
+        bad "Attach 未拒绝非法 role"
+    fi
+
+    # 未知 token 的 Ping 返回 false（前端应重新 Attach）
+    local ping_unknown
+    ping_unknown="$(dbus_call org.yxzl.ter_music.Control Ping ":1.99999")"
+    if printf '%s' "$ping_unknown" | grep -q "false"; then
+        ok "Ping 对未知 token 返回 false"
+    else
+        bad "Ping 对未知 token 返回：$(printf '%s' "$ping_unknown" | head -1)"
+    fi
+
+    # 已知 token 的 Ping 返回 true
+    local ping_known
+    ping_known="$(dbus_call org.yxzl.ter_music.Control Ping "$token")"
+    if printf '%s' "$ping_known" | grep -q "true"; then
+        ok "Ping 刷新已登记 token"
+    else
+        bad "Ping 已知 token 返回：$(printf '%s' "$ping_known" | head -1)"
+    fi
+
+    # Detach 后不再列出
+    dbus_call org.yxzl.ter_music.Control Detach "$token" >/dev/null
+    dbus_call org.yxzl.ter_music.Control Detach "$token2" >/dev/null
+    list="$(dbus_call org.yxzl.ter_music.Control FrontendInfo)"
+    count="$(json_field "$list" 'doc["count"]')"
+    if [ "$count" = "0" ]; then
+        ok "Detach 后注册表清空"
+    else
+        bad "Detach 后仍有 $count 个前端"
+    fi
+
+    # 心跳超时：登记后不再 Ping，超过 RPC_FRONTEND_TIMEOUT_MS(6s) 应被清除
+    attached="$(dbus_call org.yxzl.ter_music.Control Attach app)"
+    token="$(json_field "$attached" 'doc["token"]')"
+    local waited=0
+    while [ "$waited" -lt 9 ]; do
+        sleep 1
+        waited=$((waited + 1))
+        count="$(json_field "$(dbus_call org.yxzl.ter_music.Control FrontendInfo)" 'doc["count"]')"
+        [ "$count" = "0" ] && break
+    done
+    if [ "$count" = "0" ]; then
+        ok "无心跳 ${waited}s 后被判定离开"
+    else
+        bad "无心跳 ${waited}s 后仍登记着（count=$count）"
+    fi
+}
+
 # ── 主流程 ─────────────────────────────────────────────────────────
 info "准备隔离环境"
 setup_fixtures
@@ -303,6 +389,9 @@ check_method_list
 
 info "检查 3：Info 扩展（M2.2）"
 check_info_extensions
+
+info "检查 4：前端注册表（M2.3）"
+check_frontends
 
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"

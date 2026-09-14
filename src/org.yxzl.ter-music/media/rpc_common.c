@@ -363,6 +363,10 @@ static const char *const k_rpc_methods[] = {
     "Info.GetVisualizer",
     "Info.GetStatus",
     /* Control */
+    "Control.Attach",
+    "Control.Ping",
+    "Control.Detach",
+    "Control.FrontendInfo",
     "Control.Play",
     "Control.Pause",
     "Control.PlayPause",

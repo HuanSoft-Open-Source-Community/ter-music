@@ -153,6 +153,8 @@ const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
 
 /* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
+void rpc_control_tick(void);       /* 清理超时未心跳的前端登记 */
+int rpc_frontend_count(void);      /* 当前在线前端数 */
 void rpc_control_emit_status(unsigned long long seq, const char *message);
 void rpc_control_emit_error(const char *source, const char *name, const char *message);
 

@@ -81,11 +81,280 @@ void rpc_control_emit_error(const char *source, const char *name, const char *me
     rpc_send(signal);
 }
 
+/* ── 前端注册表（Control.Attach / Ping / Detach / FrontendInfo） ────
+ *
+ * 前端（TUI/CLI/第三方应用）接入时登记，之后每 RPC_PING_INTERVAL_MS 心跳一次；
+ * 超过 RPC_FRONTEND_TIMEOUT_MS 没有心跳视为离开。核心据此知道“还有没有前端”，
+ * M4 的 core_exit_when_no_frontend 与 Info.GetInfo.frontends 都依赖它。
+ *
+ * token 只是登记标识，不做鉴权：会话总线本身是同用户信任域，且短命客户端
+ * （每次调用新建连接）无法维持“token=连接名”的绑定。token 由核心分配，
+ * 使用接入方连接的唯一名（dbus_message_get_sender）作为种子。 */
+
+typedef struct {
+    int active;
+    char token[128];
+    char role[16];
+    int pid;
+    unsigned long long last_ping_ms;
+} RpcFrontend;
+
+static RpcFrontend g_frontends[RPC_FRONTEND_MAX];
+
+static unsigned long long rpc_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL;
+}
+
+/* 通过会话总线查询连接的对端 PID；失败返回 0（不视为错误）。
+ * 仅在 Attach 时调用一次，100ms 超时保证有界。 */
+static int rpc_sender_pid(const char *sender)
+{
+    if (!sender || !sender[0]) {
+        return 0;
+    }
+    DBusConnection *connection = rpc_session_connection();
+    if (!connection) {
+        return 0;
+    }
+
+    DBusMessage *message = dbus_message_new_method_call("org.freedesktop.DBus",
+                                                        "/org/freedesktop/DBus",
+                                                        "org.freedesktop.DBus",
+                                                        "GetConnectionUnixProcessID");
+    if (!message) {
+        return 0;
+    }
+    dbus_message_append_args(message, DBUS_TYPE_STRING, &sender, DBUS_TYPE_INVALID);
+
+    DBusError error;
+    dbus_error_init(&error);
+    DBusMessage *reply = dbus_connection_send_with_reply_and_block(connection, message, 100, &error);
+    dbus_message_unref(message);
+
+    int pid = 0;
+    if (reply) {
+        dbus_uint32_t value = 0;
+        if (dbus_message_get_args(reply, &error, DBUS_TYPE_UINT32, &value, DBUS_TYPE_INVALID)) {
+            pid = (int)value;
+        }
+        dbus_message_unref(reply);
+    }
+    if (dbus_error_is_set(&error)) {
+        dbus_error_free(&error);
+    }
+    return pid;
+}
+
+static int rpc_role_valid(const char *role)
+{
+    return role && (strcmp(role, "tui") == 0 || strcmp(role, "cli") == 0 ||
+                    strcmp(role, "app") == 0);
+}
+
+static RpcFrontend *rpc_frontend_find(const char *token)
+{
+    if (!token || !token[0]) {
+        return NULL;
+    }
+    for (int i = 0; i < RPC_FRONTEND_MAX; i++) {
+        if (g_frontends[i].active && strcmp(g_frontends[i].token, token) == 0) {
+            return &g_frontends[i];
+        }
+    }
+    return NULL;
+}
+
+/* 清理超时未心跳的登记 */
+void rpc_control_tick(void)
+{
+    unsigned long long now = rpc_now_ms();
+    for (int i = 0; i < RPC_FRONTEND_MAX; i++) {
+        if (!g_frontends[i].active) {
+            continue;
+        }
+        if (now - g_frontends[i].last_ping_ms > RPC_FRONTEND_TIMEOUT_MS) {
+            log_info("rpc_control", "Frontend '%s' (%s) timed out after %llu ms",
+                     g_frontends[i].token, g_frontends[i].role,
+                     now - g_frontends[i].last_ping_ms);
+            memset(&g_frontends[i], 0, sizeof(g_frontends[i]));
+        }
+    }
+}
+
+int rpc_frontend_count(void)
+{
+    int count = 0;
+    for (int i = 0; i < RPC_FRONTEND_MAX; i++) {
+        if (g_frontends[i].active) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/*
+ * Attach / Ping / Detach / FrontendInfo 处理器在 rpc_control_handle 内实现：
+ * 它们与既有控制方法共用同一个成员分发。
+ */
+
 DBusMessage *rpc_control_handle(DBusMessage *message) {
     const char *member = dbus_message_get_member(message);
     if (!member) {
         return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
                                    "Missing method name");
+    }
+
+    if (strcmp(member, "Attach") == 0) {
+        const char *role = NULL;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error, DBUS_TYPE_STRING, &role,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        if (!rpc_role_valid(role)) {
+            return rpc_error(message, RPC_ERROR_INVALID_ARGS,
+                             "role must be 'tui', 'cli' or 'app'");
+        }
+
+        const char *sender = dbus_message_get_sender(message);
+        RpcFrontend *entry = rpc_frontend_find(sender);
+        if (!entry) {
+            for (int i = 0; i < RPC_FRONTEND_MAX; i++) {
+                if (!g_frontends[i].active) {
+                    entry = &g_frontends[i];
+                    break;
+                }
+            }
+        }
+        if (!entry) {
+            return rpc_error(message, RPC_ERROR_BUSY,
+                             "frontend registry is full; detach an unused frontend first");
+        }
+
+        memset(entry, 0, sizeof(*entry));
+        entry->active = 1;
+        snprintf(entry->token, sizeof(entry->token), "%s",
+                 (sender && sender[0]) ? sender : "anonymous");
+        snprintf(entry->role, sizeof(entry->role), "%s", role);
+        entry->pid = rpc_sender_pid(sender);
+        entry->last_ping_ms = rpc_now_ms();
+
+        log_info("rpc_control", "Frontend attached: token='%s' role='%s' pid=%d (total=%d)",
+                 entry->token, entry->role, entry->pid, rpc_frontend_count());
+
+        char json[512];
+        size_t pos = 0;
+        pos = json_append_char(json, sizeof(json), pos, '{');
+        pos = json_append_key(json, sizeof(json), pos, "token");
+        pos = json_append_escaped(json, sizeof(json), pos, entry->token);
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "role");
+        pos = json_append_escaped(json, sizeof(json), pos, entry->role);
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "api_version");
+        pos = json_append_int(json, sizeof(json), pos, TER_MUSIC_API_VERSION);
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "ping_interval_ms");
+        pos = json_append_int(json, sizeof(json), pos, RPC_PING_INTERVAL_MS);
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "frontends");
+        pos = json_append_int(json, sizeof(json), pos, rpc_frontend_count());
+        pos = json_append_char(json, sizeof(json), pos, '}');
+        json[pos] = '\0';
+        return rpc_reply_string(message, json);
+    }
+
+    if (strcmp(member, "Ping") == 0) {
+        const char *token = NULL;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error, DBUS_TYPE_STRING, &token,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        RpcFrontend *entry = rpc_frontend_find(token);
+        if (!entry) {
+            return rpc_reply_bool(message, 0);   /* 未知/已过期 token：前端应重新 Attach */
+        }
+        entry->last_ping_ms = rpc_now_ms();
+        return rpc_reply_bool(message, 1);
+    }
+
+    if (strcmp(member, "Detach") == 0) {
+        const char *token = NULL;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error, DBUS_TYPE_STRING, &token,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        RpcFrontend *entry = rpc_frontend_find(token);
+        if (!entry) {
+            return rpc_reply_bool(message, 0);
+        }
+        log_info("rpc_control", "Frontend detached: token='%s' (remaining=%d)",
+                 entry->token, rpc_frontend_count() - 1);
+        memset(entry, 0, sizeof(*entry));
+        return rpc_reply_bool(message, 1);
+    }
+
+    if (strcmp(member, "FrontendInfo") == 0) {
+        char json[2048];
+        size_t pos = 0;
+        unsigned long long now = rpc_now_ms();
+
+        pos = json_append_char(json, sizeof(json), pos, '{');
+        pos = json_append_key(json, sizeof(json), pos, "frontends");
+        pos = json_append_char(json, sizeof(json), pos, '[');
+
+        int written = 0;
+        for (int i = 0; i < RPC_FRONTEND_MAX; i++) {
+            if (!g_frontends[i].active) {
+                continue;
+            }
+            if (written > 0) {
+                pos = json_append_char(json, sizeof(json), pos, ',');
+            }
+            pos = json_append_char(json, sizeof(json), pos, '{');
+            pos = json_append_key(json, sizeof(json), pos, "token");
+            pos = json_append_escaped(json, sizeof(json), pos, g_frontends[i].token);
+            pos = json_append_raw(json, sizeof(json), pos, ",");
+            pos = json_append_key(json, sizeof(json), pos, "role");
+            pos = json_append_escaped(json, sizeof(json), pos, g_frontends[i].role);
+            pos = json_append_raw(json, sizeof(json), pos, ",");
+            pos = json_append_key(json, sizeof(json), pos, "pid");
+            pos = json_append_int(json, sizeof(json), pos, g_frontends[i].pid);
+            pos = json_append_raw(json, sizeof(json), pos, ",");
+            pos = json_append_key(json, sizeof(json), pos, "last_ping_ms");
+            pos = json_append_int(json, sizeof(json), pos,
+                                  (long long)(now - g_frontends[i].last_ping_ms));
+            pos = json_append_char(json, sizeof(json), pos, '}');
+            written++;
+        }
+
+        pos = json_append_char(json, sizeof(json), pos, ']');
+        pos = json_append_raw(json, sizeof(json), pos, ",");
+        pos = json_append_key(json, sizeof(json), pos, "count");
+        pos = json_append_int(json, sizeof(json), pos, written);
+        pos = json_append_char(json, sizeof(json), pos, '}');
+        json[pos] = '\0';
+        return rpc_reply_string(message, json);
     }
 
     if (strcmp(member, "Play") == 0) {
@@ -291,8 +560,22 @@ static const char *const k_control_introspection =
     "      <arg name=\"name\" type=\"s\"/>\n"
     "      <arg name=\"message\" type=\"s\"/>\n"
     "    </signal>\n"
-    "    <method name=\"Play\"><arg type=\"b\" direction=\"out\"/></method>\n"
-    "    <method name=\"Pause\"><arg type=\"b\" direction=\"out\"/></method>\n"
+    "    <method name=\"Attach\">\n"
+    "      <arg name=\"role\" type=\"s\" direction=\"in\"/>\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"Ping\">\n"
+    "      <arg name=\"token\" type=\"s\" direction=\"in\"/>\n"
+    "      <arg type=\"b\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"Detach\">\n"
+    "      <arg name=\"token\" type=\"s\" direction=\"in\"/>\n"
+    "      <arg type=\"b\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"FrontendInfo\">\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"Play\"><arg type=\"b\" direction=\"out\"/></method>\n"    "    <method name=\"Pause\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "    <method name=\"PlayPause\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "    <method name=\"Stop\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "    <method name=\"Next\"><arg type=\"b\" direction=\"out\"/></method>\n"
