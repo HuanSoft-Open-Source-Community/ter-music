@@ -18,6 +18,7 @@
 - [中文（现代版）](translations/README_zh-CN_Modern.md)
 - [中文（文言版）](translations/README_zh-CN_Legacy.md)
 - [Lyrics API (English)](API_LYRICS_en_US.md)
+- [D-Bus Info & Control API (English)](API_DBUS_en_US.md)
 
 ## 1. Project Introduction
 
@@ -45,7 +46,9 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
 - 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG via braille art or chafa), can be toggled on/off in Settings
-- 🎵 **MPRIS & Lyrics API**: Desktop media controls with album art and an open D-Bus lyrics API for other programs
+- 🖥️ **CLI Mode & Background Playback**: Full command-line subcommands (`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`) with a detached background playback daemon that keeps playing after you close the terminal — including inside Linyaps packages, where background playback is started through D-Bus activation or the shipped systemd user service
+- 📋 **Configurable Info Display**: The basic info block, braille/ASCII text cover, progress line and two lyric lines (current + next) printed by `ter-music show` are configurable in the TUI settings
+- 🎵 **MPRIS & Lyrics API**: Desktop media controls with album art, an open D-Bus lyrics API, plus a `Info` interface (track / progress / text cover) and a `Control` interface for other programs
 
 ### 1.2 Design Philosophy
 
@@ -75,6 +78,10 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🌐 **Remote Playback**: Play music via SMB/SFTP/FTP/WebDAV remote protocols | <br /> |
 | 🎨 **Album Cover**: Terminal album art display, toggleable in Settings | <br /> |
 | 🎵 **MPRIS / Lyrics API**: Desktop media controls, album art via `mpris:artUrl`, and a JSON lyrics API over D-Bus | <br /> |
+| 🖥️ **CLI Mode**: `ter-music play/pause/next/seek/volume/speed/mode/show` works against the running instance; `show` prints the configurable info block | <br /> |
+| 🌙 **Background Playback**: `ter-music daemon start` runs headless playback; control it from any terminal, no TUI needed | <br /> |
+| 🖼️ **Text Cover over D-Bus**: `Info.GetCoverArt` returns braille or ASCII cover art for other applications | <br /> |
+| 📦 **Linyaps CLI**: the same CLI runs inside the Linyaps container (`ll-cli run org.yxzl.ter-music -- ter-music …`); on-demand background playback via D-Bus activation, always-on via a systemd user service | <br /> |
 
 ### 1.4 Use Cases
 
@@ -345,6 +352,8 @@ cd build
 
 ### 5.2 Command Line Arguments
 
+Running `ter-music` without a command starts the TUI (unchanged behaviour):
+
 ```bash
 ter-music [OPTIONS]
 
@@ -352,6 +361,8 @@ Options:
   -o, --open <path>    Open specified music directory directly on startup
   -d, --debug          Enable debug logging (outputs to ter-music-debug.log)
   -h, --help           Show help information
+  -v, --version        Show version information
+  tui [path]           Explicitly start the TUI
 ```
 
 **Examples:**
@@ -372,6 +383,150 @@ ter-music --open http://webdav-server/music
 # Show help
 ter-music --help
 ```
+
+#### 5.2.1 CLI Mode
+
+Any of the following first arguments switches to CLI mode. CLI commands are
+thin D-Bus clients: they talk to the instance that currently owns
+`org.mpris.MediaPlayer2.ter_music` (either the TUI or the background daemon),
+so they work from any terminal, script or window manager shortcut.
+
+| Command | Description |
+| ------- | ----------- |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | Play a path; starts a detached background daemon when no instance is running |
+| `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | Basic transport control |
+| `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | Relative, absolute or percentage seek |
+| `volume [0-100\|+N\|-N]` | Query or set volume |
+| `speed [0.5-3.0]` | Query or set playback speed |
+| `mode [NAME\|0-16]` | Query or set the play mode (stable names such as `list_repeat`, `folder_shuffle_repeat`) |
+| `show [OPTIONS]` | Print the current info block (basic info / text cover / progress / two lyric lines) |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | Background playback process management |
+| `version` / `help` | Version / usage |
+
+`show` options (all of them override the stored TUI settings for that call):
+
+| Option | Description |
+| ------ | ----------- |
+| `--json` | Print the full JSON snapshot (`Info.GetInfo`) |
+| `--watch[=MS]` | Live refreshing view (default 500 ms, `Ctrl+C` to exit, requires a TTY) |
+| `--one-line` | Single-line output, suitable for status bars |
+| `--full` / `--compact` / `--preset full\|compact\|custom` | Info display preset |
+| `--fields a,b,c` | Basic info fields: `state,mode,index,queue,title,artist,album,format,path,volume,speed` |
+| `--cover` / `--no-cover`, `--cover-size WxH`, `--charset braille\|ascii` | Text cover options (4-40 columns, 2-20 rows) |
+| `--progress bar\|time\|percent\|time+percent`, `--no-progress` | Progress line style |
+| `--lyrics 0\|1\|2` | Lyric lines: off / current line / current + next line |
+| `--width N` | Output width (defaults to the terminal width) |
+| `--bus NAME` | Target a specific instance bus name (defaults to the primary instance) |
+
+**Exit codes:** `0` success; `1` usage error; `3` no running instance;
+`4` D-Bus unavailable; `5` rejected by the instance.
+
+**Examples:**
+
+```bash
+# Start background playback and return to the shell immediately
+ter-music play ~/Music
+
+# Play a single file (its directory is loaded as the playlist)
+ter-music play ~/Music/album/01.flac
+
+# Current track info: braille cover, progress bar and the current/next lyric lines
+ter-music show
+
+# Single-line status for a status bar, refreshed every second
+ter-music show --one-line --watch=1000
+
+# Raw JSON for scripts
+ter-music show --json | jq -r '.track.title'
+
+# Transport control
+ter-music next
+ter-music seek +10
+ter-music volume +5
+ter-music mode shuffle_repeat
+
+# Background daemon management
+ter-music daemon start --open ~/Music
+ter-music daemon status
+ter-music daemon reload      # re-read config.xml (info display settings, volume, ...)
+ter-music daemon stop
+```
+
+Notes:
+
+- Without a command, `ter-music <path>` still opens the TUI. To open a
+  directory literally named `play`/`show`/..., use `-o ./play` or `ter-music tui play`.
+- The TUI and the daemon cannot both be the primary instance; `daemon start`
+  refuses to start when another instance owns the bus name (use `--force` to
+  start as a secondary instance anyway).
+- `daemon stop` refuses to terminate a running TUI unless `--force` is given.
+
+#### 5.2.2 Linyaps (Linglong) Package Environment
+
+When ter-music is installed as a Linyaps (如意玲珑) package, the binaries live
+inside the application container and no host-wide `ter-music` command exists
+(Linyaps cannot export executables to `$PATH`). Run CLI commands through
+`ll-cli`; every invocation joins the same application container, so the CLI,
+the TUI and the playback daemon share one session bus, one configuration
+directory and one set of D-Bus interfaces.
+
+```bash
+# Any CLI command
+ll-cli run org.yxzl.ter-music -- ter-music show
+ll-cli run org.yxzl.ter-music -- ter-music pause
+ll-cli run org.yxzl.ter-music -- ter-music play ~/Music
+
+# Reading state while a container is already running (see the notes below)
+ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+
+# Convenience wrapper for interactive shells (put it in ~/.bashrc)
+ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
+```
+
+**Background playback.** A self-detached process (`ter-music daemon start`)
+would be recycled together with the container, so it is disabled inside the
+sandbox: `daemon start` and `play` instead ask the session bus to activate the
+background player, and fall back to an explanatory message with the exact
+commands when activation is unavailable. Three supported ways exist:
+
+| Option | How to use | Behaviour |
+| ------ | ---------- | --------- |
+| D-Bus activation (on demand) | `ter-music play <path>` or `ter-music daemon start` | The session bus starts `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground --no-autoplay` on the host and the command is forwarded to it |
+| systemd user service (always on) | `systemctl --user enable --now org.yxzl.ter-music` (on the host) | The player starts with the session and keeps playing in the background |
+| Foreground | `ll-cli run org.yxzl.ter-music -- ter-music play <path> --foreground` | Plays in the foreground; the container lives as long as the command runs (tmux/screen friendly) |
+
+Notes:
+
+- `systemctl --user` is not reachable from inside the container, so the service
+  must be enabled from the host shell; `ter-music help` prints the same hints
+  when it detects the sandbox.
+- `ter-music daemon stop` works as usual and stops the instance; the container
+  is reclaimed afterwards, so `ll-cli ps` no longer lists the application.
+- `ll-cli run` maps every failure exit code to `255`; host-side scripts should
+  inspect `ter-music show --json` (field `"running"`) instead of relying on
+  exit codes.
+- When an application container is **already running** (the background daemon, or
+  the TUI), `ll-cli run … -- <command>` attaches that command's output to the
+  *running container's* stdout, so your terminal stays empty. Read it with
+  `journalctl --user -u org.yxzl.ter-music`, or use `ll-cli enter`, which keeps
+  the terminal attached:
+  `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show`.
+  That entered environment carries no `DBUS_SESSION_BUS_ADDRESS`, so the CLI
+  resolves the session bus itself (`$XDG_RUNTIME_DIR/bus`, then
+  `/run/user/<uid>/bus`); an explicitly set address always wins.
+- Host paths are visible inside the container as-is (`$HOME`, `/tmp`, `/media`),
+  and the extracted cover art stays readable by host applications through
+  `mpris:artUrl`.
+- Settings, library and the playback session are stored in
+  `$XDG_CONFIG_HOME/ter-music`. If the Linyaps runtime redirects the XDG
+  variables (see the Linyaps FAQ, "where is application data saved"), they land
+  in `~/.linglong/org.yxzl.ter-music/…` instead, keeping Linyaps and non-Linyaps
+  installations independent.
+- `--watch` requires a terminal (it uses ANSI cursor control) — run it directly
+  in a terminal instead of piping it.
+- The `Info`/`Control` interfaces are ordinary session-bus services, so host
+  applications (`gdbus`, media widgets, `busctl`) can read and control the
+  Linyaps instance exactly as they do for a regular install.
 
 ### 5.3 Interface Layout
 
@@ -597,6 +752,31 @@ An open lyrics API is available on the same D-Bus object: interface
 See [Lyrics API (English)](API_LYRICS_en_US.md) for the JSON schema and
 examples.
 
+Two more interfaces are published on the same object path so that other
+applications can read track data, text cover art and progress, and drive the
+player:
+
+- `org.yxzl.ter_music.Info` (read-only): `GetInfo`, `GetTrackInfo`,
+  `GetProgress`, `GetLyricsLines`, `GetCoverArt(charset, cols, rows)`,
+  `GetDisplay(options)` (the exact text printed by `ter-music show`),
+  `InstanceInfo`, plus the signals `InfoChanged`, `ProgressChanged` (at most
+  1 Hz) and `CoverChanged`.
+- `org.yxzl.ter_music.Control`: transport, seek, volume, speed, play mode,
+  `OpenPath`, `PlayIndex`, `GetPlaylist`, `ReloadConfig` and `Quit`.
+- `org.freedesktop.DBus.Introspectable` and `org.freedesktop.DBus.Peer` are
+  implemented, so `busctl --user introspect` / `gdbus introspect` work.
+- MPRIS metadata additionally carries `xesam:url` (file URI or the original
+  remote URL) and `xesam:trackNumber`; `OpenUri` is implemented.
+- `CanQuit` stays `false` on purpose so desktop media widgets cannot kill the
+  player; use `ter-music daemon stop` or `Control.Quit` instead.
+
+See [D-Bus Info & Control API (English)](API_DBUS_en_US.md) for the complete
+method list and JSON schema.
+
+The same interfaces are published when ter-music runs from a Linyaps package:
+the container uses the host session bus, so host applications and the packaged
+CLI see the very same object path and interfaces.
+
 ### 5.9 Configuration File
 
 The configuration file is stored at `~/.config/ter-music/config.xml`. The program will automatically create it on first run (and auto-migrate from v1 `config.json` if present).
@@ -624,6 +804,15 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `remote_connections`: Saved remote server connections (SMB/SFTP/FTP/WebDAV)
 - Color theme configuration: 24 preset themes + 1 custom slot, foreground and background colors for all UI elements
 - Equalizer configuration: 10-band gains, pre-amp, enable/disable
+- Info display (CLI / D-Bus) configuration, editable in **Settings → Info Display**:
+  - `info_preset`: preset (0=Full, 1=Compact, 2=Custom)
+  - `info_fields`: bitmask of the basic info fields (1=State, 2=Mode, 4=Index, 8=Queue, 16=Title, 32=Artist, 64=Album, 128=Format, 256=Path, 512=Volume, 1024=Speed; 2047=all)
+  - `info_show_cover`: print the braille/ASCII text cover (0/1)
+  - `info_cover_cols` / `info_cover_rows`: cover size in character columns/rows (4-40 / 2-20)
+  - `info_cover_charset`: cover charset (0=Braille, 1=ASCII)
+  - `info_show_progress`: print the progress line (0/1)
+  - `info_progress_style`: progress style (0=Bar+Time, 1=Time, 2=Percent, 3=Time+Percent)
+  - `info_lyrics_lines`: lyric lines (0=Off, 1=Current, 2=Current+Next)
 
 The program automatically saves configuration; changes take effect immediately after modification.
 
@@ -935,7 +1124,12 @@ Ter-Music adopts a modular design, main modules include:
   - **schema.h**: XML element/attribute constants
   - **crypto.c**: Remote connection password encryption/decryption
 - **remote.c**: Remote music playback support (SMB/SFTP/FTP/WebDAV/HTTP protocols)
-- **media_session.c**: MPRIS D-Bus media session, album art URL, and lyrics API integration (optional)
+- **media_session.c**: MPRIS D-Bus media session, album art URL, lyrics API, plus the Info/Control/Introspectable interfaces (optional)
+- **info/info.c**: playback info snapshot and rendering (text, JSON, braille/ASCII cover cache) shared by `ter-music show` and the D-Bus Info interface
+- **cli/cli.c, cli/cli_client.c**: CLI subcommand dispatch and the thin D-Bus client used by `play`/`pause`/`show`/...
+- **cli/daemon.c**: headless background playback process (`daemon start` / `daemon foreground`)
+- **app/open.c**: shared path opening and session restore primitives (used by the TUI, the daemon and `Control.OpenPath`)
+- **util/json.c**: small JSON writer shared by the Lyrics and Info interfaces
 - **search.c**: Async search with pinyin support
 - **logger.c**: Logging subsystem
 

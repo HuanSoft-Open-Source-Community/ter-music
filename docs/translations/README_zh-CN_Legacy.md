@@ -15,6 +15,7 @@
 - [English](../README.md)
 - [中文（现代版）](README_zh-CN_Modern.md)
 - [Lyrics API (English)](../API_LYRICS_en_US.md)
+- [D-Bus Info & Control API (English)](../API_DBUS_en_US.md)
 
 ## 卷一 本志叙略
 ### 一 枢要功用
@@ -36,7 +37,9 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **色采之谱**：24套预设主题 + 1个自定槽位，前后色彩配对保护
 - **恒存之储**：SQLite一统（珍存、往迹、曲帙），自动从v1 JSON迁移
 - 专辑封面显明之能，可于点阵中绘封面之图（可于节度中启闭）
-- **MPRIS 与歌词 API**：经D-Bus而通桌面媒体之制、`mpris:artUrl`封面，及开放歌辞之接口
+- **符令行之制与背景播弄**：诸符令子目咸备（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），兼有离脱背景之播弄役使，端闱既闭而乐声不绝；Linyaps 封缄之态亦可用——背景播弄或经 D-Bus 按需唤起，或凭随包之 systemd 用户役使常驻
+- **信息显明之可自定**：`ter-music show` 所出之基本信息、点阵文书封面、音程之行与歌辞二行（当前及其次），俱可于文界节度中厘定
+- **MPRIS 与歌词 API**：经D-Bus而通桌面媒体之制、`mpris:artUrl`封面、开放歌辞之接口，兼有 `Info`（曲目／音程／文书封面）与 `Control` 二接口，以惠他器
 - 全凭键符捷操，迅疾无伦
 - 音程条贯实时昭显，流转顺滑，可任意跳转
 
@@ -64,6 +67,10 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约 |
 | 🎨 专辑封面 | 端闱中显乐集之面，可于节度中启闭 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体之制、`mpris:artUrl`封面，及基于D-Bus之JSON歌辞接口 |
+| 🖥️ 符令行之制 | `ter-music play/pause/next/seek/volume/speed/mode/show` 诸令皆役当下所行之实例；`show` 则出可自定之信息块 |
+| 🌙 背景播弄 | `ter-music daemon start` 行无文界之播弄，任于何端闱皆得御之，不待文墨之界 |
+| 🖼️ 经D-Bus出文书封面 | `Info.GetCoverArt` 为他器出点阵或ASCII之封面 |
+| 📦 Linyaps 符令 | 同一套符令可于 Linyaps 容器内经 `ll-cli run org.yxzl.ter-music -- ter-music …` 行之；背景播弄有 D-Bus 按需唤起与常驻 systemd 用户役使二途 |
 
 ### 四 施用之境
 - 无图之御宇、幽隐之服器，无轩窗界面而欲播乐者
@@ -298,6 +305,9 @@ cd build
 ```
 
 ### 二 符令行之参数
+
+不附子目而径行 `ter-music` 者，仍入文墨之界（与旧无异）：
+
 ```bash
 ter-music [OPTIONS]
 
@@ -305,6 +315,8 @@ ter-music [OPTIONS]
   -o, --open <path>    启器时直开指定乐籍目录
   -d, --debug          启调拭志录（录于 ter-music-debug.log）
   -h, --help           显助益之文
+  -v, --version        显版本之文
+  tui [path]           明入文墨之界
 ```
 
 **示例**：
@@ -321,6 +333,114 @@ ter-music --open http://webdav-server/music
 # 显助益之文
 ter-music --help
 ```
+
+#### 二之一 CLI 模式
+
+凡首参为下列诸目之一者，皆入CLI模式。CLI之令皆薄客也，凭D-Bus而与当下主 `org.mpris.MediaPlayer2.ter_music` 之实例（或文墨之界，或背景役使）相语，故任于何端闱、脚本、轩窗营理之捷键皆可行之。
+
+| 令目 | 所司之事 |
+| --- | --- |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 播一径；若无实例在行，则立离脱之背景役使 |
+| `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | 基础传输之御 |
+| `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | 相对、绝对或按百分率而跳转 |
+| `volume [0-100\|+N\|-N]` | 查询或设音量 |
+| `speed [0.5-3.0]` | 查询或设迅疾之度 |
+| `mode [NAME\|0-16]` | 查询或设播弄之制（如 `list_repeat`、`folder_shuffle_repeat` 之定名） |
+| `show [OPTIONS]` | 出当下之信息块（基本信息／文书封面／音程／歌辞二行） |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | 背景播弄役使之管摄 |
+| `version` / `help` | 版本／用法 |
+
+`show` 之选项（用之，则一时盖过节度所存之设）：
+
+| 选项 | 所司之事 |
+| --- | --- |
+| `--json` | 出全JSON之快照（`Info.GetInfo`） |
+| `--watch[=MS]` | 实时焕新之视（默500千分秒，`Ctrl+C`退之，必在TTY） |
+| `--one-line` | 单行而出，宜于状态之栏 |
+| `--full` / `--compact` / `--preset full\|compact\|custom` | 信息显明之预设 |
+| `--fields a,b,c` | 基本信息之域：`state,mode,index,queue,title,artist,album,format,path,volume,speed` |
+| `--cover` / `--no-cover`、`--cover-size WxH`、`--charset braille\|ascii` | 文书封面之选项（宽4-40列，高2-20行） |
+| `--progress bar\|time\|percent\|time+percent`、`--no-progress` | 音程之行式 |
+| `--lyrics 0\|1\|2` | 歌辞之行：无／仅当前句／当前及其次 |
+| `--width N` | 输出之修广（默取端闱之广） |
+| `--bus NAME` | 指特定实例之总线名（默指主实例） |
+
+**退去之码：** `0` 成；`1` 用法有误；`3` 无实例在行；`4` D-Bus不可用；`5` 为实例所拒。
+
+**示例**：
+
+```bash
+# 启背景播弄，即归符令之界
+ter-music play ~/Music
+
+# 播单曲（其所在之目录即为曲帙）
+ter-music play ~/Music/album/01.flac
+
+# 当下曲目之文：点阵封面、音程条贯与当前／次句歌辞
+ter-music show
+
+# 单行之状态，宜于状态栏，每秒焕新
+ter-music show --one-line --watch=1000
+
+# 供脚本用之原始JSON
+ter-music show --json | jq -r '.track.title'
+
+# 传输之御
+ter-music next
+ter-music seek +10
+ter-music volume +5
+ter-music mode shuffle_repeat
+
+# 背景役使之管摄
+ter-music daemon start --open ~/Music
+ter-music daemon status
+ter-music daemon reload      # 重读 config.xml（信息显明之设、音量等）
+ter-music daemon stop
+```
+
+注意：
+
+- 不附子目者，`ter-music <path>` 仍入文墨之界。欲开恰名 `play`／`show` 之目录，当用 `-o ./play` 或 `ter-music tui play`。
+- 文墨之界与daemon不得同为主实例；总线名若已为他实例所主，则 `daemon start` 拒而不启（欲为次实例而强启者，可用 `--force`）。
+- `daemon stop` 于在行之文墨之界则拒之，非 `--force` 不得终也。
+
+#### 二之二 Linyaps（如意玲珑）封缄之态
+
+ter-music 以 Linyaps（如意玲珑）之包纳置者，其可执行之文居于应用容器之内，宿主无 `ter-music` 之令（玲珑不导出可执行之文于 `$PATH`），故当假 `ll-cli` 而行符令。每行一次，皆入同一应用容器，是以符令、文墨之界与背景役使共一会话总线、一节度之文、一组 D-Bus 接口。
+
+```bash
+# 诸符令皆如是行之
+ll-cli run org.yxzl.ter-music -- ter-music show
+ll-cli run org.yxzl.ter-music -- ter-music pause
+ll-cli run org.yxzl.ter-music -- ter-music play ~/Music
+
+# 容器既行之时读取其状（说见下）
+ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+
+# 交互端闱之便（置于 ~/.bashrc）
+ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
+```
+
+**背景播弄。** 自离之进程（`ter-music daemon start`）将随容器而收，故于沙箱中禁之：`daemon start` 与 `play` 改为请会话总线唤起背景之播弄者，不可唤起，则退而以具列命令之告示示人。可循之途有三：
+
+| 途 | 用之法 | 所成之事 |
+| --- | --- | --- |
+| D-Bus 按需唤起 | `ter-music play <path>` 或 `ter-music daemon start` | 会话总线于宿主行 `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground --no-autoplay`，而符令归于彼 |
+| systemd 用户役使（常驻） | `systemctl --user enable --now org.yxzl.ter-music`（于宿主行之） | 播弄之器随会话而启，常驻于背景，乐声不绝 |
+| 前台运行 | `ll-cli run org.yxzl.ter-music -- ter-music play <path> --foreground` | 于前台而播；符令行一日未毕，则容器一日存（宜于 tmux／screen） |
+
+注意：
+
+- 容器之内不达 `systemctl --user`，故役使必于宿主之端闱启之；`ter-music help` 察知沙箱者，亦印此提示。
+- `ter-music daemon stop` 如常而行，终其实例；事毕容器见收，故 `ll-cli ps` 不复列其应用。
+- `ll-cli run` 于诸般失败之码，尽以 `255` 为归；宿主之脚本宜改读 `ter-music show --json` 之 `"running"` 字段，而不恃退去之码。
+- 若应用之器**已行**（背景之役使，或文墨之界），则 `ll-cli run … -- <符令>` 尽以其所出归于*方行之容器*之常出，端闱遂空无一字。可假 `journalctl --user -u org.yxzl.ter-music` 观之，或改由 `ll-cli enter`（端闱犹接）：
+  `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show`。
+  所入之境不传 `DBUS_SESSION_BUS_ADDRESS`，符令乃自寻会话总线（先试 `$XDG_RUNTIME_DIR/bus`，次试 `/run/user/<uid>/bus`）；若明设其址，则明设者为先。
+- 宿主之径（`$HOME`、`/tmp`、`/media`）于容器之内如故可见；所提之封面，凭 `mpris:artUrl` 为宿主之器所读。
+- 节度之文、曲库与会话存于 `$XDG_CONFIG_HOME/ter-music`。若玲珑之运行时重定 XDG 之变数（见玲珑之 FAQ「应用数据保存到哪里」），则落于 `~/.linglong/org.yxzl.ter-music/…`，与 deb 之装各不相犯。
+- `--watch` 须有端闱（用 ANSI 光标之制），勿经管道而行，宜于端闱之中直行之。
+- `Info`／`Control` 即寻常会话总线之役，故宿主之器（`gdbus`、媒体之件、`busctl`）可视可御其玲珑之实例，与寻常之装无异。
 
 ### 三 文界局度
 启之，则局分三栏，其制如左：
@@ -511,6 +631,26 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 `GetLyrics`，信号 `LyricsChanged`。JSON之构与调用之例见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
 
+同一对象之路，复布二接口，俾他器得读曲目之文、文书封面与音程，且得御其器：
+
+- `org.yxzl.ter_music.Info`（唯读）：`GetInfo`、`GetTrackInfo`、`GetProgress`、
+  `GetLyricsLines`、`GetCoverArt(charset, cols, rows)`、`GetDisplay(options)`
+  （即 `ter-music show` 所出之文，毫厘不异）、`InstanceInfo`，及信号
+  `InfoChanged`、`ProgressChanged`（每秒至多一发）与 `CoverChanged`。
+- `org.yxzl.ter_music.Control`：传输、跳转、音量、迅疾之度、播弄之制、
+  `OpenPath`、`PlayIndex`、`GetPlaylist`、`ReloadConfig` 与 `Quit`。
+- `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer` 俱已备，
+  故 `busctl --user introspect`／`gdbus introspect` 可行。
+- MPRIS之Metadata复载 `xesam:url`（文卷之URI，或远程之原URL）与
+  `xesam:trackNumber`；`OpenUri` 亦已行之。
+- `CanQuit` 故守 `false`，使桌面媒体之件不得径杀其器；欲终之者，当用
+  `ter-music daemon stop` 或 `Control.Quit`。
+
+方法之全目与JSON之构，见
+[D-Bus Info & Control API (English)](../API_DBUS_en_US.md)。
+
+ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线，故宿主之器与包内符令所见之对象路径与接口同一。
+
 ### 九 节度之文
 节度之文存于`~/.config/ter-music/config.xml`（v2.2 XML格式，经libxml2解析）。器初启时将自动创之（若有v1 config.json则自动迁之）。
 
@@ -536,6 +676,15 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 - `remote_connections`：所存远程服器之连（SMB/SFTP/FTP/WebDAV）
 - 色采主题节度：24套预设主题 + 1个自定槽位，所有文界元素之前景、背景色
 - 均衡器：10段增益、前置放大、启/禁
+- 信息显明（CLI / D-Bus）之节度，可于**节度 → 信息显示**中厘定：
+  - `info_preset`：预设（0=全、1=简、2=自定）
+  - `info_fields`：基本信息诸域之位掩码（1=状态、2=制、4=序号、8=队列、16=标题、32=艺术家、64=专辑、128=制式、256=路径、512=音量、1024=迅疾；2047=尽有）
+  - `info_show_cover`：出点阵／ASCII之文书封面（0/1）
+  - `info_cover_cols` / `info_cover_rows`：封面之修广，以字符之列、行计（4-40 / 2-20）
+  - `info_cover_charset`：封面之字符集（0=点阵、1=ASCII）
+  - `info_show_progress`：出音程之行（0/1）
+  - `info_progress_style`：音程之行式（0=条贯＋时、1=时、2=百分、3=时＋百分）
+  - `info_lyrics_lines`：歌辞之行（0=无、1=仅当前句、2=当前及其次）
 
 器将自动存其节度，改之即生效。
 
@@ -790,7 +939,12 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **schema.h**：XML元素/属性常量定义
   - **crypto.c**：远程连密码加密解密之制
 - **remote.c**：远程播乐之能（SMB/SFTP/FTP/WebDAV/HTTP诸约）
-- **media_session.c**：MPRIS D-Bus媒体会话、专辑封面URL与歌词API之耦（可择）
+- **media_session.c**：MPRIS D-Bus媒体会话、专辑封面URL、歌词API，兼Info／Control／Introspectable诸接口（可择）
+- **info/info.c**：播弄信息之快照与渲染（文、JSON、点阵／ASCII封面之缓存），为 `ter-music show` 与D-Bus之Info接口所共用
+- **cli/cli.c, cli/cli_client.c**：CLI子目之分发，及 `play`／`pause`／`show` 等所用之薄D-Bus客
+- **cli/daemon.c**：无文界之背景播弄役使（`daemon start` / `daemon foreground`）
+- **app/open.c**：开径与会话恢复之共用元术（为文墨之界、daemon与 `Control.OpenPath` 所共用）
+- **util/json.c**：歌词与Info二接口所共用之小JSON书写之器
 - **search.c**：异步搜求之能（拼音搜求）
 - **logger.c**：日志纪事之部
 
