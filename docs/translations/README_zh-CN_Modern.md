@@ -17,6 +17,7 @@
 - [English](../README.md)
 - [中文（文言版）](README_zh-CN_Legacy.md)
 - [Lyrics API (English)](../API_LYRICS_en_US.md)
+- [D-Bus Info & Control API (English)](../API_DBUS_en_US.md)
 
 ## 第一章 产品概述
 ### 一 核心功能
@@ -36,7 +37,9 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - **扩展调色板**：24套预设主题 + 1个自定义槽位，前后角色彩配对保护
 - **持久化存储**：SQLite统一存储（收藏、历史、歌单），自动从v1 JSON迁移
 - 支持专辑封面显示，可在终端中渲染显示封面图片（设置中可开关）
-- **MPRIS 与歌词 API**：通过 D-Bus 提供桌面媒体控制、`mpris:artUrl` 专辑封面，以及供其他程序读取的开放歌词接口
+- 🖥️ **CLI 模式与后台播放**：提供完整的命令行子命令（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），并可启动脱离终端的后台播放守护进程，关闭终端后音乐依旧继续播放——Linyaps 打包下同样可用，后台播放经 D-Bus 激活或随包提供的 systemd 用户服务启动
+- 📋 **可配置信息显示**：`ter-music show` 输出的基本信息块、盲文/ASCII 字符封面、进度行与两行歌词（当前行 + 下一行）均可在 TUI 设置中配置
+- **MPRIS 与歌词 API**：通过 D-Bus 提供桌面媒体控制、`mpris:artUrl` 专辑封面、供其他程序读取的开放歌词接口，以及供其他程序查询曲目、进度与字符封面的 `Info` 接口和驱动播放器的 `Control` 接口
 - 纯键盘快捷键操作，响应迅速
 - 实时显示音频进度条，流畅丝滑，可任意跳转播放位置
 
@@ -65,6 +68,10 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | 🌐 远程播放 | 支持SMB/SFTP/FTP/WebDAV/HTTP远程音乐播放 |
 | 🎨 专辑封面 | 终端专辑封面显示，可在设置中开关 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体控制、`mpris:artUrl` 封面，以及基于 D-Bus 的 JSON 歌词接口 |
+| 🖥️ CLI 模式 | `ter-music play/pause/next/seek/volume/speed/mode/show` 可直接控制正在运行的实例；`show` 打印可配置的信息块 |
+| 🌙 后台播放 | `ter-music daemon start` 以无界面方式播放；可从任意终端控制，无需 TUI |
+| 🖼️ 通过 D-Bus 输出字符封面 | `Info.GetCoverArt` 向其他应用程序返回盲文或 ASCII 字符封面 |
+| 📦 Linyaps CLI | 同一套 CLI 可在 Linyaps 容器内经 `ll-cli run org.yxzl.ter-music -- ter-music …` 使用；后台播放支持按需 D-Bus 激活与常驻 systemd 用户服务 |
 
 ### 四 适用场景
 - 无图形界面的Linux系统、嵌入式设备，需要播放音乐但没有窗口界面的场景
@@ -299,6 +306,8 @@ cd build
 ```
 
 ### 二 命令行参数
+不带任何子命令直接运行 `ter-music` 仍会启动 TUI（行为不变）：
+
 ```bash
 ter-music [OPTIONS]
 
@@ -306,6 +315,8 @@ ter-music [OPTIONS]
   -o, --open <path>    启动时直接打开指定的音乐目录
   -d, --debug          启用调试日志（输出到 ter-music-debug.log）
   -h, --help           显示帮助信息
+  -v, --version        显示版本信息
+  tui [path]           显式启动 TUI
 ```
 
 **示例**：
@@ -322,6 +333,135 @@ ter-music --open http://webdav-server/music
 # 显示帮助信息
 ter-music --help
 ```
+
+#### 5.2.1 CLI 模式
+
+以下任意一个首参数都会切换到 CLI 模式。CLI 命令是轻量的 D-Bus 客户端：
+它们与当前持有 `org.mpris.MediaPlayer2.ter_music` 的实例（TUI 或后台守护进程）
+通信，因此在任意终端、脚本或窗口管理器快捷键中都能使用。
+
+| 命令 | 说明 |
+| --- | --- |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 播放指定路径；若无实例在运行，则启动一个脱离终端的后台守护进程 |
+| `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | 基础传输控制 |
+| `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | 相对、绝对或按百分比的跳转 |
+| `volume [0-100\|+N\|-N]` | 查询或设置音量 |
+| `speed [0.5-3.0]` | 查询或设置播放倍速 |
+| `mode [NAME\|0-16]` | 查询或设置播放模式（支持 `list_repeat`、`folder_shuffle_repeat` 等稳定名称） |
+| `show [OPTIONS]` | 打印当前信息块（基本信息 / 字符封面 / 进度 / 两行歌词） |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | 后台播放进程管理 |
+| `version` / `help` | 版本 / 用法 |
+
+`show` 选项（每项都会在该次调用中覆盖已保存的 TUI 设置）：
+
+| 选项 | 说明 |
+| --- | --- |
+| `--json` | 打印完整的 JSON 快照（`Info.GetInfo`） |
+| `--watch[=MS]` | 实时刷新视图（默认 500 毫秒，按 `Ctrl+C` 退出，需要 TTY） |
+| `--one-line` | 单行输出，适合状态栏使用 |
+| `--full` / `--compact` / `--preset full\|compact\|custom` | 信息显示预设 |
+| `--fields a,b,c` | 基本信息字段：`state,mode,index,queue,title,artist,album,format,path,volume,speed` |
+| `--cover` / `--no-cover`、`--cover-size WxH`、`--charset braille\|ascii` | 字符封面选项（4-40 列、2-20 行） |
+| `--progress bar\|time\|percent\|time+percent`、`--no-progress` | 进度行样式 |
+| `--lyrics 0\|1\|2` | 歌词行：关闭 / 当前行 / 当前行 + 下一行 |
+| `--width N` | 输出宽度（默认使用终端宽度） |
+| `--bus NAME` | 指定目标实例的总线名称（默认为主实例） |
+
+**退出码**：`0` 成功；`1` 用法错误；`3` 没有正在运行的实例；
+`4` D-Bus 不可用；`5` 被实例拒绝。
+
+**示例**：
+
+```bash
+# 启动后台播放并立即返回 shell
+ter-music play ~/Music
+
+# 播放单个文件（其所在目录会作为歌单载入）
+ter-music play ~/Music/album/01.flac
+
+# 当前曲目信息：盲文封面、进度条以及当前/下一行歌词
+ter-music show
+
+# 供状态栏使用的单行信息，每秒刷新一次
+ter-music show --one-line --watch=1000
+
+# 供脚本使用的原始 JSON
+ter-music show --json | jq -r '.track.title'
+
+# 传输控制
+ter-music next
+ter-music seek +10
+ter-music volume +5
+ter-music mode shuffle_repeat
+
+# 后台守护进程管理
+ter-music daemon start --open ~/Music
+ter-music daemon status
+ter-music daemon reload      # 重新读取 config.xml（信息显示设置、音量等）
+ter-music daemon stop
+```
+
+注意事项：
+
+- 不带子命令时，`ter-music <path>` 仍会打开 TUI。若要打开名称恰好为
+  `play`/`show`/…… 的目录，请使用 `-o ./play` 或 `ter-music tui play`。
+- TUI 与守护进程不能同时作为主实例；当总线名称已被其他实例占用时，
+  `daemon start` 会拒绝启动（可用 `--force` 强制以次级实例启动）。
+- 除非显式指定 `--force`，`daemon stop` 会拒绝终止正在运行的 TUI。
+
+#### 5.2.2 Linyaps（如意玲珑）打包环境
+
+当 ter-music 以 Linyaps（如意玲珑）包安装时，二进制位于应用容器内部，不存在
+宿主级的 `ter-music` 命令（Linyaps 无法把可执行文件导出到 `$PATH`）。请通过
+`ll-cli` 运行 CLI 命令；每次调用都会加入同一个应用容器，因此 CLI、TUI 与播放
+守护进程共享同一会话总线、同一配置目录与同一组 D-Bus 接口。
+
+```bash
+# 任意 CLI 命令
+ll-cli run org.yxzl.ter-music -- ter-music show
+ll-cli run org.yxzl.ter-music -- ter-music pause
+ll-cli run org.yxzl.ter-music -- ter-music play ~/Music
+
+# 容器已在运行时读取状态（见下方说明）
+ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+
+# 交互式 shell 的便捷包装（可写入 ~/.bashrc）
+ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
+```
+
+**后台播放。** 自我脱离的进程（`ter-music daemon start`）会随容器一起被回收，
+因此在沙箱内被禁用：`daemon start` 与 `play` 改为请求会话总线激活后台播放，
+当激活不可用时回退为带完整命令的提示信息。共有三种可用方式：
+
+| 方式 | 用法 | 行为 |
+| --- | --- | --- |
+| D-Bus 按需激活 | `ter-music play <路径>` 或 `ter-music daemon start` | 会话总线在宿主上启动 `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground --no-autoplay`，命令随后转发给它 |
+| systemd 用户服务（常驻） | 在宿主执行 `systemctl --user enable --now org.yxzl.ter-music` | 播放器随会话启动，并在后台持续播放 |
+| 前台运行 | `ll-cli run org.yxzl.ter-music -- ter-music play <路径> --foreground` | 在前台播放；容器与命令同生命周期（适合 tmux/screen） |
+
+注意事项：
+
+- 容器内不可访问 `systemctl --user`，因此必须在宿主 shell 中启用该服务；
+  `ter-music help` 在检测到沙箱时会打印同样的提示。
+- `ter-music daemon stop` 照常工作并停止实例；之后容器被回收，因此 `ll-cli ps`
+  不再列出该应用。
+- `ll-cli run` 会把所有失败退出码映射为 `255`；宿主脚本应改为解析
+  `ter-music show --json` 的 `"running"` 字段，而不要依赖退出码。
+- 当应用容器**已在运行**（后台 daemon 或 TUI）时，`ll-cli run … -- <命令>` 会把该命令
+  的输出接到*正在运行的容器*的标准输出上，终端因此看不到任何内容。可用
+  `journalctl --user -u org.yxzl.ter-music` 查看，或改用 `ll-cli enter`（终端保持连接）：
+  `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show`。
+  该进入环境不传 `DBUS_SESSION_BUS_ADDRESS`，CLI 会自行解析会话总线
+  （依次尝试 `$XDG_RUNTIME_DIR/bus`、`/run/user/<uid>/bus`）；显式设置的地址始终优先。
+- 宿主路径在容器内原样可见（`$HOME`、`/tmp`、`/media`），提取出的封面通过
+  `mpris:artUrl` 仍可被宿主应用读取。
+- 设置、曲库与播放会话存储于 `$XDG_CONFIG_HOME/ter-music`。若 Linyaps 运行时
+  重定向了 XDG 变量（参见 Linyaps FAQ「应用数据保存到哪里」），它们会落在
+  `~/.linglong/org.yxzl.ter-music/…`，从而与 deb 安装互不干扰。
+- `--watch` 需要终端（它使用 ANSI 光标控制）——请直接在终端中运行，不要经管道
+  运行。
+- `Info`/`Control` 就是普通的会话总线服务，因此宿主应用（`gdbus`、媒体组件、
+  `busctl`）可以像普通安装那样读取与控制 Linyaps 实例。
 
 ### 三 界面布局
 启动后界面分为三栏，布局如下：
@@ -513,6 +653,29 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 `GetLyrics`，信号 `LyricsChanged`。JSON 结构与调用示例见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
 
+同一对象路径上还额外发布了两个接口，便于其他应用程序读取曲目数据、字符封面与
+播放进度，并驱动播放器：
+
+- `org.yxzl.ter_music.Info`（只读）：`GetInfo`、`GetTrackInfo`、
+  `GetProgress`、`GetLyricsLines`、`GetCoverArt(charset, cols, rows)`、
+  `GetDisplay(options)`（即 `ter-music show` 打印的原文）、
+  `InstanceInfo`，以及信号 `InfoChanged`、`ProgressChanged`（最高 1 Hz）
+  和 `CoverChanged`。
+- `org.yxzl.ter_music.Control`：传输控制、跳转、音量、倍速、播放模式、
+  `OpenPath`、`PlayIndex`、`GetPlaylist`、`ReloadConfig` 与 `Quit`。
+- 已实现 `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer`，
+  因此 `busctl --user introspect` / `gdbus introspect` 可直接使用。
+- MPRIS 元数据额外携带 `xesam:url`（文件 URI 或原始远程 URL）与
+  `xesam:trackNumber`；`OpenUri` 已实现。
+- `CanQuit` 刻意保持为 `false`，以免桌面媒体组件直接结束播放器进程；
+  如需退出，请使用 `ter-music daemon stop` 或 `Control.Quit`。
+
+完整的方法列表与 JSON 结构见
+[D-Bus Info & Control API (English)](../API_DBUS_en_US.md)。
+
+当 ter-music 以 Linyaps 包运行时同样发布这些接口：容器使用宿主会话总线，因此
+宿主应用与包内 CLI 看到的是同一对象路径与接口。
+
 ### 九 配置文件
 
 配置文件存储在`~/.config/ter-music/config.xml`，播放器首次启动时会自动创建（如存在v1的config.json会自动迁移）。
@@ -539,6 +702,15 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `remote_connections`：保存的远程服务器连接（SMB/SFTP/FTP/WebDAV）
 - 颜色主题设置：24套预设主题 + 1个自定义槽位，所有界面元素的前景色、背景色
 - 均衡器设置：10段增益、前置放大、启用/禁用
+- 信息显示（CLI / D-Bus）设置，可在**设置 → 信息显示**中编辑：
+  - `info_preset`：预设（0=完整、1=紧凑、2=自定义）
+  - `info_fields`：基本信息字段位掩码（1=状态、2=模式、4=序号、8=队列、16=标题、32=艺术家、64=专辑、128=格式、256=路径、512=音量、1024=倍速；2047=全部）
+  - `info_show_cover`：打印盲文/ASCII 字符封面（0/1）
+  - `info_cover_cols` / `info_cover_rows`：封面尺寸（字符列数/行数，4-40 / 2-20）
+  - `info_cover_charset`：封面字符集（0=盲文、1=ASCII）
+  - `info_show_progress`：打印进度行（0/1）
+  - `info_progress_style`：进度样式（0=进度条+时间、1=时间、2=百分比、3=时间+百分比）
+  - `info_lyrics_lines`：歌词行数（0=关闭、1=当前行、2=当前行+下一行）
 
 播放器会自动保存配置，修改后立即生效。
 
@@ -796,7 +968,12 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **schema.h**: XML元素/属性常量定义
   - **crypto.c**: 远程连接密码加密解密处理
 - **remote.c**: 远程音乐播放（SMB/SFTP/FTP/WebDAV/HTTP协议）
-- **media_session.c**: MPRIS D-Bus 媒体会话、专辑封面 URL 与歌词 API 集成（可选）
+- **media_session.c**: MPRIS D-Bus 媒体会话、专辑封面 URL、歌词 API，以及 Info/Control/Introspectable 接口（可选）
+- **info/info.c**: 播放信息快照与渲染（文本、JSON、盲文/ASCII 封面缓存），供 `ter-music show` 与 D-Bus Info 接口共用
+- **cli/cli.c、cli/cli_client.c**: CLI 子命令分发，以及 `play`/`pause`/`show`/…… 所用的轻量 D-Bus 客户端
+- **cli/daemon.c**: 无界面后台播放进程（`daemon start` / `daemon foreground`）
+- **app/open.c**: 共享的路径打开与会话恢复原语（供 TUI、守护进程与 `Control.OpenPath` 使用）
+- **util/json.c**: 供歌词与信息接口共用的小型 JSON 写入器
 - **search.c**: 异步搜索功能（支持拼音搜索）
 - **logger.c**: 日志记录子系统
 
