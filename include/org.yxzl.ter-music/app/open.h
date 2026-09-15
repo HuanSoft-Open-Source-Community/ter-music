@@ -67,4 +67,13 @@ void app_set_selection_for_track(int physical_idx);
 /* 目录内是否存在（直接子文件的）音频文件 */
 int app_dir_has_audio_files(const char *path);
 
+/**
+ * 路径是否可直接交给核心播放：普通文件系统路径或 `file://` URI。
+ *
+ * 核心只播放本地文件——远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：
+ * 前端列出并下载到本地缓存，再把缓存里的本地路径交给核心。故凡含 `://`
+ * 且不是 `file://` 的一律返回 0，核心不需要认识任何协议。
+ */
+int app_path_is_local_playable(const char *path);
+
 #endif /* APP_OPEN_H */

@@ -151,6 +151,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/util.c
     src/org.yxzl.ter-music/ui/menus.c
     src/org.yxzl.ter-music/ui/settings.c
+    src/org.yxzl.ter-music/ui/remote_view.c
     src/org.yxzl.ter-music/ui/history.c
     src/org.yxzl.ter-music/ui/favorites.c
     src/org.yxzl.ter-music/ui/playlist_view.c
@@ -180,6 +181,8 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/app/open.c
     src/org.yxzl.ter-music/util/json.c
     src/org.yxzl.ter-music/remote/remote.c
+    src/org.yxzl.ter-music/remote/remote_store.c
+    src/org.yxzl.ter-music/remote/remote_cache.c
     src/org.yxzl.ter-music/config/config.c
     src/org.yxzl.ter-music/config/migration.c
     src/org.yxzl.ter-music/config/crypto.c

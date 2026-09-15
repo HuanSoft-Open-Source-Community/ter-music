@@ -51,6 +51,8 @@ def main():
     parser.add_argument("--state-out", help="把 D-Bus 状态快照写到该文件")
     parser.add_argument("--wait", type=float, default=2.0, help="启动等待秒数")
     parser.add_argument("--keep-window", action="store_true")
+    parser.add_argument("--extra-args", default="",
+                        help="追加给被测程序的参数（空格分隔，如 --debug）")
     args = parser.parse_args()
 
     home = args.home or os.path.join(os.path.dirname(os.path.abspath(args.music)), "home")
@@ -68,7 +70,8 @@ def main():
 
     pid, fd = pty.fork()
     if pid == 0:
-        os.execve(args.bin, [args.bin, "-o", args.music], env)
+        argv = [args.bin, "-o", args.music] + [a for a in args.extra_args.split() if a]
+        os.execve(args.bin, argv, env)
 
     def drain(seconds):
         output = b""

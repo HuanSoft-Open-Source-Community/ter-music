@@ -611,4 +611,6 @@
 
   <!-- ===== Help fallback ===== -->
   <string key="help.fallback_notice">{name}语言包内帮助页面缺失，此处显示为缺省英文帮助页面！</string>
+  <string key="remote.download_failed">下载失败：</string>
+  <string key="remote.partial">部分曲目下载失败</string>
 </lang>

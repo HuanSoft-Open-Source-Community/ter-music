@@ -611,4 +611,6 @@
 
   <!-- ===== Help fallback ===== -->
   <string key="help.fallback_notice">The help page for {name} is missing — displaying the default English help page instead.</string>
+  <string key="remote.download_failed">Download failed: </string>
+  <string key="remote.partial">Some tracks failed to download</string>
 </lang>

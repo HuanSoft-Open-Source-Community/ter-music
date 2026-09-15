@@ -213,16 +213,8 @@ int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_siz
 void player_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms);
 void player_set_visualizer_active(int active);
 
-/* ── 远程服务器 ───────────────────────────────────────────────── */
-
-int player_remote_server_count(void);
-int player_remote_server_get(int index, RemoteConnectionConfig *out);
-int player_remote_save_server(int index, const char *json);
-int player_remote_delete_server(int index);
-int player_remote_list(int index, const char *subpath);
-int player_remote_status(int *count, int *error, const char **path,
-                         RemoteDirEntry **entries);
-int player_remote_connect(int index, const char *subpath);
-int player_remote_disconnect(void);
+/* 门面里没有远程音乐源：远程服务器列表、目录浏览与下载都是前端自己的事
+ * （remote/remote_store.c、remote/remote_cache.c），前端把下载好的本地
+ * 路径经 player_playlist_load() 交给核心即可。 */
 
 #endif /* PLAYER_H */

@@ -37,6 +37,7 @@
 #include "audio/progress/progress.h"
 #include "audio/play_queue.h"
 #include "ui/menu_internal.h"
+#include "ui/remote_view.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -343,6 +344,8 @@ void run_event_loop(void)
         core_tick();
         /* 门面刷新：本地后端重算快照并与上次比较，修订号变化即请求重绘 */
         player_pump();
+        /* 前端远程：取回后台线程的列目录结果与已下载曲目（交给核心） */
+        remote_view_tick();
         sync_player_revisions();
         process_pending_ui_refresh();
 
@@ -1086,6 +1089,7 @@ void cleanup(void)
     audio_backend_shutdown();
     reset_album_cover_cache();
     info_release_cover_cache();
+    remote_view_shutdown();
     remote_cleanup();
 }
 

@@ -27,6 +27,20 @@ static const char *const k_audio_extensions[] = {
     ".wv", ".WV", NULL
 };
 
+/* 核心只播放本地文件：含 "://" 且不是 file:// 的路径不是本地路径。
+ * 远程音乐源由前端列出并下载到本地缓存，再把缓存路径交给核心，故核心
+ * 只需这一条朴素判定，不认识任何协议。 */
+int app_path_is_local_playable(const char *path)
+{
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+    if (!strstr(path, "://")) {
+        return 1;                       /* 普通文件系统路径 */
+    }
+    return strncmp(path, "file://", 7) == 0;
+}
+
 static void expand_user_path(const char *input, char *output, size_t output_size)
 {
     if (!output || output_size == 0) {

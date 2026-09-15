@@ -1564,7 +1564,52 @@ Playlist *playlist_build_local(const char *path, int append,
     }
 
     struct stat st;
-    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    if (stat(path, &st) != 0) {
+        return NULL;
+    }
+
+    /* 单个音频文件：单曲播放列表。前端把远程缓存里的曲目逐首交给核心，
+     * 故 Load/Append 也必须接受普通文件（与文档一致）。 */
+    if (S_ISREG(st.st_mode)) {
+        if (!is_audio_file(path)) {
+            return NULL;
+        }
+        Playlist *single = calloc(1, sizeof(*single));
+        if (!single) {
+            return NULL;
+        }
+        if (append) {
+            playlist_lock();
+            *single = g_playlist;
+            playlist_unlock();
+            if (single->count == 0) {
+                memset(single, 0, sizeof(*single));
+            }
+        }
+        if (single->count >= MAX_TRACKS) {
+            free(single);
+            return NULL;
+        }
+        snprintf(single->tracks[single->count], MAX_PATH_LEN, "%s", path);
+        single->count++;
+        single->is_loaded = 1;
+        if (single->folder_path[0] == '\0') {
+            const char *slash = strrchr(path, '/');
+            if (slash && slash != path) {
+                size_t length = (size_t)(slash - path);
+                memcpy(single->folder_path, path, length);
+                single->folder_path[length] = '\0';
+            } else {
+                snprintf(single->folder_path, sizeof(single->folder_path), ".");
+            }
+        }
+        if (progress) {
+            progress(single->count, single->count, userdata);
+        }
+        return single;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
         return NULL;
     }
 
@@ -1703,6 +1748,30 @@ int load_playlist(const char *path) {
     Playlist *next = calloc(1, sizeof(*next));
     if (!next) {
         return -1;
+    }
+
+    /* 单个音频文件：追加一首（前端把远程缓存里的曲目逐首交给核心） */
+    struct stat single;
+    if (stat(path, &single) == 0 && S_ISREG(single.st_mode)) {
+        if (!is_audio_file(path) || next->count >= MAX_TRACKS) {
+            free(next);
+            return -1;
+        }
+        snprintf(next->tracks[next->count], MAX_PATH_LEN, "%s", path);
+        next->count++;
+        next->is_loaded = 1;
+        playlist_lock();
+        g_playlist = *next;
+        playlist_unlock();
+        search_clear();
+        free(next);
+        recompute_sort_order();
+        play_queue_clear(&g_play_queue);
+        if (g_current_play_index >= 0)
+            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
+        else if (playlist_count() > 0)
+            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+        return 1;
     }
 
     next->tree_mode = 1;  /* enable tree browsing */

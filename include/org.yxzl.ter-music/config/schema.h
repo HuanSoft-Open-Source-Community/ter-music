@@ -105,6 +105,12 @@ extern "C" {
 #define XML_ATTR_PASSWORD_ENCRYPTED "encrypted"
 #define XML_VAL_ENCRYPTED           "1"
 
+/* 前端自有的远程配置（服务器列表与密码密文），与核心配置同目录。
+ * 前端是它唯一的写者。 */
+#define REMOTE_FILE_NAME            "remote.xml"
+#define REMOTE_ROOT                 "ter-music-remote"
+#define REMOTE_SECTION_CONNS        "connections"
+
 /* ── File names ───────────────────────────────────────────────────── */
 #define CONFIG_FILE_NAME            "config.xml"
 #define CONFIG_FILE_OLD_NAME        "config.json"

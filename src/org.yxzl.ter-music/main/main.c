@@ -11,6 +11,8 @@
 #include "ui/menus.h"
 #include "ui/lyrics.h"
 #include "remote/remote.h"
+#include "remote/remote_cache.h"
+#include "ui/remote_view.h"
 #include "app/open.h"
 #include "cli/cli.h"
 #include "core/core.h"
@@ -253,6 +255,8 @@ int main(int argc, char *argv[]) {
     
     init_ffmpeg();
     remote_init();
+    /* 前端远程：读入前端自有的 remote.xml 并启动下载线程 */
+    remote_view_init();
     log_info("main", "Subsystems initialized");
 
     g_active_backend = g_app_config.audio_backend;
@@ -300,14 +304,18 @@ int main(int argc, char *argv[]) {
 
     if (open_path && strlen(open_path) > 0) {
         log_info("main", "Processing --open path: %s", open_path);
-        if (remote_is_remote_path(open_path)) {
+        if (!app_path_is_local_playable(open_path)) {
+            /* 远程 URL：**前端**负责——列出目录、逐曲下载到本地缓存，再把
+             * 缓存路径交给核心播放（核心不认识远程，见 check-core-purity.sh）。
+             * 下载由后台线程进行，结果在 ui 主循环的 remote_view_tick() 里
+             * 交付给核心。 */
             RemoteConnectionConfig rconn;
             if (remote_parse_url(open_path, &rconn) == 0) {
                 log_info("main", "Remote URL parsed: protocol=%d host=%s port=%d",
                          rconn.protocol, rconn.host, rconn.port);
-                int count = load_remote_playlist(&rconn, rconn.base_path);
-                if (count > 0) {
-                    log_info("main", "Remote playlist loaded: %d tracks from %s", count, open_path);
+                if (remote_cache_start_session(&rconn, rconn.base_path,
+                                               g_app_config.auto_play_on_start) == 0) {
+                    log_info("main", "Front-end remote session started for '%s'", open_path);
                     loaded = 1;
                     snprintf(final_path, sizeof(final_path), "%s", open_path);
                 } else {
