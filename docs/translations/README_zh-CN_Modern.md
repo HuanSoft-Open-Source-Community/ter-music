@@ -65,7 +65,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | 🎛️ 10段均衡器 | ISO标准图示均衡器，设置中可视化条形图界面 |
 | ⏩ 倍速播放控制 | 六档速度调节（0.75x-3.0x），播放中可随时切换 |
 | 📊 信息栏 | 实时显示当前音频的采样率、位深、比特率、编码格式 |
-| 🌐 远程播放 | 支持SMB/SFTP/FTP/WebDAV/HTTP远程音乐播放 |
+| 🌐 远程播放 | 支持SMB/SFTP/FTP/WebDAV/HTTP 音乐源；由**前端**列出并逐曲下载到本地缓存，再把本地文件交给核心播放 |
 | 🎨 专辑封面 | 终端专辑封面显示，可在设置中开关 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体控制、`mpris:artUrl` 封面，以及基于 D-Bus 的 JSON 歌词接口 |
 | 🖥️ CLI 模式 | `ter-music play/pause/next/seek/volume/speed/mode/show` 可直接控制正在运行的实例；`show` 打印可配置的信息块 |
@@ -667,14 +667,15 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
   编辑播放队列；两者都返回“渲染就绪”的分页（响应上限 256 KB、默认每页 200 行）。
 - `org.yxzl.ter_music.Library` 及 `.Favorites`、`.History`、`.DirHistory`：
   浏览艺术家/专辑/流派/曲目、搜索、重新扫描，以及收藏与历史的读写。
-- `org.yxzl.ter_music.Config`：配置的唯一写入口；密码只以密文往返。
-- `org.yxzl.ter_music.Remote`：远程服务器条目的增删改与浏览。
-- `Info.GetInfo` 通过 `core.api_version` 与已实现方法清单做版本握手，
-  客户端可先校验兼容性再调用。
+- `org.yxzl.ter_music.Config`：核心配置的唯一写入口。远程服务器条目**不**在其中：
+  它属于前端（见下文）。
+- `Info.GetInfo` 通过 `core.api_version`（当前为 `3`）与已实现方法清单做版本握手，
+  客户端可先校验兼容性再调用。版本 3 移除了 `Remote` 接口与 `track.is_remote`
+  字段，并规定所有路径参数只接受本地路径。
 - 已实现 `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer`，
   因此 `busctl --user introspect` / `gdbus introspect` 可直接使用。
-- MPRIS 元数据额外携带 `xesam:url`（文件 URI 或原始远程 URL）与
-  `xesam:trackNumber`；`OpenUri` 已实现。
+- MPRIS 元数据额外携带 `xesam:url`（恒为 `file://` URI，远程来源的曲目也是
+  本地缓存路径）与 `xesam:trackNumber`；`OpenUri` 只接受本地文件。
 - `CanQuit` 刻意保持为 `false`，以免桌面媒体组件直接结束播放器进程；
   如需退出，请使用 `ter-music daemon stop` 或 `Control.Quit`。
 
@@ -707,7 +708,9 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `audio_backend`：音频后端（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
 - `sort_mode`：排序模式（0=默认、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文件字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
-- `remote_connections`：保存的远程服务器连接（SMB/SFTP/FTP/WebDAV）
+- 远程服务器连接（SMB/SFTP/FTP/WebDAV/HTTP）**不**存在 `config.xml` 里：
+  前端把它保存在同目录下自有的 `remote.xml`（服务器条目 + 密码密文，权限 0600），
+  下载的曲目缓存在 `$XDG_CACHE_HOME/ter-music/remote/`
 - 颜色主题设置：24套预设主题 + 1个自定义槽位，所有界面元素的前景色、背景色
 - 均衡器设置：10段增益、前置放大、启用/禁用
 - 信息显示（CLI / D-Bus）设置，可在**设置 → 信息显示**中编辑：
@@ -974,8 +977,12 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **config.c**: XML配置加载/保存（libxml2、schema v2.2）
   - **migration.c**: v1 config.json → v2 config.xml 迁移
   - **schema.h**: XML元素/属性常量定义
-  - **crypto.c**: 远程连接密码加密解密处理
-- **remote.c**: 远程音乐播放（SMB/SFTP/FTP/WebDAV/HTTP协议）
+  - **crypto.c**: 前端远程存储的密码加密解密
+- **remote/**: **前端**远程音乐源——`remote.c`（SMB/SFTP/FTP/WebDAV/HTTP，libcurl）、
+  `remote_store.c`（服务器列表，存于 `<配置目录>/remote.xml`）、
+  `remote_cache.c`（后台下载与本地缓存）
+- **ui/remote_view.c**: **设置 → 远程设备**页（列表/浏览/下载即播放），
+  下载好的本地路径经 `player` 门面交给核心
 - **media_session.c**: MPRIS D-Bus 媒体会话、专辑封面 URL、歌词 API，以及 Info/Control/Introspectable 接口（可选）
 - **info/info.c**: 播放信息快照与渲染（文本、JSON、盲文/ASCII 封面缓存），供 `ter-music show` 与 D-Bus Info 接口共用
 - **cli/cli.c、cli/cli_client.c**: CLI 子命令分发，以及 `play`/`pause`/`show`/…… 所用的轻量 D-Bus 客户端

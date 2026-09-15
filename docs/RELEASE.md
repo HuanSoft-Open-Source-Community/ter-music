@@ -9,6 +9,15 @@
 1. 更新 `include/org.yxzl.ter-music/types.h` 中的 `APP_VERSION`（例如 `"v2.1.1"`）。
 2. Git tag 名必须与 APP_VERSION 一致（`vX.Y.Z` 格式），发布时按此打 tag。
 3. 确认 CI 全绿：`gh run list --workflow ci.yml`。
+4. 行为变更登记（远程音乐源移交前端的那一版）：
+   - 配置 schema v5 → v6：旧的 `<remote_connections>` 段由核心在首次启动时
+     一次性搬到前端自有的 `<configdir>/remote.xml`（密码密文原样保留，
+     文件权限 0600），核心配置此后不再含该段；
+   - 核心不再发布 `org.yxzl.ter_music.Remote`，`core.api_version` 升为 3；
+   - `Playlist.Load/Append`、`Control.OpenPath`、MPRIS `OpenUri` 只接受本地
+     路径；CLI/daemon 收到远程 URL 会明确报错（远程源由 TUI 前端负责）；
+   - 远程曲目由前端下载到 `$XDG_CACHE_HOME/ter-music/remote/` 后交给核心播放。
+   回归脚本：`scripts/test/config-migration-check.sh`、`scripts/test/check-core-purity.sh`。
 
 > **原则：验收通过后才打 tag，绝不提前打 tag。**
 > 构建产物、测试、验收全部在 tag 之前完成（构建脚本用 `git archive HEAD`

@@ -30,7 +30,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **音乐库**：SQLite库存储，FTS5全文搜检，按艺术家/专辑/流派览之，兼**递归子目录搜索**与增量跟踪
 - **播弄队列**：独立队列之界，显序号、当下播弄之标，可排序、可恒存
 - 乐目营理之能，任君创置多组曲帙，随宜调遣
-- 远程播乐之能，通SMB、SFTP、FTP、WebDAV、HTTP诸般远器之约，以传远方服器之乐
+- 远程播乐之能，通SMB、SFTP、FTP、WebDAV、HTTP诸般远器之约，以传远方服器之乐；此乃**前端**之职——列其目、逐曲下载于本地之藏，而后以本地文卷付于核心（核心惟识本地文卷）
 - 珍存所好之章，便疾取览
 - 自动录纪播弄之迹，便于回溯
 - 志录近所临之乐籍目录，无烦复寻
@@ -64,7 +64,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | 🔊 音声传布 | 通PipeWire、PulseAudio、ALSA三枢，运行时自动检测（PipeWire > Pulse > ALSA） |
 | 🎛️ 10段均衡器 | ISO准图示均衡器，设中可视化条图 |
 | ⏩ 迅疾节度 | 六档迅迟之度，播弄中可随意迁转 |
-| 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约 |
+| 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约，由前端览之、下载于本地之藏 |
 | 🎨 专辑封面 | 端闱中显乐集之面，可于节度中启闭 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体之制、`mpris:artUrl`封面，及基于D-Bus之JSON歌辞接口 |
 | 🖥️ 符令行之制 | `ter-music play/pause/next/seek/volume/speed/mode/show` 诸令皆役当下所行之实例；`show` 则出可自定之信息块 |
@@ -119,7 +119,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | `libjpeg` | 6b+ | 专辑封面显示（JPEG格式支持） |
 | `pulseaudio-libs-devel` | 10.0+ | 波氏音声传布 |
 | `ncurses-devel` | 6.0+ | 文墨之界，宽字符之持 |
-| `libcurl-devel` | 7.0+ | 远程播乐（SMB/SFTP/FTP/WebDAV） |
+| `libcurl-devel` | 7.0+ | 远程乐源（SMB/SFTP/FTP/WebDAV/HTTP），为前端所用 |
 | `libxml2-devel` | 2.9+ | XML节度文件解析 |
 | `sqlite-devel` | 3.20+ | 音乐库数据库（FTS5全文搜检） |
 | `cmake` | 3.10+ | 营构之统（译纂时必需） |
@@ -644,13 +644,14 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
   每页常二百行）。
 - `org.yxzl.ter_music.Library` 及 `.Favorites`、`.History`、`.DirHistory`：
   览乐师、专集、流派、曲目，索之、重扫之，并收存与史录之读改。
-- `org.yxzl.ter_music.Config`：惟此一门可改其制；密语往来皆用密文。
-- `org.yxzl.ter_music.Remote`：远方服务器之增删改与浏览。
-- `Info.GetInfo` 以 `core.api_version` 与所备方法之目相质，客可先验其合否。
+- `org.yxzl.ter_music.Config`：惟此一门可改核心之制。远方服务器之条目**不**在其中，
+  乃前端所守（见下文）。
+- `Info.GetInfo` 以 `core.api_version`（今为 `3`）与所备方法之目相质，客可先验其合否。
+  第三版去 `Remote` 接口与 `track.is_remote` 之目，且凡路径之参惟受本地者。
 - `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer` 俱已备，
   故 `busctl --user introspect`／`gdbus introspect` 可行。
-- MPRIS之Metadata复载 `xesam:url`（文卷之URI，或远程之原URL）与
-  `xesam:trackNumber`；`OpenUri` 亦已行之。
+- MPRIS之Metadata复载 `xesam:url`（恒为 `file://` 之URI，虽自远方而来者亦为本地之藏径）
+  与 `xesam:trackNumber`；`OpenUri` 惟受本地文卷。
 - `CanQuit` 故守 `false`，使桌面媒体之件不得径杀其器；欲终之者，当用
   `ter-music daemon stop` 或 `Control.Quit`。
 
@@ -681,7 +682,9 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
 - `sort_mode`：排序之式（0=默、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
-- `remote_connections`：所存远程服器之连（SMB/SFTP/FTP/WebDAV）
+- 远程服器之连（SMB/SFTP/FTP/WebDAV/HTTP）**不**存于 `config.xml`：
+  前端自藏于同目录之 `remote.xml`（服务器条目与密码密文，权为 0600），
+  所下之曲藏于 `$XDG_CACHE_HOME/ter-music/remote/`
 - 色采主题节度：24套预设主题 + 1个自定槽位，所有文界元素之前景、背景色
 - 均衡器：10段增益、前置放大、启/禁
 - 信息显明（CLI / D-Bus）之节度，可于**节度 → 信息显示**中厘定：
@@ -945,8 +948,12 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   - **config.c**：XML节度加载/保存（libxml2、schema v2.2）
   - **migration.c**：v1 config.json → v2 config.xml 迁之
   - **schema.h**：XML元素/属性常量定义
-  - **crypto.c**：远程连密码加密解密之制
-- **remote.c**：远程播乐之能（SMB/SFTP/FTP/WebDAV/HTTP诸约）
+  - **crypto.c**：前端远程藏所之密码加密解密
+- **remote/**：**前端**远程乐源——`remote.c`（SMB/SFTP/FTP/WebDAV/HTTP，libcurl）、
+  `remote_store.c`（服务器之目，藏于 `<制目录>/remote.xml`）、
+  `remote_cache.c`（后台下载与本地之藏）
+- **ui/remote_view.c**：**节度 → 远程设备**之页（览、下载而即播），
+  所下之本地径由 `player` 之门面付于核心
 - **media_session.c**：MPRIS D-Bus媒体会话、专辑封面URL、歌词API，兼Info／Control／Introspectable诸接口（可择）
 - **info/info.c**：播弄信息之快照与渲染（文、JSON、点阵／ASCII封面之缓存），为 `ter-music show` 与D-Bus之Info接口所共用
 - **cli/cli.c, cli/cli_client.c**：CLI子目之分发，及 `play`／`pause`／`show` 等所用之薄D-Bus客

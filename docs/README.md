@@ -28,7 +28,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 
 **Key Features:**
 
-- 🌐 **Remote Music Playback**: Supports SMB, SFTP, FTP, WebDAV, HTTP protocols for playing music from remote servers and NAS devices
+- 🌐 **Remote Music Playback**: SMB, SFTP, FTP, WebDAV and HTTP sources. The **front end** lists them and downloads each track into a local cache, then hands the local files to the core (which only ever plays local files)
 - 🎵 **Supports Multiple Audio Formats**: MP3, WAV, FLAC, OGG, M4A, AAC, WMA, APE, OPUS, **WV (WavPack)** and other popular formats
 - 🎼 **CUE Split-track Support**: CUE sheet parsing for FLAC/APE/WV, with auto-detect encoding (GBK/BIG5/Shift-JIS)
 - 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights current line with playback progress; **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files. Switch between embedded/external sources in lyric seek mode (Ctrl+L → Tab)
@@ -75,7 +75,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🎛️ **10-band Equalizer**: ISO graphic equalizer with visual bar chart UI in settings | <br /> |
 | ⏩ **Playback Speed Control**: 6 levels of speed adjustment (0.75x-3.0x), switchable during playback | <br /> |
 | 📊 **Info Bar**: Displays sample rate, bit depth, bitrate and codec of current track | <br /> |
-| 🌐 **Remote Playback**: Play music via SMB/SFTP/FTP/WebDAV remote protocols | <br /> |
+| 🌐 **Remote Playback**: SMB/SFTP/FTP/WebDAV/HTTP sources, browsed and downloaded by the front end into a local cache | <br /> |
 | 🎨 **Album Cover**: Terminal album art display, toggleable in Settings | <br /> |
 | 🎵 **MPRIS / Lyrics API**: Desktop media controls, album art via `mpris:artUrl`, and a JSON lyrics API over D-Bus | <br /> |
 | 🖥️ **CLI Mode**: `ter-music play/pause/next/seek/volume/speed/mode/show` works against the running instance; `show` prints the configurable info block | <br /> |
@@ -139,7 +139,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | `libjpeg` | 6b+ | Album cover display (JPEG format support) |
 | `pulseaudio-libs-devel` | 10.0+ | PulseAudio audio output |
 | `ncurses-devel` | 6.0+ | Text user interface, wide character support |
-| `libcurl-devel` | 7.0+ | Remote music playback (SMB/SFTP/FTP/WebDAV) |
+| `libcurl-devel` | 7.0+ | Remote music sources (SMB/SFTP/FTP/WebDAV/HTTP) — used by the front end |
 | `libxml2-devel` | 2.9+ | XML config file parsing |
 | `sqlite-devel` | 3.20+ | Music library database (FTS5 for full-text search) |
 | `cmake` | 3.10+ | Build system (required for compilation) |
@@ -769,15 +769,18 @@ player:
 - `org.yxzl.ter_music.Library` with `.Favorites`, `.History` and
   `.DirHistory`: browse artists/albums/genres/tracks, search, rescan, and
   read or edit favorites and history.
-- `org.yxzl.ter_music.Config`: read and patch the configuration (the only
-  writer); passwords are exchanged as ciphertext only.
-- `org.yxzl.ter_music.Remote`: manage remote server entries and browse them.
-- `Info.GetInfo` advertises `core.api_version` plus the implemented method
-  list, so clients can check compatibility before using anything else.
+- `org.yxzl.ter_music.Config`: read and patch the core configuration (the only
+  writer). Remote server entries are **not** part of it: they belong to the
+  front end (see below).
+- `Info.GetInfo` advertises `core.api_version` (currently `3`) plus the
+  implemented method list, so clients can check compatibility before using
+  anything else. Version 3 removed the `Remote` interface and the
+  `track.is_remote` field and made every path argument local-only.
 - `org.freedesktop.DBus.Introspectable` and `org.freedesktop.DBus.Peer` are
   implemented, so `busctl --user introspect` / `gdbus introspect` work.
-- MPRIS metadata additionally carries `xesam:url` (file URI or the original
-  remote URL) and `xesam:trackNumber`; `OpenUri` is implemented.
+- MPRIS metadata additionally carries `xesam:url` (always a `file://` URI,
+  including for tracks downloaded from a remote source) and
+  `xesam:trackNumber`; `OpenUri` accepts local files only.
 - `CanQuit` stays `false` on purpose so desktop media widgets cannot kill the
   player; use `ter-music daemon stop` or `Control.Quit` instead.
 
@@ -812,7 +815,10 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire)
 - `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `cue_encoding`: CUE file character encoding (0=Auto, 1=UTF-8, 2=GB18030, 3=GBK, 4=BIG5, 5=Shift-JIS)
-- `remote_connections`: Saved remote server connections (SMB/SFTP/FTP/WebDAV)
+- Remote server connections (SMB/SFTP/FTP/WebDAV/HTTP) are **not** stored in
+  `config.xml`: the front end keeps them in its own `remote.xml` next to it
+  (server entries plus password ciphertext, file mode 0600), and caches
+  downloaded tracks under `$XDG_CACHE_HOME/ter-music/remote/`
 - Color theme configuration: 24 preset themes + 1 custom slot, foreground and background colors for all UI elements
 - Equalizer configuration: 10-band gains, pre-amp, enable/disable
 - Info display (CLI / D-Bus) configuration, editable in **Settings → Info Display**:
@@ -1133,8 +1139,13 @@ Ter-Music adopts a modular design, main modules include:
   - **config.c**: XML config load/save via libxml2, schema v2.2
   - **migration.c**: v1 config.json → v2 config.xml migration
   - **schema.h**: XML element/attribute constants
-  - **crypto.c**: Remote connection password encryption/decryption
-- **remote.c**: Remote music playback support (SMB/SFTP/FTP/WebDAV/HTTP protocols)
+  - **crypto.c**: password encryption/decryption for the front-end remote store
+- **remote/**: **front-end** remote music sources — `remote.c` (SMB/SFTP/FTP/
+  WebDAV/HTTP via libcurl), `remote_store.c` (server list in `<configdir>/
+  remote.xml`), `remote_cache.c` (background downloader + local cache)
+- **ui/remote_view.c**: the *Settings → Remote Device* page (list, browse,
+  download-and-play); downloaded local paths are handed to the core through
+  the `player` facade
 - **media_session.c**: MPRIS D-Bus media session, album art URL, lyrics API, plus the Info/Control/Introspectable interfaces (optional)
 - **info/info.c**: playback info snapshot and rendering (text, JSON, braille/ASCII cover cache) shared by `ter-music show` and the D-Bus Info interface
 - **cli/cli.c, cli/cli_client.c**: CLI subcommand dispatch and the thin D-Bus client used by `play`/`pause`/`show`/...

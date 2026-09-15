@@ -442,7 +442,7 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 - `libjpeg-turbo-devel`
 - `libxml2-devel`
 - `sqlite-devel`
-- `libcurl-devel`
+- `libcurl-devel`（前端远程音乐源：SMB/SFTP/FTP/WebDAV/HTTP）
 - Docker（容器构建模式时必需）
 
 > **静态构建（`--static`）**：FFmpeg 在 Docker 容器中从源码编译，无需 `ffmpeg-free-devel` 包。
@@ -476,7 +476,8 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 - `linglong-installer`
 - `cmake`、`make`、`gcc`
 - FFmpeg 开发库
-- ncurses、pulseaudio、sqlite、curl、png、jpeg、xml2、dbus 等开发库
+- ncurses、pulseaudio、sqlite、png、jpeg、xml2、dbus 等开发库
+- curl 开发库（前端远程音乐源；核心不认识远程）
 
 ### build-deb.sh 依赖：
 - `dpkg-dev`
@@ -487,7 +488,7 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 - `gcc`
 - `libncurses-dev`
 - `libpulse-dev`
-- `libcurl4-openssl-dev`
+- `libcurl4-openssl-dev`（前端远程音乐源：SMB/SFTP/FTP/WebDAV/HTTP）
 - `libpng-dev`
 - `libjpeg-dev`
 - `libxml2-dev`
