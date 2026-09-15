@@ -8,13 +8,14 @@
  *
  * 两条约定：
  *  - 渲染（config_render_json）输出全部字段，分区与 config.xml 相同：
- *    paths / theme / preferences / equalizer / remote_connections。
- *  - 应用（config_apply_json）只接受已知键，任何未知键即整体失败，
- *    避免“改了一半”的配置落盘。应用是原子的：先改副本，全部成功后再提交。
+ *    paths / theme / preferences / equalizer。
+ *  - 应用（config_apply_json）只接受已知键与已知分区，任何未知键即整体
+ *    失败，避免“改了一半”的配置落盘。应用是原子的：先改副本，全部成功
+ *    后再提交。
  *
- * 密码：渲染只输出密文（password_encrypted）与 password_set 布尔，
- * 明文不穿越会话总线；应用时接受 password（明文，落盘时由 config 层加密）
- * 或 password_encrypted（密文，解密后存入内存，落盘时不会二次加密）。
+ * 远程音乐源（服务器列表与密码）不属于核心配置：自 config v6 起由前端
+ * 自己保存（见 remote/ 与 README 的“前端远程”一节），因此补丁里出现
+ * remote_connections 会被整体拒绝。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -23,7 +24,6 @@
 
 #include "config/config.h"
 
-#include "config/crypto.h"
 #include "config/schema.h"
 #include "logger/logger.h"
 #include "util/json.h"
@@ -114,7 +114,7 @@ static const ConfigFieldEntry k_fields[] = {
 #define FIELD_COUNT ((int)(sizeof(k_fields) / sizeof(k_fields[0])))
 
 static const char *const k_sections[] = {
-    "paths", "theme", "preferences", "equalizer", "remote_connections", NULL
+    "paths", "theme", "preferences", "equalizer", NULL
 };
 
 static int field_clamp(const ConfigFieldDef *def, int value)
@@ -127,56 +127,6 @@ static int field_clamp(const ConfigFieldDef *def, int value)
 }
 
 /* ── 渲染 ───────────────────────────────────────────────────────── */
-
-static size_t render_remote_connections(const AppConfig *cfg, char *out, size_t out_size, size_t pos)
-{
-    pos = json_append_char(out, out_size, pos, '[');
-    for (int i = 0; i < cfg->remote_connection_count && i < MAX_REMOTE_CONNECTIONS; i++) {
-        const RemoteConnectionConfig *rc = &cfg->remote_connections[i];
-        if (i > 0) pos = json_append_char(out, out_size, pos, ',');
-
-        char encrypted[512];
-        encrypted[0] = '\0';
-        if (rc->password[0]) {
-            crypto_encrypt(rc->password, encrypted, sizeof(encrypted));
-        }
-
-        pos = json_append_char(out, out_size, pos, '{');
-        pos = json_append_key(out, out_size, pos, "index");
-        pos = json_append_int(out, out_size, pos, i);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "name");
-        pos = json_append_escaped(out, out_size, pos, rc->name);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "protocol");
-        pos = json_append_int(out, out_size, pos, rc->protocol);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "host");
-        pos = json_append_escaped(out, out_size, pos, rc->host);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "port");
-        pos = json_append_int(out, out_size, pos, rc->port);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "username");
-        pos = json_append_escaped(out, out_size, pos, rc->username);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "base_path");
-        pos = json_append_escaped(out, out_size, pos, rc->base_path);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "private_key_path");
-        pos = json_append_escaped(out, out_size, pos, rc->private_key_path);
-        pos = json_append_raw(out, out_size, pos, ",");
-        pos = json_append_key(out, out_size, pos, "password_set");
-        pos = json_append_bool(out, out_size, pos, rc->password[0] != '\0');
-        pos = json_append_raw(out, out_size, pos, ",");
-        /* 只回传密文：明文不穿越会话总线 */
-        pos = json_append_key(out, out_size, pos, "password_encrypted");
-        pos = json_append_string_or_null(out, out_size, pos,
-                                         encrypted[0] ? encrypted : NULL);
-        pos = json_append_char(out, out_size, pos, '}');
-    }
-    return json_append_char(out, out_size, pos, ']');
-}
 
 int config_render_json(const AppConfig *cfg, char *out, size_t out_size)
 {
@@ -211,11 +161,6 @@ int config_render_json(const AppConfig *cfg, char *out, size_t out_size)
             }
             pos = json_append_char(out, out_size, pos, ']');
             pos = json_append_char(out, out_size, pos, '}');
-            continue;
-        }
-
-        if (strcmp(section, "remote_connections") == 0) {
-            pos = render_remote_connections(cfg, out, out_size, pos);
             continue;
         }
 
@@ -294,73 +239,6 @@ static int apply_eq_bands(AppConfig *cfg, const JsonValue *value)
     return 0;
 }
 
-static int apply_remote_connections(AppConfig *cfg, const JsonValue *value)
-{
-    JsonReader reader;
-    json_reader_init(&reader, value->start, value->length);
-    JsonReader array = reader;
-    if (json_reader_enter(&array, value) != 0) {
-        return -1;
-    }
-
-    int index = 0;
-    JsonValue element;
-    while (json_array_next(&array, &element) == 1) {
-        if (element.type != JSON_VALUE_OBJECT || index >= MAX_REMOTE_CONNECTIONS) {
-            continue;
-        }
-        JsonReader entry = array;
-        if (json_reader_enter(&entry, &element) != 0) {
-            return -1;
-        }
-
-        RemoteConnectionConfig *rc = &cfg->remote_connections[index];
-        int was_set = (rc->name[0] != '\0' || rc->host[0] != '\0');
-        (void)was_set;
-
-        json_get_string(&entry, "name", rc->name, sizeof(rc->name));
-        json_get_string(&entry, "host", rc->host, sizeof(rc->host));
-        json_get_string(&entry, "username", rc->username, sizeof(rc->username));
-        json_get_string(&entry, "base_path", rc->base_path, sizeof(rc->base_path));
-        json_get_string(&entry, "private_key_path", rc->private_key_path,
-                        sizeof(rc->private_key_path));
-
-        JsonValue protocol;
-        if (json_get_path(&entry, "protocol", &protocol) == 0) {
-            int value_int = (int)json_value_int(&protocol, rc->protocol);
-            if (value_int < 0 || value_int > REMOTE_PROTOCOL_HTTP) {
-                return -1;
-            }
-            rc->protocol = value_int;
-        }
-        JsonValue port;
-        if (json_get_path(&entry, "port", &port) == 0) {
-            int value_int = (int)json_value_int(&port, rc->port);
-            if (value_int >= 0 && value_int <= 65535) {
-                rc->port = value_int;
-            }
-        }
-
-        /* 密码：明文（重新加密落盘）或密文（解密后存内存，避免二次加密）；
-         * 两者都没给则保留原有密码。 */
-        JsonValue password;
-        if (json_get_path(&entry, "password", &password) == 0 &&
-            password.type == JSON_VALUE_STRING && password.length > 0) {
-            json_value_string(&password, rc->password, sizeof(rc->password));
-        } else if (json_get_path(&entry, "password_encrypted", &password) == 0 &&
-                   password.type == JSON_VALUE_STRING && password.length > 0) {
-            char hex[512];
-            json_value_string(&password, hex, sizeof(hex));
-            crypto_decrypt(hex, rc->password, sizeof(rc->password));
-        }
-
-        index++;
-    }
-
-    cfg->remote_connection_count = index;
-    return 0;
-}
-
 int config_apply_json(const char *patch_json, char *error_out, size_t error_size)
 {
     if (error_out && error_size) {
@@ -388,6 +266,40 @@ int config_apply_json(const char *patch_json, char *error_out, size_t error_size
     }
 
     int failed = 0;
+
+    /* 顶层分区必须已知：旧版本前端可能仍发送已移除的分区
+     * （如 remote_connections，远程音乐源已移交前端），必须整体失败，
+     * 而不是“忽略它、改掉别的”。 */
+    {
+        JsonValue root = { JSON_VALUE_OBJECT, 0, 0.0, patch_json, strlen(patch_json) };
+        JsonReader top = reader;
+        if (json_reader_enter(&top, &root) == 0) {
+            char section_key[128];
+            JsonValue section_value;
+            while (json_object_next(&top, section_key, sizeof(section_key), &section_value) == 1) {
+                int known = 0;
+                for (int s = 0; k_sections[s] != NULL; s++) {
+                    if (strcmp(section_key, k_sections[s]) == 0) {
+                        known = 1;
+                        break;
+                    }
+                }
+                if (!known) {
+                    if (error_out && error_size) {
+                        snprintf(error_out, error_size, "unknown section '%s'", section_key);
+                    }
+                    free(draft);
+                    return -1;
+                }
+            }
+            if (!json_reader_ok(&top)) {
+                free(draft);
+                if (error_out && error_size) snprintf(error_out, error_size, "malformed JSON");
+                return -1;
+            }
+        }
+    }
+
     for (int s = 0; k_sections[s] != NULL && !failed; s++) {
         const char *section = k_sections[s];
 
@@ -420,20 +332,6 @@ int config_apply_json(const char *patch_json, char *error_out, size_t error_size
                         failed = 1;
                         break;
                     }
-                }
-            }
-            continue;
-        }
-
-        if (strcmp(section, "remote_connections") == 0) {
-            JsonValue connections;
-            if (json_get_path(&reader, "remote_connections", &connections) == 0) {
-                if (connections.type != JSON_VALUE_ARRAY ||
-                    apply_remote_connections(draft, &connections) != 0) {
-                    if (error_out && error_size) {
-                        snprintf(error_out, error_size, "invalid remote_connections");
-                    }
-                    failed = 1;
                 }
             }
             continue;

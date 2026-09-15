@@ -18,7 +18,7 @@ extern "C" {
 
 /* ── Version identifiers ──────────────────────────────────────────── */
 #define CONFIG_XML_VERSION          "2.2"
-#define CONFIG_CURRENT_VERSION      5   /* 与 types.h 保持同步 */
+#define CONFIG_CURRENT_VERSION      6   /* 与 types.h 保持同步 */
 #define CONFIG_MIN_SUPPORTED_VER    2
 
 /* ── Root element ─────────────────────────────────────────────────── */
@@ -29,7 +29,6 @@ extern "C" {
 #define XML_SECTION_PATHS           "paths"
 #define XML_SECTION_THEME           "theme"
 #define XML_SECTION_PREFERENCES     "preferences"
-#define XML_SECTION_REMOTE_CONNS    "remote_connections"
 
 /* ── Paths ────────────────────────────────────────────────────────── */
 #define XML_PATH_DEFAULT_STARTUP    "default_startup_path"
@@ -90,7 +89,11 @@ extern "C" {
 #define XML_EQ_BAND                 "band"
 #define XML_ATTR_BAND_FREQUENCY     "frequency"
 
-/* ── Remote connections ───────────────────────────────────────────── */
+/* ── Legacy remote connections（仅 v5 → v6 一次性搬迁时读取） ─────────
+ * 远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）已移交前端：核心不再读写该段，
+ * 只在升级时把旧配置里的条目**原样**（含密码密文）搬到前端自有的
+ * <configdir>/remote.xml，随后保存出不含该段的 v6 配置。 */
+#define XML_SECTION_REMOTE_CONNS    "remote_connections"
 #define XML_REMOTE_CONN             "connection"
 #define XML_REMOTE_NAME             "name"
 #define XML_REMOTE_PROTOCOL         "protocol"
@@ -105,16 +108,16 @@ extern "C" {
 #define XML_ATTR_PASSWORD_ENCRYPTED "encrypted"
 #define XML_VAL_ENCRYPTED           "1"
 
-/* 前端自有的远程配置（服务器列表与密码密文），与核心配置同目录。
- * 前端是它唯一的写者。 */
-#define REMOTE_FILE_NAME            "remote.xml"
-#define REMOTE_ROOT                 "ter-music-remote"
-#define REMOTE_SECTION_CONNS        "connections"
-
 /* ── File names ───────────────────────────────────────────────────── */
 #define CONFIG_FILE_NAME            "config.xml"
 #define CONFIG_FILE_OLD_NAME        "config.json"
 #define CONFIG_FILE_BACKUP_SUFFIX   ".bak"
+
+/* 前端自有的远程配置（服务器列表与密码密文），与核心配置同目录。
+ * 前端是它唯一的写者；核心只在 v5 → v6 迁移时写一次。 */
+#define REMOTE_FILE_NAME            "remote.xml"
+#define REMOTE_ROOT                 "ter-music-remote"
+#define REMOTE_SECTION_CONNS        "connections"
 
 #ifdef __cplusplus
 }

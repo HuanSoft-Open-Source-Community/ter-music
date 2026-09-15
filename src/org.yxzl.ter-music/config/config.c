@@ -3,8 +3,10 @@
  * @brief XML serialization / deserialization for AppConfig using libxml2
  *
  * Provides save/load/validate functions for the v2 XML config format.
- * Password fields are encrypted on save and decrypted on load
- * (delegates to crypto.c).
+ * The core configuration holds no remote data: remote music sources belong to
+ * the front end, which keeps its own server list. The only exception is a
+ * one-shot v5 → v6 migration that copies the legacy <remote_connections>
+ * section verbatim into the front-end file.
  *
  * @author ter-music team
  * @date 2026-06-01
@@ -22,11 +24,13 @@
 #include "config/config.h"
 #include "config/schema.h"
 #include "config/migration.h"
-#include "config/crypto.h"
 #include "playlist/encoding.h"
 #include "logger/logger.h"
 #include "audio/equalizer.h"
 #include "i18n/i18n.h"
+
+/* v5 → v6：把旧配置里的 <remote_connections> 交给前端（定义见文件后半部分） */
+static int legacy_connections_export(const char *config_path);
 
 /* ── 应用目录解析（XDG） ────────────────────────────────────────── */
 
@@ -235,8 +239,6 @@ void init_default_config(void)
     g_app_config.info_progress_style   = 0;       /* 进度条+时间 */
     g_app_config.info_lyrics_lines     = 2;       /* 当前句+下一句 */
     g_app_config.config_version        = 0;
-    g_app_config.remote_connection_count = 0;
-    memset(g_app_config.remote_connections, 0, sizeof(g_app_config.remote_connections));
 }
 
 void load_config(void)
@@ -266,6 +268,19 @@ void load_config(void)
     if (!loaded) {
         /* Nothing worked — stick with defaults already set by init_default_config */
         log_debug("menu_views", "No valid config found, using defaults");
+    }
+
+    /* v5 → v6：旧配置里的远程服务器条目移交前端（一次性数据搬迁）。
+     * 搬迁后立即保存 v6，使核心配置不再含 <remote_connections>。 */
+    if (loaded) {
+        int moved = legacy_connections_export(config_file);
+        if (moved == 1) {
+            log_info("menu_views", "Remote connections handed over to the front end, saving config v%d",
+                     CONFIG_CURRENT_VERSION);
+            save_config();
+        } else if (moved < 0) {
+            log_warn("menu_views", "Failed to hand over remote connections; config left untouched");
+        }
     }
 
     /* Migrate old configs (version < 3): change bg=0 (old C_BLACK default)
@@ -449,49 +464,6 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         }
     }
 
-    /* ── <remote_connections> ───────────────────────────────────── */
-    xmlNodePtr remotes = xmlNewChild(root, NULL,
-                                     (const xmlChar *)XML_SECTION_REMOTE_CONNS, NULL);
-    for (int i = 0; i < cfg->remote_connection_count && i < MAX_REMOTE_CONNECTIONS; i++) {
-        const RemoteConnectionConfig *rc = &cfg->remote_connections[i];
-        xmlNodePtr conn = xmlNewChild(remotes, NULL,
-                                      (const xmlChar *)XML_REMOTE_CONN, NULL);
-
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_NAME,
-                    (const xmlChar *)rc->name);
-
-        snprintf(buf, sizeof(buf), "%d", rc->protocol);
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_PROTOCOL,
-                    (const xmlChar *)buf);
-
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_HOST,
-                    (const xmlChar *)rc->host);
-
-        snprintf(buf, sizeof(buf), "%d", rc->port);
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_PORT,
-                    (const xmlChar *)buf);
-
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_USERNAME,
-                    (const xmlChar *)rc->username);
-
-        /* Encrypt password on save */
-        xmlNodePtr pwdNode = xmlNewChild(conn, NULL,
-                                         (const xmlChar *)XML_REMOTE_PASSWORD, NULL);
-        if (rc->password[0]) {
-            char encrypted[512];
-            crypto_encrypt(rc->password, encrypted, sizeof(encrypted));
-            xmlNodeSetContent(pwdNode, (const xmlChar *)encrypted);
-            xmlSetProp(pwdNode, (const xmlChar *)XML_ATTR_PASSWORD_ENCRYPTED,
-                       (const xmlChar *)XML_VAL_ENCRYPTED);
-        }
-
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_PRIVKEY,
-                    (const xmlChar *)rc->private_key_path);
-
-        xmlNewChild(conn, NULL, (const xmlChar *)XML_REMOTE_BASE_PATH,
-                    (const xmlChar *)rc->base_path);
-    }
-
     /* ── Write to file ──────────────────────────────────────────── */
     int ret = xmlSaveFormatFileEnc(path, doc, "UTF-8", 1);
     xmlFreeDoc(doc);
@@ -503,6 +475,105 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
 
     log_info("config_xml", "Saved config to '%s' (%d bytes)", path, ret);
     return 0;
+}
+
+/* ── v5 → v6：旧配置里的远程服务器条目移交前端 ───────────────────────
+ * 远程音乐源已移交前端（核心只播放本地文件），但旧配置里的服务器条目是
+ * 用户数据、不能丢：这里把它们**原样**（元素与密码密文都不改）复制到
+ * 前端自有的 <configdir>/remote.xml，随后 load_config() 保存出不含该段
+ * 的 v6 配置。
+ *
+ * 纯数据搬迁：核心不理解协议语义，只复制元素。前端已有的 remote.xml
+ * 不会被覆盖——前端才是它的写者。 */
+#define LEGACY_REMOTE_MAX 20   /* 旧实现的上限，仅用于搬迁截断 */
+
+/* @return 1 = 已搬迁（调用方应保存 v6 配置）；0 = 无需搬迁；-1 = 出错 */
+static int legacy_connections_export(const char *config_path)
+{
+    xmlDocPtr doc = xmlParseFile(config_path);
+    if (!doc) {
+        return 0;
+    }
+
+    xmlNodePtr root = xmlDocGetRootElement(doc);
+    xmlNodePtr legacy = root ? xml_find_child(root, XML_SECTION_REMOTE_CONNS) : NULL;
+    if (!legacy) {
+        xmlFreeDoc(doc);
+        return 0;
+    }
+
+    /* 与 core 配置同目录的前端文件：<configdir>/remote.xml */
+    char remote_path[MAX_PATH_LEN];
+    const char *slash = strrchr(config_path, '/');
+    if (slash && (size_t)(slash - config_path) + 1 < sizeof(remote_path)) {
+        snprintf(remote_path, sizeof(remote_path), "%.*s%s",
+                 (int)(slash - config_path + 1), config_path, REMOTE_FILE_NAME);
+    } else {
+        snprintf(remote_path, sizeof(remote_path), "%s", REMOTE_FILE_NAME);
+    }
+
+    struct stat st;
+    if (stat(remote_path, &st) == 0) {
+        log_info("config_xml", "Front-end remote config '%s' exists, not overwriting", remote_path);
+        xmlFreeDoc(doc);
+        return 1;   /* 段仍要被 v6 保存掉 */
+    }
+
+    xmlDocPtr out = xmlNewDoc((const xmlChar *)"1.0");
+    if (!out) {
+        xmlFreeDoc(doc);
+        return -1;
+    }
+    xmlNodePtr out_root = xmlNewNode(NULL, (const xmlChar *)REMOTE_ROOT);
+    if (!out_root) {
+        xmlFreeDoc(out);
+        xmlFreeDoc(doc);
+        return -1;
+    }
+    xmlDocSetRootElement(out, out_root);
+    xmlSetProp(out_root, (const xmlChar *)XML_ATTR_VERSION, (const xmlChar *)"1");
+    xmlNodePtr conns = xmlNewChild(out_root, NULL, (const xmlChar *)REMOTE_SECTION_CONNS, NULL);
+
+    int moved = 0;
+    for (xmlNodePtr child = legacy->children; child; child = child->next) {
+        if (child->type != XML_ELEMENT_NODE ||
+            xmlStrcmp(child->name, (const xmlChar *)XML_REMOTE_CONN) != 0) {
+            continue;
+        }
+        if (moved >= LEGACY_REMOTE_MAX) {
+            log_warn("config_xml", "Legacy remote list exceeds %d entries, the rest is dropped",
+                     LEGACY_REMOTE_MAX);
+            break;
+        }
+        xmlNodePtr copy = xmlDocCopyNode(child, out, 1);
+        if (copy) {
+            xmlAddChild(conns, copy);
+            moved++;
+        }
+    }
+
+    if (moved == 0) {
+        xmlFreeDoc(out);
+        xmlFreeDoc(doc);
+        return 1;   /* 空段：只需让 v6 保存掉它 */
+    }
+
+    int ret = xmlSaveFormatFileEnc(remote_path, out, "UTF-8", 1);
+    if (ret >= 0) {
+        /* 服务器条目含密码密文：只有属主可读（与 remote_store_save 一致） */
+        chmod(remote_path, 0600);
+    }
+    xmlFreeDoc(out);
+    xmlFreeDoc(doc);
+
+    if (ret < 0) {
+        log_error("config_xml", "Failed to hand over remote connections to '%s'", remote_path);
+        return -1;
+    }
+
+    log_info("config_xml", "Handed over %d remote connection(s) to the front-end file '%s'",
+             moved, remote_path);
+    return 1;
 }
 
 int config_load_from_xml(const char *path, AppConfig *cfg)
@@ -608,54 +679,6 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->info_show_progress       = xml_get_int(prefs, XML_PREF_INFO_SHOW_PROGRESS, 1);
         cfg->info_progress_style      = xml_get_int(prefs, XML_PREF_INFO_PROGRESS_STYLE, 0);
         cfg->info_lyrics_lines        = xml_get_int(prefs, XML_PREF_INFO_LYRICS_LINES, 2);
-    }
-
-    /* ── <remote_connections> ───────────────────────────────────── */
-    xmlNodePtr remotes = xml_find_child(root, XML_SECTION_REMOTE_CONNS);
-    if (remotes) {
-        xmlNodePtr conn = remotes->children;
-        int ri = 0;
-        while (conn && ri < MAX_REMOTE_CONNECTIONS) {
-            if (conn->type == XML_ELEMENT_NODE &&
-                xmlStrcmp(conn->name, (const xmlChar *)XML_REMOTE_CONN) == 0) {
-
-                RemoteConnectionConfig *rc = &cfg->remote_connections[ri];
-                xml_get_string(conn, XML_REMOTE_NAME, rc->name, sizeof(rc->name));
-                rc->protocol = xml_get_int(conn, XML_REMOTE_PROTOCOL, 0);
-
-                xml_get_string(conn, XML_REMOTE_HOST, rc->host, sizeof(rc->host));
-                rc->port = xml_get_int(conn, XML_REMOTE_PORT, 0);
-                xml_get_string(conn, XML_REMOTE_USERNAME, rc->username, sizeof(rc->username));
-
-                /* Decrypt password if encrypted attribute is set */
-                xmlNodePtr pwdNode = xml_find_child(conn, XML_REMOTE_PASSWORD);
-                if (pwdNode) {
-                    xmlChar *content = xmlNodeGetContent(pwdNode);
-                    if (content) {
-                        xmlChar *encAttr = xmlGetProp(pwdNode,
-                                      (const xmlChar *)XML_ATTR_PASSWORD_ENCRYPTED);
-                        if (encAttr && xmlStrcmp(encAttr, (const xmlChar *)XML_VAL_ENCRYPTED) == 0) {
-                            crypto_decrypt((const char *)content, rc->password,
-                                           sizeof(rc->password));
-                            xmlFree(encAttr);
-                        } else {
-                            strncpy(rc->password, (const char *)content, sizeof(rc->password) - 1);
-                            rc->password[sizeof(rc->password) - 1] = '\0';
-                        }
-                        xmlFree(content);
-                    }
-                }
-
-                xml_get_string(conn, XML_REMOTE_PRIVKEY,
-                               rc->private_key_path, sizeof(rc->private_key_path));
-                xml_get_string(conn, XML_REMOTE_BASE_PATH,
-                               rc->base_path, sizeof(rc->base_path));
-
-                ri++;
-            }
-            conn = conn->next;
-        }
-        cfg->remote_connection_count = ri;
     }
 
     /* ── <equalizer> ─────────────────────────────────────────────── */

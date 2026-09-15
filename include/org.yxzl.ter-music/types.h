@@ -159,15 +159,13 @@ typedef struct {
 
 #define MAX_ALBUM_COVER_CACHE 10
 #define ALBUM_COVER_TEMP_PREFIX "/tmp/ter-music-cover-"
-#define MAX_REMOTE_CONNECTIONS 20
-#define MAX_REMOTE_NAME_LEN 64
 
 #define AUDIO_BACKEND_AUTO      0
 #define AUDIO_BACKEND_PULSE     1
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 5   /* 与 config/schema.h 保持同步 */
+#define CONFIG_CURRENT_VERSION 6   /* 与 config/schema.h 保持同步 */
 
 /* ── Lyrics source preference ── */
 #define LYRICS_SOURCE_AUTO     0   /* default: embedded first, then external */
@@ -270,25 +268,6 @@ typedef struct {
     int border_bg;
 } ColorTheme;
 
-typedef enum {
-    REMOTE_PROTOCOL_SMB = 0,
-    REMOTE_PROTOCOL_SFTP = 1,
-    REMOTE_PROTOCOL_FTP = 2,
-    REMOTE_PROTOCOL_WEBDAV = 3,
-    REMOTE_PROTOCOL_HTTP = 4
-} RemoteProtocol;
-
-typedef struct {
-    char name[MAX_REMOTE_NAME_LEN];
-    int protocol;               // RemoteProtocol value
-    char host[256];
-    int port;
-    char username[64];
-    char password[256];
-    char private_key_path[MAX_PATH_LEN];
-    char base_path[512];
-} RemoteConnectionConfig;
-
 typedef struct {
     char default_startup_path[MAX_PATH_LEN];
     char last_opened_path[MAX_PATH_LEN];
@@ -314,8 +293,6 @@ typedef struct {
     int sort_mode;         // SortMode value, 0=default (no sort)
     int cue_encoding;      // CUE_ENCODING_* constant (playlist/encoding.h), 0=auto
     int config_version;
-    RemoteConnectionConfig remote_connections[MAX_REMOTE_CONNECTIONS];
-    int remote_connection_count;
     int eq_enabled;              /* 0/1 — equaliser master switch */
     int eq_preamp;               /* pre-amp gain in dB, -12..12 */
     int eq_band_gains[EQ_BAND_COUNT]; /* per-band gain in dB, -12..12 */

@@ -625,6 +625,13 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
         && ok "Control.OpenPath 拒绝远程 URL" \
         || bad "Control.OpenPath 未拒绝远程 URL：$reject_open"
 
+    # 配置面：remote_connections 段已随接口一起消失
+    local config_all
+    config_all="$(rpc_py call org.yxzl.ter_music.Config.GetAll)"
+    printf '%s' "$config_all" | grep -q "remote_connections" \
+        && bad "Config.GetAll 仍含 remote_connections" \
+        || ok "Config.GetAll 不含 remote_connections"
+
     # 前端注册表（保持连接）
     (rpc_py attach tui 5 >/dev/null 2>&1 &)
     sleep 1

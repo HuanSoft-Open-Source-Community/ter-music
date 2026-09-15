@@ -174,44 +174,9 @@ int config_migrate_v1_to_v2(void)
     if (strstr(json, "\"sort_mode\""))
         cfg.sort_mode = (int)extract_json_int(json, "sort_mode");
 
-    /* Remote connections */
-    int old_version = 0;
-    if (strstr(json, "\"config_version\""))
-        old_version = (int)extract_json_int(json, "config_version");
-    if (strstr(json, "\"remote_connection_count\"")) {
-        int count = (int)extract_json_int(json, "remote_connection_count");
-        if (count > MAX_REMOTE_CONNECTIONS) count = MAX_REMOTE_CONNECTIONS;
-        if (count < 0) count = 0;
-        cfg.remote_connection_count = count;
-
-        for (int ri = 0; ri < count; ri++) {
-            RemoteConnectionConfig *rc = &cfg.remote_connections[ri];
-            char key[64];
-            snprintf(key, sizeof(key), "remote_%d_name", ri);
-            extract_json_string(json, key, rc->name, sizeof(rc->name));
-            snprintf(key, sizeof(key), "remote_%d_protocol", ri);
-            rc->protocol = (int)extract_json_int(json, key);
-            snprintf(key, sizeof(key), "remote_%d_host", ri);
-            extract_json_string(json, key, rc->host, sizeof(rc->host));
-            snprintf(key, sizeof(key), "remote_%d_port", ri);
-            rc->port = (int)extract_json_int(json, key);
-            snprintf(key, sizeof(key), "remote_%d_username", ri);
-            extract_json_string(json, key, rc->username, sizeof(rc->username));
-            snprintf(key, sizeof(key), "remote_%d_password", ri);
-            extract_json_string(json, key, rc->password, sizeof(rc->password));
-            snprintf(key, sizeof(key), "remote_%d_private_key_path", ri);
-            extract_json_string(json, key, rc->private_key_path, sizeof(rc->private_key_path));
-            snprintf(key, sizeof(key), "remote_%d_base_path", ri);
-            extract_json_string(json, key, rc->base_path, sizeof(rc->base_path));
-        }
-    }
-
-    /* v0→v1 migration: clear unencrypted passwords from old v0 files */
-    if (old_version < 1) {
-        for (int ri = 0; ri < MAX_REMOTE_CONNECTIONS; ri++) {
-            cfg.remote_connections[ri].password[0] = '\0';
-        }
-    }
+    /* v0→v1 migration: old v0 files (and every remote entry they carried)
+     * are not carried over — remote music sources belong to the front end
+     * since config v6, and the front end keeps its own server list. */
 
     free(json);
 

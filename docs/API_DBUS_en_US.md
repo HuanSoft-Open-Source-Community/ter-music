@@ -347,30 +347,24 @@ All three broadcast `Library.LibraryChanged` with their own reason.
 `GetAll` mirrors `config.xml`, using the same section and key names:
 
 ```json
-{ "version": 5,
+{ "version": 6,
   "paths": { "default_startup_path": "…", "last_opened_path": "…" },
   "theme": { "playlist_fg": 7, "playlist_bg": -1, "…": 0 },
   "preferences": { "volume_percent": 100, "default_playback_speed": 1.00,
                    "info_preset": 0, "info_fields": 2047, "…": 0 },
-  "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] },
-  "remote_connections": [
-    { "index": 0, "name": "nas", "protocol": "sftp", "host": "…", "port": 22,
-      "username": "…", "base_path": "/music", "private_key_path": "",
-      "password_set": true, "password_encrypted": "1f3a…" }
-  ] }
+  "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] } }
 ```
 
 Notes:
 
 - Numeric values outside their range are clamped, not rejected
   (`volume_percent: 999` becomes `100`).
-- **Passwords never cross the bus in plaintext.** `GetAll` returns
-  `password_set` plus the stored ciphertext (`password_encrypted`). `Set`
-  accepts either `password` (plaintext; the core encrypts it on save) or
-  `password_encrypted` (the value `GetAll` gave you; decrypted back so saving
-  never double-encrypts). Omitting both keeps the stored password.
 - `Set` applying to play mode, speed or volume is visible immediately, because
   the core re-applies runtime values after saving.
+- Remote server entries and their passwords are **not** part of the core
+  configuration. They belong to the front end, which keeps them in its own
+  file; a patch containing `remote_connections` fails with
+  `Error.Unsupported`.
 
 Signal `ConfigChanged(s patch)` carries the patch that was applied; `{}` means
 "everything may have changed" (used by `Reset`).
