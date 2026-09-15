@@ -24,7 +24,6 @@
 #include "ui/menus.h"
 #include "audio/progress/progress.h"
 #include "ui/lyrics.h"
-#include "remote/remote.h"
 #include "logger/logger.h"
 #include "ui/braille/braille_art.h"
 #include "library/library.h"
@@ -90,10 +89,6 @@ pthread_mutex_t g_play_mutex = PTHREAD_MUTEX_INITIALIZER;
 int g_play_thread_active = 0;
 int g_play_thread_finished = 0;
 int g_pending_playback_index = -1;
-
-/* ── Remote cache paths ── */
-char g_cached_audio_path[MAX_PATH_LEN] = "";
-char g_cached_lyrics_path[MAX_PATH_LEN] = "";
 
 /* ── Speed ── */
 float g_playback_speed = 1.0f;
@@ -455,20 +450,6 @@ void process_pending_playback_action(void)
     if (pending_index >= 0) play_audio(pending_index);
 }
 
-void cleanup_playback_cache(void)
-{
-    if (g_cached_audio_path[0]) {
-        log_debug("audio", "Cleaning up cached audio: %s", g_cached_audio_path);
-        unlink(g_cached_audio_path);
-        g_cached_audio_path[0] = '\0';
-    }
-    if (g_cached_lyrics_path[0]) {
-        log_debug("audio", "Cleaning up cached lyrics: %s", g_cached_lyrics_path);
-        unlink(g_cached_lyrics_path);
-        g_cached_lyrics_path[0] = '\0';
-    }
-}
-
 void wait_for_playback_thread_shutdown(void)
 {
     int timeout_ms = 2000;
@@ -543,12 +524,6 @@ void persist_playback_session_state(void)
     snprintf(g_app_config.last_played_folder_path, sizeof(g_app_config.last_played_folder_path), "%s", track_folder_path);
     save_config();
 }
-
-/* ============================================================
- * Remote download progress callback
- * ============================================================ */
-
-static void remote_progress_refresh(void) { refresh(); }
 
 /* ============================================================
  * Play audio (public API)
@@ -641,64 +616,8 @@ void play_audio(int index)
 
 start_playback:
     {
-    char local_audio_path[MAX_PATH_LEN] = "";
-    char local_lyrics_path[MAX_PATH_LEN] = "";
-
     /* Set CUE offset for the playback thread */
     g_cue_offset = cue_get_offset(index);
-
-    if (remote_is_remote_path(track_path)) {
-        cleanup_playback_cache();
-        remote_set_progress_hook(remote_progress_refresh);
-
-        const char *src_ext = strrchr(track_path, '.');
-        char ext_buf[16] = "";
-        if (src_ext) {
-            size_t ext_len = strlen(src_ext);
-            if (ext_len < sizeof(ext_buf)) memcpy(ext_buf, src_ext, ext_len + 1);
-        }
-
-        char tmp_audio[] = "/tmp/ter-music-cache-XXXXXX";
-        int audio_fd = -1;
-        if (ext_buf[0]) {
-            char pattern[MAX_PATH_LEN];
-            snprintf(pattern, sizeof(pattern), "/tmp/ter-music-cache-XXXXXX%s", ext_buf);
-            audio_fd = mkstemps(pattern, (int)strlen(ext_buf));
-            if (audio_fd >= 0) { close(audio_fd); strncpy(tmp_audio, pattern, sizeof(tmp_audio) - 1); }
-        } else {
-            audio_fd = mkstemp(tmp_audio);
-            if (audio_fd >= 0) close(audio_fd);
-        }
-        if (audio_fd >= 0) {
-            update_controls_status(i18n_get("audio.status.downloading"));
-            refresh();
-            if (remote_fetch_to_file(track_path, tmp_audio) == 0) {
-                strncpy(g_cached_audio_path, tmp_audio, MAX_PATH_LEN - 1);
-                strncpy(local_audio_path, tmp_audio, MAX_PATH_LEN - 1);
-            } else {
-                unlink(tmp_audio);
-            }
-        }
-
-        char lrc_url[MAX_PATH_LEN];
-        strncpy(lrc_url, track_path, MAX_PATH_LEN - 1);
-        char *dot = strrchr(lrc_url, '.');
-        if (dot) {
-            strcpy(dot, ".lrc");
-            char tmp_lrc[] = "/tmp/ter-music-cache-XXXXXX.lrc";
-            int lrc_fd = mkstemps(tmp_lrc, 4);
-            if (lrc_fd >= 0) {
-                close(lrc_fd);
-                if (remote_fetch_to_file(lrc_url, tmp_lrc) == 0) {
-                    strncpy(g_cached_lyrics_path, tmp_lrc, MAX_PATH_LEN - 1);
-                    strncpy(local_lyrics_path, tmp_lrc, MAX_PATH_LEN - 1);
-                } else {
-                    unlink(tmp_lrc);
-                }
-            }
-        }
-        remote_set_progress_hook(NULL);
-    }
 
     int *index_ptr = malloc(sizeof(int));
     if (!index_ptr) {
@@ -728,9 +647,9 @@ start_playback:
     signal_playback_thread();
 
     int lyrics_source = library_get_lyrics_source(track_path);
-    load_lyrics(local_lyrics_path[0] ? local_lyrics_path : track_path, lyrics_source);
+    load_lyrics(track_path, lyrics_source);
     if (g_current_view == VIEW_MAIN) render_lyrics();
-    update_album_cover_for_track(local_audio_path[0] ? local_audio_path : track_path);
+    update_album_cover_for_track(track_path);
 
     Track track;
     get_track_metadata(index, &track);
@@ -808,7 +727,6 @@ void stop_audio(void)
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
 
-    cleanup_playback_cache();
     g_current_position = 0;
     progress_tracker_on_stop();
     clear_lyrics();

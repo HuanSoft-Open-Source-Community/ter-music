@@ -173,7 +173,6 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/media/rpc_job.c
     src/org.yxzl.ter-music/media/rpc_library.c
     src/org.yxzl.ter-music/media/rpc_config.c
-    src/org.yxzl.ter-music/media/rpc_remote.c
     src/org.yxzl.ter-music/info/info.c
     src/org.yxzl.ter-music/cli/cli.c
     src/org.yxzl.ter-music/cli/cli_client.c

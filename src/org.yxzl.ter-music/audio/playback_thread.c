@@ -425,13 +425,6 @@ static void attempt_next_track_preload(int current_track_index,
         return;
     }
 
-    /* Use cached remote path if available */
-    {
-        extern char g_cached_audio_path[256];
-        if (g_cached_audio_path[0])
-            strncpy(file_path, g_cached_audio_path, MAX_PATH_LEN - 1);
-    }
-
     log_info("segment", "preload: attempting next track idx=%d path='%s'", next_index, file_path);
 
     /* Ensure preload data buffers are allocated */
@@ -641,8 +634,6 @@ void *play_audio_thread(void *arg)
     extern int g_play_thread_running;
     extern PlayState g_play_state;
     extern int g_current_play_index;
-    extern char g_cached_audio_path[256];
-    extern char g_cached_lyrics_path[256];
     extern int g_total_duration;
     extern int g_current_position;
     extern float g_playback_speed;
@@ -670,11 +661,6 @@ void *play_audio_thread(void *arg)
 
     char file_path[MAX_PATH_LEN];
     int valid_index = playlist_get_track_path(index, file_path, sizeof(file_path)) == 0;
-
-    if (valid_index && g_cached_audio_path[0]) {
-        strncpy(file_path, g_cached_audio_path, MAX_PATH_LEN - 1);
-        file_path[MAX_PATH_LEN - 1] = '\0';
-    }
 
     if (!valid_index || !thread_running) {
         log_warn("audio", "Playback thread: invalid index=%d or thread not running", index);

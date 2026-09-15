@@ -13,7 +13,6 @@
 #include "i18n/i18n.h"
 #include "logger/logger.h"
 #include "playlist/playlist.h"
-#include "remote/remote.h"
 #include "ui/braille/braille_art.h"
 #include "ui/utf8.h"
 #include "util/json.h"
@@ -525,9 +524,9 @@ int info_uri_to_path(const char *uri, char *path, size_t path_size)
             start = slash;
         }
     } else if (strstr(uri, "://") != NULL) {
-        /* 远程 URL：原样返回，交由 remote/ 层处理 */
-        snprintf(path, path_size, "%s", uri);
-        return 0;
+        /* 非 file:// 的 URI 不是本地路径：核心只播放本地文件，远程音乐源
+         * 由前端下载到本地缓存后再把路径交给核心。 */
+        return -1;
     }
 
     size_t pos = 0;
@@ -574,17 +573,12 @@ void info_track_snapshot(InfoTrack *out)
     out->index = g_current_play_index;
     info_build_track_id(out->track_id, sizeof(out->track_id), track_path);
     snprintf(out->path, sizeof(out->path), "%s", track_path);
-    out->is_remote = remote_is_remote_path(track_path) ? 1 : 0;
     out->cue_track_number = track.cue_track_number;
     snprintf(out->title, sizeof(out->title), "%s", track.title);
     snprintf(out->artist, sizeof(out->artist), "%s", track.artist);
     snprintf(out->album, sizeof(out->album), "%s", track.album);
 
-    if (out->is_remote) {
-        snprintf(out->uri, sizeof(out->uri), "%s", track_path);
-    } else {
-        info_build_file_uri(track_path, out->uri, sizeof(out->uri));
-    }
+    info_build_file_uri(track_path, out->uri, sizeof(out->uri));
 
     out->queue_count = g_play_queue.count;
     for (int i = 0; i < g_play_queue.count; i++) {
@@ -1394,10 +1388,6 @@ static size_t info_append_track_object(char *out, size_t out_size, size_t pos,
     pos = json_append_key(out, out_size, pos, "uri");
     pos = json_append_string_or_null(out, out_size, pos,
                                      (t->valid && t->uri[0]) ? t->uri : NULL);
-
-    pos = json_append_raw(out, out_size, pos, ",");
-    pos = json_append_key(out, out_size, pos, "is_remote");
-    pos = json_append_bool(out, out_size, pos, t->is_remote);
 
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "cue_track_number");

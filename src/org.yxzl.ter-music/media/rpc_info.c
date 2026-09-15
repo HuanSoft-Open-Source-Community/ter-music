@@ -19,7 +19,6 @@
 #include "info/info.h"
 #include "logger/logger.h"
 #include "playlist/playlist.h"
-#include "remote/remote.h"
 #include "ui/braille/braille_art.h"
 #include "ui/lyrics.h"
 #include "ui/menus.h"

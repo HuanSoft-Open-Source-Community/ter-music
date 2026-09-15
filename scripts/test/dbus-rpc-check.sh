@@ -39,7 +39,6 @@ EXPECTED_INTERFACES=(
     "org.yxzl.ter_music.History"
     "org.yxzl.ter_music.DirHistory"
     "org.yxzl.ter_music.Config"
-    "org.yxzl.ter_music.Remote"
 )
 
 usage() {
@@ -236,10 +235,10 @@ check_info_extensions() {
     local info api_version
     info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
     api_version="$(json_field "$info" 'doc["core"]["api_version"]')"
-    if [ "$api_version" = "2" ]; then
-        ok "core.api_version=2（握手版本）"
+    if [ "$api_version" = "3" ]; then
+        ok "core.api_version=3（握手版本：移除 Remote、路径只接受本地）"
     else
-        bad "core.api_version 期望 2，实际 '$api_version'"
+        bad "core.api_version 期望 3，实际 '$api_version'"
     fi
 
     local methods
@@ -304,7 +303,7 @@ check_frontends() {
 
     local version
     version="$(json_field "$attached" 'doc["api_version"]')"
-    [ "$version" = "2" ] && ok "Attach 返回 api_version=2" || bad "Attach api_version=$version"
+    [ "$version" = "3" ] && ok "Attach 返回 api_version=3" || bad "Attach api_version=$version"
 
     # 第二个前端
     local attached2
@@ -600,31 +599,31 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
     clamped="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
     [ "$clamped" = "100" ] && ok "越界值被钳制到 100" || bad "钳制失败：$clamped"
 
-    # Remote：新增服务器 + 密码不回明文
-    rpc_py call org.yxzl.ter_music.Remote.SaveServer -1 \
-        'json:{"name":"t","protocol":"sftp","host":"127.0.0.1","port":2222,"password":"s3cret"}' >/dev/null
-    local servers leak
-    servers="$(rpc_py call org.yxzl.ter_music.Remote.ListServers)"
-    leak="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c '
-import json,sys
-doc = json.load(sys.stdin)
-rc = doc["remote_connections"][0]
-print("%s|%s|%s" % (rc["password_set"], "password" in rc, bool(rc["password_encrypted"])))
-')"
-    if printf '%s' "$servers" | grep -q '"count":1' && [ "$leak" = "True|False|True" ]; then
-        ok "Remote.SaveServer 生效，密码仅以密文回传（$leak）"
+    # 远程音乐源已移交前端：核心不得再发布 Remote 接口，也不得出现在方法清单里
+    local remote_iface remote_methods
+    remote_iface="$(introspect)"
+    remote_methods="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    if printf '%s' "$remote_iface" | grep -q "ter_music.Remote"; then
+        bad "自省 XML 仍含 org.yxzl.ter_music.Remote"
     else
-        bad "Remote 密码处理异常：servers=$servers leak=$leak"
+        ok "自省 XML 不含 Remote 接口（远程音乐源属前端）"
+    fi
+    if printf '%s' "$remote_methods" | grep -q '"Remote\.'; then
+        bad "core.methods 仍声明 Remote.*：$(printf '%s' "$remote_methods" | grep -o '"Remote\.[A-Za-z]*"' | tr '\n' ' ')"
+    else
+        ok "core.methods 不含 Remote.*"
     fi
 
-    local bad_proto
-    bad_proto="$(rpc_py call org.yxzl.ter_music.Remote.SaveServer -1 'json:{"name":"x","protocol":"gopher","host":"h"}')"
-    printf '%s' "$bad_proto" | grep -q "InvalidArgs" && ok "Remote 拒绝未知协议" || bad "Remote 未拒绝未知协议"
-
-    rpc_py call org.yxzl.ter_music.Remote.DeleteServer 0 >/dev/null
-    local remaining
-    remaining="$(rpc_py call org.yxzl.ter_music.Remote.ListServers | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')"
-    [ "$remaining" = "0" ] && ok "Remote.DeleteServer 生效" || bad "删除后仍有 $remaining 条"
+    # 核心拒绝远程 URL：远程源由前端下载到本地缓存后再交给核心
+    local reject_load reject_open
+    reject_load="$(rpc_py call org.yxzl.ter_music.Playlist.Load 'ftp://127.0.0.1/pub' false false)"
+    reject_open="$(rpc_py call org.yxzl.ter_music.Control.OpenPath 'smb://host/share' false)"
+    printf '%s' "$reject_load" | grep -q "Unsupported" \
+        && ok "Playlist.Load 拒绝远程 URL" \
+        || bad "Playlist.Load 未拒绝远程 URL：$reject_load"
+    printf '%s' "$reject_open" | grep -q "Unsupported" \
+        && ok "Control.OpenPath 拒绝远程 URL" \
+        || bad "Control.OpenPath 未拒绝远程 URL：$reject_open"
 
     # 前端注册表（保持连接）
     (rpc_py attach tui 5 >/dev/null 2>&1 &)

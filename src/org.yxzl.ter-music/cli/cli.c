@@ -12,6 +12,7 @@
 #include "cli/cli.h"
 
 #include "config/config.h"
+#include "app/open.h"
 #include "info/info.h"
 #include "types.h"
 #include "ui/utf8.h"
@@ -244,6 +245,12 @@ static int cli_cmd_play(int argc, char **argv) {
         }
     }
 
+    if (path && !app_path_is_local_playable(path)) {
+        fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：\n");
+        fprintf(stderr, "      请在 TUI 中打开远程目录，前端会把曲目下载到本地缓存后再交给核心播放。\n");
+        return CLI_EXIT_USAGE;
+    }
+
     if (cli_client_primary_available(cli_bus())) {
         if (foreground) {
             fprintf(stderr, "提示：已有 ter-music 实例在运行，改为控制该实例（--foreground 仅在无实例时生效）。\n");
@@ -317,6 +324,12 @@ static int cli_cmd_daemon(int argc, char **argv) {
             fprintf(stderr, "错误：未知选项 '%s'。\n", argv[i]);
             return CLI_EXIT_USAGE;
         }
+    }
+
+    if (open_path && !app_path_is_local_playable(open_path)) {
+        fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：\n");
+        fprintf(stderr, "      请在 TUI 中打开远程目录，前端会把曲目下载到本地缓存后再交给核心播放。\n");
+        return CLI_EXIT_USAGE;
     }
 
     if (strcmp(action, "foreground") == 0) {

@@ -3,7 +3,6 @@
 #include "config/config.h"
 #include "search/search.h"
 #include "pinyin_table.h"
-#include "remote/remote.h"
 #include "playlist/ape_tag.h"
 #include "ui/braille/braille_art.h"
 #include "ui/ui.h"
@@ -950,13 +949,6 @@ static void fill_metadata_from_filename(const char *path, char *title, char *art
     const char *fname = strrchr(path, '/');
     fname = fname ? fname + 1 : path;
 
-    // Decode percent-encoding for remote URLs (e.g. "%E8%B8%8F" -> "踏浪")
-    char decoded_fname[MAX_META_LEN];
-    if (remote_is_remote_path(path)) {
-        remote_url_decode(fname, decoded_fname, sizeof(decoded_fname));
-        fname = decoded_fname;
-    }
-
     char temp_title[MAX_META_LEN];
     utf8_str_truncate(temp_title, fname, MAX_META_LEN - 1);
     char *dot = strrchr(temp_title, '.');
@@ -1296,11 +1288,6 @@ void get_audio_metadata(const char *path, char *title, char *artist, char *album
     static const char *const album_keys[] = {"album", "ALBUM"};
 
     fill_metadata_from_filename(path, title, artist, album);
-
-    // 远程 URL 不通过 FFmpeg 打开（会阻塞主线程且无超时）
-    if (remote_is_remote_path(path)) {
-        return;
-    }
 
     AVFormatContext *fmt_ctx = NULL;
     if (avformat_open_input(&fmt_ctx, path, NULL, NULL) != 0) {
@@ -1654,50 +1641,6 @@ Playlist *playlist_build_local(const char *path, int append,
     return next;
 }
 
-Playlist *playlist_build_remote(const RemoteConnectionConfig *conn, const char *subpath)
-{
-    if (!conn) {
-        return NULL;
-    }
-
-    RemoteDirEntry *entries = NULL;
-    int entry_count = 0;
-    if (remote_list_directory(conn, subpath, &entries, &entry_count) < 0) {
-        log_warn("playlist", "playlist_build_remote: list failed for '%s'",
-                 subpath ? subpath : "");
-        return NULL;
-    }
-
-    Playlist *next = calloc(1, sizeof(*next));
-    if (!next) {
-        remote_free_entries(entries, entry_count);
-        return NULL;
-    }
-
-    char base_url[4096];
-    remote_build_url(conn, subpath, base_url, sizeof(base_url));
-
-    for (int i = 0; i < entry_count && next->count < MAX_TRACKS; i++) {
-        if (!is_audio_file(entries[i].name)) {
-            continue;
-        }
-        char encoded_name[768];
-        remote_encode_url_path(entries[i].name, encoded_name, sizeof(encoded_name));
-        char track_url[4096];
-        snprintf(track_url, sizeof(track_url), "%s/%s", base_url, encoded_name);
-        snprintf(next->tracks[next->count], MAX_PATH_LEN, "%s", track_url);
-        next->count++;
-    }
-
-    remote_free_entries(entries, entry_count);
-
-    if (next->count > 0) {
-        snprintf(next->folder_path, sizeof(next->folder_path), "%s", base_url);
-        next->is_loaded = 1;
-    }
-    return next;
-}
-
 void playlist_install(Playlist *built)
 {
     if (!built) {
@@ -1750,30 +1693,6 @@ int load_playlist(const char *path) {
         return -1;
     }
 
-    /* 单个音频文件：追加一首（前端把远程缓存里的曲目逐首交给核心） */
-    struct stat single;
-    if (stat(path, &single) == 0 && S_ISREG(single.st_mode)) {
-        if (!is_audio_file(path) || next->count >= MAX_TRACKS) {
-            free(next);
-            return -1;
-        }
-        snprintf(next->tracks[next->count], MAX_PATH_LEN, "%s", path);
-        next->count++;
-        next->is_loaded = 1;
-        playlist_lock();
-        g_playlist = *next;
-        playlist_unlock();
-        search_clear();
-        free(next);
-        recompute_sort_order();
-        play_queue_clear(&g_play_queue);
-        if (g_current_play_index >= 0)
-            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-        else if (playlist_count() > 0)
-            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
-        return 1;
-    }
-
     next->tree_mode = 1;  /* enable tree browsing */
     int added = scan_playlist_directory_into(next, path, 0);
     if (added < 0) {
@@ -1824,6 +1743,30 @@ int append_playlist(const char *path) {
         return load_playlist(path);
     }
 
+    /* 单个音频文件：追加一首（前端把远程缓存里的曲目逐首交给核心） */
+    struct stat single;
+    if (stat(path, &single) == 0 && S_ISREG(single.st_mode)) {
+        if (!is_audio_file(path) || next->count >= MAX_TRACKS) {
+            free(next);
+            return -1;
+        }
+        snprintf(next->tracks[next->count], MAX_PATH_LEN, "%s", path);
+        next->count++;
+        next->is_loaded = 1;
+        playlist_lock();
+        g_playlist = *next;
+        playlist_unlock();
+        search_clear();
+        free(next);
+        recompute_sort_order();
+        play_queue_clear(&g_play_queue);
+        if (g_current_play_index >= 0)
+            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
+        else if (playlist_count() > 0)
+            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+        return 1;
+    }
+
     next->tree_mode = 1;  /* enable tree browsing */
     int added = scan_playlist_directory_into(next, path, 1);
     if (added < 0) {
@@ -1858,66 +1801,6 @@ int append_playlist(const char *path) {
     else if (playlist_count() > 0)
         play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
     return added;
-}
-
-int load_remote_playlist(const RemoteConnectionConfig *conn, const char *subpath) {
-    log_info("playlist", "load_remote_playlist(protocol=%d, subpath='%s') called", conn->protocol, subpath);
-    RemoteDirEntry *entries = NULL;
-    int entry_count = 0;
-
-    if (remote_list_directory(conn, subpath, &entries, &entry_count) < 0) {
-        log_warn("playlist", "remote_list_directory failed");
-        return -1;
-    }
-
-    Playlist *next = calloc(1, sizeof(*next));
-    if (!next) {
-        remote_free_entries(entries, entry_count);
-        return -1;
-    }
-
-    // Build the base URL for this remote directory
-    char base_url[4096];
-    remote_build_url(conn, subpath, base_url, sizeof(base_url));
-
-    int added = 0;
-    for (int i = 0; i < entry_count && next->count < MAX_TRACKS; i++) {
-        if (!is_audio_file(entries[i].name)) continue;
-
-        // Construct full URL: base_url + "/" + encoded filename
-        char encoded_name[768];
-        remote_encode_url_path(entries[i].name, encoded_name, sizeof(encoded_name));
-        char track_url[4096];
-        snprintf(track_url, sizeof(track_url), "%s/%s", base_url, encoded_name);
-
-        strncpy(next->tracks[next->count], track_url, MAX_PATH_LEN - 1);
-        next->tracks[next->count][MAX_PATH_LEN - 1] = '\0';
-        next->count++;
-        added++;
-    }
-
-    remote_free_entries(entries, entry_count);
-
-    if (next->count > 0) {
-        strncpy(next->folder_path, base_url, sizeof(next->folder_path) - 1);
-        next->is_loaded = 1;
-    }
-
-    playlist_lock();
-    g_playlist = *next;
-    playlist_unlock();
-    search_clear();
-
-    int total = next->count;
-    free(next);
-    log_info("playlist", "Remote playlist: loaded %d tracks", total);
-    recompute_sort_order();
-    play_queue_clear(&g_play_queue);
-    if (g_current_play_index >= 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-    else if (playlist_count() > 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
-    return total;
 }
 
 static int g_sort_comparison_field = SORT_DEFAULT;
@@ -2635,7 +2518,7 @@ static int cover_candidate_rank(const char *name,
 static int find_directory_cover(const char *audio_path,
                                 char *output_path,
                                 size_t output_size) {
-    if (!audio_path || remote_is_remote_path(audio_path)) {
+    if (!audio_path) {
         return -1;
     }
 
@@ -2693,12 +2576,6 @@ int extract_album_cover(const char *audio_path, char *output_path, size_t output
     }
 
     log_debug("playlist", "extract_album_cover('%s')", audio_path);
-
-    // 远程 URL 的封面无法在不阻塞的情况下提取
-    if (remote_is_remote_path(audio_path)) {
-        log_debug("playlist", "Skipping cover extract for remote path");
-        return -1;
-    }
 
     AVFormatContext *fmt_ctx = NULL;
     if (avformat_open_input(&fmt_ctx, audio_path, NULL, NULL) != 0) {

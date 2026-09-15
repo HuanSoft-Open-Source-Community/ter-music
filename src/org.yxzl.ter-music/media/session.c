@@ -12,7 +12,6 @@
 #include "app/open.h"
 #include "config/config.h"
 #include "info/info.h"
-#include "remote/remote.h"
 #include "ui/menus.h"
 #include "util/json.h"
 #include "cli/cli.h"
@@ -510,7 +509,7 @@ static DBusMessage *handle_get_all_properties(DBusMessage *message,
     return reply;
 }
 
-static void apply_remote_loop_status(const char *value) {
+static void apply_bus_loop_status(const char *value) {
     if (!value) {
         return;
     }
@@ -573,7 +572,7 @@ static DBusMessage *handle_set_property(DBusMessage *message) {
         }
         const char *value = NULL;
         dbus_message_iter_get_basic(&variant_iter, &value);
-        apply_remote_loop_status(value);
+        apply_bus_loop_status(value);
     } else if (strcmp(property_name, "Shuffle") == 0) {
         if (dbus_message_iter_get_arg_type(&variant_iter) != DBUS_TYPE_BOOLEAN) {
             return rpc_error(message, DBUS_ERROR_INVALID_ARGS, "Shuffle must be a boolean");
@@ -700,6 +699,10 @@ static DBusMessage *handle_player_method(DBusMessage *message,
         }
         dbus_error_free(&error);
 
+        if (!app_path_is_local_playable(uri)) {
+            return rpc_error(message, DBUS_ERROR_NOT_SUPPORTED,
+                             "OpenUri accepts local files only; remote sources belong to the front end");
+        }
         if (!rpc_action_open_path(uri, 1)) {
             return rpc_error(message, DBUS_ERROR_INVALID_ARGS,
                                        "Uri could not be opened");
@@ -820,7 +823,6 @@ static void build_introspection(void)
         rpc_queue_introspection(),
         rpc_library_introspection(),
         rpc_config_introspection(),
-        rpc_remote_introspection(),
         k_introspection_tail,
         NULL
     };
@@ -1126,8 +1128,6 @@ void media_session_tick(void) {
             reply = rpc_library_handle_all(message);
         } else if (dbus_message_has_interface(message, RPC_IFACE_CONFIG)) {
             reply = rpc_config_handle(message);
-        } else if (dbus_message_has_interface(message, RPC_IFACE_REMOTE)) {
-            reply = rpc_remote_handle(message);
         }
 
         if (reply) {

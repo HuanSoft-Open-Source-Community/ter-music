@@ -24,7 +24,6 @@
 #include "logger/logger.h"
 #include "media/session.h"
 #include "playlist/playlist.h"
-#include "remote/remote.h"
 #include "ui/braille/braille_art.h"
 #include "ui/lyrics.h"
 #include "ui/menus.h"
@@ -93,7 +92,6 @@ static void daemon_shutdown(void) {
     audio_backend_shutdown();
     reset_album_cover_cache();
     info_release_cover_cache();
-    remote_cleanup();
 
     log_info("daemon", "daemon exited cleanly");
     logger_shutdown();
@@ -119,7 +117,6 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     set_volume_percent(g_app_config.volume_percent);
 
     init_ffmpeg();
-    remote_init();
     g_active_backend = g_app_config.audio_backend;
     init_audio_device();
     media_session_init();
@@ -142,16 +139,11 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     int loaded = 0;
     if (open_path && open_path[0]) {
         AppOpenResult result;
-        if (remote_is_remote_path(open_path)) {
-            RemoteConnectionConfig connection;
-            if (remote_parse_url(open_path, &connection) == 0 &&
-                load_remote_playlist(&connection, connection.base_path) > 0) {
-                g_selected_index = 0;
-                loaded = 1;
-                log_info("daemon", "Remote playlist loaded from '%s'", open_path);
-            } else {
-                log_warn("daemon", "Failed to load remote path '%s'", open_path);
-            }
+        if (!app_path_is_local_playable(open_path)) {
+            /* 远程音乐源由前端负责：前端下载到本地缓存后再把路径交给核心 */
+            fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责。\n");
+            log_warn("daemon", "Refusing non-local path '%s': remote sources belong to the front end",
+                     open_path);
         } else {
             result = app_open_path(open_path, NULL, 0, NULL, NULL);
             if (result == APP_OPEN_OK) {

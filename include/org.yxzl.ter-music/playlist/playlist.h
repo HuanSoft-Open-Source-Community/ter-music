@@ -15,7 +15,6 @@ extern CueSheet g_cue_sheet;  /* parsed CUE data for the current directory */
 int load_playlist(const char *folder_path);
 int append_playlist(const char *folder_path);
 int load_single_file(const char *file_path);
-int load_remote_playlist(const RemoteConnectionConfig *conn, const char *subpath);
 void reset_playlist_state(void);
 void playlist_lock(void);
 void playlist_unlock(void);
@@ -77,7 +76,6 @@ typedef void (*PlaylistBuildProgress)(int processed, int total, void *userdata);
  * 失败返回 NULL。 */
 Playlist *playlist_build_local(const char *path, int append,
                                PlaylistBuildProgress progress, void *userdata);
-Playlist *playlist_build_remote(const RemoteConnectionConfig *conn, const char *subpath);
 
 /* 媒体循环内调用：换入播放列表并完成派生状态更新；随后 free(built)。 */
 void playlist_install(Playlist *built);

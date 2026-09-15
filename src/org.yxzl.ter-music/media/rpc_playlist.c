@@ -289,6 +289,10 @@ DBusMessage *rpc_playlist_handle(DBusMessage *message)
         dbus_error_free(&error);
 
         RpcJobKind kind = append ? RPC_JOB_PLAYLIST_APPEND : RPC_JOB_PLAYLIST_LOAD;
+        if (!app_path_is_local_playable(path)) {
+            return rpc_error(message, RPC_ERROR_UNSUPPORTED,
+                             "Playlist accepts local paths only; remote sources belong to the front end");
+        }
         if (rpc_job_start(kind, path, NULL, autoplay ? 1 : 0) != 0) {
             return rpc_error(message, RPC_ERROR_BUSY,
                              "another playlist operation is already running");

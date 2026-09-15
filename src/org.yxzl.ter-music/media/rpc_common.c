@@ -3,8 +3,8 @@
  * @brief RPC 接口面的共享实现（分页钳制、方法清单、自省拼装）
  *
  * 本文件不含任何接口专属逻辑：接口处理器分散在 rpc_info.c / rpc_control.c /
- * rpc_lyrics.c / rpc_playlist.c / rpc_queue.c / rpc_library.c / rpc_config.c /
- * rpc_remote.c，共用同一份会话与连接（media/session.c）。
+ * rpc_lyrics.c / rpc_playlist.c / rpc_queue.c / rpc_library.c / rpc_config.c，
+ * 共用同一份会话与连接（media/session.c）。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -20,7 +20,6 @@
 #include "info/info.h"
 #include "logger/logger.h"
 #include "playlist/playlist.h"
-#include "remote/remote.h"
 #include "ui/braille/braille_art.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
@@ -232,9 +231,15 @@ int rpc_action_play_index(int index) {
     return 1;
 }
 
-/* 打开本地路径 / 远程 URL（MPRIS OpenUri 与 Control.OpenPath 共用） */
+/* 打开本地路径（MPRIS OpenUri 与 Control.OpenPath 共用）。
+ * 非本地路径一律拒绝：调用方负责回 Error.Unsupported。 */
 int rpc_action_open_path(const char *path, int autoplay) {
     if (!path || path[0] == '\0') {
+        return 0;
+    }
+    if (!app_path_is_local_playable(path)) {
+        log_warn("rpc", "Refused non-local path '%s': remote sources belong to the front end",
+                 path);
         return 0;
     }
 
@@ -246,16 +251,7 @@ int rpc_action_open_path(const char *path, int autoplay) {
         return 0;
     }
 
-    if (remote_is_remote_path(local_path)) {
-        RemoteConnectionConfig connection;
-        if (remote_parse_url(local_path, &connection) != 0) {
-            return 0;
-        }
-        if (load_remote_playlist(&connection, connection.base_path) <= 0) {
-            return 0;
-        }
-        g_selected_index = 0;
-    } else if (app_open_path(local_path, NULL, 0, NULL, NULL) != APP_OPEN_OK) {
+    if (app_open_path(local_path, NULL, 0, NULL, NULL) != APP_OPEN_OK) {
         return 0;
     }
 
@@ -436,14 +432,6 @@ static const char *const k_rpc_methods[] = {
     "Config.Set",
     "Config.Reload",
     "Config.Reset",
-    /* Remote */
-    "Remote.ListServers",
-    "Remote.SaveServer",
-    "Remote.DeleteServer",
-    "Remote.List",
-    "Remote.Status",
-    "Remote.Connect",
-    "Remote.Disconnect",
     NULL
 };
 

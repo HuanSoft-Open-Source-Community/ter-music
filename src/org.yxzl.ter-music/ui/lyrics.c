@@ -1021,7 +1021,7 @@ static void render_lyric_line(int row, const char *text, int is_highlighted, int
  */
 static int extract_embedded_lyrics(const char *audio_path)
 {
-    if (!audio_path || remote_is_remote_path(audio_path)) return -1;
+    if (!audio_path) return -1;
 
     char *lyrics_text = NULL;
     int found = 0;
@@ -1187,17 +1187,7 @@ void load_lyrics(const char *audio_path, int lyrics_source) {
     }
     
     char *lyrics_text = NULL;
-    if (remote_is_remote_path(lrc_path)) {
-        unsigned char *raw_data = NULL;
-        size_t raw_size = 0;
-        if (remote_fetch_to_buffer(lrc_path, &raw_data, &raw_size) == 0) {
-            process_lyrics_buffer(raw_data, raw_size, &lyrics_text);
-        }
-        if (!lyrics_text) {
-            reset_loaded_lyrics();
-            return;
-        }
-    } else if (load_lyrics_text_utf8(lrc_path, &lyrics_text) != 0 || !lyrics_text) {
+    if (load_lyrics_text_utf8(lrc_path, &lyrics_text) != 0 || !lyrics_text) {
         log_debug("lyrics", "No LRC file found for '%s'", lrc_path);
         reset_loaded_lyrics();
         return;

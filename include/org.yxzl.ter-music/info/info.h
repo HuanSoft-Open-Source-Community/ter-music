@@ -104,7 +104,6 @@ typedef struct {
     char track_id[96];
     char path[MAX_PATH_LEN];
     char uri[INFO_URI_MAX];
-    int is_remote;
     int cue_track_number;          /* 0 = 非 CUE 子轨 */
     char title[MAX_META_LEN];
     char artist[MAX_META_LEN];

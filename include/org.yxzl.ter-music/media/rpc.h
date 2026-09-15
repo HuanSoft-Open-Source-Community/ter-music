@@ -10,8 +10,10 @@
  *  - 复杂载荷一律 JSON 字符串，用 util/json.c 的追加式写入器生成；
  *  - 单响应硬上限 RPC_PAYLOAD_MAX，超出返回 Error.TooLarge，绝不截断；
  *  - 分页默认 RPC_PAGE_DEFAULT 行、单次最多 RPC_PAGE_MAX 行；
- *  - 方法必须在媒体循环内非阻塞有界：目录扫描、远程列目录等走
- *    media/rpc_job.c 的后台任务，网络/磁盘结果经信号通知前端。
+ *  - 方法必须在媒体循环内非阻塞有界：目录扫描走 media/rpc_job.c 的
+ *    后台任务，磁盘结果经信号通知前端；
+ *  - 核心只接受**本地文件路径**：远程音乐源由前端负责（前端下载到本地
+ *    缓存后再把路径交给核心），故核心不认识任何远程概念。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -24,7 +26,6 @@
 
 #include "types.h"
 #include "info/info.h"
-#include "remote/remote.h"
 
 #ifdef HAVE_DBUS
 #include <dbus/dbus.h>
@@ -32,10 +33,13 @@
 
 /* ── 版本与握手 ─────────────────────────────────────────────────────
  * 1 = M2 之前的接口面（Info/Control/Lyrics 第一版，Info JSON 里 schema=1）；
- * 2 = 本里程碑定义的接口面：Info 增加 core 对象，新增 Playlist/Queue/
- *     Library/Favorites/History/DirHistory/Config/Remote 与增量信号。
- * 前端在接入时校验 core.api_version >= 2，不兼容则提示升级并退出。 */
-#define TER_MUSIC_API_VERSION 2
+ * 2 = M2 定义的接口面：Info 增加 core 对象，新增 Playlist/Queue/
+ *     Library/Favorites/History/DirHistory/Config 与增量信号。
+ * 3 = 移除 Remote 接口（远程音乐源改为前端功能），Playlist.Load/Append、
+ *     Control.OpenPath 与 MPRIS OpenUri 只接受本地路径，Info 快照不再带
+ *     远程来源标记字段。
+ * 前端在接入时校验 core.api_version >= 3，不兼容则提示升级并退出。 */
+#define TER_MUSIC_API_VERSION 3
 
 /* 单响应硬上限（256 KB）：任何 JSON 回复超过它都返回 Error.TooLarge */
 #define RPC_PAYLOAD_MAX 262144
@@ -51,9 +55,6 @@
 
 /* 可视化帧：最多 20 Hz，且仅在采样修订号变化时发送 */
 #define RPC_VISUALIZER_INTERVAL_MS 50
-
-/* 远程目录列举的单页上限（受 RPC_PAGE_MAX 约束） */
-#define RPC_REMOTE_ENTRY_NAME_MAX 256
 
 /* ── 错误名 ─────────────────────────────────────────────────────── */
 #define RPC_ERROR_INVALID_ARGS "org.yxzl.ter_music.Error.InvalidArgs"
@@ -74,7 +75,6 @@
 #define RPC_IFACE_HISTORY     "org.yxzl.ter_music.History"
 #define RPC_IFACE_DIRHISTORY  "org.yxzl.ter_music.DirHistory"
 #define RPC_IFACE_CONFIG      "org.yxzl.ter_music.Config"
-#define RPC_IFACE_REMOTE      "org.yxzl.ter_music.Remote"
 
 /* ── 分页参数钳制 ───────────────────────────────────────────────────
  * 把调用方给出的 offset/count 收敛到合法区间。
@@ -150,7 +150,6 @@ DBusMessage *rpc_queue_handle(DBusMessage *message);
 /* Library/Favorites/History/DirHistory 共用一个入口（按接口名分发） */
 DBusMessage *rpc_library_handle_all(DBusMessage *message);
 DBusMessage *rpc_config_handle(DBusMessage *message);
-DBusMessage *rpc_remote_handle(DBusMessage *message);
 DBusMessage *rpc_info_handle(DBusMessage *message);
 DBusMessage *rpc_control_handle(DBusMessage *message);
 
@@ -160,19 +159,16 @@ const char *rpc_playlist_introspection(void);
 const char *rpc_queue_introspection(void);
 const char *rpc_library_introspection(void);
 const char *rpc_config_introspection(void);
-const char *rpc_remote_introspection(void);
 const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
 
 /* ── 后台任务（media/rpc_job.c） ────────────────────────────────────
- * 阻塞 IO（目录扫描、远程列举/连接）走单工作线程；结果由媒体循环在
- * rpc_job_tick() 内单点换入，随后广播信号。 */
+ * 阻塞 IO（目录扫描）走单工作线程；结果由媒体循环在 rpc_job_tick()
+ * 内单点换入，随后广播信号。 */
 typedef enum {
     RPC_JOB_NONE = 0,
     RPC_JOB_PLAYLIST_LOAD,     /* path = 目录/文件路径 */
-    RPC_JOB_PLAYLIST_APPEND,   /* path = 目录/文件路径 */
-    RPC_JOB_REMOTE_LIST,       /* subpath = 远程子路径（连接配置先 set） */
-    RPC_JOB_REMOTE_CONNECT     /* subpath = 远程子路径（连接配置先 set） */
+    RPC_JOB_PLAYLIST_APPEND    /* path = 目录/文件路径 */
 } RpcJobKind;
 
 typedef enum {
@@ -182,7 +178,6 @@ typedef enum {
 } RpcJobState;
 
 int  rpc_job_start(RpcJobKind kind, const char *path, const char *subpath, int autoplay);
-void rpc_job_set_connection(const RemoteConnectionConfig *connection);
 void rpc_job_tick(void);            /* 媒体循环内调用 */
 void rpc_job_cancel(void);
 int  rpc_job_state(void);
@@ -191,8 +186,6 @@ int  rpc_job_progress(void);
 int  rpc_job_total(void);
 const char *rpc_job_error(void);
 const char *rpc_job_path(void);
-/* 远程列举结果（所有权归 rpc_job.c，消费方只读） */
-RemoteDirEntry *rpc_job_entries(int *count, int *error, const char **path);
 
 /* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
 void rpc_control_tick(void);       /* 清理超时未心跳的前端登记 */

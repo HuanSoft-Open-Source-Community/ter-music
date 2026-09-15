@@ -18,7 +18,6 @@ library, and change the configuration:
 | `org.yxzl.ter_music.History` | Play history |
 | `org.yxzl.ter_music.DirHistory` | Recently opened directories |
 | `org.yxzl.ter_music.Config` | Configuration read/write (the only writer) |
-| `org.yxzl.ter_music.Remote` | Remote server entries and browsing |
 
 `org.freedesktop.DBus.Introspectable`, `.Peer` and `.Properties` are
 implemented as well, and the MPRIS interfaces (`org.mpris.MediaPlayer2`,
@@ -65,12 +64,15 @@ of exactly these interfaces.
   `org.freedesktop.DBus.Error.*` names.
 
 - **Handshake.** `Info.GetInfo` carries a `core` object. Read
-  `core.api_version` before using anything else; version 2 is described here.
-  Version 1 was the pre-`core` surface (Info/Control/Lyrics only, `schema` 1).
+  `core.api_version` before using anything else; version 3 is described here.
+  Version 2 added the `core` object and the Playlist/Queue/Library/Config
+  surface; version 3 removed `Remote` (remote music sources are a front-end
+  feature) and restricted every path argument to local files. Version 1 was the
+  pre-`core` surface (Info/Control/Lyrics only, `schema` 1).
 
   ```json
   "core": {
-    "api_version": 2, "payload_max": 262144,
+    "api_version": 3, "payload_max": 262144,
     "page_default": 200, "page_max": 1000,
     "methods": ["Info.GetInfo", "Control.Play", "Playlist.GetPage", "…"]
   }
@@ -78,10 +80,15 @@ of exactly these interfaces.
 
   `core.methods` lists every method the running core implements, so a client
   can degrade gracefully instead of discovering gaps one call at a time.
-- **Blocking work.** Directory scans, remote listings and remote connects run
-  on a background worker. Those methods return immediately and report progress
-  through their `Status` method plus a change signal; the media loop itself
-  never blocks.
+- **Local paths only.** Every path argument (`Playlist.Load`, `Playlist.Append`,
+  `Control.OpenPath`, MPRIS `OpenUri`) must be a local path or a `file://` URI.
+  Remote sources (SMB/SFTP/FTP/WebDAV/HTTP) belong to the front end: it lists
+  and downloads them itself, then hands the resulting local file paths to the
+  core. A remote URL is rejected with
+  `org.yxzl.ter_music.Error.Unsupported`.
+- **Blocking work.** Directory scans run on a background worker. Those methods
+  return immediately and report progress through their `Status` method plus a
+  change signal; the media loop itself never blocks.
 
 ## org.yxzl.ter_music.Info
 
@@ -135,7 +142,7 @@ separated by `;`. Keys may be combined; later keys win:
   "running": true,
   "instance": { "mode": "daemon", "pid": 1234, "version": "v2.3.0",
                 "bus": "org.mpris.MediaPlayer2.ter_music", "has_primary_name": true },
-  "core": { "api_version": 2, "payload_max": 262144, "page_default": 200,
+  "core": { "api_version": 3, "payload_max": 262144, "page_default": 200,
             "page_max": 1000, "methods": ["Info.GetInfo", "…"] },
   "playback": {
     "state": "playing", "position_ms": 83400, "duration_ms": 296000,
@@ -149,7 +156,7 @@ separated by `;`. Keys may be combined; later keys win:
     "playlist_count": 12, "queue_position": 3, "queue_count": 12,
     "title": "Example Song", "artist": "Example Artist", "album": "Example Album",
     "path": "/home/user/Music/example.flac", "uri": "file:///home/user/Music/example.flac",
-    "is_remote": false, "cue_track_number": 0,
+    "cue_track_number": 0,
     "format": { "codec": "flac", "sample_rate": 96000, "bit_depth": 24,
                 "bit_rate": 1234000, "rate_display": "96000Hz",
                 "depth_display": "24bit", "bitrate_display": "1234kbps" }
@@ -177,8 +184,9 @@ Field notes:
   `single_repeat`, `list_repeat`, `shuffle_once`, `shuffle_repeat`,
   `folder_*`, `album_*`, `artist_*`). `play_mode_name` is localized,
   `play_mode_index` the numeric enum value.
-- `track.uri` is a `file://` URI for local tracks and the original URL for
-  remote tracks; `is_remote` distinguishes them. `track.number` is 1-based;
+- `track.uri` is always a `file://` URI: the core only plays local files, so
+  even a track downloaded from a remote source appears under its cached local
+  path. `track.number` is 1-based;
   `queue_position` is `null` when the track is not in the queue.
 - `cover.text` holds newline-separated lines ready to print; `half` uses
   `▀`/`▄`/`█`, `ascii` uses `#`, `braille` uses braille patterns.
@@ -213,12 +221,12 @@ Transport methods return a boolean (`true` when the request was accepted).
 | `SetVolume` / `GetVolume` | `(i percent) -> b` / `() -> i` | Volume (0-100) |
 | `SetSpeed` / `GetSpeed` | `(d rate) -> b` / `() -> d` | Playback speed (0.5-3.0) |
 | `SetPlayMode` / `GetPlayMode` / `GetPlayModeName` | `(i mode) -> b` / `() -> i` / `() -> s` | Play mode (0-16, stable name, localized name) |
-| `OpenPath` | `(s path, b autoplay) -> b` | Load a directory, audio file, `file://` URI or remote URL and optionally start playing |
+| `OpenPath` | `(s path, b autoplay) -> b` | Load a local directory, audio file or `file://` URI and optionally start playing |
 | `PlayIndex` | `(i index) -> b` | Play a track by 0-based playlist index |
 | `GetPlaylist` | `() -> s` | `{"loaded":b,"count":n,"current_index":i,"folder":"…"}` |
 | `ReloadConfig` | `() -> b` | Re-read `config.xml` (same as `SIGHUP`); `Config.Reload` is the newer equivalent |
 | `Quit` | `() -> b` | Gracefully stop this instance (persists the playback session) |
-| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":2,"ping_interval_ms":2000,"frontends":n}` |
+| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":3,"ping_interval_ms":2000,"frontends":n}` |
 | `Ping` | `(s token) -> b` | Keep the registration alive. `false` means the token is unknown or expired: attach again |
 | `Detach` | `(s token) -> b` | Leave explicitly |
 | `FrontendInfo` | `() -> s` | `{"frontends":[{"token":"…","role":"tui","pid":n,"last_ping_ms":n}],"count":n}` |
@@ -239,7 +247,7 @@ authenticate: the session bus is a same-user trust domain.
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
-| `Load` | `(s path, b append, b autoplay) -> b` | Start loading a directory, file, `file://` URI or remote URL in the background |
+| `Load` | `(s path, b append, b autoplay) -> b` | Start loading a local directory, file or `file://` URI in the background |
 | `Append` | `(s path) -> b` | Same, appending to the current playlist |
 | `Clear` | `() -> b` | Empty the playlist |
 | `Sort` | `(s mode) -> b` | `default`, `title`, `artist`, `album` or `filename`; persisted and applied immediately |
@@ -367,17 +375,14 @@ Notes:
 Signal `ConfigChanged(s patch)` carries the patch that was applied; `{}` means
 "everything may have changed" (used by `Reset`).
 
-## org.yxzl.ter_music.Remote
+## Removed: org.yxzl.ter_music.Remote
 
-| Method | Signature | Description |
-| ------ | --------- | ----------- |
-| `ListServers` | `() -> s` | `{"count":n,"servers":[{"index":n,"name":"…","protocol":"smb\|sftp\|ftp\|webdav\|http","host":"…","port":n,"username":"…","base_path":"…","private_key_path":"…","has_password":b}]}` |
-| `SaveServer` | `(i index, s json) -> b` | Create (`index` < 0) or update an entry. Accepts `name`, `protocol`, `host`, `port`, `username`, `base_path`, `private_key_path` and either `password` or `password_encrypted` |
-| `DeleteServer` | `(i index) -> b` | Remove an entry |
-| `List` | `(i index, s subpath) -> b` | List a directory in the background; read the result from `Status` |
-| `Status` | `() -> s` | `{"state":"idle\|loading\|error","connection_index":n,"path":"…","total":n,"error":"…","entries":[{"name":"…","is_dir":b}]}` |
-| `Connect` | `(i index, s subpath) -> b` | Build a playlist from a remote directory in the background; completion is reported by `PlaylistChanged` |
-| `Disconnect` | `() -> b` | Forget the current browse context |
+Removed in `core.api_version` 3. Remote music sources (SMB/SFTP/FTP/WebDAV/
+HTTP) are a **front-end** feature: the front end stores its own server list
+(outside the core configuration), lists and downloads remote directories, and
+then hands the resulting local file paths to `Playlist.Load` / `Playlist.Append`.
+The core never sees a remote URL, so a stale client calling `Remote.*` gets the
+standard `org.freedesktop.DBus.Error.UnknownMethod`.
 
 ## Examples
 
@@ -429,7 +434,10 @@ scripts/test/rpc_client.py monitor 3                    # list signals seen
 - Interface name components cannot contain hyphens, hence the underscores in
   `org.yxzl.ter_music.*`.
 - `Info` JSON `schema` is `1`; the interface surface is versioned separately by
-  `core.api_version` (currently `2`). Consumers must ignore unknown fields.
+  `core.api_version` (currently `3`). Consumers must ignore unknown fields.
+  Version 3 removed `org.yxzl.ter_music.Remote` and the `track.is_remote` field
+  and made every path argument local-only; version 2 added the `core` object and
+  the Playlist/Queue/Library/Favorites/History/DirHistory/Config interfaces.
 - The API shares the MPRIS lifecycle: it exists while the process owns the bus
   name and is torn down on shutdown.
 - Inside a Linyaps (如意玲珑) package the container joins the host session bus,

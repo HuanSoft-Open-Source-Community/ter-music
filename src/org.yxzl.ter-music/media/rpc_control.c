@@ -19,7 +19,7 @@
 #include "info/info.h"
 #include "logger/logger.h"
 #include "playlist/playlist.h"
-#include "remote/remote.h"
+#include "app/open.h"
 #include "ui/braille/braille_art.h"
 #include "ui/lyrics.h"
 #include "ui/menus.h"
@@ -486,6 +486,10 @@ DBusMessage *rpc_control_handle(DBusMessage *message) {
             return reply;
         }
         dbus_error_free(&error);
+        if (!app_path_is_local_playable(path)) {
+            return rpc_error(message, RPC_ERROR_UNSUPPORTED,
+                             "OpenPath accepts local files only; remote sources belong to the front end");
+        }
         return rpc_reply_bool(message, rpc_action_open_path(path, autoplay ? 1 : 0));
     }
     if (strcmp(member, "PlayIndex") == 0) {
