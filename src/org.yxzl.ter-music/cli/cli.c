@@ -82,12 +82,13 @@ static void cli_print_help(const char *program) {
     printf("后台播放进程：\n");
     printf("  daemon start [--open 路径] [--debug] [--force]\n");
     printf("  daemon foreground [--open 路径] [--debug] [--force]\n");
-    printf("  daemon stop [--force] | restart | status [--json] | reload\n\n");
+    printf("  daemon stop [--force] [--all] | restart | status [--json] | reload\n");
+    printf("     --all  除主实例外，把 --force 起的次要实例也一并停止\n\n");
 
     printf("其他：\n");
     printf("  version | --version        显示版本\n");
     printf("  help | --help              显示本帮助\n");
-    printf("  --bus <名称>               指定目标实例的总线名（默认主实例）\n\n");
+    printf("  --bus <名称>               指定目标实例的总线名（默认主实例；写在子命令之后）\n\n");
 
     printf("退出码：0 成功；1 参数错误；3 无运行实例；4 D-Bus 不可用；5 实例拒绝或操作失败\n");
 
@@ -314,6 +315,93 @@ static int cli_cmd_play(int argc, char **argv) {
 
 /* ── daemon ─────────────────────────────────────────────────────── */
 
+/* ── daemon：次要实例的提示与收尾 ───────────────────────────────────
+ * `daemon start --force` 起的第二个核心持有 `<主名>.instance<pid>`，它**不**
+ * 接收普通 CLI 命令。这两个函数只做“让人看得见、收得掉”，不改其存在语义
+ * （次要实例是有文档的功能，见 README 的 daemon 注意事项）。 */
+
+static int list_secondary_instances(const char *base, CliInstanceInfo *out, int cap) {
+    CliInstanceInfo instances[8];
+    int count = cli_client_list_instances(base, instances, 8);
+    if (count <= 0) {
+        return count;
+    }
+
+    int secondaries = 0;
+    for (int i = 0; i < count; i++) {
+        if (instances[i].primary) {
+            continue;
+        }
+        if (secondaries < cap) {
+            out[secondaries] = instances[i];
+        }
+        secondaries++;
+    }
+    return secondaries;
+}
+
+/* 主实例之外还有实例在跑时，向 stderr 打一段可操作的提示。
+ * @param base 枚举用的基名（cli_bus()，NULL = 默认主名）
+ * @param primary_running 主实例此刻是否在运行（决定提示措辞，不要用 base 是否为 NULL 推断） */
+static void warn_about_secondary_instances(const char *base, int primary_running) {
+    CliInstanceInfo secondaries[8];
+    int count = list_secondary_instances(base, secondaries, 8);
+    if (count <= 0) {
+        return;
+    }
+
+    fprintf(stderr, primary_running
+        ? "警告：另有 %d 个次要实例在运行（普通 CLI 命令只发给主实例）：\n"
+        : "警告：主实例未在运行，但仍有 %d 个次要实例在运行：\n", count);
+    for (int i = 0; i < count && i < 8; i++) {
+        fprintf(stderr, "  pid %d  %s  %s\n", secondaries[i].pid, secondaries[i].mode,
+                secondaries[i].bus);
+    }
+    fprintf(stderr, "  控制单个：ter-music daemon stop --bus <名称>（--bus 写在子命令之后）\n");
+    fprintf(stderr, "  全部停止：ter-music daemon stop --all\n");
+}
+
+/* 停掉所有次要实例（主实例已由调用方处理）。
+ * @param out_failed 收到“拒绝退出/超时未释放总线名”的个数（可为 NULL）
+ * @return 成功停止的个数；-1 = 拿不到总线 */
+static int stop_secondary_instances(const char *primary_bus, int *out_failed) {
+    if (out_failed) {
+        *out_failed = 0;
+    }
+
+    CliInstanceInfo secondaries[8];
+    int count = list_secondary_instances(primary_bus, secondaries, 8);
+    if (count < 0) {
+        fprintf(stderr, "错误：无法枚举实例（会话总线不可用）。\n");
+        return -1;
+    }
+
+    int stopped = 0;
+    int failed = 0;
+    for (int i = 0; i < count && i < 8; i++) {
+        const char *bus = secondaries[i].bus;
+        if (cli_client_quit(bus) != CLI_EXIT_OK) {
+            fprintf(stderr, "警告：次要实例 %s（pid %d）拒绝退出。\n",
+                    bus, secondaries[i].pid);
+            failed++;
+            continue;
+        }
+        if (!cli_wait_until_offline(bus, 5000)) {
+            fprintf(stderr, "警告：次要实例 %s（pid %d）未在 5 秒内释放总线名。\n",
+                    bus, secondaries[i].pid);
+            failed++;
+            continue;
+        }
+        printf("已停止次要实例（pid %d，%s）。\n", secondaries[i].pid, bus);
+        stopped++;
+    }
+
+    if (out_failed) {
+        *out_failed = failed;
+    }
+    return stopped;
+}
+
 static int cli_cmd_daemon(int argc, char **argv) {
     if (argc < 3) {
         fprintf(stderr, "错误：daemon 需要子命令：start | foreground | stop | restart | status | reload\n");
@@ -326,6 +414,7 @@ static int cli_cmd_daemon(int argc, char **argv) {
     int force = 0;
     int want_json = 0;
     int no_autoplay = 0;
+    int all = 0;
 
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--open") == 0 && i + 1 < argc) {
@@ -334,6 +423,8 @@ static int cli_cmd_daemon(int argc, char **argv) {
             debug = 1;
         } else if (strcmp(argv[i], "--force") == 0) {
             force = 1;
+        } else if (strcmp(argv[i], "--all") == 0) {
+            all = 1;
         } else if (strcmp(argv[i], "--no-autoplay") == 0) {
             no_autoplay = 1;
         } else if (strcmp(argv[i], "--json") == 0) {
@@ -396,6 +487,12 @@ static int cli_cmd_daemon(int argc, char **argv) {
         char mode[32] = "";
         int pid = 0;
         int rc = cli_client_instance_mode(cli_bus(), mode, sizeof(mode), &pid);
+
+        /* 次要实例（`daemon start --force`）不接收普通 CLI 命令：主实例之外
+         * 还有谁在跑必须让人看见，否则就成了“后台莫名其妙有两个 ter-music”。
+         * 提示走 **stderr**，`daemon status` 的 stdout 保持原样（脚本在解析它）。 */
+        warn_about_secondary_instances(cli_bus(), rc == CLI_EXIT_OK);
+
         if (rc != CLI_EXIT_OK) {
             if (rc == CLI_EXIT_NO_INSTANCE) {
                 fprintf(stderr, "ter-music 未在运行。\n");
@@ -416,29 +513,50 @@ static int cli_cmd_daemon(int argc, char **argv) {
         char mode[32] = "";
         int pid = 0;
         int rc = cli_client_instance_mode(cli_bus(), mode, sizeof(mode), &pid);
-        if (rc != CLI_EXIT_OK) {
+
+        if (rc == CLI_EXIT_OK) {
+            if (strcmp(mode, "tui") == 0 && !force) {
+                fprintf(stderr, "错误：当前主实例是 TUI（pid %d）。如需一并退出 TUI 请加 --force。\n", pid);
+                return CLI_EXIT_REFUSED;
+            }
+
+            int quit_rc = cli_client_quit(cli_bus());
+            if (quit_rc != CLI_EXIT_OK) {
+                return quit_rc;
+            }
+
+            if (!cli_wait_until_offline(cli_bus(), 5000)) {
+                fprintf(stderr, "警告：实例 %d 已收到退出请求，但总线名仍未释放（可能正在等待音频线程收尾）。\n",
+                        pid);
+                return CLI_EXIT_REFUSED;
+            }
+            printf("已停止（pid %d）。\n", pid);
+        } else if (!all) {
             if (rc == CLI_EXIT_NO_INSTANCE) {
                 fprintf(stderr, "ter-music 未在运行。\n");
             }
             return rc;
         }
-        if (strcmp(mode, "tui") == 0 && !force) {
-            fprintf(stderr, "错误：当前主实例是 TUI（pid %d）。如需一并退出 TUI 请加 --force。\n", pid);
-            return CLI_EXIT_REFUSED;
+
+        if (!all) {
+            return CLI_EXIT_OK;
         }
 
-        rc = cli_client_quit(cli_bus());
-        if (rc != CLI_EXIT_OK) {
-            return rc;
+        /* --all：把次要实例一并收掉。主实例没了也照做——“主实例已死、只剩
+         * 次要实例”正是最需要收尾的情形。 */
+        int failed_secondaries = 0;
+        int stopped_secondaries = stop_secondary_instances(cli_bus(), &failed_secondaries);
+        if (stopped_secondaries < 0) {
+            return CLI_EXIT_DBUS;
         }
-
-        if (!cli_wait_until_offline(cli_bus(), 5000)) {
-            fprintf(stderr, "警告：实例 %d 已收到退出请求，但总线名仍未释放（可能正在等待音频线程收尾）。\n",
-                    pid);
-            return CLI_EXIT_REFUSED;
+        if (rc != CLI_EXIT_OK && stopped_secondaries == 0 && failed_secondaries == 0) {
+            fprintf(stderr, "ter-music 未在运行。\n");
+            return CLI_EXIT_NO_INSTANCE;
         }
-        printf("已停止（pid %d）。\n", pid);
-        return CLI_EXIT_OK;
+        if (stopped_secondaries > 0) {
+            printf("已停止 %d 个次要实例。\n", stopped_secondaries);
+        }
+        return failed_secondaries > 0 ? CLI_EXIT_REFUSED : CLI_EXIT_OK;
     }
 
     if (strcmp(action, "restart") == 0) {

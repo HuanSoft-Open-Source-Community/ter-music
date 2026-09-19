@@ -261,7 +261,10 @@ int daemon_start_background(const char *open_path, int debug, int force,
         pid_text[0] = '\0';
     }
 
-    if (cli_client_primary_available(NULL)) {
+    /* 启动前主名是否已被占用：决定新核心会拿主名还是 .instance<pid> 回退名，
+     * 也就决定了等名字上线时该等哪一个。 */
+    int primary_before = cli_client_primary_available(NULL);
+    if (primary_before) {
         char mode[32] = "";
         int pid = 0;
         cli_client_instance_mode(NULL, mode, sizeof(mode), &pid);
@@ -279,9 +282,22 @@ int daemon_start_background(const char *open_path, int debug, int force,
     snprintf(log_path, sizeof(log_path), "%s/%s",
              (config_dir && config_dir[0]) ? config_dir : ".", DAEMON_LOG_NAME);
 
+    /* 把脱离后的真实进程 pid 带回父进程：孙进程 exec 之前写一个 pid 就关掉，
+     * 中间子进程不持有写端，父进程 waitpid() 之后读——这样“起了哪个实例”
+     * 不再靠猜，也不会把主实例的 pid 当成新实例的 pid 报出去。 */
+    int pid_pipe[2] = { -1, -1 };
+    if (pipe(pid_pipe) != 0) {
+        pid_pipe[0] = pid_pipe[1] = -1;
+    } else {
+        fcntl(pid_pipe[0], F_SETFD, FD_CLOEXEC);
+        fcntl(pid_pipe[1], F_SETFD, FD_CLOEXEC);
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         fprintf(stderr, "错误：fork 失败：%s\n", strerror(errno));
+        if (pid_pipe[0] >= 0) close(pid_pipe[0]);
+        if (pid_pipe[1] >= 0) close(pid_pipe[1]);
         return CLI_EXIT_DBUS;
     }
 
@@ -291,7 +307,23 @@ int daemon_start_background(const char *open_path, int debug, int force,
             _exit(127);
         }
         if (fork() != 0) {
+            /* 中间子进程：不持有管道，直接退出 */
+            if (pid_pipe[0] >= 0) close(pid_pipe[0]);
+            if (pid_pipe[1] >= 0) close(pid_pipe[1]);
             _exit(0);
+        }
+
+        if (pid_pipe[1] >= 0) {
+            char self_pid[32];
+            int n = snprintf(self_pid, sizeof(self_pid), "%d", (int)getpid());
+            if (n > 0) {
+                ssize_t ignored = write(pid_pipe[1], self_pid, (size_t)n);
+                (void)ignored;
+            }
+            close(pid_pipe[1]);
+        }
+        if (pid_pipe[0] >= 0) {
+            close(pid_pipe[0]);
         }
 
         int null_fd = open("/dev/null", O_RDONLY);
@@ -346,8 +378,31 @@ int daemon_start_background(const char *open_path, int debug, int force,
     int status = 0;
     waitpid(pid, &status, 0);
 
+    int child_pid = 0;
+    if (pid_pipe[0] >= 0) {
+        close(pid_pipe[1]);
+        char buffer[32];
+        ssize_t n = read(pid_pipe[0], buffer, sizeof(buffer) - 1);
+        close(pid_pipe[0]);
+        if (n > 0) {
+            buffer[n] = '\0';
+            child_pid = atoi(buffer);
+        }
+    }
+
+    /* 主名已被占用 + --force：新核心拿的是 <主名>.instance<pid>（session.c 用
+     * 自己的 pid 拼这个名字）——今天这里等的是主名，而主名早就在线，于是
+     * “已启动（pid N）”报的是**主实例**的 pid。改为等真正的次要实例。 */
+    char instance_name[160];
+    const char *expect_name = NULL;
+    if (primary_before && force && child_pid > 0) {
+        snprintf(instance_name, sizeof(instance_name), "%s.instance%d",
+                 CLI_PRIMARY_BUS_NAME, child_pid);
+        expect_name = instance_name;
+    }
+
     int daemon_pid = 0;
-    if (cli_client_wait_for_online(NULL, DAEMON_START_TIMEOUT_MS, &daemon_pid) != CLI_EXIT_OK) {
+    if (cli_client_wait_for_online(expect_name, DAEMON_START_TIMEOUT_MS, &daemon_pid) != CLI_EXIT_OK) {
         fprintf(stderr, "错误：后台播放进程未在 %d 秒内就绪。\n", DAEMON_START_TIMEOUT_MS / 1000);
         daemon_log_tail(log_path);
         return CLI_EXIT_DBUS;
@@ -355,6 +410,14 @@ int daemon_start_background(const char *open_path, int debug, int force,
 
     if (pid_text && pid_text_size) {
         snprintf(pid_text, pid_text_size, "%d", daemon_pid);
+    }
+    if (expect_name) {
+        /* `--bus` 必须写在子命令**之后**：main 按 argv[1] 分派，写在前面会被
+         * 当成"打开 TUI"（实测：`ter-music --bus X daemon stop` 会走进 TUI）。 */
+        fprintf(stderr, "次要实例总线名：%s\n"
+                        "  控制它：ter-music daemon status --bus %s（--bus 写在子命令之后）\n"
+                        "  全部停止：ter-music daemon stop --all\n",
+                expect_name, expect_name);
     }
     return CLI_EXIT_OK;
 }

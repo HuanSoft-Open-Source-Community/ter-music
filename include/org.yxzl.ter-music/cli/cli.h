@@ -76,6 +76,22 @@ int cli_client_wait_for_online(const char *bus, int timeout_ms, int *pid_out);
 int cli_client_instance_mode(const char *bus, char *mode_out, size_t mode_size,
                              int *pid_out);
 
+/* ── 实例枚举（主实例 + 次要实例） ───────────────────────────────
+ * 次要实例（`daemon start --force`，总线名 `<主名>.instance<pid>`）不接收
+ * 普通 CLI 命令，因此必须能被列出来，否则用户只能看见“后台有两个 ter-music
+ * 在跑”却无从下手。两个函数都只看会话总线，不改变任何实例状态。 */
+typedef struct {
+    char bus[128];      /* 完整总线名 */
+    int pid;            /* 实例进程 pid（取不到为 0） */
+    char mode[32];      /* "daemon" / "tui" / "unknown" */
+    int primary;        /* 1 = 持有主名 */
+} CliInstanceInfo;
+
+/* 枚举 base（NULL → 主名）下的全部实例：主名本身 + `<base>.instance*`。
+ * 主实例排在最前，其余按 pid 升序。
+ * @return 写入 out 的条数（可能被 out_cap 截断）；-1 = 连不上会话总线 */
+int cli_client_list_instances(const char *base, CliInstanceInfo *out, int out_cap);
+
 /* 传输控制：method ∈ Play/Pause/PlayPause/Stop/Next/Previous */
 int cli_client_transport(const char *bus, const char *method);
 int cli_client_seek(const char *bus, const char *argument);

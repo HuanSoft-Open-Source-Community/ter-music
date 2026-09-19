@@ -481,13 +481,17 @@ static int cli_json_string(const char *json, const char *key, char *out, size_t 
 
 /* ── 实例信息 ───────────────────────────────────────────────────── */
 
-static int cli_instance_info(const char *bus, char *json_out, size_t json_size,
-                             int *pid_out) {
+/* 在**既有连接**上问某实例的 Info.InstanceInfo（避免每个名字各开一条连接）。
+ * 调用方负责连接的关闭；client 只借用它，不能按普通 CliClient 释放。 */
+static int cli_instance_info_on(DBusConnection *connection, const char *bus,
+                                char *json_out, size_t json_size, int *pid_out) {
     CliClient client;
-    int rc = cli_client_open(&client, bus);
-    if (rc != CLI_EXIT_OK) {
-        return rc;
-    }
+    memset(&client, 0, sizeof(client));
+    client.connection = connection;
+    /* 与 cli_client_open() 同一口径：NULL/空串 = 主实例名。少了这一步，
+     * 目标名会变成 "(null)"，libdbus 的 bus name 断言会直接 abort。 */
+    snprintf(client.bus, sizeof(client.bus), "%s",
+             (bus && bus[0]) ? bus : CLI_PRIMARY_BUS_NAME);
 
     int result = cli_reply_string(cli_call0(&client, CLI_INFO_INTERFACE, "InstanceInfo"),
                                   json_out, json_size);
@@ -499,6 +503,18 @@ static int cli_instance_info(const char *bus, char *json_out, size_t json_size,
             *pid_out = 0;
         }
     }
+    return result;
+}
+
+static int cli_instance_info(const char *bus, char *json_out, size_t json_size,
+                             int *pid_out) {
+    CliClient client;
+    int rc = cli_client_open(&client, bus);
+    if (rc != CLI_EXIT_OK) {
+        return rc;
+    }
+
+    int result = cli_instance_info_on(client.connection, bus, json_out, json_size, pid_out);
     cli_client_close(&client);
     return result;
 }
@@ -525,6 +541,116 @@ int cli_client_instance_mode(const char *bus, char *mode_out, size_t mode_size,
         *pid_out = pid;
     }
     return CLI_EXIT_OK;
+}
+
+/* 名字是否属于本基名下的实例：主名本身，或 `<主名>.instance<pid>` */
+static int cli_instance_name_matches(const char *base, const char *name) {
+    if (!base || !name) {
+        return 0;
+    }
+    if (strcmp(name, base) == 0) {
+        return 1;
+    }
+    size_t base_len = strlen(base);
+    static const char k_instance_suffix[] = ".instance";
+    if (strncmp(name, base, base_len) != 0 ||
+        strncmp(name + base_len, k_instance_suffix, sizeof(k_instance_suffix) - 1) != 0) {
+        return 0;
+    }
+    /* 只接受 `.instance<数字>`：避免把别人的名字前缀撞进来 */
+    const char *digits = name + base_len + sizeof(k_instance_suffix) - 1;
+    if (digits[0] == '\0') {
+        return 0;
+    }
+    for (const char *p = digits; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int cli_client_list_instances(const char *base_bus, CliInstanceInfo *out, int out_cap) {
+    if (!out || out_cap <= 0) {
+        return -1;
+    }
+
+    const char *base = (base_bus && base_bus[0]) ? base_bus : CLI_PRIMARY_BUS_NAME;
+
+    DBusConnection *connection = cli_connect();
+    if (!connection) {
+        return -1;
+    }
+
+    /* 本机 libdbus 头文件未提供 dbus_bus_list_names，故与 cli_owner_pid()
+     * 一样手写方法调用；回复是 "as"，用显式迭代器解析。 */
+    DBusMessage *message = dbus_message_new_method_call("org.freedesktop.DBus",
+                                                        "/org/freedesktop/DBus",
+                                                        "org.freedesktop.DBus",
+                                                        "ListNames");
+    if (!message) {
+        cli_disconnect(connection);
+        return -1;
+    }
+
+    DBusError error;
+    dbus_error_init(&error);
+    DBusMessage *reply = dbus_connection_send_with_reply_and_block(
+        connection, message, CLI_CALL_TIMEOUT_MS, &error);
+    dbus_message_unref(message);
+    if (dbus_error_is_set(&error)) {
+        dbus_error_free(&error);
+    }
+    if (!reply) {
+        cli_disconnect(connection);
+        return -1;
+    }
+
+    int written = 0;
+    DBusMessageIter iter;
+    DBusMessageIter array;
+    if (dbus_message_iter_init(reply, &iter) &&
+        dbus_message_iter_get_arg_type(&iter) == DBUS_TYPE_ARRAY) {
+        dbus_message_iter_recurse(&iter, &array);
+        while (dbus_message_iter_get_arg_type(&array) == DBUS_TYPE_STRING) {
+            const char *name = NULL;
+            dbus_message_iter_get_basic(&array, &name);
+            if (name && cli_instance_name_matches(base, name) && written < out_cap) {
+                CliInstanceInfo *slot = &out[written];
+                memset(slot, 0, sizeof(*slot));
+                snprintf(slot->bus, sizeof(slot->bus), "%s", name);
+                slot->primary = (strcmp(name, base) == 0);
+                snprintf(slot->mode, sizeof(slot->mode), "unknown");
+
+                char json[512] = "";
+                int pid = 0;
+                if (cli_instance_info_on(connection, name, json, sizeof(json), &pid) ==
+                    CLI_EXIT_OK) {
+                    slot->pid = pid;
+                    if (cli_json_string(json, "mode", slot->mode, sizeof(slot->mode)) != 0) {
+                        snprintf(slot->mode, sizeof(slot->mode), "unknown");
+                    }
+                }
+                written++;
+            }
+            dbus_message_iter_next(&array);
+        }
+    }
+    dbus_message_unref(reply);
+    cli_disconnect(connection);
+
+    /* 主实例在前，其余按 pid 升序：输出与测试都稳定 */
+    for (int i = 1; i < written; i++) {
+        CliInstanceInfo key = out[i];
+        int j = i - 1;
+        while (j >= 0 && (out[j].primary < key.primary ||
+                          (out[j].primary == key.primary && out[j].pid > key.pid))) {
+            out[j + 1] = out[j];
+            j--;
+        }
+        out[j + 1] = key;
+    }
+    return written;
 }
 
 /* ── 传输控制 ───────────────────────────────────────────────────── */
@@ -1039,6 +1165,11 @@ int cli_client_instance_mode(const char *bus, char *mode_out, size_t mode_size,
                              int *pid_out) {
     (void)bus; (void)mode_out; (void)mode_size; (void)pid_out;
     return CLI_EXIT_DBUS;
+}
+
+int cli_client_list_instances(const char *base, CliInstanceInfo *out, int out_cap) {
+    (void)base; (void)out; (void)out_cap;
+    return -1;
 }
 
 int cli_client_transport(const char *bus, const char *method) {
