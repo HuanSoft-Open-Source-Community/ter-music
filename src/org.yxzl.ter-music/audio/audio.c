@@ -16,17 +16,18 @@
 #include "audio/audio.h"
 #include "audio/audio_internal.h"
 #include "audio/play_queue.h"
-#include "playlist/playlist.h"
-#include "ui/ui.h"
-#include "i18n/i18n.h"
+#include "audio/play_mode_util.h"
+#include "audio/visualizer.h"
 #include "config/config.h"
-#include "media/session.h"
-#include "ui/menus.h"
-#include "audio/progress/progress.h"
-#include "ui/lyrics.h"
+#include "core/core.h"
+#include "i18n/i18n.h"
 #include "logger/logger.h"
+#include "media/session.h"
+#include "queue/backend_queue.h"
+#include "audio/progress/progress.h"
 #include "ui/braille/braille_art.h"
-#include "library/library.h"
+/* 迁移期过渡：歌词引擎抽取前，后端仍需 load_lyrics/clear_lyrics 入口 */
+#include "ui/lyrics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,8 +41,6 @@
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/version.h>
-
-extern ViewMode g_current_view;
 
 #ifndef DT_REG
 #define DT_REG 8
@@ -325,8 +324,8 @@ void set_volume_percent(int volume)
         save_config();
         char msg[64];
         snprintf(msg, sizeof(msg), i18n_get("status.volume_fmt"), clamped);
-        update_controls_status(msg);
-        request_ui_refresh(UI_DIRTY_CONTROLS);
+        core_status_push(msg);
+        core_notify_state_changed();
         signal_playback_thread();
     }
 }
@@ -354,13 +353,16 @@ void set_play_mode(PlayMode mode)
     if (mode < 0 || mode >= PLAY_MODE_COUNT) return;
     g_play_mode = mode;
     log_info("audio", "Play mode changed: %d (%s)", g_play_mode, get_play_mode_str());
-    /* Rebuild queue with new mode */
-    if (g_current_play_index >= 0) {
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
+    /* 对已下发的路径队列重建执行顺序；后端不认识内容列表，故锚点用
+     * 当前条目的路径。 */
+    if (bq_count() > 0) {
+        BackendQueueEntry current;
+        const char *anchor = (bq_current(&current) == 0) ? current.path : NULL;
+        play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
     }
     g_app_config.default_play_mode = g_play_mode;
     save_config();
-    request_ui_refresh(UI_DIRTY_CONTROLS);
+    core_notify_state_changed();
 }
 
 void cycle_play_mode(void)
@@ -368,12 +370,14 @@ void cycle_play_mode(void)
     int next = (g_play_mode + 1) % 5;
     g_play_mode = (PlayMode)next;
     log_info("audio", "Play mode changed: %d (%s)", g_play_mode, get_play_mode_str());
-    if (g_current_play_index >= 0) {
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
+    if (bq_count() > 0) {
+        BackendQueueEntry current;
+        const char *anchor = (bq_current(&current) == 0) ? current.path : NULL;
+        play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
     }
     g_app_config.default_play_mode = g_play_mode;
     save_config();
-    request_ui_refresh(UI_DIRTY_CONTROLS);
+    core_notify_state_changed();
 }
 
 void toggle_playback_speed(void)
@@ -386,8 +390,8 @@ void toggle_playback_speed(void)
     save_config();
     char msg[64];
     snprintf(msg, sizeof(msg), "%s: %.2fx", i18n_get("controls.label.speed"), (double)g_playback_speed);
-    update_controls_status(msg);
-    request_ui_refresh(UI_DIRTY_CONTROLS);
+    core_status_push(msg);
+    core_notify_state_changed();
     apply_playback_speed_change();
 }
 
@@ -504,7 +508,7 @@ void persist_playback_session_state(void)
     }
     pthread_mutex_unlock(&g_play_mutex);
 
-    if (!should_resume || playlist_get_track_path(play_index, track_path, sizeof(track_path)) != 0) {
+    if (!should_resume || bq_path_at(play_index, track_path, sizeof(track_path)) != 0) {
         g_app_config.resume_last_playback = 0;
         g_app_config.last_played_position = 0;
         g_app_config.last_played_folder_path[0] = '\0';
@@ -531,34 +535,19 @@ void persist_playback_session_state(void)
 
 void play_audio(int index)
 {
-    char track_path[MAX_PATH_LEN];
-    if (playlist_get_track_path(index, track_path, sizeof(track_path)) != 0) {
-        log_warn("audio", "play_audio(%d): invalid track index", index);
+    BackendQueueEntry entry;
+    if (bq_entry_at(index, &entry) != 0) {
+        log_warn("audio", "play_audio(%d): queue position out of range", index);
         return;
     }
+    char track_path[MAX_PATH_LEN];
+    snprintf(track_path, sizeof(track_path), "%s", entry.path);
     log_info("audio", "play_audio(index=%d) track='%s'", index, track_path);
 
-    /* When the queue already has this track at current_position, skip rebuild
-     * to preserve manual additions (a / i / J / K).
-     * Otherwise, search the queue for the target — if found, jump to it;
-     * if not found, insert after current position instead of rebuilding. */
-    if (g_play_queue.count == 0 ||
-        g_play_queue.current_position < 0 ||
-        g_play_queue.current_position >= g_play_queue.count) {
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, index);
-    } else if (g_play_queue.indices[g_play_queue.current_position] != index) {
-        int found = -1;
-        for (int i = 0; i < g_play_queue.count; i++) {
-            if (g_play_queue.indices[i] == index) { found = i; break; }
-        }
-        if (found >= 0) {
-            /* Target already queued — just jump to it */
-            g_play_queue.current_position = found;
-        } else {
-            /* Insert after current, preserving the rest of the queue */
-            play_queue_insert_after(&g_play_queue, index);
-            g_play_queue.current_position++;
-        }
+    /* 队列由前端下发：位置 index 必须与后端游标一致，但前端也可能直接
+     * 指定某个位置（Queue.PlayAt），因此这里以调用方给的位置为准。 */
+    if (bq_position() != index) {
+        bq_play_at(index);
     }
 
     reap_finished_playback_thread();
@@ -602,7 +591,7 @@ void play_audio(int index)
             }
             log_warn("audio", "Paused thread did not exit within 500ms, falling back to async switch");
         }
-        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+        core_notify_state_changed();
         return;
     }
 
@@ -617,7 +606,7 @@ void play_audio(int index)
 start_playback:
     {
     /* Set CUE offset for the playback thread */
-    g_cue_offset = cue_get_offset(index);
+    g_cue_offset = entry.cue_offset;
 
     int *index_ptr = malloc(sizeof(int));
     if (!index_ptr) {
@@ -646,21 +635,23 @@ start_playback:
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
 
-    int lyrics_source = library_get_lyrics_source(track_path);
+    /* 歌词来源随队列条目下发（前端扫描时已知）；条目未带时才回落自动。
+     * 歌词与字符封面都是“当前曲目信息”，归后端。 */
+    int lyrics_source = (entry.lyrics_source >= LYRICS_SOURCE_AUTO &&
+                         entry.lyrics_source <= LYRICS_SOURCE_EXTERNAL)
+        ? entry.lyrics_source : LYRICS_SOURCE_AUTO;
     load_lyrics(track_path, lyrics_source);
-    if (g_current_view == VIEW_MAIN) render_lyrics();
     update_album_cover_for_track(track_path);
 
-    Track track;
-    get_track_metadata(index, &track);
     char msg[64];
     snprintf(msg, sizeof(msg), "%s%s - %s",
-             i18n_get("audio.status.playing"), track.title, track.artist);
-    update_controls_status(msg);
-    add_history_entry(&track);
-    log_info("audio", "Now playing: '%s' - '%s' (idx=%d)", track.title, track.artist, index);
-    request_ui_refresh(UI_DIRTY_PLAYLIST);
-    request_ui_refresh(UI_DIRTY_CONTROLS);
+             i18n_get("audio.status.playing"),
+             entry.title[0] ? entry.title : entry.path,
+             entry.artist);
+    core_status_push(msg);
+    log_info("audio", "Now playing: '%s' - '%s' (idx=%d)",
+             entry.title, entry.artist, index);
+    core_notify_state_changed();
     }
 }
 
@@ -676,7 +667,7 @@ void pause_audio(void)
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
-    if (g_current_play_index < 0 || g_current_play_index >= playlist_count()) {
+    if (g_current_play_index < 0 || g_current_play_index >= bq_count()) {
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
@@ -685,7 +676,7 @@ void pause_audio(void)
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
     progress_tracker_on_pause();
-    request_ui_refresh(UI_DIRTY_PLAYLIST);
+    core_notify_state_changed();
 }
 
 void resume_audio(void)
@@ -696,7 +687,7 @@ void resume_audio(void)
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
-    if (g_current_play_index < 0 || g_current_play_index >= playlist_count()) {
+    if (g_current_play_index < 0 || g_current_play_index >= bq_count()) {
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
@@ -705,9 +696,7 @@ void resume_audio(void)
     pthread_mutex_unlock(&g_play_mutex);
     signal_playback_thread();
     progress_tracker_on_resume();
-    request_ui_refresh(UI_DIRTY_PLAYLIST);
-    update_progress_bar();
-    update_lyrics_display();
+    core_notify_state_changed();
 }
 
 void stop_audio(void)
@@ -731,7 +720,7 @@ void stop_audio(void)
     progress_tracker_on_stop();
     clear_lyrics();
     reset_visualizer_state();
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    core_notify_state_changed();
 }
 
 /* ============================================================
@@ -741,41 +730,26 @@ void stop_audio(void)
 void next_track(void)
 {
     log_debug("audio", "next_track() called, mode=%d, current_idx=%d", g_play_mode, g_current_play_index);
-    int playlist_total = playlist_count();
-    if (playlist_total == 0) return;
+    if (bq_count() == 0) return;
 
-    /* Ensure queue is built */
-    if (g_play_queue.count == 0) {
-        int idx = (g_current_play_index >= 0) ? g_current_play_index : g_selected_index;
-        if (idx < 0) idx = 0;
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, idx);
-    }
-
-    int next_index = play_queue_peek_next(&g_play_queue, g_play_mode);
-    if (next_index < 0) {
+    int next_position = play_queue_peek_next(&g_play_queue, g_play_mode);
+    if (next_position < 0) {
         stop_audio();
         return;
     }
-    play_queue_advance(&g_play_queue, g_play_mode);
-    play_audio(next_index);
+    bq_play_at(next_position);
+    play_audio(next_position);
 }
 
 void prev_track(void)
 {
     log_debug("audio", "prev_track() called, mode=%d, current_idx=%d", g_play_mode, g_current_play_index);
-    int playlist_total = playlist_count();
-    if (playlist_total == 0) return;
+    if (bq_count() == 0) return;
 
-    if (g_play_queue.count == 0) {
-        int idx = (g_current_play_index >= 0) ? g_current_play_index : g_selected_index;
-        if (idx < 0) idx = 0;
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, idx);
-    }
-
-    int prev_index = play_queue_peek_prev(&g_play_queue, g_play_mode);
-    if (prev_index < 0) return;
-    play_queue_rewind(&g_play_queue, g_play_mode);
-    play_audio(prev_index);
+    int prev_position = play_queue_peek_prev(&g_play_queue, g_play_mode);
+    if (prev_position < 0) return;
+    bq_play_at(prev_position);
+    play_audio(prev_position);
 }
 
 /* ============================================================
@@ -797,8 +771,7 @@ void seek_audio(double position)
         g_current_position = int_position;
         pthread_mutex_unlock(&g_play_mutex);
         if (progress_tracker_is_ready()) progress_tracker_seek(int_position);
-        update_progress_bar();
-        request_ui_refresh(UI_DIRTY_CONTROLS);
+        core_notify_state_changed();
         return;
     }
 
@@ -809,10 +782,7 @@ void seek_audio(double position)
     pthread_mutex_unlock(&g_seek_mutex);
     signal_playback_thread();
 
-    update_progress_bar();
-    request_ui_refresh(UI_DIRTY_CONTROLS);
-    request_ui_refresh(UI_DIRTY_PLAYLIST);
-    update_lyrics_display();
+    core_notify_state_changed();
     media_session_notify_seek((uint64_t)g_current_position * 1000ULL);
 }
 

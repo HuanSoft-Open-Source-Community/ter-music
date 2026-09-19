@@ -303,7 +303,8 @@ int app_restore_session(int honor_autoplay,
         save_config();
     }
 
-    play_queue_load(&g_play_queue);
+    /* 队列已由 load_playlist/append_playlist 经播放列表→队列桥下发到后端；
+     * 这里不再用 queue.txt 覆盖（前端自有的持久化文件不再回灌后端队列）。 */
 
     if (honor_autoplay) {
         int resumed = app_resume_saved_playback();

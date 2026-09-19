@@ -34,6 +34,7 @@
 #include "info/info.h"
 #include "library/library.h"
 #include "playlist/playlist.h"
+#include "queue/backend_queue.h"
 #include "remote/remote.h"
 #include "ui/lyrics.h"
 
@@ -121,6 +122,8 @@ void player_set_play_mode(PlayMode mode);
 
 /* ── 队列 ─────────────────────────────────────────────────────── */
 
+/* 队列内容归后端（前端下发路径队列），游标也由后端拥有；
+ * 前端的「内容列表物理下标」与「队列位置」一一对应（装配顺序即下标顺序）。 */
 int player_queue_count(void);
 int player_queue_position(void);
 int player_queue_index_at(int position);     /* 该位置的曲目下标，-1 = 越界 */
@@ -134,6 +137,14 @@ int player_queue_clear(void);
 int player_queue_rebuild(void);
 int player_queue_shuffle(void);
 int player_queue_is_active(void);
+
+/* 内容列表变化后整表重推（分块下发），返回下发条目数；-1 = 失败 */
+int player_queue_push(void);
+/* 按路径反查队列位置（-1 = 不在队列） */
+int player_queue_find(const char *path);
+/* 队列视图分页：一页最多 out_cap 条，返回实际写入条数 */
+int player_queue_page_count(void);
+int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap);
 
 /* ── 播放列表 ─────────────────────────────────────────────────── */
 

@@ -12,7 +12,7 @@
 #include "audio/audio.h"
 #include "audio/audio_internal.h"
 #include "i18n/i18n.h"
-#include "ui/ui.h"
+#include "core/core.h"
 #include "config/config.h"
 #include "logger/logger.h"
 #include <stdio.h>
@@ -91,7 +91,7 @@ int audio_backend_prepare_stream(int sample_rate, int channels)
 
     if (pulse_loaded && g_active_backend == AUDIO_BACKEND_PULSE) {
         if (!pa_connected || !pa_ctx) {
-            update_controls_status(i18n_get("audio.err.pulseaudio_disconnected"));
+            core_status_push(i18n_get("audio.err.pulseaudio_disconnected"));
             return -1;
         }
 
@@ -101,7 +101,7 @@ int audio_backend_prepare_stream(int sample_rate, int channels)
 
         pa_stream *new_stream = P.stream_new(pa_ctx, "playback", &pa_ss, NULL);
         if (!new_stream) {
-            update_controls_status(i18n_get("audio.err.pulseaudio_create_stream"));
+            core_status_push(i18n_get("audio.err.pulseaudio_create_stream"));
             return -1;
         }
 
@@ -114,7 +114,7 @@ int audio_backend_prepare_stream(int sample_rate, int channels)
         ba.fragsize  = (uint32_t)-1;
 
         if (P.stream_connect_playback(new_stream, NULL, &ba, PA_STREAM_ADJUST_LATENCY, NULL, NULL) < 0) {
-            update_controls_status(i18n_get("audio.err.pulseaudio_connect_stream"));
+            core_status_push(i18n_get("audio.err.pulseaudio_connect_stream"));
             P.stream_unref(new_stream);
             return -1;
         }
@@ -122,7 +122,7 @@ int audio_backend_prepare_stream(int sample_rate, int channels)
         while (P.stream_get_state(new_stream) != PA_STREAM_READY) {
             if (P.stream_get_state(new_stream) == PA_STREAM_FAILED ||
                 P.stream_get_state(new_stream) == PA_STREAM_TERMINATED) {
-                update_controls_status(i18n_get("audio.err.pulseaudio_init_failed"));
+                core_status_push(i18n_get("audio.err.pulseaudio_init_failed"));
                 P.stream_unref(new_stream);
                 return -1;
             }
@@ -135,20 +135,20 @@ int audio_backend_prepare_stream(int sample_rate, int channels)
 
     if (alsa_loaded && g_active_backend == AUDIO_BACKEND_ALSA) {
         if (!alsa_ready) {
-            update_controls_status(i18n_get("audio.err.alsa_not_ready"));
+            core_status_push(i18n_get("audio.err.alsa_not_ready"));
             return -1;
         }
 
         extern char g_default_audio_device[128];
         if (A.pcm_open(&alsa_pcm, g_default_audio_device, SND_PCM_STREAM_PLAYBACK, 0) < 0) {
-            update_controls_status(i18n_get("audio.err.alsa_open"));
+            core_status_push(i18n_get("audio.err.alsa_open"));
             alsa_pcm = NULL;
             return -1;
         }
 
         if (A.pcm_set_params(alsa_pcm, SND_PCM_FORMAT_S32_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
                                (unsigned int)channels, (unsigned int)sample_rate, 1, latency_usec) < 0) {
-            update_controls_status(i18n_get("audio.err.alsa_config"));
+            core_status_push(i18n_get("audio.err.alsa_config"));
             A.pcm_close(alsa_pcm);
             alsa_pcm = NULL;
             return -1;
@@ -177,7 +177,7 @@ int audio_backend_prepare_stream(int sample_rate, int channels)
         return -1;
     }
 
-    update_controls_status(i18n_get("audio.err.no_backend"));
+    core_status_push(i18n_get("audio.err.no_backend"));
     return -1;
 }
 

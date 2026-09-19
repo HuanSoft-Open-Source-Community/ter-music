@@ -26,12 +26,25 @@ volatile sig_atomic_t g_config_reload_requested = 0;
 static void (*g_lyrics_tick)(void) = NULL;
 static void (*g_config_listener)(void) = NULL;
 static void (*g_status_listener)(const char *message) = NULL;
+static void (*g_state_listener)(void) = NULL;
 static char g_status_last[CORE_STATUS_MAX] = "";
 static unsigned long long g_status_seq = 0;
 
 void core_set_lyrics_tick(void (*tick)(void))
 {
     g_lyrics_tick = tick;
+}
+
+void core_set_state_listener(void (*listener)(void))
+{
+    g_state_listener = listener;
+}
+
+void core_notify_state_changed(void)
+{
+    if (g_state_listener) {
+        g_state_listener();
+    }
 }
 
 void core_set_config_listener(void (*listener)(void))

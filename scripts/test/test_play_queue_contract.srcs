@@ -1,0 +1,4 @@
+src/org.yxzl.ter-music/queue/backend_queue.c
+src/org.yxzl.ter-music/audio/play_queue.c
+scripts/test/stub_logger.c
+scripts/test/stub_play_queue_deps.c

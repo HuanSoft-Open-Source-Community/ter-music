@@ -13,6 +13,7 @@
 #include "media/session.h"
 
 #include "audio/audio.h"
+#include "audio/visualizer.h"
 #include "audio/play_queue.h"
 #include "config/config.h"
 #include "core/core.h"

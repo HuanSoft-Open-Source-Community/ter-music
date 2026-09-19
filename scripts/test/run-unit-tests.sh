@@ -30,9 +30,18 @@ for name in "${names[@]}"; do
         continue
     fi
     bin="$OUT_DIR/$name"
+
+    # 可选：<name>.srcs 里每行一个额外源文件（相对仓库根），供需要链接模块的单测用
+    extra=()
+    if [ -f "$SCRIPT_DIR/$name.srcs" ]; then
+        while IFS= read -r extra_src; do
+            [ -n "$extra_src" ] && extra+=("$REPO_ROOT/$extra_src")
+        done < "$SCRIPT_DIR/$name.srcs"
+    fi
+
     if ! "$CC" -std=gnu99 -D_GNU_SOURCE -Wall -Wextra \
             -I "$REPO_ROOT/include/org.yxzl.ter-music" \
-            "$src" "$REPO_ROOT/src/org.yxzl.ter-music/util/json.c" \
+            "$src" "$REPO_ROOT/src/org.yxzl.ter-music/util/json.c" "${extra[@]}" \
             -o "$bin" 2>"$OUT_DIR/$name.build.log"; then
         echo "FAIL $name 编译失败："
         sed 's/^/      /' "$OUT_DIR/$name.build.log"

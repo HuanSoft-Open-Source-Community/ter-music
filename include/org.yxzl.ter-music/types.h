@@ -112,8 +112,13 @@ typedef struct {
 #define MAX_TRACKS 1000
 #define MAX_TREE_NODES 5000
 
+/* 前端队列视图的索引镜像（2026-09-15 架构调整后）。
+ * 真正的队列是**后端**的路径队列（queue/backend_queue.h）：条目内容、执行
+ * 顺序与游标都归它。本结构只供界面渲染队列视图使用，由
+ * audio/play_queue.c 的 play_queue_indices_sync() 从后端队列反查内容列表
+ * 下标后填充；后端代码不得读它。 */
 typedef struct {
-    int indices[MAX_TRACKS];
+    int indices[MAX_TRACKS];   /* 队列位置 → 内容列表物理下标 */
     int count;
     int current_position;
     int shuffle_generation;

@@ -2,14 +2,15 @@
  * @file utf8.h
  * @brief UTF-8 字符串宽度/截断工具（无 ncurses 依赖声明）
  *
- * 实现位于 ui/utf8.c。单独拆出头文件是为了让非 TUI 代码
- * （info 模块与 cli 模块）复用这些纯函数而不引入 ncurses 头文件。
+ * 实现位于 util/utf8.c。原先是 ui/ 下的头文件（因最早只服务 TUI），
+ * 但后端（info/）与 CLI 都要用它做宽度计算与截断，2026-09-15 的架构
+ * 调整把它搬到 util/：后端不得引用任何 ui/ 头文件。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
-#ifndef UI_UTF8_H
-#define UI_UTF8_H
+#ifndef UTIL_UTF8_H
+#define UTIL_UTF8_H
 
 #include <stddef.h>
 #include <wchar.h>
@@ -37,4 +38,4 @@ int use_ascii_fallback_ui(void);
  * 处理中文，导致宽度计算与截断切断多字节字符）。 */
 void ensure_utf8_locale(void);
 
-#endif /* UI_UTF8_H */
+#endif /* UTIL_UTF8_H */

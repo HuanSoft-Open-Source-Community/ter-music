@@ -706,7 +706,7 @@ void run_event_loop(void)
                             track_idx = get_visible_node_track_index(g_selected_index);
                             if (track_idx < 0) break;
                         }
-                        play_queue_insert_after(&g_play_queue, track_idx);
+                        player_queue_insert_after(track_idx);
                         update_controls_status(i18n_get("status.inserted_next"));
                     }
                     break;
@@ -779,11 +779,11 @@ void run_event_loop(void)
                             g_saved_browser_index = -1;
                         }
 
-                        /* Auto-fill queue on first switch if empty */
+                        /* 队列内容由内容列表下发产生（playlist_queue_sync）：切到
+                         * 队列视图时只把光标对到当前曲目，不再自行“填队列”。 */
                         if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
-                            g_play_queue.count == 0 && playlist_count() > 0) {
-                            int anchor = g_current_play_index >= 0 ? g_current_play_index : 0;
-                            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, anchor);
+                            player_queue_count() > 0) {
+                            int anchor = player_track_index() >= 0 ? player_track_index() : 0;
                             g_queue_selected_index = 0;
                             for (int i = 0; i < g_play_queue.count; i++) {
                                 if (g_play_queue.indices[i] == anchor) {
@@ -813,7 +813,7 @@ void run_event_loop(void)
                             track_idx = get_visible_node_track_index(g_selected_index);
                             if (track_idx < 0) break;
                         }
-                        play_queue_append(&g_play_queue, track_idx);
+                        player_queue_append(track_idx);
                         update_controls_status(i18n_get("status.added_to_queue"));
                     }
                     break;

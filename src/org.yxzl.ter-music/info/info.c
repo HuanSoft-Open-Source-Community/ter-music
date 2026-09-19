@@ -12,9 +12,9 @@
 #include "config/config.h"
 #include "i18n/i18n.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
+#include "queue/backend_queue.h"
 #include "ui/braille/braille_art.h"
-#include "ui/utf8.h"
+#include "util/utf8.h"
 #include "util/json.h"
 
 #include <ctype.h>
@@ -552,41 +552,32 @@ void info_track_snapshot(InfoTrack *out)
         return;
     }
     memset(out, 0, sizeof(*out));
-    out->queue_position = -1;
-    out->playlist_total = playlist_count();
+    /* 队列长度与游标是**后端队列**的事实，与“当前是否有曲目”无关：
+     * 未播放时也应当如实报告，否则 `show --json` 会显示 queue_count=0
+     * 而 Queue.Get 显示 N，两个接口自相矛盾。 */
+    out->playlist_total = bq_count();
+    out->queue_count = bq_count();
+    out->queue_position = bq_position();
 
     if (g_current_play_index < 0 || g_current_play_index >= out->playlist_total) {
         return;
     }
 
-    char track_path[MAX_PATH_LEN];
-    if (playlist_get_track_path(g_current_play_index, track_path, sizeof(track_path)) != 0) {
-        return;
-    }
-
-    Track track;
-    if (get_track_metadata(g_current_play_index, &track) != 0) {
+    BackendQueueEntry entry;
+    if (bq_entry_at(g_current_play_index, &entry) != 0) {
         return;
     }
 
     out->valid = 1;
     out->index = g_current_play_index;
-    info_build_track_id(out->track_id, sizeof(out->track_id), track_path);
-    snprintf(out->path, sizeof(out->path), "%s", track_path);
-    out->cue_track_number = track.cue_track_number;
-    snprintf(out->title, sizeof(out->title), "%s", track.title);
-    snprintf(out->artist, sizeof(out->artist), "%s", track.artist);
-    snprintf(out->album, sizeof(out->album), "%s", track.album);
+    info_build_track_id(out->track_id, sizeof(out->track_id), entry.path);
+    snprintf(out->path, sizeof(out->path), "%s", entry.path);
+    out->cue_track_number = entry.cue_track_number;
+    snprintf(out->title, sizeof(out->title), "%s", entry.title);
+    snprintf(out->artist, sizeof(out->artist), "%s", entry.artist);
+    snprintf(out->album, sizeof(out->album), "%s", entry.album);
 
-    info_build_file_uri(track_path, out->uri, sizeof(out->uri));
-
-    out->queue_count = g_play_queue.count;
-    for (int i = 0; i < g_play_queue.count; i++) {
-        if (g_play_queue.indices[i] == g_current_play_index) {
-            out->queue_position = i;
-            break;
-        }
-    }
+    info_build_file_uri(entry.path, out->uri, sizeof(out->uri));
 
     if (get_current_album_cover_path(out->cover_path, sizeof(out->cover_path)) == 0) {
         out->has_cover = 1;
@@ -606,7 +597,7 @@ void info_playback_snapshot(InfoPlayback *out)
     out->speed = g_playback_speed;
     out->play_mode = g_play_mode;
     out->can_seek = (g_current_play_index >= 0 &&
-                     g_current_play_index < playlist_count() &&
+                     g_current_play_index < bq_count() &&
                      out->duration_seconds > 0);
     if (out->duration_seconds > 0 && out->position_seconds > out->duration_seconds) {
         out->position_seconds = out->duration_seconds;

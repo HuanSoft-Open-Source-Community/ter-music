@@ -14,20 +14,17 @@
 #include "cli/cli.h"
 #include "core/core.h"
 
-#include "app/open.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "config/config.h"
 #include "i18n/i18n.h"
 #include "info/info.h"
-#include "library/library.h"
-#include "logger/logger.h"
 #include "media/session.h"
-#include "playlist/playlist.h"
+#include "queue/backend_queue.h"
+#include "logger/logger.h"
 #include "ui/braille/braille_art.h"
 #include "ui/lyrics.h"
-#include "ui/menus.h"
-#include "ui/ui.h"
+#include "util/utf8.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -66,7 +63,7 @@ static int daemon_prepare_logging(int debug) {
         /* debug 日志落盘到配置目录（容器内 CWD 可能只读，不能依赖相对路径） */
         setenv("TER_MUSIC_LOG_DIR", config_dir, 1);
     }
-    g_debug_enabled = 1;
+    logger_set_enabled(1);
     logger_init();
     log_info("daemon", "=== ter-music %s daemon session started ===", APP_VERSION);
     return 1;
@@ -85,10 +82,9 @@ static void daemon_shutdown(void) {
 
     stop_audio();
     wait_for_playback_thread_shutdown();
-    library_shutdown();
-    play_queue_save(&g_play_queue);
-    save_temp_playlist();
-    cleanup_temp_playlist();
+    /* 后端只做播放：不保存内容列表、不碰临时播放列表（那些归前端）。
+     * 队列本身是前端下发的，退出时不再落盘——前端持有内容真相。 */
+    bq_shutdown();
     audio_backend_shutdown();
     reset_album_cover_cache();
     info_release_cover_cache();
@@ -99,6 +95,9 @@ static void daemon_shutdown(void) {
 
 int daemon_run_foreground(const char *open_path, int debug, int force,
                           int no_autoplay) {
+    /* no_autoplay 只影响前端（D-Bus 激活时不自动播放）；后端没有内容可
+     * “自动播放”，队列完全由前端下发。 */
+    (void)no_autoplay;
     g_daemon_mode = 1;
 
     /* 无界面进程同样需要 UTF-8 locale：信息块渲染的宽度计算与截断
@@ -111,8 +110,10 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
 
     signal(SIGHUP, daemon_sighup_handler);
 
-    /* 配置 / 曲库 / 持久化数据（与 TUI 启动同一入口，无 curses 依赖） */
-    init_all_persistent_data();
+    /* 后端只做播放：读取配置并应用运行时字段，**不**初始化曲库/收藏/
+     * 历史/用户歌单——这些内容归前端（见 check-core-purity.sh 的 B 轴）。 */
+    ensure_config_dir_exists();
+    core_config_apply();
     i18n_init(g_app_config.ui_language);
     set_volume_percent(g_app_config.volume_percent);
 
@@ -120,6 +121,7 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     g_active_backend = g_app_config.audio_backend;
     init_audio_device();
     media_session_init();
+    bq_init();
 
     if (!media_session_has_primary_name()) {
         const char *bus = media_session_bus_name();
@@ -134,50 +136,19 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
         fprintf(stderr, "警告：以次要实例身份运行（总线名 %s），CLI 命令仍会发送给主实例。\n", bus);
     }
 
-    reset_playlist_state();
-
-    int loaded = 0;
     if (open_path && open_path[0]) {
-        AppOpenResult result;
-        if (!app_path_is_local_playable(open_path)) {
-            /* 远程音乐源由前端负责：前端下载到本地缓存后再把路径交给核心 */
-            fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责。\n");
-            log_warn("daemon", "Refusing non-local path '%s': remote sources belong to the front end",
-                     open_path);
-        } else {
-            result = app_open_path(open_path, NULL, 0, NULL, NULL);
-            if (result == APP_OPEN_OK) {
-                loaded = 1;
-                log_info("daemon", "Local path loaded: '%s'", open_path);
-            } else {
-                log_warn("daemon", "Failed to load path '%s' (result=%d)", open_path, (int)result);
-                fprintf(stderr, "错误：无法打开 '%s'（路径不存在或没有可播放的音频）。\n", open_path);
-            }
-        }
-
-        if (loaded) {
-            play_queue_load(&g_play_queue);
-            if (!no_autoplay && playlist_count() > 0) {
-                int index = (g_current_play_index >= 0 && g_current_play_index < playlist_count())
-                    ? g_current_play_index : 0;
-                play_audio(index);
-                app_set_selection_for_track(index);
-            }
-        }
+        /* 后端不再扫描目录：`--open <dir>` 是“前端负责扫描”的旧语义，
+         * 继续接受它只会让人以为核心会自己加载曲目。 */
+        fprintf(stderr, "错误：核心不再扫描目录。\n");
+        fprintf(stderr, "      请在前端（TUI 或 `ter-music play <路径>`）扫描后，经 D-Bus Queue.Set 下发队列。\n");
+        log_warn("daemon", "Refusing --open '%s': the core does not scan directories any more", open_path);
     } else {
-        /* --no-autoplay（D-Bus 激活路径）只装载播放列表，等待控制命令，
-         * 避免“激活即恢复上次会话播放”随后又被 OpenPath 打断 */
-        loaded = app_restore_session(no_autoplay ? 0 : 1, NULL, 0) > 0;
-        if (!loaded) {
-            log_warn("daemon", "Nothing to restore; waiting for commands");
-        }
+        /* 队列一律由前端下发（Queue.Set/Append）：核心不扫描目录，也不自行
+         * 从 queue.txt 恢复内容——那份文件归前端所有。 */
+        log_info("daemon", "Waiting for a front end to deliver a queue");
     }
 
-    /* 歌词状态当前由 ui/lyrics.c 持有，核心经钩子调用其推进函数 */
-    core_set_lyrics_tick(update_lyrics_display);
-
-    log_info("daemon", "Entering main loop (playlist=%d loaded=%d)",
-             playlist_count(), loaded);
+    log_info("daemon", "Entering main loop (queue=%d)", bq_count());
 
     while (!g_should_exit) {
         /* 与 TUI 共用同一套核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */

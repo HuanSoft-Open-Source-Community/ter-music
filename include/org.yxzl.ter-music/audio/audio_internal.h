@@ -3,6 +3,7 @@
 
 #include "types.h"
 #include "audio/audio.h"
+#include "audio/play_queue.h"
 #include <pthread.h>
 
 /* ================================================================

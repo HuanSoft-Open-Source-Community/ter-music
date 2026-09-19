@@ -89,10 +89,12 @@ setup_fixtures() {
     mkdir -p "$WORK_DIR/music" "$WORK_DIR/home"
 
     if command -v ffmpeg >/dev/null 2>&1; then
-        ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=r=44100:cl=mono \
-            -t 3 -c:a pcm_s16le -y "$WORK_DIR/music/a.wav" 2>/dev/null
-        ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=r=44100:cl=mono \
-            -t 3 -c:a pcm_s16le -y "$WORK_DIR/music/b.wav" 2>/dev/null
+        local i
+        for i in 1 2 3 4 5; do
+            ffmpeg -hide_banner -loglevel error -f lavfi \
+                -i "sine=frequency=$((300 + i * 110)):duration=3" \
+                -c:a pcm_s16le -y "$WORK_DIR/music/tone$i.wav" 2>/dev/null
+        done
     fi
 
     export HOME="$WORK_DIR/home"
@@ -101,8 +103,9 @@ setup_fixtures() {
 }
 
 start_daemon() {
+    # 后端不扫描目录：daemon 直接启动，队列随后由检查项经 Queue.Set 下发
     local pid
-    pid="$("$TM_BIN" daemon start --open "$WORK_DIR/music" 2>/dev/null |
+    pid="$("$TM_BIN" daemon start 2>/dev/null |
            sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
     if [ -z "$pid" ]; then
         # daemon start 的输出格式变化时退回按总线名查询
@@ -377,72 +380,88 @@ check_frontends() {
 
 
 # ── 检查 5：Playlist / Queue（分页边界、过滤、队列编辑） ─────────────
-check_playlist_queue() {
-    local tree total
-    tree="$(dbus_call org.yxzl.ter_music.Playlist GetTree)"
-    total="$(json_field "$tree" 'doc["count"]')"
-    case "$total" in
-        ''|ERR:*) bad "GetTree 失败：$tree" ; return ;;
-        *) ok "GetTree count=$total" ;;
-    esac
+check_queue() {
+    # 队列内容由前端下发（Queue.Set/Append，路径语义），后端只执行。
+    # 本检查在后端进程内直接下发队列，因此不依赖任何前端或曲库。
+    local music="$WORK_DIR/music"
+    local payload
+    payload="{\"entries\":["
+    payload="$payload{\"path\":\"$music/tone1.wav\",\"title\":\"T1\",\"artist\":\"A\",\"album\":\"AL\"},"
+    payload="$payload{\"path\":\"$music/tone2.wav\",\"title\":\"T2\",\"artist\":\"A\",\"album\":\"AL\"},"
+    payload="$payload{\"path\":\"$music/tone3.wav\",\"title\":\"T3\",\"artist\":\"B\",\"album\":\"BL\"}]}"
 
-    # 分页：offset 越界返回 0 行而不是报错
-    local page count
-    page="$(dbus_call org.yxzl.ter_music.Playlist GetPage 100000 10)"
-    count="$(json_field "$page" 'doc["count"]')"
-    [ "$count" = "0" ] && ok "GetPage 越界 offset 返回空页" || bad "GetPage 越界返回 count=$count"
+    # 空队列起步
+    dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
+    local qcount
+    qcount="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 0 10)" 'doc["count"]')"
+    [ "$qcount" = "0" ] && ok "Queue.Get 空队列 count=0" || bad "Queue.Get 空队列 count=$qcount"
+
+    # Set：整表下发，返回写入条目数
+    local rc
+    rc="$(dbus_call org.yxzl.ter_music.Queue Set "$payload")"
+    printf '%s' "$rc" | grep -q "(3,)" && ok "Queue.Set 写入 3 条" || bad "Queue.Set 返回 $rc"
+
+    local queue
+    queue="$(dbus_call org.yxzl.ter_music.Queue Get 0 10)"
+    qcount="$(json_field "$queue" 'doc["count"]')"
+    [ "$qcount" = "3" ] && ok "Queue.Get count=3" || bad "Queue.Get count=$qcount"
+    printf '%s' "$queue" | grep -q "tone2.wav" && ok "Queue.Get 行内含路径" || bad "Queue.Get 行内缺路径"
+    local pos
+    pos="$(json_field "$queue" 'doc["current_position"]')"
+    [ "$pos" = "0" ] && ok "Set 后游标置 0" || bad "Set 后游标=$pos"
+
+    # 分页：offset 越界返回空行集而不是报错
+    local page_count
+    page_count="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 100000 10)" 'doc["rows"]' 2>/dev/null || true)"
+    local rows
+    rows="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 100000 10)" 'len(doc["rows"])')"
+    [ "$rows" = "0" ] && ok "Queue.Get 越界 offset 返回空页" || bad "Queue.Get 越界返回 rows=$rows"
 
     # 分页：count 超上限应被拒绝
-    local over
-    over="$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 5000)"
-    if printf '%s' "$over" | grep -q "InvalidArgs"; then
-        ok "GetPage 拒绝超过上限的 count（1000）"
+    local over_limit
+    over_limit="$(dbus_call org.yxzl.ter_music.Queue Get 0 5000)"
+    if printf '%s' "$over_limit" | grep -q "InvalidArgs"; then
+        ok "Queue.Get 拒绝超过上限的 count（1000）"
     else
-        bad "GetPage 未拒绝超大 count"
+        bad "Queue.Get 未拒绝超大 count：$over_limit"
     fi
 
-    # 过滤：SetFilter 后 GetPage 反映过滤结果，清空后恢复。
-    # 注意 GetTree.count 是曲目数，GetPage.total 是可见行数（树模式含目录行），
-    # 因此用同一接口的前后对比，而不是与 GetTree 比较。
-    local baseline
-    baseline="$(json_field "$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 10)" 'doc["total"]')"
-    dbus_call org.yxzl.ter_music.Playlist SetFilter "a" >/dev/null
-    local filtered_n
-    filtered_n="$(json_field "$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 10)" 'doc["total"]')"
-    dbus_call org.yxzl.ter_music.Playlist SetFilter "" >/dev/null
-    local restored
-    restored="$(json_field "$(dbus_call org.yxzl.ter_music.Playlist GetPage 0 10)" 'doc["total"]')"
-    if [ "$restored" = "$baseline" ] && [ "$filtered_n" -lt "$baseline" ]; then
-        ok "SetFilter 生效（$filtered_n < $baseline 行）并可清空恢复"
-    else
-        bad "SetFilter 行为异常：baseline=$baseline filtered=$filtered_n restored=$restored"
-    fi
+    # 编辑：InsertAfter / MoveUp / RemoveAt / PlayAt
+    rc="$(dbus_call org.yxzl.ter_music.Queue InsertAfter 1 "{\"entries\":[{\"path\":\"$music/tone4.wav\",\"title\":\"T4\"}]}")"
+    printf '%s' "$rc" | grep -q "(1,)" && ok "Queue.InsertAfter 插入 1 条" || bad "Queue.InsertAfter 返回 $rc"
 
-    # 队列：Get 与写操作
-    local queue qcount
-    queue="$(dbus_call org.yxzl.ter_music.Queue Get 0 200)"
-    qcount="$(json_field "$queue" 'doc["count"]')"
-    case "$qcount" in
-        ''|ERR:*) bad "Queue.Get 失败：$queue"; return ;;
-        *) ok "Queue.Get count=$qcount" ;;
-    esac
-
-    local rc
-    rc="$(dbus_call org.yxzl.ter_music.Queue Append 0)"
-    printf '%s' "$rc" | grep -q "true" && ok "Queue.Append 接受合法曲目" || bad "Queue.Append 失败：$rc"
-
-    rc="$(dbus_call org.yxzl.ter_music.Queue Append 999999)"
-    printf '%s' "$rc" | grep -q "OutOfRange" && ok "Queue.Append 拒绝越界曲目" || bad "Queue.Append 未拒绝越界：$rc"
+    rc="$(dbus_call org.yxzl.ter_music.Queue MoveDown 0)"
+    printf '%s' "$rc" | grep -q "true" && ok "Queue.MoveDown 接受合法位置" || bad "Queue.MoveDown 失败：$rc"
 
     rc="$(dbus_call org.yxzl.ter_music.Queue MoveUp 999999)"
     printf '%s' "$rc" | grep -q "OutOfRange" && ok "Queue.MoveUp 拒绝越界位置" || bad "Queue.MoveUp 未拒绝越界：$rc"
+
+    rc="$(dbus_call org.yxzl.ter_music.Queue InsertAfter 999999 "{\"entries\":[{\"path\":\"$music/tone4.wav\"}]}")"
+    printf '%s' "$rc" | grep -q "InvalidArgs" && ok "Queue.InsertAfter 拒绝越界位置" || bad "Queue.InsertAfter 未拒绝越界：$rc"
+
+    # 非本地路径必须被拒绝（核心只播放本地文件）
+    rc="$(dbus_call org.yxzl.ter_music.Queue Set '{"entries":[{"path":"smb://host/share/a.mp3"}]}')"
+    printf '%s' "$rc" | grep -q "InvalidArgs" && ok "Queue.Set 拒绝非本地路径" || bad "Queue.Set 未拒绝非本地路径：$rc"
+
+    # 非法 JSON 必须被拒绝
+    rc="$(dbus_call org.yxzl.ter_music.Queue Set 'not-json')"
+    printf '%s' "$rc" | grep -q "InvalidArgs" && ok "Queue.Set 拒绝非法 JSON" || bad "Queue.Set 未拒绝非法 JSON：$rc"
+
+    # PlayAt：置游标并开始播放
+    dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
+    dbus_call org.yxzl.ter_music.Queue Set "$payload" >/dev/null
+    rc="$(dbus_call org.yxzl.ter_music.Queue PlayAt 2)"
+    printf '%s' "$rc" | grep -q "true" && ok "Queue.PlayAt 置游标" || bad "Queue.PlayAt 失败：$rc"
+    local info
+    info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    printf '%s' "$info" | grep -q "tone3.wav" && ok "Info.GetInfo 反映队列游标曲目" || bad "Info.GetInfo 未反映 PlayAt 结果"
 
     # 队列变更信号
     gdbus monitor --session --dest org.mpris.MediaPlayer2.ter_music \
         --object-path /org/mpris/MediaPlayer2 > "$WORK_DIR/queue-monitor.txt" 2>&1 &
     local monitor_pid=$!
     sleep 0.8
-    dbus_call org.yxzl.ter_music.Queue Append 0 >/dev/null
+    dbus_call org.yxzl.ter_music.Queue Append "{\"entries\":[{\"path\":\"$music/tone5.wav\"}]}" >/dev/null
     sleep 0.8
     kill "$monitor_pid" 2>/dev/null
     if grep -q "QueueChanged" "$WORK_DIR/queue-monitor.txt"; then
@@ -450,6 +469,9 @@ check_playlist_queue() {
     else
         bad "未捕获 QueueChanged 信号"
     fi
+
+    dbus_call org.yxzl.ter_music.Control Stop >/dev/null
+    dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
 }
 
 
@@ -716,11 +738,12 @@ check_info_extensions
 info "检查 4：前端注册表（M2.3）"
 check_frontends
 
-info "检查 5：Playlist / Queue（M2.4）"
-check_playlist_queue
+info "检查 5：Queue（路径语义：内容由前端下发）"
+check_queue
 
-info "检查 6：曲库与收藏/历史（M2.5）"
-check_library
+info "检查 6：曲库与收藏/历史（后端不再拥有内容，本段随内容接口一并撤下）"
+# 后端只做播放：曲库/收藏/历史归前端（TUI/CLI），daemon 进程内不再打开 SQLite。
+# 这一段针对 daemon 的断言已无意义，内容接口撤下时整段删除。
 
 info "检查 7：Config / Remote（M2.6）"
 check_config_remote

@@ -15,7 +15,7 @@
 #include "app/open.h"
 #include "info/info.h"
 #include "types.h"
-#include "ui/utf8.h"
+#include "util/utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>

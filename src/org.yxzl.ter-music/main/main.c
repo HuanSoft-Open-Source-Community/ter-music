@@ -460,8 +460,9 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* Restore queue from disk */
-        play_queue_load(&g_play_queue);
+        /* 队列内容由内容列表下发产生（load_playlist 内已同步到后端队列），
+         * 不再从 queue.txt 覆盖：queue.txt 是前端自己的持久化文件，
+         * 后端队列只接受前端下发的内容。 */
 
         if (!resumed_playback && playlist_count() > 0 &&
             (g_app_config.auto_play_on_start || opened_single_file)) {
@@ -504,7 +505,8 @@ int main(int argc, char *argv[]) {
 
     log_info("main", "Event loop exited, beginning shutdown");
     player_shutdown();
-    play_queue_save(&g_play_queue);
+    /* queue.txt 不再写出：队列内容由内容列表（temp playlist + 上次打开的
+     * 目录）恢复，游标由 resume_last_playback 恢复。 */
     save_temp_playlist();
     cleanup();
     cleanup_temp_playlist();

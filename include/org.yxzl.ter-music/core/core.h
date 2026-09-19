@@ -49,9 +49,16 @@ const char *core_status_last(void);
  * 不必比较文本（同一条消息被再次推送时也应被看到）。 */
 unsigned long long core_status_seq(void);
 
+/* ── 播放面状态变更广播 ─────────────────────────────────────────── */
+/* 后端（音频层 / 播放线程 / 队列）改变播放状态后调用它；前端注册的监听器
+ * 据此标脏重绘。这层回调取代了后端直接调用界面渲染函数——核心不认识
+ * ncurses，daemon 注册空监听器即可。 */
+void core_notify_state_changed(void);
+void core_set_state_listener(void (*listener)(void));
+
 /* ── 歌词推进钩子 ───────────────────────────────────────────────── */
-/* 歌词状态目前仍由 ui/lyrics.c 持有（其归属将在前端改造阶段迁移到核心）。
- * 核心通过注册回调调用推进函数，使 core 模块不反向依赖界面头文件。 */
+/* 歌词数据由后端持有（lyrics/lyrics.c），其推进由 core_tick() 直接调用
+ * `lyrics_tick()`；此处保留注册入口，供需要自定义推进节奏的前端覆盖。 */
 void core_set_lyrics_tick(void (*tick)(void));
 
 #endif /* CORE_H */

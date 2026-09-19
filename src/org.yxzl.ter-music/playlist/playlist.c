@@ -9,6 +9,7 @@
 #include "i18n/i18n.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
+#include "playlist/playlist_queue.h"
 #include "logger/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -356,7 +357,8 @@ void reset_playlist_state(void) {
     playlist_unlock();
     search_clear();
     memset(&g_sort_state, 0, sizeof(g_sort_state));
-    play_queue_clear(&g_play_queue);
+    /* 内容清空即队列清空：同步告知后端（bq_clear + 句柄对齐） */
+    playlist_queue_sync();
 }
 
 static int playlist_contains_track_in(const Playlist *playlist, const char *path) {
@@ -1405,11 +1407,7 @@ int load_single_file(const char *file_path) {
 
     free(next);
     recompute_sort_order();
-    play_queue_clear(&g_play_queue);
-    if (g_current_play_index >= 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-    else if (playlist_count() > 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+    playlist_queue_sync();
     return 1;
 }
 
@@ -1655,11 +1653,7 @@ void playlist_install(Playlist *built)
     search_clear();
     recompute_sort_order();
 
-    play_queue_clear(&g_play_queue);
-    if (g_current_play_index >= 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-    else if (playlist_count() > 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+    playlist_queue_sync();
 
     request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
 }
@@ -1714,11 +1708,7 @@ int load_playlist(const char *path) {
     free(next);
     log_info("playlist", "load_playlist: loaded %d tracks from '%s'", total, path);
     recompute_sort_order();
-    play_queue_clear(&g_play_queue);
-    if (g_current_play_index >= 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-    else if (playlist_count() > 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+    playlist_queue_sync();
     return total;
 }
 
@@ -1759,11 +1749,7 @@ int append_playlist(const char *path) {
         search_clear();
         free(next);
         recompute_sort_order();
-        play_queue_clear(&g_play_queue);
-        if (g_current_play_index >= 0)
-            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-        else if (playlist_count() > 0)
-            play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+        playlist_queue_sync();
         return 1;
     }
 
@@ -1795,11 +1781,7 @@ int append_playlist(const char *path) {
     free(next);
     log_info("playlist", "append_playlist: added %d new tracks (total=%d)", added, playlist_count());
     recompute_sort_order();
-    play_queue_clear(&g_play_queue);
-    if (g_current_play_index >= 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, g_current_play_index);
-    else if (playlist_count() > 0)
-        play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, 0);
+    playlist_queue_sync();
     return added;
 }
 

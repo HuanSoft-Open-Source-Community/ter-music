@@ -65,6 +65,9 @@ of exactly these interfaces.
 
 - **Handshake.** `Info.GetInfo` carries a `core` object. Read
   `core.api_version` before using anything else; version 3 is described here.
+  Version 3 removed the Remote interface and changed `Queue` from playlist
+  indices to **local file paths**: `Queue.Set` was added, and
+  `Queue.Append`/`InsertAfter` now take a JSON payload instead of a track index.
   Version 2 added the `core` object and the Playlist/Queue/Library/Config
   surface; version 3 removed `Remote` (remote music sources are a front-end
   feature) and restricted every path argument to local files. Version 1 was the
@@ -282,19 +285,46 @@ Signal `PlaylistChanged(s reason)` with `reason` one of `loading`, `loaded`,
 
 ## org.yxzl.ter_music.Queue
 
+The queue is a list of **local file paths** executed by the core. The front end
+owns content: it scans directories, extracts metadata and hands the result over.
+The core never scans anything by itself and never sees a content-list index —
+queue positions are the only cursor it knows.
+
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
-| `Get` | `(i offset, i count) -> s` | `{"revision":n,"count":n,"current_position":n\|null,"offset":n,"rows":[{"position":n,"track_index":n,"title":"…","artist":"…","album":"…","is_cue":b}]}` |
-| `Append` / `InsertAfter` | `(i track_index) -> b` | Add a track at the end / after the current one |
+| `Get` | `(i offset, i count) -> s` | `{"revision":n,"count":n,"current_position":n\|null,"offset":n,"rows":[{"position":n,"path":"…","title":"…","artist":"…","album":"…","is_cue":b}]}` |
+| `Set` | `(s json) -> i` | Replace the whole queue; returns the number of entries written |
+| `Append` | `(s json) -> i` | Append entries; returns the number written |
+| `InsertAfter` | `(i position, s json) -> i` | Insert entries after a position; returns the number written |
 | `RemoveAt` | `(i position) -> b` | Remove one entry |
 | `MoveUp` / `MoveDown` | `(i position) -> b` | Reorder one entry |
 | `Clear` | `() -> b` | Empty the queue |
-| `Rebuild` | `(i mode) -> b` | Rebuild from the playlist using a play mode (optional; current mode by default) |
-| `Shuffle` | `() -> b` | Keep the current track first and shuffle the rest |
-| `PlayAt` | `(i position) -> b` | Play the entry at a queue position |
+| `Rebuild` | `(i mode) -> b` | Re-apply a play mode to the delivered queue (optional; current mode by default) |
+| `Shuffle` | `() -> b` | Keep the current entry first and shuffle the rest |
+| `PlayAt` | `(i position) -> b` | Move the cursor to a position and start playing |
 
-Signal `QueueChanged(u revision, i count, i current_position)` after every
-edit. Queue edits are synchronous: the queue is bounded by the playlist size.
+Payload for `Set` / `Append` / `InsertAfter` — either `{"entries":[…]}` or a bare
+array:
+
+```json
+{"entries":[
+  {"path":"/music/a/01.flac","title":"…","artist":"…","album":"…",
+   "cue_offset":0,"cue_track_number":0,"is_cue":false,"lyrics_source":0}
+]}
+```
+
+Rules:
+
+* A single call carries at most **500** entries (`BQ_SET_MAX`); a larger queue is
+  delivered as one `Set` plus as many `Append` calls as needed.
+* Array order **is** execution order. `Rebuild` reshapes it for folder/album/
+  artist and shuffle modes while keeping the current entry.
+* `path` must be local: `smb://`, `ftp://`, `http(s)://` and friends are
+  rejected with `Error.InvalidArgs`. The front end downloads remote content and
+  passes the local cache path.
+* Metadata travels with each entry, so the core does not have to re-read tags.
+
+Signal `QueueChanged(u revision, i count, i current_position)` after every edit.
 
 ## org.yxzl.ter_music.Library
 
@@ -374,7 +404,7 @@ Signal `ConfigChanged(s patch)` carries the patch that was applied; `{}` means
 Removed in `core.api_version` 3. Remote music sources (SMB/SFTP/FTP/WebDAV/
 HTTP) are a **front-end** feature: the front end stores its own server list
 (outside the core configuration), lists and downloads remote directories, and
-then hands the resulting local file paths to `Playlist.Load` / `Playlist.Append`.
+then hands the resulting local file paths to `Queue.Set` / `Queue.Append`.
 The core never sees a remote URL, so a stale client calling `Remote.*` gets the
 standard `org.freedesktop.DBus.Error.UnknownMethod`.
 

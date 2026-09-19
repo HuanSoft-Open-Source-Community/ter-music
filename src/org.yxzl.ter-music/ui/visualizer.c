@@ -14,6 +14,7 @@
 #include "ui/menu_internal.h"
 #include "ui/braille/braille_art.h"
 #include "audio/audio.h"
+#include "audio/visualizer.h"
 #include "config/config.h"
 #include <ncursesw/ncurses.h>
 #include <stdio.h>

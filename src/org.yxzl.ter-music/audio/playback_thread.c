@@ -14,8 +14,9 @@
 #include "audio/audio_internal.h"
 #include "audio/progress/progress.h"
 #include "audio/play_queue.h"
-#include "playlist/playlist.h"
-#include "ui/ui.h"
+#include "audio/visualizer.h"
+#include "core/core.h"
+#include "queue/backend_queue.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
@@ -32,6 +33,11 @@
 #include <libavutil/channel_layout.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/version.h>
+
+/* 迁移期过渡：播放线程仍需要歌词/封面的加载与清空入口，二者属“当前曲目
+ * 信息”（后端职责）。正式的引擎抽取在歌词模块化那一步完成，届时本声明
+ * 连同 `ui/lyrics.h` 一起从后端消失（见 check-core-purity.sh 的 B 轴）。 */
+#include "ui/lyrics.h"
 
 /* ── Write batch size (~23ms at 44100 Hz) ── */
 #define WRITE_BATCH_FRAMES 1024
@@ -293,7 +299,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
         int64_t target_ts = av_rescale_q(target_position + cue_offset, (AVRational){1, 1}, time_base);
         int ret = av_seek_frame(fmt_ctx, audio_stream_index, target_ts, 0);
         if (ret < 0) {
-            update_controls_status(i18n_get("audio.err.seek_failed"));
+            core_status_push(i18n_get("audio.err.seek_failed"));
         } else {
             avcodec_flush_buffers(codec_ctx);
             if (swr_ctx) swr_init(swr_ctx);
@@ -328,7 +334,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
                                 use_resampler, decoder_draining, decoder_finished);
             if (fill_ret < 0) {
                 log_error("audio", "handle_seek_request: decode_segment_fill failed, aborting seek");
-                update_controls_status(i18n_get("audio.err.seek_failed"));
+                core_status_push(i18n_get("audio.err.seek_failed"));
                 pthread_mutex_unlock(&g_seek_mutex);
                 return handled;  /* leave decoder state as-is; main loop can retry */
             }
@@ -344,7 +350,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
             snprintf(msg, sizeof(msg),
                      i18n_get("status.seek_fmt"),
                      target_position / 60, target_position % 60);
-            update_controls_status(msg);
+            core_status_push(msg);
         }
     }
     pthread_mutex_unlock(&g_seek_mutex);
@@ -401,31 +407,32 @@ static void attempt_next_track_preload(int current_track_index,
         return;
     }
 
-    /* Determine next track index (need lock for queue access) */
+    /* Determine the next queue position (need lock for queue access) */
     int next_index = -1;
+    BackendQueueEntry next_entry;
+    int have_next_entry = 0;
     pthread_mutex_lock(&g_play_mutex);
     next_index = play_queue_peek_next(&g_play_queue, g_play_mode);
+    if (next_index >= 0) {
+        have_next_entry = bq_entry_at(next_index, &next_entry) == 0;
+    }
     pthread_mutex_unlock(&g_play_mutex);
-    if (next_index < 0 || next_index == current_track_index) {
-        log_debug("segment", "preload: no valid next track (idx=%d)", next_index);
+    if (next_index < 0 || next_index == current_track_index || !have_next_entry) {
+        log_debug("segment", "preload: no valid next track (pos=%d)", next_index);
         return;
     }
 
     /* Skip preload for CUE tracks — preloaded PCM from position 0 would be
      * at the wrong offset. The playback thread handles CUE offset seeking. */
-    if (next_index >= 0 && next_index < MAX_TRACKS &&
-        g_playlist.cue_offsets[next_index] > 0) {
+    if (next_entry.cue_offset > 0) {
         log_debug("segment", "preload: skipping (CUE track with offset)");
         return;
     }
 
     char file_path[MAX_PATH_LEN];
-    if (playlist_get_track_path(next_index, file_path, sizeof(file_path)) != 0) {
-        log_warn("segment", "preload: cannot get path for next track idx=%d", next_index);
-        return;
-    }
+    snprintf(file_path, sizeof(file_path), "%s", next_entry.path);
 
-    log_info("segment", "preload: attempting next track idx=%d path='%s'", next_index, file_path);
+    log_info("segment", "preload: attempting next track pos=%d path='%s'", next_index, file_path);
 
     /* Ensure preload data buffers are allocated */
     if (preload_data_ensure_init(&g_preload_data, output_sample_rate, output_channels) < 0) {
@@ -660,7 +667,7 @@ void *play_audio_thread(void *arg)
     pthread_mutex_unlock(&g_play_mutex);
 
     char file_path[MAX_PATH_LEN];
-    int valid_index = playlist_get_track_path(index, file_path, sizeof(file_path)) == 0;
+    int valid_index = bq_path_at(index, file_path, sizeof(file_path)) == 0;
 
     if (!valid_index || !thread_running) {
         log_warn("audio", "Playback thread: invalid index=%d or thread not running", index);
@@ -696,12 +703,12 @@ void *play_audio_thread(void *arg)
 
     if (avformat_open_input(&fmt_ctx, file_path, NULL, NULL) != 0) {
         log_error("audio", "avformat_open_input failed for '%s' (index=%d)", file_path, index);
-        update_controls_status(i18n_get("audio.err.cannot_open_file"));
+        core_status_push(i18n_get("audio.err.cannot_open_file"));
         goto cleanup;
     }
     if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
         log_error("audio", "avformat_find_stream_info failed for '%s'", file_path);
-        update_controls_status(i18n_get("audio.err.cannot_read_stream"));
+        core_status_push(i18n_get("audio.err.cannot_read_stream"));
         goto cleanup;
     }
 
@@ -742,9 +749,25 @@ void *play_audio_thread(void *arg)
         }
     }
 
-    /* Cap duration for CUE sub-tracks */
+    /* Cap duration for CUE sub-tracks.
+     * 旧实现靠内容列表的 `cue_find_next_offset(index)` 找同一物理文件里的
+     * 下一个子轨；后端不认识内容列表，改为在**后端路径队列**里向后找同一
+     * 路径且偏移更大的条目（执行顺序即队列顺序，与扫描顺序一致）。 */
     if (cue_offset > 0) {
-        int next_offset = cue_find_next_offset(index);
+        int next_offset = -1;
+        for (int i = index + 1; i < bq_count(); i++) {
+            BackendQueueEntry candidate;
+            if (bq_entry_at(i, &candidate) != 0) {
+                break;
+            }
+            if (strcmp(candidate.path, file_path) != 0) {
+                continue;
+            }
+            if (candidate.cue_offset > cue_offset) {
+                next_offset = candidate.cue_offset;
+                break;
+            }
+        }
         int capped;
         if (next_offset > cue_offset) {
             capped = next_offset - cue_offset;
@@ -761,7 +784,7 @@ void *play_audio_thread(void *arg)
     int initial_seek_position = g_initial_seek_position;
     g_initial_seek_position = 0;
 
-    request_ui_refresh(UI_DIRTY_CONTROLS);
+    core_notify_state_changed();
 
     for (int i = 0; i < fmt_ctx->nb_streams; i++) {
         if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -771,7 +794,7 @@ void *play_audio_thread(void *arg)
     }
     if (audio_stream_index == -1) {
         log_error("audio", "No audio stream found in '%s'", file_path);
-        update_controls_status(i18n_get("audio.err.no_stream"));
+        core_status_push(i18n_get("audio.err.no_stream"));
         goto cleanup;
     }
 
@@ -779,14 +802,14 @@ void *play_audio_thread(void *arg)
     const AVCodec *codec = avcodec_find_decoder(codec_par->codec_id);
     if (!codec) {
         log_error("audio", "Unsupported codec in '%s' (codec_id=%d)", file_path, codec_par->codec_id);
-        update_controls_status(i18n_get("audio.err.unsupported_codec"));
+        core_status_push(i18n_get("audio.err.unsupported_codec"));
         goto cleanup;
     }
 
     codec_ctx = avcodec_alloc_context3(codec);
-    if (!codec_ctx) { update_controls_status(i18n_get("audio.err.alloc_codec_ctx")); goto cleanup; }
-    if (avcodec_parameters_to_context(codec_ctx, codec_par) < 0) { update_controls_status(i18n_get("audio.err.copy_codec_params")); goto cleanup; }
-    if (avcodec_open2(codec_ctx, codec, NULL) < 0) { update_controls_status(i18n_get("audio.err.open_codec")); goto cleanup; }
+    if (!codec_ctx) { core_status_push(i18n_get("audio.err.alloc_codec_ctx")); goto cleanup; }
+    if (avcodec_parameters_to_context(codec_ctx, codec_par) < 0) { core_status_push(i18n_get("audio.err.copy_codec_params")); goto cleanup; }
+    if (avcodec_open2(codec_ctx, codec, NULL) < 0) { core_status_push(i18n_get("audio.err.open_codec")); goto cleanup; }
 
     input_channels = codec_channel_count(codec_ctx);
     if (input_channels <= 0) input_channels = 2;
@@ -815,7 +838,7 @@ void *play_audio_thread(void *arg)
 
     /* ── Segment pool init ── */
     if (segment_pool_init(&seg_pool, output_sample_rate, output_channels) < 0) {
-        update_controls_status(i18n_get("audio.err.alloc_segment_buf"));
+        core_status_push(i18n_get("audio.err.alloc_segment_buf"));
         goto cleanup;
     }
     pool_initialized = 1;
@@ -827,21 +850,21 @@ void *play_audio_thread(void *arg)
 
     if (use_resampler) {
         swr_ctx = swr_alloc();
-        if (!swr_ctx) { update_controls_status(i18n_get("audio.err.alloc_resampler")); goto cleanup; }
+        if (!swr_ctx) { core_status_push(i18n_get("audio.err.alloc_resampler")); goto cleanup; }
         if (init_resampler(swr_ctx, codec_ctx, input_channels, output_channels, output_sample_rate) < 0) {
-            update_controls_status(i18n_get("audio.err.init_resampler")); goto cleanup;
+            core_status_push(i18n_get("audio.err.init_resampler")); goto cleanup;
         }
     }
 
     if (init_atempo_filter(codec_ctx, g_playback_speed) < 0) {
-        update_controls_status(i18n_get("audio.err.init_speed_filter")); goto cleanup;
+        core_status_push(i18n_get("audio.err.init_speed_filter")); goto cleanup;
     }
 
     packet = av_packet_alloc();
     frame = av_frame_alloc();
     filtered_frame = av_frame_alloc();
     if (!packet || !frame || !filtered_frame) {
-        update_controls_status(i18n_get("audio.err.alloc_decode"));
+        core_status_push(i18n_get("audio.err.alloc_decode"));
         goto cleanup;
     }
 
@@ -1211,7 +1234,7 @@ void *play_audio_thread(void *arg)
 
         /* Write to audio backend */
         if (audio_backend_write_samples(write_ptr, batch) < 0) {
-            update_controls_status(i18n_get("audio.err.device_write"));
+            core_status_push(i18n_get("audio.err.device_write"));
             playback_error = 1;
             break;
         }
@@ -1254,8 +1277,6 @@ cleanup:
 
     if (!reached_end_of_stream) g_current_position = 0;
 
-    int playlist_total = playlist_count();
-
     pthread_mutex_lock(&g_play_mutex);
     if (g_play_thread_running && reached_end_of_stream) {
         if (g_play_mode == PLAY_MODE_SINGLE_REPEAT) {
@@ -1288,11 +1309,9 @@ cleanup:
     pthread_mutex_unlock(&g_play_mutex);
 
     if (followup_index < 0) {
-        extern void clear_lyrics(void);
         clear_lyrics();
-        request_ui_refresh(UI_DIRTY_LYRICS);
     }
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS);
+    core_notify_state_changed();
 
     log_debug("audio", "Playback thread exiting for index=%d (eos=%d, err=%d)", index, reached_end_of_stream, playback_error);
     return NULL;

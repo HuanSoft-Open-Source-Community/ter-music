@@ -2,7 +2,7 @@
 #define UI_H
 
 #include "types.h"
-#include "ui/utf8.h"
+#include "util/utf8.h"
 #include <ncursesw/ncurses.h>
 
 /* ── Extern globals ── */
@@ -61,9 +61,7 @@ void request_ui_refresh(int dirty_mask);
 void process_pending_ui_refresh(void);
 /* reap_finished_playback_thread() / process_pending_playback_action() 属音频层，
  * 声明已移至 audio/audio.h */
-void reset_visualizer_state(void);
-void push_visualizer_samples(const int32_t *samples, int frame_count, int channels);
-void get_visualizer_snapshot(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms);
+/* 可视化采样属音频层，声明已移至 audio/visualizer.h */
 
 void apply_color_theme(void);
 int use_ascii_fallback_ui(void);
@@ -97,6 +95,6 @@ int  get_control_index_from_window_point(int window_y, int window_x);
 int  get_lyric_index_from_window_row(int window_y, int *lyric_index, double *timestamp);
 int  get_menu_hint_fkey_from_column(int screen_x);
 
-/* ── UTF-8 utility functions (declared in ui/utf8.h, defined in ui/utf8.c) ── */
+/* ── UTF-8 utility functions (declared in util/utf8.h, defined in util/utf8.c) ── */
 
 #endif

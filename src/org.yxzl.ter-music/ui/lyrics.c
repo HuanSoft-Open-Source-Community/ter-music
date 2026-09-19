@@ -1,6 +1,7 @@
 #include "ui/lyrics.h"
 #include "types.h"
 #include "audio/audio.h"
+#include "audio/visualizer.h"
 #include "ui/ui.h"
 #include "i18n/i18n.h"
 #include "ui/menu_internal.h"

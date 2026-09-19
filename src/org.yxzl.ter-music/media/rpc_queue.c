@@ -12,14 +12,12 @@
 #include "media/rpc.h"
 #include "media/session.h"
 
-#include "app/open.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "config/config.h"
+#include "core/core.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
-#include "ui/menus.h"
-#include "ui/ui.h"
+#include "queue/backend_queue.h"
 #include "util/json.h"
 
 #include <stdio.h>
@@ -46,8 +44,8 @@ void rpc_queue_emit_changed(void)
     }
 
     dbus_uint32_t revision = (dbus_uint32_t)g_queue_revision;
-    dbus_int32_t count = (dbus_int32_t)play_queue_count();
-    dbus_int32_t position = (dbus_int32_t)play_queue_position();
+    dbus_int32_t count = (dbus_int32_t)bq_count();
+    dbus_int32_t position = (dbus_int32_t)bq_position();
 
     dbus_message_append_args(signal,
                              DBUS_TYPE_UINT32, &revision,
@@ -62,97 +60,17 @@ unsigned long long rpc_queue_revision(void)
     return g_queue_revision;
 }
 
-/* 取队列位置 position 对应的曲目元数据（越界返回 0） */
-static int rpc_queue_row_json(char *out, size_t out_size, size_t pos,
-                              int position, int track_index)
-{
-    Track track;
-    memset(&track, 0, sizeof(track));
-    if (track_index >= 0) {
-        get_track_metadata(track_index, &track);
-    }
-
-    pos = json_append_char(out, out_size, pos, '{');
-    pos = json_append_key(out, out_size, pos, "position");
-    pos = json_append_int(out, out_size, pos, position);
-    pos = json_append_raw(out, out_size, pos, ",");
-    pos = json_append_key(out, out_size, pos, "track_index");
-    if (track_index >= 0) {
-        pos = json_append_int(out, out_size, pos, track_index);
-    } else {
-        pos = json_append_raw(out, out_size, pos, "null");
-    }
-    pos = json_append_raw(out, out_size, pos, ",");
-    pos = json_append_key(out, out_size, pos, "title");
-    pos = json_append_string_or_null(out, out_size, pos,
-                                     track.title[0] ? track.title : NULL);
-    pos = json_append_raw(out, out_size, pos, ",");
-    pos = json_append_key(out, out_size, pos, "artist");
-    pos = json_append_string_or_null(out, out_size, pos,
-                                     track.artist[0] ? track.artist : NULL);
-    pos = json_append_raw(out, out_size, pos, ",");
-    pos = json_append_key(out, out_size, pos, "album");
-    pos = json_append_string_or_null(out, out_size, pos,
-                                     track.album[0] ? track.album : NULL);
-    pos = json_append_raw(out, out_size, pos, ",");
-    pos = json_append_key(out, out_size, pos, "is_cue");
-    pos = json_append_bool(out, out_size, pos,
-                           track.cue_offset > 0 && track.cue_track_number > 0);
-    return (int)json_append_char(out, out_size, pos, '}');
-}
-
 static DBusMessage *rpc_queue_reply_page(DBusMessage *message, int offset, int count)
 {
-    int total = play_queue_count();
-    int current = play_queue_position();
-
-    if (offset >= total) {
-        count = 0;
-    } else if (offset + count > total) {
-        count = total - offset;
-    }
-
-    /* 单页 JSON 有界：行数 ≤ RPC_PAGE_MAX */
+    /* 单页 JSON 有界：行数 ≤ RPC_PAGE_MAX；渲染由后端队列模块完成
+     * （revision/count/current_position/rows 一次成型，避免两处口径漂移）。 */
     size_t capacity = RPC_PAYLOAD_MAX / 2;
     char *json = malloc(capacity);
     if (!json) {
         return rpc_error(message, DBUS_ERROR_NO_MEMORY, "Out of memory");
     }
 
-    size_t pos = 0;
-    pos = json_append_char(json, capacity, pos, '{');
-    pos = json_append_key(json, capacity, pos, "revision");
-    pos = json_append_int(json, capacity, pos, (long long)g_queue_revision);
-    pos = json_append_raw(json, capacity, pos, ",");
-    pos = json_append_key(json, capacity, pos, "count");
-    pos = json_append_int(json, capacity, pos, total);
-    pos = json_append_raw(json, capacity, pos, ",");
-    pos = json_append_key(json, capacity, pos, "current_position");
-    if (current >= 0) {
-        pos = json_append_int(json, capacity, pos, current);
-    } else {
-        pos = json_append_raw(json, capacity, pos, "null");
-    }
-    pos = json_append_raw(json, capacity, pos, ",");
-    pos = json_append_key(json, capacity, pos, "offset");
-    pos = json_append_int(json, capacity, pos, offset);
-    pos = json_append_raw(json, capacity, pos, ",");
-    pos = json_append_key(json, capacity, pos, "rows");
-    pos = json_append_char(json, capacity, pos, '[');
-
-    for (int i = 0; i < count; i++) {
-        int position = offset + i;
-        int track_index = play_queue_index_at(position);
-        if (i > 0) {
-            pos = json_append_char(json, capacity, pos, ',');
-        }
-        rpc_queue_row_json(json, capacity, pos, position, track_index);
-        pos = strlen(json);
-    }
-
-    pos = json_append_char(json, capacity, pos, ']');
-    pos = json_append_char(json, capacity, pos, '}');
-    json[pos] = '\0';
+    bq_render_get(json, capacity, offset, count);
 
     DBusMessage *reply = rpc_reply_string(message, json);
     free(json);
@@ -162,7 +80,7 @@ static DBusMessage *rpc_queue_reply_page(DBusMessage *message, int offset, int c
 /* 队列编辑的公共收尾：重建队列派生状态并发信号 */
 static void rpc_queue_after_edit(void)
 {
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS);
+    core_notify_state_changed();
     rpc_queue_emit_changed();
 }
 
@@ -188,37 +106,65 @@ DBusMessage *rpc_queue_handle(DBusMessage *message)
         }
         dbus_error_free(&error);
 
-        int clamped_offset = 0;
-        int clamped_count = 0;
-        if (rpc_page_clamp(offset, count, &clamped_offset, &clamped_count) != 0) {
+        /* 分页契约：count 超过 RPC_PAGE_MAX 一律拒绝（不静默截断），
+         * 越界 offset 返回空行集——与 Playlist/Library 分页同一口径。 */
+        if (count < 0 || count > RPC_PAGE_MAX) {
             return rpc_error(message, RPC_ERROR_INVALID_ARGS, "count exceeds the page limit");
         }
-        return rpc_queue_reply_page(message, clamped_offset, clamped_count);
+        int clamped_offset = offset < 0 ? 0 : offset;
+        return rpc_queue_reply_page(message, clamped_offset, count);
     }
 
-    if (strcmp(member, "Append") == 0 || strcmp(member, "InsertAfter") == 0) {
-        dbus_int32_t track_index = -1;
+    if (strcmp(member, "Set") == 0 || strcmp(member, "Append") == 0 ||
+        strcmp(member, "InsertAfter") == 0) {
+        const char *payload = NULL;
         DBusError error;
         dbus_error_init(&error);
-        if (!dbus_message_get_args(message, &error, DBUS_TYPE_INT32, &track_index,
-                                   DBUS_TYPE_INVALID)) {
+        dbus_int32_t position = -1;
+
+        /* Set/Append：单个 JSON 载荷；InsertAfter：位置 + JSON。
+         * Append 也接受 (i position, s json) 形式以外的单参调用。 */
+        if (strcmp(member, "InsertAfter") == 0) {
+            if (!dbus_message_get_args(message, &error,
+                                       DBUS_TYPE_INT32, &position,
+                                       DBUS_TYPE_STRING, &payload,
+                                       DBUS_TYPE_INVALID)) {
+                dbus_error_free(&error);
+                dbus_error_init(&error);
+                if (!dbus_message_get_args(message, &error,
+                                           DBUS_TYPE_STRING, &payload,
+                                           DBUS_TYPE_INVALID)) {
+                    DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+                    dbus_error_free(&error);
+                    return reply;
+                }
+                position = play_queue_position();
+            }
+        } else if (!dbus_message_get_args(message, &error,
+                                          DBUS_TYPE_STRING, &payload,
+                                          DBUS_TYPE_INVALID)) {
             DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
             dbus_error_free(&error);
             return reply;
         }
         dbus_error_free(&error);
 
-        if (track_index < 0 || track_index >= playlist_count()) {
-            return rpc_error(message, RPC_ERROR_OUT_OF_RANGE, "track_index is out of range");
+        int written;
+        if (strcmp(member, "Set") == 0) {
+            written = bq_set_json(payload);
+        } else if (strcmp(member, "Append") == 0) {
+            written = bq_append_json(payload);
+        } else {
+            written = bq_insert_after_json(position, payload);
         }
 
-        int ok = (strcmp(member, "Append") == 0)
-            ? play_queue_append(&g_play_queue, track_index)
-            : play_queue_insert_after(&g_play_queue, track_index);
-        if (ok == 0) {
-            rpc_queue_after_edit();
+        if (written < 0) {
+            return rpc_error(message, RPC_ERROR_INVALID_ARGS,
+                             "queue payload rejected (malformed JSON, over the per-call limit, or a non-local path)");
         }
-        return rpc_reply_bool(message, ok == 0);
+        rpc_queue_after_edit();
+        dbus_int32_t result = (dbus_int32_t)written;
+        return rpc_reply_int(message, result);
     }
 
     if (strcmp(member, "RemoveAt") == 0 || strcmp(member, "MoveUp") == 0 ||
@@ -234,7 +180,7 @@ DBusMessage *rpc_queue_handle(DBusMessage *message)
         }
         dbus_error_free(&error);
 
-        if (position < 0 || position >= play_queue_count()) {
+        if (position < 0 || position >= bq_count()) {
             return rpc_error(message, RPC_ERROR_OUT_OF_RANGE, "position is out of range");
         }
 
@@ -272,25 +218,17 @@ DBusMessage *rpc_queue_handle(DBusMessage *message)
         if (mode < 0 || mode >= PLAY_MODE_COUNT) {
             return rpc_error(message, RPC_ERROR_INVALID_ARGS, "mode is out of range");
         }
-        int anchor = (g_current_play_index >= 0) ? g_current_play_index : 0;
-        play_queue_rebuild(&g_play_queue, &g_playlist, (PlayMode)mode, anchor);
+        /* 锚点＝后端游标所在条目：后端不认识内容列表下标 */
+        BackendQueueEntry current;
+        const char *anchor = (bq_current(&current) == 0) ? current.path : NULL;
+        play_queue_rebuild(&g_play_queue, (PlayMode)mode, anchor);
         rpc_queue_after_edit();
         return rpc_reply_bool(message, 1);
     }
 
     if (strcmp(member, "Shuffle") == 0) {
-        if (play_queue_count() > 1) {
-            /* 当前曲目置首，其余洗牌（与重建时的洗牌语义一致） */
-            int current = play_queue_position();
-            if (current > 0) {
-                int tmp = g_play_queue.indices[0];
-                g_play_queue.indices[0] = g_play_queue.indices[current];
-                g_play_queue.indices[current] = tmp;
-                g_play_queue.current_position = 0;
-            }
-            play_queue_shuffle_range(&g_play_queue, 1, g_play_queue.count - 1);
-            g_play_queue.shuffle_generation++;
-        }
+        /* 当前条目置首、其余打乱（后端队列的洗牌语义） */
+        bq_shuffle_rest();
         rpc_queue_after_edit();
         return rpc_reply_bool(message, 1);
     }
@@ -307,14 +245,12 @@ DBusMessage *rpc_queue_handle(DBusMessage *message)
         }
         dbus_error_free(&error);
 
-        int track_index = play_queue_index_at(position);
-        if (track_index < 0) {
+        if (position < 0 || position >= bq_count()) {
             return rpc_error(message, RPC_ERROR_OUT_OF_RANGE, "position is out of range");
         }
 
-        play_queue_set_position(position);
-        play_audio(track_index);
-        app_set_selection_for_track(track_index);
+        bq_play_at(position);
+        play_audio(position);
         rpc_queue_after_edit();
         return rpc_reply_bool(message, 1);
     }
@@ -326,18 +262,18 @@ DBusMessage *rpc_queue_handle(DBusMessage *message)
 
 static const char *const k_queue_introspection =
     "  <interface name=\"org.yxzl.ter_music.Queue\">\n"
-    "    <method name=\"Get\">\n"
-    "      <arg name=\"offset\" type=\"i\" direction=\"in\"/>\n"
-    "      <arg name=\"count\" type=\"i\" direction=\"in\"/>\n"
-    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    <method name=\"Set\">\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"in\"/>\n"
+    "      <arg name=\"written\" type=\"i\" direction=\"out\"/>\n"
     "    </method>\n"
     "    <method name=\"Append\">\n"
-    "      <arg name=\"track_index\" type=\"i\" direction=\"in\"/>\n"
-    "      <arg type=\"b\" direction=\"out\"/>\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"in\"/>\n"
+    "      <arg name=\"written\" type=\"i\" direction=\"out\"/>\n"
     "    </method>\n"
     "    <method name=\"InsertAfter\">\n"
-    "      <arg name=\"track_index\" type=\"i\" direction=\"in\"/>\n"
-    "      <arg type=\"b\" direction=\"out\"/>\n"
+    "      <arg name=\"position\" type=\"i\" direction=\"in\"/>\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"in\"/>\n"
+    "      <arg name=\"written\" type=\"i\" direction=\"out\"/>\n"
     "    </method>\n"
     "    <method name=\"RemoveAt\">\n"
     "      <arg name=\"position\" type=\"i\" direction=\"in\"/>\n"

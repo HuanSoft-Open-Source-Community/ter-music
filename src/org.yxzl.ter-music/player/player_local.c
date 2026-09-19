@@ -20,6 +20,7 @@
 
 #include "app/open.h"
 #include "audio/audio.h"
+#include "audio/visualizer.h"
 #include "audio/equalizer.h"
 #include "audio/play_queue.h"
 #include "audio/progress/progress.h"
@@ -29,6 +30,8 @@
 #include "library/library.h"
 #include "logger/logger.h"
 #include "playlist/playlist.h"
+#include "playlist/playlist_queue.h"
+#include "queue/backend_queue.h"
 #include "remote/remote.h"
 #include "search/search.h"
 #include "ui/braille/braille_art.h"
@@ -378,26 +381,62 @@ void player_set_play_mode(PlayMode mode)
 
 /* ── 队列 ─────────────────────────────────────────────────────── */
 
+/* 内容列表下标解析器：后端队列条目只有路径，界面要的是内容下标 */
+static int resolve_content_index(const char *path, void *user)
+{
+    (void)user;
+    return playlist_find_track_index_by_path(path);
+}
+
+/* 后端队列变化后重建界面用的队列镜像（队列位置 → 内容下标） */
+static void play_local_queue_sync_mirror(void)
+{
+    play_queue_sync_mirror(resolve_content_index, NULL);
+}
+
+/* 队列位置 ↔ 内容列表物理下标：前端的内容列表与后端队列一一对应
+ * （装配顺序即物理下标顺序，见 playlist/playlist_queue.c）。 */
 int player_queue_count(void)      { return play_queue_count(); }
 int player_queue_position(void)   { return play_queue_position(); }
-int player_queue_index_at(int position) { return play_queue_index_at(position); }
 int player_queue_is_active(void)  { return play_queue_is_active(&g_play_queue); }
+
+int player_queue_index_at(int position)
+{
+    BackendQueueEntry entry;
+    if (bq_entry_at(position, &entry) != 0) {
+        return -1;
+    }
+    return playlist_find_track_index_by_path(entry.path);
+}
 
 int player_queue_play(int position)
 {
-    int track_index = play_queue_index_at(position);
-    if (track_index < 0) {
+    if (bq_play_at(position) != 0) {
         return -1;
     }
-    play_queue_set_position(position);
-    play_audio(track_index);
-    app_set_selection_for_track(track_index);
+    play_audio(position);
+    int track_index = player_queue_index_at(position);
+    if (track_index >= 0) {
+        app_set_selection_for_track(track_index);
+    }
     refresh_snapshot();
     return 0;
 }
 
-int player_queue_append(int track_index)        { int rc = play_queue_append(&g_play_queue, track_index); refresh_snapshot(); return rc; }
-int player_queue_insert_after(int track_index)  { int rc = play_queue_insert_after(&g_play_queue, track_index); refresh_snapshot(); return rc; }
+int player_queue_append(int track_index)
+{
+    int rc = playlist_queue_push_entry(track_index, 0);
+    refresh_snapshot();
+    return rc < 0 ? -1 : 0;
+}
+
+int player_queue_insert_after(int track_index)
+{
+    int rc = playlist_queue_push_entry(track_index, 1);
+    refresh_snapshot();
+    return rc < 0 ? -1 : 0;
+}
+
 int player_queue_remove_at(int position)        { int rc = play_queue_remove_at(&g_play_queue, position); refresh_snapshot(); return rc; }
 int player_queue_move_up(int position)          { int rc = play_queue_move_up(&g_play_queue, position); refresh_snapshot(); return rc; }
 int player_queue_move_down(int position)        { int rc = play_queue_move_down(&g_play_queue, position); refresh_snapshot(); return rc; }
@@ -411,27 +450,50 @@ int player_queue_clear(void)
 
 int player_queue_rebuild(void)
 {
-    int anchor = (g_current_play_index >= 0) ? g_current_play_index : 0;
-    play_queue_rebuild(&g_play_queue, &g_playlist, g_play_mode, anchor);
+    play_queue_rebuild(&g_play_queue, g_play_mode, NULL);
     refresh_snapshot();
     return 0;
 }
 
 int player_queue_shuffle(void)
 {
-    if (play_queue_count() > 1) {
-        int current = play_queue_position();
-        if (current > 0) {
-            int tmp = g_play_queue.indices[0];
-            g_play_queue.indices[0] = g_play_queue.indices[current];
-            g_play_queue.indices[current] = tmp;
-            play_queue_set_position(0);
-        }
-        play_queue_shuffle_range(&g_play_queue, 1, play_queue_count() - 1);
-        g_play_queue.shuffle_generation++;
-    }
+    bq_shuffle_rest();
+    play_local_queue_sync_mirror();
     refresh_snapshot();
     return 0;
+}
+
+int player_queue_push(void)
+{
+    int written = playlist_queue_sync();
+    play_local_queue_sync_mirror();
+    refresh_snapshot();
+    return written < 0 ? -1 : written;
+}
+
+int player_queue_find(const char *path)
+{
+    return bq_position_of_path(path);
+}
+
+int player_queue_page_count(void)
+{
+    return bq_count();
+}
+
+int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap)
+{
+    if (!out || out_cap <= 0) {
+        return 0;
+    }
+    int written = 0;
+    for (int i = 0; i < count && written < out_cap; i++) {
+        if (bq_entry_at(offset + i, &out[written]) != 0) {
+            break;
+        }
+        written++;
+    }
+    return written;
 }
 
 /* ── 播放列表 ─────────────────────────────────────────────────── */

@@ -396,8 +396,9 @@ static const char *const k_rpc_methods[] = {
     "Playlist.ToggleExpand",
     "Playlist.RevealIndex",
     "Playlist.Status",
-    /* Queue */
+    /* Queue（路径语义：内容由前端下发，后端只执行） */
     "Queue.Get",
+    "Queue.Set",
     "Queue.Append",
     "Queue.InsertAfter",
     "Queue.RemoveAt",
