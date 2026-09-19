@@ -62,6 +62,9 @@ static const char *const k_required_methods[] = {
     "Control.SetVolume", "Control.SetSpeed", "Control.SetPlayMode", "Control.Attach",
     "Control.Ping", "Control.Detach",
     "Queue.Get", "Queue.Set", "Queue.PlayAt",
+    /* 歌词面：面板的行数据全部来自 Lyrics.GetDocument，来源切换走 SetSource。
+     * 缺了它们不能“安静地显示空歌词栏”，必须在接入时就明确失败。 */
+    "Lyrics.GetDocument", "Lyrics.SetSource",
     NULL
 };
 
@@ -107,16 +110,15 @@ typedef struct {
     char cover_track_id[96];
     char cover_text[INFO_COVER_TEXT_MAX];
 
-    /* 歌词页缓存 */
+    /* 歌词文档缓存：本地后端直读进程内引擎内存，远端后端的等价物是这份
+     * 缓存（界面按任意下标取行，不能每行一次 D-Bus）。归属由
+     * lyrics_page_track_id 校验，失效点见 remote_store_track/lyrics。 */
     int lyrics_page_valid;
-    int lyrics_page_offset;
     int lyrics_page_count;
     int lyrics_total;
-    int lyrics_has;
-    int lyrics_has_timestamps;
-    int lyrics_source;
-    int lyrics_current_index;
-    LyricLine lyrics_lines[PLAYER_LYRIC_PAGE_MAX];
+    char lyrics_page_track_id[96];
+    uint64_t lyrics_retry_ms;       /* 上次拉取失败后的重试门槛（退避 1s） */
+    LyricLine lyrics_lines[MAX_LYRIC_LINES];
 
     /* 上次已知的核心配置：player_config_persist() 只把相对它的差异下发 */
     AppConfig synced_config;
@@ -512,6 +514,9 @@ static int remote_try_connect(void)
     g_remote.connected = 1;
     g_remote.backoff_index = 0;
     g_remote.next_ping_ms = (int)(remote_now_ms() + (uint64_t)g_remote.ping_interval_ms);
+    /* 接回来的可能是另一个核心进程（重启过）：歌词缓存不再可信 */
+    g_remote.lyrics_page_valid = 0;
+    g_remote.lyrics_retry_ms = 0;
     return 0;
 }
 
@@ -673,9 +678,12 @@ static void remote_store_lyrics(const char *json)
         json_value_string(&value, lyrics.next_text, sizeof(lyrics.next_text));
     }
     char source[32];
+    /* json_value_string 返回**写入字节数**：写成 `== 0` 会让映射永不执行，
+     * 于是界面的 Ctrl+L → Tab 根据 `player_lyrics_source()` 判断时永远看到
+     * AUTO(0)，只会请求内嵌歌词——来源切换在远端模式下静默失效。 */
     if (json_get_path(&reader, "lyrics.source", &value) == 0 &&
         value.type == JSON_VALUE_STRING &&
-        json_value_string(&value, source, sizeof(source)) == 0) {
+        json_value_string(&value, source, sizeof(source)) > 0) {
         for (int s = LYRICS_SOURCE_AUTO; s <= LYRICS_SOURCE_EXTERNAL; s++) {
             if (strcmp(source, info_lyrics_source_id(s)) == 0) {
                 lyrics.source = s;
@@ -689,6 +697,16 @@ static void remote_store_lyrics(const char *json)
         lyrics.source != g_remote.lyrics.source ||
         strcmp(lyrics.current_text, g_remote.lyrics.current_text) != 0) {
         g_remote.lyrics_revision++;
+    }
+
+    /* 歌词**身份**变化（有没有 / 来源 / 有无时间戳）意味着行数据也换了，
+     * 缓存必须失效重取。这是修复竞态的关键：play_audio() 里的 load_lyrics()
+     * 在播放命令返回之后才执行，前端可能先轮询到 has_lyrics=false；靠这次
+     * 0→1 跳变，面板才能在第一帧取到行数据。 */
+    if (lyrics.has_lyrics != g_remote.lyrics.has_lyrics ||
+        lyrics.source != g_remote.lyrics.source ||
+        lyrics.has_timestamps != g_remote.lyrics.has_timestamps) {
+        g_remote.lyrics_page_valid = 0;
     }
     g_remote.lyrics = lyrics;
 }
@@ -1330,41 +1348,189 @@ int player_remote_queue_page(int offset, int count, BackendQueueEntry *out, int 
 
 /* ── 歌词 / 封面 / 可视化 ───────────────────────────────────────── */
 
-int player_remote_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
+/* 拉取一页歌词文档到 out（绝对下标 offset 起），并带回整篇元信息。
+ * @return 本页行数；-1 = 调用或解析失败 */
+static int remote_lyrics_fetch_page(int offset, LyricLine *out, int out_cap,
+                                    int *out_total, int *out_has_lyrics,
+                                    char *out_track_id, size_t out_track_id_size)
 {
-    if (!out || count <= 0 || count > PLAYER_LYRIC_PAGE_MAX) {
-        return -1;
-    }
-    memset(out, 0, sizeof(*out));
-
-    JsonValue args[2];
-    (void)args;
-
-    /* Lyrics.GetDocument(offset, count) -> JSON */
+    /* 单页 200 行 × 每行 ~300 B ≈ 60 KB，与 Queue.Get 的分页同一量级；
+     * 与 player_remote_queue_find 一样用接收缓冲，不在栈上开 256 KB。 */
+    char json[RPC_PAYLOAD_MAX / 2];
     DBusMessage *reply = remote_call_ii(REMOTE_IFACE_LYRICS, "GetDocument", 3000,
-                                        offset, count);
+                                        offset, PLAYER_LYRIC_PAGE_MAX);
     if (!reply) {
         return -1;
     }
-
-    /* 复用歌词快照 + 本地缓存的行（远端分页在 Lyrics.GetDocument 里给全文） */
+    int rc = remote_reply_string(reply, json, sizeof(json));
     dbus_message_unref(reply);
+    if (rc != 0) {
+        return -1;
+    }
 
-    out->total = g_remote.lyrics_total;
+    JsonReader reader;
+    JsonValue value;
+    json_reader_init(&reader, json, strlen(json));
+
+    if (out_total && json_get_path(&reader, "total", &value) == 0) {
+        *out_total = (int)json_value_int(&value, 0);
+    }
+    if (out_has_lyrics) {
+        *out_has_lyrics = 0;
+        if (json_get_path(&reader, "has_lyrics", &value) == 0) {
+            *out_has_lyrics = json_value_bool(&value, 0) ? 1 : 0;
+        }
+    }
+    if (out_track_id && out_track_id_size > 0) {
+        out_track_id[0] = '\0';
+        if (json_get_path(&reader, "track_id", &value) == 0 &&
+            value.type == JSON_VALUE_STRING) {
+            json_value_string(&value, out_track_id, out_track_id_size);
+        }
+    }
+
+    JsonReader lines_reader;
+    JsonValue lines;
+    json_reader_init(&lines_reader, json, strlen(json));
+    if (json_get_path(&lines_reader, "lines", &lines) != 0 ||
+        json_reader_enter(&lines_reader, &lines) != 0) {
+        return 0;
+    }
+
+    int in_page = 0;
+    JsonValue row;
+    while (json_array_next(&lines_reader, &row) == 1) {
+        if (offset + in_page >= out_cap) {
+            /* 核心的行数上限（MAX_LYRIC_LINES）以内不该发生；超出即丢弃本页余量 */
+            break;
+        }
+        JsonReader row_reader = lines_reader;
+        JsonValue field;
+        if (json_reader_enter(&row_reader, &row) != 0) {
+            continue;
+        }
+
+        LyricLine line;
+        memset(&line, 0, sizeof(line));
+        if (json_get_path(&row_reader, "timestamp", &field) == 0) {
+            /* 纯文本歌词的 timestamp 是 null：json_value_double 回落 0.0 */
+            line.timestamp = json_value_double(&field, 0.0);
+        }
+        if (json_get_path(&row_reader, "text", &field) == 0 &&
+            field.type == JSON_VALUE_STRING) {
+            json_value_string(&field, line.text, sizeof(line.text));
+        }
+        out[offset + in_page] = line;
+        in_page++;
+    }
+    return in_page;
+}
+
+/* 确保整篇歌词文档已在本地缓存里（每页 ≤PLAYER_LYRIC_PAGE_MAX 行，分页拉完）。
+ * 界面要“按任意下标取行”，本地后端是内存直读，远端后端等价物就是这份缓存。
+ * @return 0 = 可用；-1 = 无法提供（未连接 / 核心没有歌词 / 拉取失败） */
+static int remote_lyrics_ensure_loaded(void)
+{
+    if (!g_remote.connected) {
+        return -1;
+    }
+    /* 核心说没有歌词：不必发调用，也**不缓存“没有”**——load_lyrics() 发生在
+     * 播放命令返回之后，缓存住空结果就会永远停在空歌词栏。 */
+    if (!g_remote.lyrics.has_lyrics) {
+        return -1;
+    }
+    if (g_remote.lyrics_page_valid &&
+        strcmp(g_remote.lyrics_page_track_id, g_remote.track.track_id) == 0) {
+        return 0;
+    }
+
+    uint64_t now = remote_now_ms();
+    if (now < g_remote.lyrics_retry_ms) {
+        return -1;      /* 失败退避：核心挂死时不让渲染路径每帧阻塞 */
+    }
+
+    /* 页数护栏：核心的 count 不会超过 MAX_LYRIC_LINES，多给一轮余量防呆 */
+    const int max_pages = (MAX_LYRIC_LINES / PLAYER_LYRIC_PAGE_MAX) + 2;
+    int offset = 0;
+    int loaded = 0;
+    int total = 0;
+    int has = 0;
+    char track_id[96] = "";
+    char first_track_id[96] = "";
+
+    for (int page = 0; page < max_pages; page++) {
+        int in_page = remote_lyrics_fetch_page(offset, g_remote.lyrics_lines,
+                                               MAX_LYRIC_LINES, &total, &has,
+                                               track_id, sizeof(track_id));
+        if (in_page < 0) {
+            log_debug("player_remote", "Lyrics.GetDocument failed at offset %d", offset);
+            g_remote.lyrics_retry_ms = now + 1000;
+            return -1;
+        }
+        if (offset == 0 && !has) {
+            /* 轮询与取文档之间核心换了曲：这次结果不可信，不缓存 */
+            g_remote.lyrics_retry_ms = now + 1000;
+            return -1;
+        }
+        /* 多页之间换曲会把两首歌的行拼在一起：宁可这次不给，也不缓存错行 */
+        if (page == 0) {
+            snprintf(first_track_id, sizeof(first_track_id), "%s", track_id);
+        } else if (strcmp(first_track_id, track_id) != 0) {
+            log_debug("player_remote", "Track changed while paging lyrics; discarding");
+            g_remote.lyrics_retry_ms = now + 1000;
+            return -1;
+        }
+
+        loaded += in_page;
+        offset += in_page;
+        if (in_page == 0 || loaded >= total || loaded >= MAX_LYRIC_LINES) {
+            break;
+        }
+    }
+
+    if (loaded <= 0) {
+        g_remote.lyrics_retry_ms = now + 1000;
+        return -1;
+    }
+
+    g_remote.lyrics_total = total;
+    g_remote.lyrics_page_count = loaded;
+    snprintf(g_remote.lyrics_page_track_id, sizeof(g_remote.lyrics_page_track_id), "%s",
+             track_id[0] ? track_id : g_remote.track.track_id);
+    g_remote.lyrics_page_valid = 1;
+    g_remote.lyrics_retry_ms = 0;
+
+    log_info("player_remote", "Pulled %d lyric lines from the core (source=%s, track=%s)",
+             loaded, info_lyrics_source_id(g_remote.lyrics.source),
+             g_remote.lyrics_page_track_id);
+    return 0;
+}
+
+int player_remote_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
+{
+    if (!out || offset < 0 || count <= 0) {
+        return -1;
+    }
+    if (count > PLAYER_LYRIC_PAGE_MAX) {
+        count = PLAYER_LYRIC_PAGE_MAX;      /* 与本地后端一致：夹取而非报错 */
+    }
+    memset(out, 0, sizeof(*out));
+
     out->offset = offset;
     out->has_lyrics = g_remote.lyrics.has_lyrics;
     out->has_timestamps = g_remote.lyrics.has_timestamps;
     out->source = g_remote.lyrics.source;
-    snprintf(out->track_id, sizeof(out->track_id), "%s", g_remote.track.track_id);
-    out->current_index = g_remote.lyrics.current_index;
+    out->current_index = g_remote.lyrics.has_lyrics ? g_remote.lyrics.current_index : -1;
     out->revision = g_remote.lyrics_revision;
+    snprintf(out->track_id, sizeof(out->track_id), "%s", g_remote.track.track_id);
 
-    if (!g_remote.lyrics_page_valid) {
+    if (remote_lyrics_ensure_loaded() != 0) {
         return 0;
     }
 
+    out->total = g_remote.lyrics_total;
     int written = 0;
-    for (int i = 0; i < count && written < PLAYER_LYRIC_PAGE_MAX; i++) {
+    for (int i = 0; i < count; i++) {
         int index = offset + i;
         if (index >= g_remote.lyrics_page_count) {
             break;
@@ -1385,6 +1551,7 @@ int player_remote_lyrics_reload_source(int source)
         dbus_message_unref(reply);
     }
     g_remote.lyrics_page_valid = 0;
+    g_remote.lyrics_retry_ms = 0;
     remote_refresh_snapshot();
     return rc == 0 && ok ? 0 : -1;
 }
@@ -1400,18 +1567,43 @@ int player_remote_lyrics_highlight(int *out_current, int *out_next, int *out_has
 
 int player_remote_lyrics_highlight_count(void)
 {
-    /* 同时间戳一起高亮的行数：远端快照未单独给出，按“下一行文本是否存在且
-     * 时间戳相同”无从判断，故返回 1（渲染退化为单行高亮，不影响正确性）。 */
+    /* 与核心 lyrics_tick() 同一口径：同一时间戳的多行一起高亮（最多两行），
+     * 纯文本歌词固定停在第 0 行（返回 0，界面会夹取为 1）。 */
+    if (remote_lyrics_ensure_loaded() != 0) {
+        return 1;
+    }
+    int index = g_remote.lyrics.current_index;
+    if (index < 0 || index >= g_remote.lyrics_page_count) {
+        return 1;
+    }
+    if (!g_remote.lyrics.has_timestamps) {
+        return 0;
+    }
+    if (index + 1 < g_remote.lyrics_page_count &&
+        g_remote.lyrics_lines[index + 1].timestamp ==
+        g_remote.lyrics_lines[index].timestamp) {
+        return 2;
+    }
     return 1;
 }
 
 int player_remote_lyrics_source(void) { return g_remote.lyrics.source; }
-int player_remote_lyrics_total(void)  { return g_remote.lyrics_total; }
+
+int player_remote_lyrics_total(void)
+{
+    /* 返回**可服务的**行数：界面按 i < total 逐行取行，保证每个 line_at(i) 都成功 */
+    if (remote_lyrics_ensure_loaded() != 0) {
+        return 0;
+    }
+    return g_remote.lyrics_page_count;
+}
 
 int player_remote_lyrics_line_at(int index, LyricLine *out)
 {
-    if (!out || index < 0 || !g_remote.lyrics_page_valid ||
-        index >= g_remote.lyrics_page_count) {
+    if (!out || index < 0) {
+        return -1;
+    }
+    if (remote_lyrics_ensure_loaded() != 0 || index >= g_remote.lyrics_page_count) {
         return -1;
     }
     *out = g_remote.lyrics_lines[index];
