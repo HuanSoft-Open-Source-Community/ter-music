@@ -191,6 +191,119 @@ else
     ok "最后一个前端离开并过宽限期后，核心自行退出"
 fi
 
+# ── A7：核心随总线消失而退出 ──────────────────────────────────────
+# 总线没了 = 再也没有前端能联系到这个核心；若它继续播放，就变成一个谁也
+# 停不掉、`daemon stop` 也看不见的孤儿播放进程（本轮实测踩到过）。这条
+# 断言需要一条**会死掉**的总线，所以在一层嵌套的私有会话里起核心。
+info "A7 核心所属的会话总线消失后必须自行退出"
+
+core_alive() {   # $1 = pid：既要存在，也要确实是 ter-music 核心（防 pid 复用误判）
+    kill -0 "$1" 2>/dev/null || return 1
+    ps -p "$1" -o cmd= 2>/dev/null | grep -q "ter-music"
+}
+
+nested_home="$WORK_DIR/nested-home"
+mkdir -p "$nested_home/.config"
+rm -f "$WORK_DIR/nested.pid"
+timeout 30 dbus-run-session -- bash -c '
+    export HOME="$1" XDG_CONFIG_HOME="$1/.config"
+    out="$("$2" daemon start 2>&1)"
+    printf "%s\n" "$out" | sed -n "s/.*pid \([0-9]\{1,\}\).*/\1/p" | head -1 > "$3"
+    sleep 2
+' _ "$nested_home" "$TM_BIN" "$WORK_DIR/nested.pid" >/dev/null 2>&1 || true
+
+nested_pid="$(cat "$WORK_DIR/nested.pid" 2>/dev/null)"
+if [ -z "$nested_pid" ]; then
+    bad "未能记录嵌套会话里的核心 pid（bus-loss 场景无法判定）"
+else
+    nested_exited=0
+    for _ in $(seq 1 40); do          # 最多等 10 秒
+        core_alive "$nested_pid" || { nested_exited=1; break; }
+        sleep 0.25
+    done
+    if [ "$nested_exited" -eq 1 ]; then
+        ok "总线消失后核心自行退出（pid $nested_pid）"
+    else
+        bad "总线消失后核心仍在运行（pid $nested_pid），会成为无人可控的孤儿"
+        kill -9 "$nested_pid" 2>/dev/null
+    fi
+fi
+
+# ── A4″：次要实例可见、可一次收尾 ────────────────────────────────
+# `daemon start --force` 起的第二个核心是**有文档的功能**，但它不接收普通
+# CLI 命令：必须能从 `daemon status` 看见、能一次收干净，否则就成了“后台
+# 莫名其妙有两个 ter-music 在跑”。
+info "A4″ --force 起的次要实例可见、可一次收尾"
+
+"$TM_BIN" daemon start >/dev/null 2>&1
+sleep 1.5
+"$TM_BIN" daemon start --force >"$WORK_DIR/force.out" 2>"$WORK_DIR/force.err" || true
+
+if grep -q "instance" "$WORK_DIR/force.err" 2>/dev/null; then
+    ok "--force 启动时报出次要实例的总线名（可据此 --bus 控制）"
+else
+    bad "--force 启动时未报出次要实例的总线名：$(tail -2 "$WORK_DIR/force.err" | tr '\n' ' ')"
+fi
+
+if "$TM_BIN" daemon status 2>&1 >/dev/null | grep -q "次要实例"; then
+    ok "daemon status 会提示次要实例（含 pid 与总线名）"
+else
+    bad "daemon status 没有提示次要实例"
+fi
+
+status_pids="$("$TM_BIN" daemon status 2>/dev/null | grep -c "pid")"
+if [ "$status_pids" = "1" ]; then
+    ok "daemon status 的 stdout 未被次要实例污染（仍是 1 行 pid，脚本解析不受影响）"
+else
+    bad "daemon status 的 stdout 出现 $status_pids 行 pid（应为 1）"
+fi
+
+# 提示里给出的控制方式必须真的可用：`--bus` 写在**子命令之后**
+secondary_bus="$(sed -n 's/^次要实例总线名：\(org[^ ]*\)$/\1/p' "$WORK_DIR/force.err" 2>/dev/null | head -1)"
+if [ -z "$secondary_bus" ]; then
+    secondary_bus="$("$TM_BIN" daemon status 2>&1 >/dev/null |
+        sed -n 's/.*pid [0-9]\{1,\}  [^ ]*  \(org[^ ]*\)$/\1/p' | head -1)"
+fi
+if [ -z "$secondary_bus" ]; then
+    bad "未能取到次要实例的总线名（无法验证 --bus 控制路径）"
+else
+    if "$TM_BIN" daemon stop --bus "$secondary_bus" >/dev/null 2>&1; then
+        ok "ter-music daemon stop --bus <次要实例> 能单独停掉它"
+    else
+        bad "ter-music daemon stop --bus $secondary_bus 失败"
+    fi
+    if "$TM_BIN" daemon status >/dev/null 2>&1; then
+        ok "--bus 只停次要实例，主实例不受影响"
+    else
+        bad "次要实例被 --bus 停掉时主实例也一起没了"
+    fi
+    "$TM_BIN" daemon start --force >/dev/null 2>&1 || true   # 后面还要一个次要实例
+    sleep 1.5
+fi
+
+"$TM_BIN" daemon stop >/dev/null 2>&1
+sleep 2
+status_err="$("$TM_BIN" daemon status 2>&1 >/dev/null || true)"
+if printf '%s' "$status_err" | grep -q "主实例未在运行，但仍有"; then
+    ok "主实例退出后，次要实例仍被明确指出（这正是最容易变成孤儿的形态）"
+else
+    bad "主实例退出后没有提示残留的次要实例：$(printf '%s' "$status_err" | head -1)"
+fi
+
+if "$TM_BIN" daemon stop --all >/dev/null 2>&1; then
+    ok "daemon stop --all 收掉主实例与次要实例"
+else
+    bad "daemon stop --all 失败（rc=$?）"
+fi
+
+"$TM_BIN" daemon status >/dev/null 2>&1
+no_instance_rc=$?
+if [ "$no_instance_rc" -eq 3 ]; then
+    ok "--all 之后确实没有实例在运行（退出码 3）"
+else
+    bad "--all 之后仍有实例在运行（退出码 $no_instance_rc）"
+fi
+
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
