@@ -1214,7 +1214,9 @@ int player_remote_queue_find(const char *path)
         return -1;
     }
 
-    /* 逐页扫描后端队列（页上限 RPC_PAGE_MAX） */
+    /* 逐页扫描后端队列（页上限 RPC_PAGE_MAX）。
+     * 缓冲约 120 KB：一页 500 行 × 约 240 B 的载荷放得下，同时避免在栈上
+     * 开 256 KB（沙箱栈 8 MB，每次栈审计都要求静态帧远小于该值）。 */
     char json[RPC_PAYLOAD_MAX / 2];
     int offset = 0;
     while (offset < g_remote.queue_count) {
@@ -1275,6 +1277,7 @@ int player_remote_queue_page(int offset, int count, BackendQueueEntry *out, int 
         return 0;
     }
 
+    /* 单页 JSON 的接收缓冲：与 Queue.Get 的分页上限同量级（见上面的说明） */
     char json[RPC_PAYLOAD_MAX / 2];
     DBusMessage *reply = remote_call_ii(REMOTE_IFACE_QUEUE, "Get", 3000, offset, count);
     if (!reply) {
