@@ -45,6 +45,12 @@ typedef struct {
 
 static MediaSessionState g_media_session = {0};
 
+/* 1 = 曾经持有总线名，随后 D-Bus 连接断开（总线消失）。
+ * 只在 media_session_tick() 的断连分支置位、永不清零：核心据此判定
+ * “再也没有任何前端能联系到我”，由主循环决定退出。从未拿到总线的进程
+ * （无会话总线的 systemd/纯音频场景）不会被置位。 */
+static int g_session_lost = 0;
+
 /* ── 会话访问器（供 rpc_common.c 与各 rpc_*.c 查询总线状态） ─────── */
 
 DBusConnection *rpc_session_connection(void)
@@ -1012,6 +1018,10 @@ int media_session_has_primary_name(void) {
     return g_media_session.active && g_media_session.has_primary_name;
 }
 
+int media_session_lost(void) {
+    return g_session_lost;
+}
+
 const char *media_session_bus_name(void) {
     return g_media_session.active ? g_media_session.bus_name : "";
 }
@@ -1072,6 +1082,9 @@ void media_session_tick(void) {
     }
     if (!dbus_connection_get_is_connected(g_media_session.connection)) {
         log_warn("media_session", "D-Bus connection lost, shutting down");
+        /* 闩锁先置位：media_session_shutdown() 会把整个 session 结构清零，
+         * 而“曾经持有总线名、随后连接断开”这件事必须活到进程决定退出为止。 */
+        g_session_lost = 1;
         media_session_shutdown();
         return;
     }
@@ -1163,6 +1176,10 @@ void media_session_notify_seek(uint64_t position_ms) {
 }
 
 int media_session_has_primary_name(void) {
+    return 0;
+}
+
+int media_session_lost(void) {
     return 0;
 }
 

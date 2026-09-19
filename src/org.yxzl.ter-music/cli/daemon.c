@@ -208,6 +208,14 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     while (!g_should_exit) {
         /* 与 TUI 共用同一套核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */
         core_tick();
+        /* 会话总线没了 = 再也没有前端能联系到这个核心：继续播放只会变成一个
+         * 谁也停不掉、谁也控制不了的孤儿播放进程（占着音频设备）。退出是唯一
+         * 可控的选择；前端重连时会自行拉起新核心并补推队列。
+         * 从未拿到总线的进程（无会话总线的托管场景）不会被置位，行为不变。 */
+        if (media_session_lost()) {
+            log_warn("daemon", "Session bus is gone; no front end can reach this core, exiting");
+            g_should_exit = 1;
+        }
         if (frontend_watchdog_should_exit(media_session_has_primary_name(),
                                           rpc_frontend_count())) {
             g_should_exit = 1;
