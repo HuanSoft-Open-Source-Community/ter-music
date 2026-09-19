@@ -9,15 +9,43 @@
 1. 更新 `include/org.yxzl.ter-music/types.h` 中的 `APP_VERSION`（例如 `"v2.1.1"`）。
 2. Git tag 名必须与 APP_VERSION 一致（`vX.Y.Z` 格式），发布时按此打 tag。
 3. 确认 CI 全绿：`gh run list --workflow ci.yml`。
-4. 行为变更登记（远程音乐源移交前端的那一版）：
-   - 配置 schema v5 → v6：旧的 `<remote_connections>` 段由核心在首次启动时
-     一次性搬到前端自有的 `<configdir>/remote.xml`（密码密文原样保留，
-     文件权限 0600），核心配置此后不再含该段；
-   - 核心不再发布 `org.yxzl.ter_music.Remote`，`core.api_version` 升为 3；
-   - `Playlist.Load/Append`、`Control.OpenPath`、MPRIS `OpenUri` 只接受本地
-     路径；CLI/daemon 收到远程 URL 会明确报错（远程源由 TUI 前端负责）；
-   - 远程曲目由前端下载到 `$XDG_CACHE_HOME/ter-music/remote/` 后交给核心播放。
-   回归脚本：`scripts/test/config-migration-check.sh`、`scripts/test/check-core-purity.sh`。
+4. 行为变更登记（架构反转：后端只做播放、前端持有内容的那一版）：
+   - **职责边界**：核心（`daemon`）只做播放服务——音频设备、播放状态与进度、
+     传输命令、音量/倍速/播放模式、执行前端下发的**本地路径队列**、当前曲目
+     信息（歌词/封面/可视化）、配置、前端注册与心跳；前端（TUI/CLI）持有
+     文件系统与内容——曲库（SQLite）、扫描与元数据、播放列表、歌单、收藏/
+     历史/目录历史、排序/过滤/搜索、远程源与下载缓存、界面；
+   - **D-Bus `api_version` 3 → 4**：撤下内容接口 `Playlist`、`Library`、
+     `Favorites`、`History`、`DirHistory`，`Control.OpenPath`/`PlayIndex`/
+     `GetPlaylist` 一并撤下；`Queue` 改为**路径队列**语义
+     （`Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get`，
+     仅本地路径、单次 ≤500 条、分页读 ≤1000 条），新增 `QueueChanged` 广播；
+     播放面接口为 `Lyrics`/`Info`/`Control`/`Queue`/`Config`（46 个方法）；
+   - **前端默认走远程门面**：`ter-music` / `ter-music tui` 默认
+     `--frontend=remote`（无核心则自动拉起并把内容队列推给核心），
+     新增 `--attach-only`（无核心直接退出码 3）与 `--bus NAME`；
+     `--frontend=local` 保留为本机进程内播放的回归基线（后续版本删除）；
+   - **`daemon --open` 语义变更**：核心不再扫描目录。`daemon start --open <目录>`
+     现在是「先起核心 → 由该 CLI 进程（前端）扫描 → `Queue.Set` → `Queue.PlayAt`」；
+     `daemon foreground --open` 给出明确提示；`ter-music play <目录>` 同路径；
+   - **退出语义**：`q` 只退前端，核心继续播放；新增配置
+     `core_exit_when_no_frontend`（默认 0，配置版本 6 → 7），置 1 时最后一个
+     前端离开并过 10 秒宽限期后核心自行退出；
+   - **配置文件归属**：`config.xml` 由核心独占写（前端经 `Config.Set` 提交，
+     不直接写文件）；前端自有数据为曲库 `library.db`、`remote.xml` 与
+     远程下载缓存 `$XDG_CACHE_HOME/ter-music/remote/`；队列不再落
+     `queue.txt`（内容由前端的内容列表恢复，游标由 `resume_last_playback` 恢复）；
+   - **只播本地文件**：MPRIS `OpenUri`、`Queue.Set` 与 CLI/daemon 的路径参数
+     都只接受本地路径，收到远程 URL 会明确报错（远程源由前端下载成缓存文件
+     后交给核心播放）。
+   回归脚本：`scripts/test/check-core-purity.sh`、`check-ui-purity.sh`、
+   `run-unit-tests.sh`、`dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、
+   `offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、
+   `remote-frontend-e2e.sh`（CI 的 `gates` 与 `e2e` 作业已接入前六项与全部 e2e）。
+   - 历史登记（远程音乐源移交前端的那一版）：配置 schema v5 → v6 把旧的
+     `<remote_connections>` 段搬到前端自有的 `<configdir>/remote.xml`
+     （密码密文原样保留，文件权限 0600），核心配置此后不再含该段；核心不再
+     发布 `org.yxzl.ter_music.Remote`，`core.api_version` 升为 3。
 
 > **原则：验收通过后才打 tag，绝不提前打 tag。**
 > 构建产物、测试、验收全部在 tag 之前完成（构建脚本用 `git archive HEAD`

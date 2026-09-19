@@ -203,6 +203,7 @@ Field notes:
 | ------ | --------- | ----------- |
 | `GetLyrics` | `() -> s` | The A/B line snapshot: `{"active_line":"A"\|"B"\|null,"line_a":{…},"line_b":{…},"track_id":"…"\|null,"has_lyrics":b,"has_timestamps":b,"revision":n}`. See [API_LYRICS_en_US.md](API_LYRICS_en_US.md) |
 | `GetDocument` | `(i offset, i count) -> s` | A page of the whole lyric document: `{"revision":n,"track_id":"…","has_lyrics":b,"has_timestamps":b,"source":"embedded\|external\|none","total":n,"offset":n,"current_index":n\|null,"lines":[{"index":n,"timestamp":t\|null,"text":"…"}]}` — used by scrolling and karaoke views |
+| `SetSource` | `(i source) -> b` | Switch the lyric source of the current track and reload: `1` = embedded, `2` = external (same action as `Ctrl+L` → `Tab` in the TUI). `false` when there is no current track. The **preference belongs to the front end's content store**: the core only switches and reloads — a front end that changes it is expected to record it in its own library |
 
 Signal `LyricsChanged(s json)` carries the same payload as `GetLyrics` whenever
 the active lines or the lyric source change.

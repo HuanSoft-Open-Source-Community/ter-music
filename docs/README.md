@@ -36,7 +36,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🎶 **17 Playback Modes**: From basic (Sequential, Single Repeat, List Repeat, Shuffle) to advanced (Folder/Album/Artist-based variants)
 - ⚡ **Playback Speed Control**: Supports 0.75x, 1.0x, 1.25x, 1.5x, 2.0x, 3.0x speed adjustment for efficient listening
 - 📚 **Music Library**: SQLite-backed music library with FTS5 full-text search, **recursive directory scan**, browse by artist/album/genre, incremental tracking
-- 📋 **Play Queue**: Dedicated queue UI with sequence numbers, now-playing indicator, reordering and persistence
+- 📋 **Play Queue**: Dedicated queue UI with sequence numbers, now-playing indicator and reordering; the queue itself belongs to the front end (the core only executes the path list it is given), and it is rebuilt from your content on the next start
 - 🗂️ **Playlist Management**: Supports user-defined creation of multiple playlists
 - ❤️ **Favorites Feature**: Bookmark favorite songs for quick access
 - 🕒 **Playback History**: Automatically records playback history for easy review
@@ -59,6 +59,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 - **Modular Design**: Clear module separation, easy to maintain and extend
 - **Unix Philosophy**: Do one thing well, work well with other tools
 - **No Tracking**: Does not collect any user data, respects privacy
+- **Two Planes, One Job Each**: The **core** is a playback service (audio device, transport, volume/speed/mode, and a path queue handed to it by the front end); the **front end** owns the file system and the content (library, scanning, playlists, favorites, history, remote sources, UI). See [5.2.3 Front End and Core](#523-front-end-and-core)
 
 ### 1.3 Key Features
 
@@ -360,6 +361,10 @@ ter-music [OPTIONS]
 Options:
   -o, --open <path>    Open specified music directory directly on startup
   -d, --debug          Enable debug logging (outputs to ter-music-debug.log)
+  --frontend <mode>    Playback path: remote (default, talk to the core over D-Bus)
+                       or local (in-process playback, kept as a regression baseline)
+  --attach-only        Never start a core automatically: exit with code 3 when none runs
+  --bus <name>         Address a specific core/instance bus name (default: the primary one)
   -h, --help           Show help information
   -v, --version        Show version information
   tui [path]           Explicitly start the TUI
@@ -387,20 +392,22 @@ ter-music --help
 #### 5.2.1 CLI Mode
 
 Any of the following first arguments switches to CLI mode. CLI commands are
-thin D-Bus clients: they talk to the instance that currently owns
-`org.mpris.MediaPlayer2.ter_music` (either the TUI or the background daemon),
-so they work from any terminal, script or window manager shortcut.
+thin D-Bus clients: they talk to the playback core that currently owns
+`org.mpris.MediaPlayer2.ter_music` (started by `daemon start`, by D-Bus
+activation or by the TUI), so they work from any terminal, script or window
+manager shortcut. `play` additionally acts as a front end: it scans the path in
+its own process and delivers the resulting queue to the core.
 
 | Command | Description |
 | ------- | ----------- |
-| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | Play a path; starts a detached background daemon when no instance is running |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | Scan the path, deliver the queue to the core and play; starts the core when none is running |
 | `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | Basic transport control |
 | `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | Relative, absolute or percentage seek |
 | `volume [0-100\|+N\|-N]` | Query or set volume |
 | `speed [0.5-3.0]` | Query or set playback speed |
 | `mode [NAME\|0-16]` | Query or set the play mode (stable names such as `list_repeat`, `folder_shuffle_repeat`) |
 | `show [OPTIONS]` | Print the current info block (basic info / text cover / progress / two lyric lines) |
-| `daemon start\|foreground\|stop\|restart\|status\|reload` | Background playback process management |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | Playback core management |
 | `version` / `help` | Version / usage |
 
 `show` options (all of them override the stored TUI settings for that call):
@@ -456,9 +463,14 @@ Notes:
 
 - Without a command, `ter-music <path>` still opens the TUI. To open a
   directory literally named `play`/`show`/..., use `-o ./play` or `ter-music tui play`.
-- The TUI and the daemon cannot both be the primary instance; `daemon start`
-  refuses to start when another instance owns the bus name (use `--force` to
-  start as a secondary instance anyway).
+- `daemon start --open <path>` no longer makes the core scan anything: the core
+  is started first, then the CLI process (as a front end) scans the directory,
+  builds the queue and hands it over — the same path `ter-music play <path>`
+  takes. `daemon start` without `--open` starts an idle core whose queue is
+  delivered later by whichever front end attaches.
+- Only one instance owns the bus name; `daemon start` refuses to start a second
+  one while the core is running (use `--force` to start as a secondary instance
+  anyway). Front ends — TUI and CLI alike — are clients and can be many at once.
 - `daemon stop` refuses to terminate a running TUI unless `--force` is given.
 
 #### 5.2.2 Linyaps (Linglong) Package Environment
@@ -527,6 +539,56 @@ Notes:
 - The `Info`/`Control` interfaces are ordinary session-bus services, so host
   applications (`gdbus`, media widgets, `busctl`) can read and control the
   Linyaps instance exactly as they do for a regular install.
+
+#### 5.2.3 Front End and Core
+
+Ter-Music is split into two roles that talk over the session bus:
+
+| Role | Who runs it | What it owns |
+| ---- | ----------- | ------------ |
+| **Core** (playback service) | `ter-music daemon start` / `daemon foreground` | Audio device, playback state and position, transport commands, volume / speed / play mode, the **path queue handed to it by the front end**, current-track info (lyrics, text cover, spectrum), configuration, front-end registry and heartbeat |
+| **Front end** (content and file system) | The TUI (`ter-music`, `ter-music tui`), the CLI (`ter-music play/show/…`), other clients | Music library (SQLite), scanning and metadata, playlist content, user playlists, favorites / history / directory history, sorting / filtering / search, remote sources and their download cache, the UI |
+
+The core never scans a directory, never keeps a library, and never resolves a
+remote URL: it plays **local paths**, listed in the order the front end sends
+them. The front end never opens an audio device; it renders state it reads back
+over D-Bus and hands over content.
+
+**Starting up.** Running the TUI with no core around starts one automatically and
+pushes the content (the opened directory, or the restored session) into it, so
+the everyday workflow is unchanged:
+
+```bash
+ter-music                 # TUI starts (and starts a core if none is running)
+ter-music -o ~/Music      # same, opening a directory first
+```
+
+Use `--attach-only` when a core must already exist — useful in scripts, and in
+sessions where playback should not be started behind your back:
+
+```bash
+ter-music --attach-only   # exit code 3 when no core is running
+ter-music --bus org.yxzl.ter_music.instance1   # address a specific instance
+```
+
+**Leaving the front end.** Closing the TUI does **not** stop playback: the core
+keeps running and playing, and `ter-music show` / `ter-music next` still reach
+it from any terminal. Set `core_exit_when_no_frontend` to `true` in
+`config.xml` (or with `Config.Set` over D-Bus) when the core should instead exit
+by itself after the last front end has been gone for a grace period (10 s); a
+core that no front end ever attached to stays up.
+
+**Reconnect.** When the core disappears (crash, `kill`, logout), the front end
+does not exit: it marks itself offline, retries with exponential backoff
+(1/2/4/8/15/30 s), and re-attaches — and re-sends its content queue — as soon as
+a core answers again. Pressing `R` in the TUI restarts a dead core and re-pushes
+the queue immediately.
+
+**Compatibility.** The bus surface is `api_version 4`. Content interfaces
+(`Playlist`, `Library`, `Favorites`, `History`, `DirHistory`, `Remote`) are
+gone: they belong to the front end. Third-party clients should use the
+`Lyrics`, `Info`, `Control`, `Queue` and `Config` interfaces — see
+[API_DBUS_en_US.md](API_DBUS_en_US.md).
 
 ### 5.3 Interface Layout
 
@@ -748,11 +810,12 @@ session on the session bus:
   up when the player exits.
 
 An open lyrics API is available on the same D-Bus object: interface
-`org.yxzl.ter_music.Lyrics`, method `GetLyrics`, and signal `LyricsChanged`.
-See [Lyrics API (English)](API_LYRICS_en_US.md) for the JSON schema and
-examples.
+`org.yxzl.ter_music.Lyrics` with the methods `GetLyrics`, `GetDocument` and
+`SetSource` (switch between embedded and external lyrics), and the signal
+`LyricsChanged`. See [Lyrics API (English)](API_LYRICS_en_US.md) for the JSON
+schema and examples.
 
-Two more interfaces are published on the same object path so that other
+Four more interfaces are published on the same object path so that other
 applications can read track data, text cover art and progress, and drive the
 player:
 
@@ -762,20 +825,23 @@ player:
   `InstanceInfo`, plus the signals `InfoChanged`, `ProgressChanged` (at most
   1 Hz) and `CoverChanged`.
 - `org.yxzl.ter_music.Control`: transport, seek, volume, speed, play mode,
-  `OpenPath`, `PlayIndex`, `GetPlaylist`, `ReloadConfig` and `Quit`.
-- `org.yxzl.ter_music.Playlist` and `.Queue`: load/sort/filter the playlist
-  and read or edit the play queue, both returning render-ready pages
-  (256 KB response cap, 200-row default page).
-- `org.yxzl.ter_music.Library` with `.Favorites`, `.History` and
-  `.DirHistory`: browse artists/albums/genres/tracks, search, rescan, and
-  read or edit favorites and history.
+  `ReloadConfig` and `Quit`. Loading content is **not** part of it — the front
+  end delivers a queue instead.
+- `org.yxzl.ter_music.Queue`: the core's **path queue** —
+  `Set`/`Append`/`InsertAfter`/`RemoveAt`/`MoveUp`/`MoveDown`/`Clear`/
+  `Shuffle`/`PlayAt` and paged `Get(offset, count)`, with the `QueueChanged`
+  signal (entries, current position, revision). Local paths only; at most 500
+  entries per write and 1000 per read.
 - `org.yxzl.ter_music.Config`: read and patch the core configuration (the only
   writer). Remote server entries are **not** part of it: they belong to the
   front end (see below).
-- `Info.GetInfo` advertises `core.api_version` (currently `3`) plus the
+- `Info.GetInfo` advertises `core.api_version` (currently `4`) plus the
   implemented method list, so clients can check compatibility before using
   anything else. Version 3 removed the `Remote` interface and the
-  `track.is_remote` field and made every path argument local-only.
+  `track.is_remote` field and made every path argument local-only; version 4
+  replaced the content interfaces (`Playlist`, `Library`, `Favorites`,
+  `History`, `DirHistory`) with the path-based `Queue` — content now lives in
+  the front end.
 - `org.freedesktop.DBus.Introspectable` and `org.freedesktop.DBus.Peer` are
   implemented, so `busctl --user introspect` / `gdbus introspect` work.
 - MPRIS metadata additionally carries `xesam:url` (always a `file://` URI,
@@ -815,6 +881,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire)
 - `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `cue_encoding`: CUE file character encoding (0=Auto, 1=UTF-8, 2=GB18030, 3=GBK, 4=BIG5, 5=Shift-JIS)
+- `core_exit_when_no_frontend`: let the core exit by itself once no front end has been attached for 10 s (0/1, default 0 — closing the TUI keeps the music playing)
 - Remote server connections (SMB/SFTP/FTP/WebDAV/HTTP) are **not** stored in
   `config.xml`: the front end keeps them in its own `remote.xml` next to it
   (server entries plus password ciphertext, file mode 0600), and caches
@@ -927,14 +994,20 @@ All user data is stored in the `~/.config/ter-music/` directory:
 
 ```
 ~/.config/ter-music/
-├── config.xml       # Configuration file (v2.2 XML format, parsed via libxml2)
+├── config.xml       # Configuration file (XML, parsed via libxml2; migrated to the current version on start)
 ├── library.db       # SQLite database (music library, favorites, playlists, history)
-├── queue.txt        # Playback queue persistence
+├── remote.xml       # Remote server list (front-end only; not read by the core)
 ├── lang/            # User language pack directory (overrides built-in translations)
 └── config.json.bak  # Auto-backup of v1 config on first migration (if present)
 ```
 
-**Note:** The v1.0 JSON-based storage (`config.json`, separate `favorites`, `history`, `dir_history`, `playlists/`) has been fully replaced by the SQLite database `library.db`. Migration is automatic on first v2.0 startup.
+**Note:** The playback queue is **not** persisted as a file any more: it is
+content, so the front end rebuilds it from your library / last opened directory
+on the next start, while the core restores the cursor when
+`resume_last_playback` is enabled. The v1.0 JSON-based storage (`config.json`,
+separate `favorites`, `history`, `dir_history`, `playlists/`) has been fully
+replaced by the SQLite database `library.db`; migration is automatic on first
+v2.0 startup.
 
 Album covers are not stored in `~/.config/ter-music/`. Extracted covers are
 temporary managed JPEG files under `/tmp/ter-music-cover-*.jpg`, kept for the
@@ -1040,11 +1113,17 @@ Ter-Music supports terminal window resizing. When you resize the terminal, the p
 
 ### 5.14 Exit the Program
 
-There are three ways to exit:
+There are three ways to exit the front end:
 
 - Press `q` in the main interface
 - Press `Ctrl+C` / `Ctrl+D` / `Ctrl+\` (the program handles SIGHUP/SIGTERM/SIGINT gracefully and exits cleanly)
 - Select "Exit" in the options menu (which is the `F9` key)
+
+Leaving the TUI does not stop the music: playback lives in the core, so the
+current track keeps playing and `ter-music show` / `ter-music next` still work
+from any terminal. Stop it explicitly with `ter-music daemon stop`, or make the
+core exit on its own by setting `core_exit_when_no_frontend` to `true` (see
+[5.2.3 Front End and Core](#523-front-end-and-core)).
 
 ## 6. Frequently Asked Questions
 
@@ -1085,75 +1164,114 @@ There are three ways to exit:
 
 ## 7. Technical Architecture
 
+### 7.1 Front End and Core
+
+The code base is organized around two planes that share one process image but
+never share responsibilities. A build can run either plane (the daemon is core
+only, the TUI/CLI is front end only), and they meet exclusively at the `player`
+facade and the D-Bus surface:
+
+| Plane | Process | Owns |
+| ----- | ------- | ---- |
+| **Core / playback service** | `ter-music daemon foreground` (started by `daemon start`, by D-Bus activation or by a systemd user service) | Audio device and decoding, play queue execution (**paths only**), transport, volume / speed / play mode, equalizer, current-track info (lyrics, text cover, spectrum), the published `Lyrics` / `Info` / `Control` / `Queue` / `Config` interfaces, front-end registry and heartbeat, configuration |
+| **Front end / content client** | `ter-music` (TUI), `ter-music play\|show\|…` (CLI) | Directory scanning and metadata, SQLite library and FTS5 search, user playlists, favorites / history / directory history, sorting / filtering, remote sources and their download cache, the ncurses UI |
+
+The seam is deliberately thin and testable:
+
+- **`player/` facade** — `player.c` dispatches to `player_local.c` (in-process
+  playback, kept as a migration baseline) or `player_remote.c` (D-Bus client,
+  the default). The UI only ever calls the facade, which is what makes the
+  front end independently buildable and lets the same TUI drive either plane.
+- **`queue/backend_queue.c`** — the core's path queue: order, cursor and
+  revision, plus the entry metadata (path, title, artist, album, duration, CUE
+  offset/track number, lyric source). `audio/play_queue.c` is a thin forwarder
+  used by the in-process backend, and `playlist/playlist_queue.c` is the only
+  bridge that renders front-end content into a core queue.
+- **D-Bus surface, `api_version 4`** — `Queue.Set/Append/InsertAfter/RemoveAt/
+  MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` accept **local paths only** (remote
+  URLs are rejected), batch at most 500 entries per call and page reads at
+  `RPC_PAGE_MAX` (1000) entries; `QueueChanged` announces count / current
+  position / revision so any number of front ends stay in sync.
+- **Front-end registration** — every front end registers and heartbeats, which
+  is what feeds `core_exit_when_no_frontend` and `Info.GetInfo.frontends`.
+  Disconnects are not fatal: the front end backs off (1/2/4/8/15/30 s),
+  re-attaches, and re-pushes its content queue, because the core holds no
+  content of its own.
+
+### 7.2 Architecture Gates
+
+Two scripts keep the split honest, and both run in CI:
+
+| Gate | Command | Rule |
+| ---- | ------- | ---- |
+| Backend purity | `scripts/test/check-core-purity.sh` | Core directories (`audio config core info lyrics media queue` + `cli/daemon.c`) must contain **no** remote-source symbol and no content/UI reference (playlist, library, search, UI rendering, front-end headers) |
+| Front-end purity | `scripts/test/check-ui-purity.sh` | The UI must reach the playback surface **only** through the `player` facade — no engine playback globals or engine playback commands |
+
+Regression suites accompany them: `scripts/test/run-unit-tests.sh` (path queue,
+play-queue contract, lyrics parsing, JSON reader) plus the end-to-end scripts
+`dbus-rpc-check.sh`, `config-migration-check.sh`, `lifecycle-e2e.sh`,
+`offline-reconnect-e2e.sh`, `multi-frontend-e2e.sh`, `paging-deepdir-e2e.sh`
+and `remote-frontend-e2e.sh`.
+
+### 7.3 Module Map
+
 Ter-Music adopts a modular design, main modules include:
 
 > **Source files** are organized under `src/org.yxzl.ter-music/<module>/`; **public headers** under `include/org.yxzl.ter-music/<module>/`.
 
-- **main.c**: Program entry, command-line argument processing
-- **ui/**: User interface subsystem — rendering, layout, input handling
-  - **ui.c**: Main event loop, view switching, input dispatch
-  - **controls.c**: Control bar (play/pause/next/prev/volume/speed/mode popups)
-  - **settings.c**: Settings view with sidebar and right-side selection menus
-  - **menus.c**: Menu bar, function key handling (F1-F9), popup management
-  - **playlist_render.c**: File browser and queue view rendering
-  - **playlist_view.c**: Playlist management view
-  - **favorites.c**: Favorites view
-  - **history.c**: Playback history view
-  - **info_view.c**: About/info view
-  - **help_view.c**: Help view
-  - **language_view.c**: Language selection view (i18n language pack browser)
-  - **layout.c**: Terminal layout management (resize handling)
-  - **progress_ui.c**: Progress bar rendering (suspend on popup active)
-  - **visualizer.c**: Audio spectrum visualizer
-  - **lyrics.c**: Lyrics loading, parsing, synchronized display (embedded lyrics support)
-  - **braille_art.c**: Braille art rendering for album cover display in terminal
-  - **image_loader.c**: Album cover image loading and processing (PNG/JPEG)
-  - **dialog.c**: Dialog boxes
-  - **mouse.c**: Mouse interaction handling
-  - **scrollbar.c**: Reusable scrollbar module for UI panes
-  - **utf8.c**: UTF-8 string utilities
-  - **util.c**: Shared UI utilities (sidebar, palette, etc.)
-- **audio/**: Audio engine — decoding, playback, DSP
-  - **audio.c**: Core audio control, volume, play mode cycling, audio backend management
-  - **playback_thread.c**: Dedicated playback thread, FFmpeg decoding loop, EOS handling
-  - **segment_buffer.c**: Ring buffer for PCM data, bounds for RSS (~20MB)
-  - **play_queue.c**: Play queue with Fisher-Yates shuffle, 17 play mode navigation
-  - **atempo.c**: FFmpeg atempo filter for speed adjustment
-  - **equalizer.c**: 10-band ISO graphic equalizer with biquad IIR filters
-  - **audio_visualizer.c**: FFT-based spectrum data extraction for visualizer
-  - **backend_ops.c**: Unified backend operations (volume, latency, device init)
-  - **backend/pipewire.c**: PipeWire audio output (dlopen-based, no compile-time dep)
-  - **backend/pulse.c**: PulseAudio audio output
-  - **backend/alsa.c**: ALSA audio output
-- **playlist/**: Playlist loading, metadata, CUE parsing
-  - **playlist.c**: Directory scanning (**recursive** sub-directory scan), metadata reading (FFmpeg + native APEv2 tags),
-    CUE sheet detection, album art extraction with MRU cover cache and same-directory fallback
-  - **cue_parser.c**: CUE sheet line-by-line parser for split-track support
-  - **encoding.c**: CUE file encoding auto-detect and conversion (iconv)
-  - **ape_tag.c**: Native APEv2 tag parser for enhanced metadata extraction
-- **library/**: SQLite music library
-  - **library.c**: Database schema (tracks with FTS5, favorites, history, playlists),
-    scan engine, CRUD operations
-  - **browser/browser.c**: Library browser UI (artists → albums → tracks navigation)
-- **config/**: Configuration subsystem
-  - **config.c**: XML config load/save via libxml2, schema v2.2
-  - **migration.c**: v1 config.json → v2 config.xml migration
-  - **schema.h**: XML element/attribute constants
-  - **crypto.c**: password encryption/decryption for the front-end remote store
-- **remote/**: **front-end** remote music sources — `remote.c` (SMB/SFTP/FTP/
-  WebDAV/HTTP via libcurl), `remote_store.c` (server list in `<configdir>/
-  remote.xml`), `remote_cache.c` (background downloader + local cache)
-- **ui/remote_view.c**: the *Settings → Remote Device* page (list, browse,
-  download-and-play); downloaded local paths are handed to the core through
-  the `player` facade
-- **media_session.c**: MPRIS D-Bus media session, album art URL, lyrics API, plus the Info/Control/Introspectable interfaces (optional)
-- **info/info.c**: playback info snapshot and rendering (text, JSON, braille/ASCII cover cache) shared by `ter-music show` and the D-Bus Info interface
-- **cli/cli.c, cli/cli_client.c**: CLI subcommand dispatch and the thin D-Bus client used by `play`/`pause`/`show`/...
-- **cli/daemon.c**: headless background playback process (`daemon start` / `daemon foreground`)
-- **app/open.c**: shared path opening and session restore primitives (used by the TUI, the daemon and `Control.OpenPath`)
-- **util/json.c**: small JSON writer shared by the Lyrics and Info interfaces
-- **search.c**: Async search with pinyin support
-- **logger.c**: Logging subsystem
+- **main/main.c**: Program entry, argument handling, front-end startup split
+  (`frontend_init_config()` for the remote mode, `init_all_persistent_data()`
+  for the local baseline)
+- **player/**: Playback facade — `player.c` (dispatch), `player_local.c`
+  (in-process backend), `player_remote.c` (D-Bus client, default), declared in
+  `include/…/player/player_backend.h`
+- **core/core.c**: Core-side bootstrap shared by the daemon and the in-process
+  baseline
+- **cli/cli.c, cli/cli_client.c**: **Front end** CLI dispatch and the thin D-Bus
+  client behind `play`/`pause`/`show`/…; `play` scans content locally, builds
+  the path queue and delivers it
+- **cli/daemon.c**: The **core** process — configuration, playback and the
+  front-end watchdog; it never scans a directory
+- **queue/backend_queue.c**: Core path queue (order, cursor, revision,
+  local-path guard, per-call size limit) plus CUE look-ahead
+- **audio/**: Core audio engine — decoding and playback thread, ring buffer,
+  `play_queue.c` (forwarder + UI mirror used by the local baseline), atempo
+  speed control, 10-band equalizer, FFT visualizer data, `backend_ops.c` and the
+  PipeWire / PulseAudio / ALSA outputs
+- **lyrics/**: Core lyrics engine — discovery, embedded (FFmpeg) and external
+  `.lrc` parsing, source preference, timeline and page building
+- **ui/**: **Front end** ncurses UI — event loop, controls, settings, menus,
+  playlist/queue views, favorites, history, browse views, layout, progress,
+  visualizer drawing, `lyrics.c` (rendering only — the engine lives in the
+  core), braille art, image loader, dialogs, mouse, scrollbar, shared widgets
+- **media/**: Core D-Bus session — `session.c` (bus name, introspection,
+  dispatch), `rpc_common.c` (reply helpers, paging), `rpc_info.c`,
+  `rpc_control.c`, `rpc_queue.c`, `rpc_lyrics.c`, `rpc_config.c`, plus the
+  MPRIS media player interface
+- **info/info.c**: Playback info snapshot and rendering (text, JSON, braille /
+  ASCII cover cache) shared by `ter-music show` and the `Info` interface
+- **config/**: Configuration subsystem — `config.c` (XML load/save via libxml2,
+  versioned migrations, defaults), `config_json.c` + `migration.c` (v1
+  `config.json` → XML), schema constants, `crypto.c` (password encryption for
+  the front-end remote store)
+- **playlist/**: **Front end** playlist loading and metadata — recursive
+  directory scan, FFmpeg + native APEv2 tag reading, CUE sheet detection and
+  encoding auto-detect, album art extraction with MRU cover cache,
+  `playlist_queue.c` (the content → path-queue bridge)
+- **library/**: **Front end** SQLite library — schema (tracks with FTS5,
+  favorites, history, playlists), scan engine, CRUD, and `browser/browser.c`
+  (artists → albums → tracks navigation)
+- **remote/**: **Front end** remote music sources — `remote.c` (SMB/SFTP/FTP/
+  WebDAV/HTTP via libcurl), `remote_store.c` (server list in
+  `<configdir>/remote.xml`), `remote_cache.c` (background downloader + local
+  cache); `ui/remote_view.c` is the *Settings → Remote Device* page
+- **app/open.c**: Shared path-opening and session-restore primitives used by
+  the TUI and by CLI `play`
+- **util/json.c**: Small bounded JSON reader/writer shared by the
+  `Lyrics`/`Info` interfaces and the queue payloads
+- **util/utf8.c**: UTF-8 helpers needed by both planes (core lyrics, CLI output)
+- **search/search.c**: Async search with pinyin support (front end)
+- **i18n/**, **logger/**: Language packs and the logging subsystem (shared)
 
 ## 8. License
 

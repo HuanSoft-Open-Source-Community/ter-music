@@ -29,7 +29,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - **17种播放模式**：从基础（顺序、单曲循环、列表循环、随机一次、随机重复）到高级（按文件夹/专辑/艺术家分组）
 - 支持倍速播放，提供0.75x、1.0x、1.25x、1.5x、2.0x、3.0x六档速度调节，高效收听
 - **音乐库**：SQLite数据库存储，FTS5全文搜索，按艺术家/专辑/流派浏览，支持**递归目录扫描**和增量跟踪
-- **播放队列**：独立队列界面，显示序号、当前播放指示，支持排序和持久化
+- **播放队列**：独立队列界面，显示序号、当前播放指示并支持排序；队列本身归前端（核心只执行收到的路径表），下次启动时由你的内容重建
 - 支持歌单管理，可创建多个自定义歌单，灵活切换播放
 - 支持收藏喜欢的歌曲，方便快速查找播放
 - 自动记录播放历史，便于回顾听过的音乐
@@ -50,6 +50,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - 代码模块化设计，结构清晰，易于维护和功能扩展
 - 遵循Unix设计哲学，专注做好音乐播放一件事，可与其他工具无缝配合
 - 无任何窥探行为，不记录用户隐私数据，充分尊重用户隐私
+- 前后端各司其职：**核心**只提供播放服务（音频设备、传输命令、音量/倍速/播放模式，以及执行前端下发的路径队列）；**前端**掌管文件系统与内容（曲库、扫描、歌单、收藏、历史、远程源与界面）。详见 [5.2.3 前端与核心](#523-前端与核心)
 
 ### 三 核心优势
 | 优势 | 说明 |
@@ -314,6 +315,10 @@ ter-music [OPTIONS]
 选项：
   -o, --open <path>    启动时直接打开指定的音乐目录
   -d, --debug          启用调试日志（输出到 ter-music-debug.log）
+  --frontend <模式>    播放通路：remote（默认，经 D-Bus 交给核心）
+                       或 local（进程内播放，保留作回归基线）
+  --attach-only        不自动拉起核心：没有核心在跑时以退出码 3 结束
+  --bus <名称>         指定目标核心/实例的总线名（默认主实例）
   -h, --help           显示帮助信息
   -v, --version        显示版本信息
   tui [path]           显式启动 TUI
@@ -337,19 +342,21 @@ ter-music --help
 #### 5.2.1 CLI 模式
 
 以下任意一个首参数都会切换到 CLI 模式。CLI 命令是轻量的 D-Bus 客户端：
-它们与当前持有 `org.mpris.MediaPlayer2.ter_music` 的实例（TUI 或后台守护进程）
-通信，因此在任意终端、脚本或窗口管理器快捷键中都能使用。
+它们与当前持有 `org.mpris.MediaPlayer2.ter_music` 的**播放核心**（由
+`daemon start`、D-Bus 激活或 TUI 拉起）通信，因此在任意终端、脚本或窗口
+管理器快捷键中都能使用。其中 `play` 还兼任前端：它在自己的进程里扫描路径，
+再把生成的队列下发给核心。
 
 | 命令 | 说明 |
 | --- | --- |
-| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 播放指定路径；若无实例在运行，则启动一个脱离终端的后台守护进程 |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 在本进程扫描路径，把队列下发给核心并播放；无核心时先拉起核心 |
 | `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | 基础传输控制 |
 | `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | 相对、绝对或按百分比的跳转 |
 | `volume [0-100\|+N\|-N]` | 查询或设置音量 |
 | `speed [0.5-3.0]` | 查询或设置播放倍速 |
 | `mode [NAME\|0-16]` | 查询或设置播放模式（支持 `list_repeat`、`folder_shuffle_repeat` 等稳定名称） |
 | `show [OPTIONS]` | 打印当前信息块（基本信息 / 字符封面 / 进度 / 两行歌词） |
-| `daemon start\|foreground\|stop\|restart\|status\|reload` | 后台播放进程管理 |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | 播放核心管理 |
 | `version` / `help` | 版本 / 用法 |
 
 `show` 选项（每项都会在该次调用中覆盖已保存的 TUI 设置）：
@@ -405,8 +412,12 @@ ter-music daemon stop
 
 - 不带子命令时，`ter-music <path>` 仍会打开 TUI。若要打开名称恰好为
   `play`/`show`/…… 的目录，请使用 `-o ./play` 或 `ter-music tui play`。
-- TUI 与守护进程不能同时作为主实例；当总线名称已被其他实例占用时，
-  `daemon start` 会拒绝启动（可用 `--force` 强制以次级实例启动）。
+- `daemon start --open <目录>` 不再让核心去扫描：现在先起核心，再由这个 CLI
+  进程（前端）扫描目录、生成队列并下发——与 `ter-music play <目录>` 同一条路。
+  不带 `--open` 的 `daemon start` 只起一个空闲核心，队列由随后接入的前端下发。
+- 总线名称同时只允许一个实例持有；核心在运行时 `daemon start` 会拒绝再起一个
+  （可用 `--force` 强制以次级实例启动）。前端（TUI 与 CLI）都是客户端，可以
+  同时存在多个。
 - 除非显式指定 `--force`，`daemon stop` 会拒绝终止正在运行的 TUI。
 
 #### 5.2.2 Linyaps（如意玲珑）打包环境
@@ -462,6 +473,48 @@ ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
   运行。
 - `Info`/`Control` 就是普通的会话总线服务，因此宿主应用（`gdbus`、媒体组件、
   `busctl`）可以像普通安装那样读取与控制 Linyaps 实例。
+
+#### 5.2.3 前端与核心
+
+Ter-Music 分为两个角色，二者经会话总线通信：
+
+| 角色 | 由谁运行 | 掌管什么 |
+| --- | --- | --- |
+| **核心**（播放服务） | `ter-music daemon start` / `daemon foreground` | 音频设备、播放状态与进度、传输命令、音量/倍速/播放模式、**执行前端下发的路径队列**、当前曲目信息（歌词、字符封面、频谱）、配置、前端注册与心跳 |
+| **前端**（文件系统与内容） | TUI（`ter-music`、`ter-music tui`）、CLI（`ter-music play/show/…`）以及其它客户端 | 曲库（SQLite）、扫描与元数据、播放列表内容、用户歌单、收藏/历史/目录历史、排序/过滤/搜索、远程源与其下载缓存、界面 |
+
+核心从不扫描目录、不持有曲库、不解析远程 URL：它只播放**本地路径**，顺序由前端
+给定。前端从不打开音频设备：它只渲染从 D-Bus 读回的状态，并把内容交给核心。
+
+**启动。** 在没有核心时直接运行 TUI，会自动拉起一个核心并把内容（`-o` 指定的
+目录，或恢复出的上次会话）推给它，因此日常用法没有变化：
+
+```bash
+ter-music                 # 启动 TUI（无核心时会自动拉起核心）
+ter-music -o ~/Music      # 同上，并先打开一个目录
+```
+
+需要核心已经存在时（脚本里，或不愿被悄悄启动播放时），用 `--attach-only`：
+
+```bash
+ter-music --attach-only   # 没有核心在跑则以退出码 3 结束
+ter-music --bus org.yxzl.ter_music.instance1   # 指定要接入的实例
+```
+
+**退出前端。** 关闭 TUI **不会**停止播放：核心继续运行并继续播放，
+`ter-music show` / `ter-music next` 在任何终端里依然指挥得动它。若希望最后一个
+前端离开后核心自行退出，把 `core_exit_when_no_frontend` 设为 `true`
+（`config.xml`，或经 D-Bus `Config.Set`）：前端全部离开并过 10 秒宽限期后核心
+退出；从未有前端接入过的核心不会退出。
+
+**断线重连。** 核心消失时（崩溃、被 `kill`、会话注销），前端不会退出：它进入
+断线状态，按指数退避重试（1/2/4/8/15/30 秒），一旦有核心应答就重新接入，并把
+自己的内容队列补推回去。在 TUI 里按 `R` 可以立即重启一个已死的核心并重推队列。
+
+**兼容性。** 总线接口面为 `api_version 4`。内容类接口（`Playlist`、`Library`、
+`Favorites`、`History`、`DirHistory`、`Remote`）已撤下：它们属于前端。第三方
+客户端请使用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五个接口，详见
+[API_DBUS_en_US.md](../API_DBUS_en_US.md)。
 
 ### 三 界面布局
 启动后界面分为三栏，布局如下：
@@ -650,10 +703,11 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - 提取后的封面统一保存为受管理的 `/tmp/ter-music-cover-*.jpg` 缓存文件，保留最近 10 首的 MRU 缓存，退出时自动清理。
 
 同一 D-Bus 对象还提供开放歌词接口：接口 `org.yxzl.ter_music.Lyrics`，方法
-`GetLyrics`，信号 `LyricsChanged`。JSON 结构与调用示例见
+`GetLyrics`、`GetDocument` 与 `SetSource`（在内嵌歌词与外部歌词之间切换），
+信号 `LyricsChanged`。JSON 结构与调用示例见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
 
-同一对象路径上还额外发布了两个接口，便于其他应用程序读取曲目数据、字符封面与
+同一对象路径上还额外发布了下列接口，便于其他应用程序读取曲目数据、字符封面与
 播放进度，并驱动播放器：
 
 - `org.yxzl.ter_music.Info`（只读）：`GetInfo`、`GetTrackInfo`、
@@ -662,16 +716,19 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
   `InstanceInfo`，以及信号 `InfoChanged`、`ProgressChanged`（最高 1 Hz）
   和 `CoverChanged`。
 - `org.yxzl.ter_music.Control`：传输控制、跳转、音量、倍速、播放模式、
-  `OpenPath`、`PlayIndex`、`GetPlaylist`、`ReloadConfig` 与 `Quit`。
-- `org.yxzl.ter_music.Playlist` 与 `.Queue`：加载/排序/过滤播放列表，读取与
-  编辑播放队列；两者都返回“渲染就绪”的分页（响应上限 256 KB、默认每页 200 行）。
-- `org.yxzl.ter_music.Library` 及 `.Favorites`、`.History`、`.DirHistory`：
-  浏览艺术家/专辑/流派/曲目、搜索、重新扫描，以及收藏与历史的读写。
+  `ReloadConfig` 与 `Quit`。加载内容**不在**其中——内容由前端以队列形式下发。
+- `org.yxzl.ter_music.Queue`：核心的**路径队列**——
+  `Set`/`Append`/`InsertAfter`/`RemoveAt`/`MoveUp`/`MoveDown`/`Clear`/
+  `Shuffle`/`PlayAt` 与分页读取 `Get(offset, count)`，并广播 `QueueChanged`
+  （条目数、当前游标、版本号）。只接受本地路径；单次写入 ≤500 条、单次读取
+  ≤1000 条。
 - `org.yxzl.ter_music.Config`：核心配置的唯一写入口。远程服务器条目**不**在其中：
   它属于前端（见下文）。
-- `Info.GetInfo` 通过 `core.api_version`（当前为 `3`）与已实现方法清单做版本握手，
+- `Info.GetInfo` 通过 `core.api_version`（当前为 `4`）与已实现方法清单做版本握手，
   客户端可先校验兼容性再调用。版本 3 移除了 `Remote` 接口与 `track.is_remote`
-  字段，并规定所有路径参数只接受本地路径。
+  字段，并规定所有路径参数只接受本地路径；版本 4 用路径语义的 `Queue` 取代了
+  内容接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`）——
+  内容归前端。
 - 已实现 `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer`，
   因此 `busctl --user introspect` / `gdbus introspect` 可直接使用。
 - MPRIS 元数据额外携带 `xesam:url`（恒为 `file://` URI，远程来源的曲目也是
@@ -708,6 +765,9 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `audio_backend`：音频后端（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
 - `sort_mode`：排序模式（0=默认、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文件字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
+- `core_exit_when_no_frontend`：无人接入时让核心自行退出（0/1，默认 0）。
+  默认关闭表示「关掉 TUI，音乐继续放」；置 1 时最后一个前端离开并过 10 秒
+  宽限期后核心退出
 - 远程服务器连接（SMB/SFTP/FTP/WebDAV/HTTP）**不**存在 `config.xml` 里：
   前端把它保存在同目录下自有的 `remote.xml`（服务器条目 + 密码密文，权限 0600），
   下载的曲目缓存在 `$XDG_CACHE_HOME/ter-music/remote/`
@@ -818,14 +878,17 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 所有用户数据均存储在`~/.config/ter-music/`目录下：
 ```
 ~/.config/ter-music/
-├── config.xml       # 配置文件（v2.2 XML格式，libxml2解析）
+├── config.xml       # 配置文件（XML格式，libxml2解析，启动时迁移到当前版本）
 ├── library.db       # SQLite数据库（音乐库、收藏、歌单、历史）
-├── queue.txt        # 播放队列持久化
+├── remote.xml       # 远程服务器列表（前端自有，核心不读取）
 ├── lang/            # 用户语言包目录（覆盖内置翻译）
 └── config.json.bak  # v1配置文件首次迁移时的自动备份（如有）
 ```
 
-**注意：** v1.0的JSON存储（config.json、独立的favorites、history、dir_history、playlists/目录）已全部替换为SQLite数据库library.db。首次启动v2.0时会自动迁移。
+**注意：** 播放队列不再落盘为文件：队列属于内容，由前端在下次启动时从曲库 /
+上次打开的目录重建，游标则在开启 `resume_last_playback` 时由核心恢复。
+v1.0的JSON存储（config.json、独立的favorites、history、dir_history、playlists/目录）
+已全部替换为SQLite数据库library.db。首次启动v2.0时会自动迁移。
 
 专辑封面不再存于 `~/.config/ter-music/`。提取的封面是受管理的临时 JPEG
 文件，位于 `/tmp/ter-music-cover-*.jpg`，保留最近 10 首，退出时删除。
@@ -919,78 +982,108 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 本播放器支持终端窗口大小调整，修改窗口尺寸时，播放器会自动重置布局并重新绘制界面。
 
 ### 十四 退出播放器
-退出方法有三种：
+退出前端的方法有三种：
 - 在主界面按`q`键
 - 按`Ctrl+C`/`Ctrl+D`/`Ctrl+\`（播放器会优雅退出，支持SIGHUP/SIGTERM/SIGINT信号）
 - 在选项菜单中选择"Exit"（即`F9`键）
 
+退出 TUI 不会停止音乐：播放发生在核心里，当前曲目会继续播放，
+`ter-music show` / `ter-music next` 在任意终端里依然有效。要显式停止请用
+`ter-music daemon stop`；若希望核心自行退出，把 `core_exit_when_no_frontend`
+设为 `true`（见 [5.2.3 前端与核心](#523-前端与核心)）。
+
 ## 第六章 技术架构
+
+### 一 前端与核心
+
+代码库围绕两个平面组织：二者共用同一份进程镜像，但职责从不重叠。同一次构建
+既可以只跑核心（daemon），也可以只跑前端（TUI/CLI），它们只在 `player` 门面与
+D-Bus 接口面相遇：
+
+| 平面 | 进程 | 掌管什么 |
+| --- | --- | --- |
+| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start`、D-Bus 激活或 systemd 用户服务拉起） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
+| **前端 / 内容客户端** | `ter-music`（TUI）、`ter-music play\|show\|…`（CLI） | 目录扫描与元数据、SQLite 曲库与 FTS5 搜索、用户歌单、收藏/历史/目录历史、排序/过滤、远程源与下载缓存、ncurses 界面 |
+
+这条接缝刻意做得很薄，也便于测试：
+
+- **`player/` 门面**：`player.c` 分发到 `player_local.c`（进程内播放，保留作迁移
+  基线）或 `player_remote.c`（D-Bus 客户端，默认）。界面只调用门面，因此前端可以
+  独立构建，同一套 TUI 也能驱动任一平面。
+- **`queue/backend_queue.c`**：核心的路径队列——顺序、游标与版本号，外加条目
+  元数据（路径、标题、艺术家、专辑、时长、CUE 偏移/轨号、歌词来源）。
+  `audio/play_queue.c` 是进程内后端使用的轻量转发层，
+  `playlist/playlist_queue.c` 是唯一的「内容 → 核心队列」桥。
+- **D-Bus 接口面，`api_version 4`**：`Queue.Set/Append/InsertAfter/RemoveAt/
+  MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **只接受本地路径**（远程 URL 被拒绝），
+  单次写入不超过 500 条，分页读取上限 `RPC_PAGE_MAX`（1000）条；`QueueChanged`
+  广播条目数/当前游标/版本号，任意多个前端因此保持一致。
+- **前端注册**：每个前端都要注册并心跳，`core_exit_when_no_frontend` 与
+  `Info.GetInfo.frontends` 都基于它。断线不是致命的：前端按指数退避
+  （1/2/4/8/15/30 秒）重连，并把内容队列补推回去——核心自己没有任何内容。
+
+### 二 架构门禁
+
+两个脚本守住这条分界，二者都已接入 CI：
+
+| 门禁 | 命令 | 规则 |
+| --- | --- | --- |
+| 后端纯度 | `scripts/test/check-core-purity.sh` | 后端目录（`audio config core info lyrics media queue` 与 `cli/daemon.c`）不得出现任何远程源符号，也不得引用内容/界面（playlist、library、search、界面渲染、前端头文件） |
+| 前端纯度 | `scripts/test/check-ui-purity.sh` | 界面访问播放面**只能**经 `player` 门面——不得直连引擎播放全局或播放命令 |
+
+与之配套的回归套件：`scripts/test/run-unit-tests.sh`（路径队列、播放队列契约、
+歌词解析、JSON 读取器），以及端到端脚本 `dbus-rpc-check.sh`、
+`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
+`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`。
+
+### 三 模块地图
+
 本播放器采用模块化设计。**源文件**位于 `src/org.yxzl.ter-music/<module>/` 目录；**公开头文件**位于 `include/org.yxzl.ter-music/<module>/` 目录。
 
 核心代码模块如下：
 
-- **main/**: 程序入口，命令行参数解析
-- **ui/**: 用户界面子系统 — 渲染、布局、输入处理
-  - **ui.c**: 主事件循环、视图切换、输入分发
-  - **controls.c**: 控制栏（播放/暂停/上/下/音量/速度/模式弹出菜单）
-  - **settings.c**: 设置视图（侧边栏 + 右侧选择菜单）
-  - **menus.c**: 菜单栏、功能键处理（F1-F9）、弹出菜单管理
-  - **playlist_render.c**: 文件浏览与播放队列视图渲染
-  - **playlist_view.c**: 歌单管理视图
-  - **favorites.c**: 收藏视图
-  - **history.c**: 播放历史视图
-  - **info_view.c**: 关于视图
-  - **help_view.c**: 帮助视图
-  - **language_view.c**: 语言选择视图（i18n语言包浏览器）
-  - **layout.c**: 终端布局管理（窗口大小调整）
-  - **progress_ui.c**: 进度条渲染（弹出菜单激活时暂停UI）
-  - **visualizer.c**: 音频频谱可视化
-  - **lyrics.c**: 歌词加载、解析、同步显示（支持内嵌歌词）
-  - **image_loader.c**: 专辑封面图片加载处理（PNG/JPEG）
-  - **braille_art.c**: 盲文点阵渲染，在终端显示专辑封面
-  - **dialog.c**: 对话框
-  - **mouse.c**: 鼠标交互处理
-  - **scrollbar.c**: 滚动条复用模块
-  - **utf8.c**: UTF-8字符串工具函数
-  - **util.c**: 共享UI工具函数（侧边栏、调色板等）
-- **audio/**: 音频引擎 — 解码、播放、DSP
-  - **audio.c**: 核心音频控制、音量管理、播放模式切换、后端管理
-  - **playback_thread.c**: 独立播放线程、FFmpeg解码循环、播放结束处理
-  - **segment_buffer.c**: PCM数据环形缓冲区，控制RSS内存约20MB
-  - **play_queue.c**: 播放队列（Fisher-Yates洗牌、17种播放模式导航）
-  - **atempo.c**: FFmpeg atempo滤镜，变速播放
-  - **equalizer.c**: 10段ISO图示均衡器，双二阶IIR滤波器
-  - **audio_visualizer.c**: 基于FFT的频谱数据提取，供可视化使用
-  - **backend_ops.c**: 统一后端操作接口（音量、延时、设备初始化）
-  - **backend/pipewire.c**: PipeWire音频输出（dlopen运行时加载，无编译时依赖）
-  - **backend/pulse.c**: PulseAudio音频输出
-  - **backend/alsa.c**: ALSA音频输出
-- **playlist/**: 歌单加载、元数据、CUE解析
-  - **playlist.c**: 目录扫描（**递归**子目录扫描）、元数据读取（FFmpeg + APEv2标签）、CUE文件检测、专辑封面提取与 MRU 封面缓存、同目录封面回退
-  - **cue_parser.c**: CUE文件逐行解析器，支持分轨播放
-  - **encoding.c**: CUE文件编码自动检测与转换（iconv）
-  - **ape_tag.c**: 原生APEv2标签解析器，增强元数据提取
-- **library/**: SQLite音乐库
-  - **library.c**: 数据库模式（tracks + FTS5全文搜索、收藏、历史、歌单）、扫描引擎、CRUD操作
-  - **browser/browser.c**: 音乐库浏览器UI（艺术家 → 专辑 → 曲目导航）
-- **config/**: 配置子系统
-  - **config.c**: XML配置加载/保存（libxml2、schema v2.2）
-  - **migration.c**: v1 config.json → v2 config.xml 迁移
-  - **schema.h**: XML元素/属性常量定义
-  - **crypto.c**: 前端远程存储的密码加密解密
-- **remote/**: **前端**远程音乐源——`remote.c`（SMB/SFTP/FTP/WebDAV/HTTP，libcurl）、
-  `remote_store.c`（服务器列表，存于 `<配置目录>/remote.xml`）、
-  `remote_cache.c`（后台下载与本地缓存）
-- **ui/remote_view.c**: **设置 → 远程设备**页（列表/浏览/下载即播放），
-  下载好的本地路径经 `player` 门面交给核心
-- **media_session.c**: MPRIS D-Bus 媒体会话、专辑封面 URL、歌词 API，以及 Info/Control/Introspectable 接口（可选）
-- **info/info.c**: 播放信息快照与渲染（文本、JSON、盲文/ASCII 封面缓存），供 `ter-music show` 与 D-Bus Info 接口共用
-- **cli/cli.c、cli/cli_client.c**: CLI 子命令分发，以及 `play`/`pause`/`show`/…… 所用的轻量 D-Bus 客户端
-- **cli/daemon.c**: 无界面后台播放进程（`daemon start` / `daemon foreground`）
-- **app/open.c**: 共享的路径打开与会话恢复原语（供 TUI、守护进程与 `Control.OpenPath` 使用）
-- **util/json.c**: 供歌词与信息接口共用的小型 JSON 写入器
-- **search.c**: 异步搜索功能（支持拼音搜索）
-- **logger.c**: 日志记录子系统
+- **main/main.c**: 程序入口、参数处理、前端启动分叉（远端模式走
+  `frontend_init_config()`，本地基线走 `init_all_persistent_data()`）
+- **player/**: 播放门面——`player.c`（分发）、`player_local.c`（进程内后端）、
+  `player_remote.c`（D-Bus 客户端，默认），声明见
+  `include/…/player/player_backend.h`
+- **core/core.c**: 核心侧启动引导，供守护进程与进程内基线共用
+- **cli/cli.c、cli/cli_client.c**: **前端** CLI 子命令分发，以及
+  `play`/`pause`/`show`/…… 所用的轻量 D-Bus 客户端；`play` 在本进程扫描内容、
+  生成路径队列并下发
+- **cli/daemon.c**: **核心**进程——配置、播放与前端看门狗；它从不扫描目录
+- **queue/backend_queue.c**: 核心路径队列（顺序、游标、版本号、本地路径校验、
+  单次下发上限）与 CUE 前瞻
+- **audio/**: 核心音频引擎——解码与播放线程、环形缓冲、`play_queue.c`
+  （转发层 + 本地基线使用的界面镜像）、atempo 变速、10 段均衡器、FFT 频谱数据、
+  `backend_ops.c` 与 PipeWire / PulseAudio / ALSA 输出
+- **lyrics/**: 核心歌词引擎——发现、内嵌（FFmpeg）与外部 `.lrc` 解析、来源偏好、
+  时间轴与分页构建
+- **ui/**: **前端** ncurses 界面——事件循环、控制栏、设置、菜单、歌单/队列视图、
+  收藏、历史、浏览视图、布局、进度、可视化绘制、`lyrics.c`（只负责渲染，引擎在
+  核心里）、盲文点阵、图片加载、对话框、鼠标、滚动条与共享控件
+- **media/**: 核心 D-Bus 会话——`session.c`（总线名、自省、分发）、
+  `rpc_common.c`（回复助手、分页）、`rpc_info.c`、`rpc_control.c`、
+  `rpc_queue.c`、`rpc_lyrics.c`、`rpc_config.c`，以及 MPRIS 媒体播放器接口
+- **info/info.c**: 播放信息快照与渲染（文本、JSON、盲文/ASCII 封面缓存），供
+  `ter-music show` 与 `Info` 接口共用
+- **config/**: 配置子系统——`config.c`（libxml2 读写、版本迁移、默认值）、
+  `config_json.c` + `migration.c`（v1 `config.json` → XML）、schema 常量、
+  `crypto.c`（前端远程存储的密码加密解密）
+- **playlist/**: **前端**歌单加载与元数据——递归目录扫描、FFmpeg + 原生 APEv2
+  标签读取、CUE 检测与编码自动识别、专辑封面提取与 MRU 封面缓存、
+  `playlist_queue.c`（内容 → 路径队列 的桥）
+- **library/**: **前端** SQLite 曲库——数据库模式（tracks + FTS5、收藏、历史、
+  歌单）、扫描引擎、CRUD，以及 `browser/browser.c`（艺术家 → 专辑 → 曲目导航）
+- **remote/**: **前端**远程音乐源——`remote.c`（SMB/SFTP/FTP/WebDAV/HTTP，
+  libcurl）、`remote_store.c`（服务器列表，存于 `<配置目录>/remote.xml`）、
+  `remote_cache.c`（后台下载与本地缓存）；`ui/remote_view.c` 是
+  **设置 → 远程设备**页
+- **app/open.c**: 共享的路径打开与会话恢复原语，供 TUI 与 CLI `play` 使用
+- **util/json.c**: 小型有界 JSON 读写器，供 `Lyrics`/`Info` 接口与队列载荷共用
+- **util/utf8.c**: 两个平面都需要的 UTF-8 工具（核心歌词、CLI 输出）
+- **search/search.c**: 异步搜索功能（支持拼音搜索，前端）
+- **i18n/、logger/**: 语言包与日志记录子系统（共享）
 
 ## 第七章 开源协议
 本项目遵循GNU General Public License v3.0开源协议。你可以自由使用、修改、分发本项目，但修改后的衍生作品必须同样遵循该协议开源，不得闭源。

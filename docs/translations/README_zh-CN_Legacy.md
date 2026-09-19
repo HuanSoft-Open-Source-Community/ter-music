@@ -28,7 +28,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - 契LRC歌辞之文，循音程以同辉，逐节次以昭焕，毫厘不爽；**内嵌歌辞**（斐氏AVDictionary与APE标签）先于外.lrc文件。可于歌词定位模式中切换来源（Ctrl+L → Tab）
 - 迅疾之度有六：曰迟、曰常、曰稍疾、曰疾、曰倍、曰三倍，任君节度
 - **音乐库**：SQLite库存储，FTS5全文搜检，按艺术家/专辑/流派览之，兼**递归子目录搜索**与增量跟踪
-- **播弄队列**：独立队列之界，显序号、当下播弄之标，可排序、可恒存
+- **播弄队列**：独立队列之界，显序号、当下播弄之标，可排序；队列归前端（核心惟行所授之径表），再启之时由乐目重建
 - 乐目营理之能，任君创置多组曲帙，随宜调遣
 - 远程播乐之能，通SMB、SFTP、FTP、WebDAV、HTTP诸般远器之约，以传远方服器之乐；此乃**前端**之职——列其目、逐曲下载于本地之藏，而后以本地文卷付于核心（核心惟识本地文卷）
 - 珍存所好之章，便疾取览
@@ -50,6 +50,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - 分曹列伍，部伍明晰，易于缮治增益
 - 遵西土Unix之哲，专一事而工，与他器协契无间
 - 略无窥伺，不录用户毫末之迹，深敬私隐
+- 前后二面，各司其职：**核心**惟供播弄之役（音声之器、传输之令、音量／迅疾／播弄之制，及奉行前端所授之径表）；**前端**掌文件之统与内容（曲库、扫描、曲帙、珍存、往迹、远方之源、文墨之界）。详见 [二之三 前端与核心](#二之三-前端与核心)
 
 ### 三 殊胜之德
 | 殊德 | 诠解 |
@@ -314,6 +315,10 @@ ter-music [OPTIONS]
 选项：
   -o, --open <path>    启器时直开指定乐籍目录
   -d, --debug          启调拭志录（录于 ter-music-debug.log）
+  --frontend <模式>    播弄之途：remote（默，经 D-Bus 付于核心）
+                       或 local（进程内播弄，留作回归基线）
+  --attach-only        不自动拉起核心：无核心在行时以退去之码 3 终
+  --bus <名称>         指特定核心／实例之总线名（默指主实例）
   -h, --help           显助益之文
   -v, --version        显版本之文
   tui [path]           明入文墨之界
@@ -336,18 +341,18 @@ ter-music --help
 
 #### 二之一 CLI 模式
 
-凡首参为下列诸目之一者，皆入CLI模式。CLI之令皆薄客也，凭D-Bus而与当下主 `org.mpris.MediaPlayer2.ter_music` 之实例（或文墨之界，或背景役使）相语，故任于何端闱、脚本、轩窗营理之捷键皆可行之。
+凡首参为下列诸目之一者，皆入CLI模式。CLI之令皆薄客也，凭D-Bus而与当下主 `org.mpris.MediaPlayer2.ter_music` 之**播弄核心**（或由 `daemon start` 所启，或经 D-Bus 按需唤起，或由文墨之界拉起）相语，故任于何端闱、脚本、轩窗营理之捷键皆可行之。其中 `play` 兼为前端：于自进程之中扫描其径，而以所成之队列付于核心。
 
 | 令目 | 所司之事 |
 | --- | --- |
-| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 播一径；若无实例在行，则立离脱之背景役使 |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 于本进程扫描其径，以队列付于核心而播之；无核心在行则先拉起核心 |
 | `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | 基础传输之御 |
 | `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | 相对、绝对或按百分率而跳转 |
 | `volume [0-100\|+N\|-N]` | 查询或设音量 |
 | `speed [0.5-3.0]` | 查询或设迅疾之度 |
 | `mode [NAME\|0-16]` | 查询或设播弄之制（如 `list_repeat`、`folder_shuffle_repeat` 之定名） |
 | `show [OPTIONS]` | 出当下之信息块（基本信息／文书封面／音程／歌辞二行） |
-| `daemon start\|foreground\|stop\|restart\|status\|reload` | 背景播弄役使之管摄 |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | 播弄核心之管摄 |
 | `version` / `help` | 版本／用法 |
 
 `show` 之选项（用之，则一时盖过节度所存之设）：
@@ -401,7 +406,8 @@ ter-music daemon stop
 注意：
 
 - 不附子目者，`ter-music <path>` 仍入文墨之界。欲开恰名 `play`／`show` 之目录，当用 `-o ./play` 或 `ter-music tui play`。
-- 文墨之界与daemon不得同为主实例；总线名若已为他实例所主，则 `daemon start` 拒而不启（欲为次实例而强启者，可用 `--force`）。
+- `daemon start --open <目录>` 不复令核心扫描：今先启核心，再由此CLI进程（为前端）扫描其目录、成其队列而下付——与 `ter-music play <目录>` 同一途也。不带 `--open` 之 `daemon start` 惟启一空闲之核心，队列由随后接入之前端下付。
+- 总线之名同时惟许一实例执之；核心在行之时，`daemon start` 拒不再启（欲以次实例强启者，可用 `--force`）。前端（文墨之界与符令行）皆客也，可并存多者。
 - `daemon stop` 于在行之文墨之界则拒之，非 `--force` 不得终也。
 
 #### 二之二 Linyaps（如意玲珑）封缄之态
@@ -441,6 +447,37 @@ ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
 - 节度之文、曲库与会话存于 `$XDG_CONFIG_HOME/ter-music`。若玲珑之运行时重定 XDG 之变数（见玲珑之 FAQ「应用数据保存到哪里」），则落于 `~/.linglong/org.yxzl.ter-music/…`，与 deb 之装各不相犯。
 - `--watch` 须有端闱（用 ANSI 光标之制），勿经管道而行，宜于端闱之中直行之。
 - `Info`／`Control` 即寻常会话总线之役，故宿主之器（`gdbus`、媒体之件、`busctl`）可视可御其玲珑之实例，与寻常之装无异。
+
+#### 二之三 前端与核心
+
+Ter-Music 分为二役，二者经会话总线而相语：
+
+| 役 | 谁行之 | 所掌之事 |
+| --- | --- | --- |
+| **核心**（播弄之役） | `ter-music daemon start` ／ `daemon foreground` | 音声之器、播弄之状与音程、传输之令、音量／迅疾／播弄之制、**奉行前端所授之径表**、当下曲目之文（歌辞、文书封面、频谱）、节度之文、前端之登记与心跳 |
+| **前端**（文件之统与内容） | 文墨之界（`ter-music`、`ter-music tui`）、符令行（`ter-music play/show/…`）及他客 | 曲库（SQLite）、扫描与元数据、曲帙之内容、自定曲帙、珍存／往迹／目录往迹、排序／筛择／搜求、远方之源与其下载之藏、文墨之界 |
+
+核心绝不扫描目录、绝不藏曲库、绝不解析远方之URL：其所播者惟**本地之径**，次第由前端所授。前端绝不启音声之器：其所绘者，乃自 D-Bus 读回之状，而以内容付于核心。
+
+**启其器。** 无核心之时径行文墨之界，将自拉起一核心，而以内容（`-o` 所指定之目录，或所复之上次会话）付之，故日常之用无异：
+
+```bash
+ter-music                 # 启文墨之界（无核心者，自拉起一核心）
+ter-music -o ~/Music      # 同上，且先开一目录
+```
+
+须核心已存者（用于脚本，或不欲暗中启播者），当用 `--attach-only`：
+
+```bash
+ter-music --attach-only   # 无核心在行，则以退去之码 3 终
+ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
+```
+
+**退其前端。** 闭文墨之界**不**止播弄：核心仍行仍播，`ter-music show` ／ `ter-music next` 于任何端闱皆能御之。若欲最后一个前端既去而核心自退，则于 `config.xml` 中设 `core_exit_when_no_frontend` 为 `true`（或经 D-Bus `Config.Set` 设之）：前端尽去而后逾十秒之宽限，核心乃退；若核心自始未有前端接入，则终不退出。
+
+**断而复续。** 核心亡时（崩溃、见 `kill`、会话注销），前端不退：入于断线之状，按指数退避而重试（1／2／4／8／15／30 秒），一有核心应答即复接入，并补推其内容之队列。于文墨之界中按 `R`，可即重启已亡之核心而重推其队列。
+
+**相容之度。** 总线之面为 `api_version 4`。内容之接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`、`Remote`）已撤：此皆前端之职也。他客当用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五接口，详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
 
 ### 三 文界局度
 启之，则局分三栏，其制如左：
@@ -628,26 +665,29 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 - 提取之面统为受管之 `/tmp/ter-music-cover-*.jpg` 暂存，留最近十曲之MRU缓存，退器时净之。
 
 同一D-Bus对象亦供开放歌辞接口：接口 `org.yxzl.ter_music.Lyrics`，方法
-`GetLyrics`，信号 `LyricsChanged`。JSON之构与调用之例见
+`GetLyrics`、`GetDocument` 与 `SetSource`（于内嵌歌辞与外部歌辞之间切换），
+信号 `LyricsChanged`。JSON之构与调用之例见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
 
-同一对象之路，复布二接口，俾他器得读曲目之文、文书封面与音程，且得御其器：
+同一对象之路，复布四接口，俾他器得读曲目之文、文书封面与音程，且得御其器：
 
 - `org.yxzl.ter_music.Info`（唯读）：`GetInfo`、`GetTrackInfo`、`GetProgress`、
   `GetLyricsLines`、`GetCoverArt(charset, cols, rows)`、`GetDisplay(options)`
   （即 `ter-music show` 所出之文，毫厘不异）、`InstanceInfo`，及信号
   `InfoChanged`、`ProgressChanged`（每秒至多一发）与 `CoverChanged`。
 - `org.yxzl.ter_music.Control`：传输、跳转、音量、迅疾之度、播弄之制、
-  `OpenPath`、`PlayIndex`、`GetPlaylist`、`ReloadConfig` 与 `Quit`。
-- `org.yxzl.ter_music.Playlist` 与 `.Queue`：载列、序次、筛择乐籍，并可阅
-  与改播弄之队；二者皆以“可径绘之分页”应（回书不逾二百五十六千字节，
-  每页常二百行）。
-- `org.yxzl.ter_music.Library` 及 `.Favorites`、`.History`、`.DirHistory`：
-  览乐师、专集、流派、曲目，索之、重扫之，并收存与史录之读改。
+  `ReloadConfig` 与 `Quit`。载入内容**不**在其列——内容由前端以队列之形下付。
+- `org.yxzl.ter_music.Queue`：核心之**径表队列**——
+  `Set`/`Append`/`InsertAfter`/`RemoveAt`/`MoveUp`/`MoveDown`/`Clear`/
+  `Shuffle`/`PlayAt` 与分页读取 `Get(offset, count)`，并广播 `QueueChanged`
+  （条目之数、当下之标、版本之号）。惟受本地之径；一次所写不逾五百条，
+  一次所读不逾千条。
 - `org.yxzl.ter_music.Config`：惟此一门可改核心之制。远方服务器之条目**不**在其中，
   乃前端所守（见下文）。
-- `Info.GetInfo` 以 `core.api_version`（今为 `3`）与所备方法之目相质，客可先验其合否。
-  第三版去 `Remote` 接口与 `track.is_remote` 之目，且凡路径之参惟受本地者。
+- `Info.GetInfo` 以 `core.api_version`（今为 `4`）与所备方法之目相质，客可先验其合否。
+  第三版去 `Remote` 接口与 `track.is_remote` 之目，且凡路径之参惟受本地者；
+  第四版以径表语义之 `Queue` 代内容之接口（`Playlist`、`Library`、`Favorites`、
+  `History`、`DirHistory`）——内容归于前端。
 - `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer` 俱已备，
   故 `busctl --user introspect`／`gdbus introspect` 可行。
 - MPRIS之Metadata复载 `xesam:url`（恒为 `file://` 之URI，虽自远方而来者亦为本地之藏径）
@@ -661,7 +701,7 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线，故宿主之器与包内符令所见之对象路径与接口同一。
 
 ### 九 节度之文
-节度之文存于`~/.config/ter-music/config.xml`（v2.2 XML格式，经libxml2解析）。器初启时将自动创之（若有v1 config.json则自动迁之）。
+节度之文存于`~/.config/ter-music/config.xml`（XML格式，经libxml2解析；启器时迁至当前版本）。器初启时将自动创之（若有v1 config.json则自动迁之）。
 
 **节度之项**：
 - `default_startup_path`：默认启行之目录
@@ -682,6 +722,9 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
 - `sort_mode`：排序之式（0=默、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
+- `core_exit_when_no_frontend`：无前端接入时，令核心自退（0/1，默 0）。
+  默者，「闭文墨之界而乐声不绝」；置 1 者，最后一个前端既去、逾十秒之宽限，
+  核心乃退
 - 远程服器之连（SMB/SFTP/FTP/WebDAV/HTTP）**不**存于 `config.xml`：
   前端自藏于同目录之 `remote.xml`（服务器条目与密码密文，权为 0600），
   所下之曲藏于 `$XDG_CACHE_HOME/ter-music/remote/`
@@ -791,14 +834,14 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 所有用户数据，皆存于`~/.config/ter-music/`目录之下：
 ```
 ~/.config/ter-music/
-├── config.xml       # 节度之文（v2.2 XML格式，libxml2解析）
+├── config.xml       # 节度之文（XML格式，libxml2解析，启时迁至当今之版）
 ├── library.db       # SQLite数据库（音乐库、珍存、曲帙、往迹）
-├── queue.txt        # 播弄队列恒存
+├── remote.xml       # 远方服器之目（前端自有，核心不读）
 ├── lang/            # 用户语言包目录（覆盖内置翻译）
 └── config.json.bak  # v1节度首迁之自动备份（如有）
 ```
 
-**注：** v1.0之JSON存储（config.json、独立favorites、history、dir_history、playlists/）已尽替以SQLite数据库library.db。v2.0初启时将自动迁移。
+**注：** 播弄队列不复落盘为文：队列乃内容，由前端于再启之时自曲库／上次所开之目录重建，游标则在启 `resume_last_playback` 时由核心复之。v1.0之JSON存储（config.json、独立favorites、history、dir_history、playlists/）已尽替以SQLite数据库library.db。v2.0初启时将自动迁移。
 
 乐集之面不复存于 `~/.config/ter-music/`。所提之面乃受管之临时JPEG文，
 在 `/tmp/ter-music-cover-*.jpg`，留最近十曲，退器时去之。
@@ -897,71 +940,84 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 - 按`Ctrl+C`/`Ctrl+D`/`Ctrl+\`（器将正理而退，通SIGHUP/SIGTERM/SIGINT之号）
 - 于选项目录中择"Exit"（即`F9`键）
 
+退文墨之界而不止乐声：播弄在核心之中，当下之曲续播不辍，`ter-music show` ／ `ter-music next` 于任何端闱依然可用。欲明止之，请用 `ter-music daemon stop`；若欲核心自退，则设 `core_exit_when_no_frontend` 为 `true`（见 [二之三 前端与核心](#二之三-前端与核心)）。
+
 ## 卷六 术法之架构
+
+### 一 前端与核心
+
+本器之码，环二面而立：二面共一进程之像，而职守未尝相侵。一次译纂可惟行核心（役使），亦可惟行前端（文墨之界／符令行），二者惟于 `player` 之门面与 D-Bus 之面相接：
+
+| 面 | 进程 | 所掌之事 |
+| --- | --- | --- |
+| **核心／播弄之役** | `ter-music daemon foreground`（由 `daemon start`、D-Bus 按需唤起或 systemd 用户役使拉起） | 音声之器与解绎、奉行播弄之队列（**惟识径**）、传输之令、音量／迅疾／播弄之制、均衡器、当下曲目之文（歌辞、文书封面、频谱）、所布之 `Lyrics`／`Info`／`Control`／`Queue`／`Config` 接口、前端之登记与心跳、节度之文 |
+| **前端／内容之客** | `ter-music`（文墨之界）、`ter-music play\|show\|…`（符令行） | 目录之扫描与元数据、SQLite曲库与FTS5搜求、自定曲帙、珍存／往迹／目录往迹、排序／筛择、远方之源与其下载之藏、ncurses文墨之界 |
+
+其接缝刻意至薄，亦便于验：
+
+- **`player/` 门面**：`player.c` 分付于 `player_local.c`（进程内播弄，留作迁移之基线）或 `player_remote.c`（D-Bus之客，默用者）。界面惟呼门面，故前端可独立营构，同一套文墨之界亦得御任一面。
+- **`queue/backend_queue.c`**：核心之径表——序次、游标与版本之号，兼条目之元数据（径、标题、艺术家、专辑、时长、CUE之偏与轨号、歌辞之源）。`audio/play_queue.c` 乃进程内后端所用之薄转发，`playlist/playlist_queue.c` 乃惟一的「内容 → 核心队列」之桥。
+- **D-Bus之面，`api_version 4`**：`Queue.Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **惟受本地之径**（远方之URL见拒），一次所写不逾五百条，分页所读以 `RPC_PAGE_MAX`（千条）为限；`QueueChanged` 广播条目之数／当下之标／版本之号，故任意多之前端皆得同其步。
+- **前端之登记**：每前端皆当登记而心跳，`core_exit_when_no_frontend` 与 `Info.GetInfo.frontends` 皆本于此。断线非致命：前端按指数退避（1／2／4／8／15／30 秒）而复接，并补推其内容之队列——盖核心自身无内容也。
+
+### 二 架构门禁
+
+二脚本守此分界，皆已入于CI：
+
+| 门禁 | 符令 | 律 |
+| --- | --- | --- |
+| 后端之纯 | `scripts/test/check-core-purity.sh` | 后端之目（`audio config core info lyrics media queue` 与 `cli/daemon.c`）不得有远方乐源之符号，亦不得引内容／界面（playlist、library、search、界面渲染、前端之首文） |
+| 前端之纯 | `scripts/test/check-ui-purity.sh` | 界面之达播弄之面，**惟**经 `player` 门面——不得直连引擎播弄之全局或播弄之令 |
+
+与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`。
+
+### 三 模块地图
+
 本器采分曹营治之制。**源文**在 `src/org.yxzl.ter-music/<module>/` 目录；**公首文**在 `include/org.yxzl.ter-music/<module>/` 目录。主干部伍列于左：
 
-- **main/**：众部之总持，符令行参数之铨叙
-- **ui/**：文墨界子系统 — 渲染、局度、按键之应接
-  - **ui.c**：主事循环，视之迁转，按键之分发
-  - **controls.c**：控御栏（播/停/上/下/音量/速度/模式弹出菜单）
-  - **settings.c**：节度之视（侧栏 + 右侧选择菜单）
-  - **menus.c**：选单栏、功能键（F1-F9）、弹出菜单之管摄
-  - **playlist_render.c**：文件浏览与播弄队列之视渲染
-  - **playlist_view.c**：曲帙营理之视
-  - **favorites.c**：珍存之视
-  - **history.c**：播弄往迹之视
-  - **info_view.c**：关于之视
-  - **help_view.c**：助益之视
-  - **language_view.c**：语言选择之视（i18n语言包览器）
-  - **layout.c**：端闱局度之营理（窗口修广之调）
-  - **progress_ui.c**：音程条贯渲染（弹出菜单启时停UI）
-  - **visualizer.c**：音频频谱可视化
-  - **lyrics.c**：歌辞之加载、解析、同步显明（内嵌歌辞之能）
-  - **image_loader.c**：专辑封面图之加载处置（PNG/JPEG）
-  - **braille_art.c**：点阵绘艺，以显专辑封面于端闱
-  - **dialog.c**：对谈之框
-  - **mouse.c**：鼠迹交互之应接
-  - **scrollbar.c**：滚动条复用模块
-  - **utf8.c**：UTF-8字符串具
-  - **util.c**：共享UI具（侧栏、色谱等）
-- **audio/**：音声引擎 — 解绎、播弄、DSP
-  - **audio.c**：音声总控、音量管摄、播弄之制切换、后端营理
-  - **playback_thread.c**：独立播弄线程、FFmpeg解绎循环、播毕之应接
-  - **segment_buffer.c**：PCM数据环形缓冲区，控RSS内存约20MB
-  - **play_queue.c**：播弄队列（Fisher-Yates洗牌、17种播弄之制导航）
-  - **atempo.c**：FFmpeg atempo滤镜，变速播弄
-  - **equalizer.c**：10段ISO图示均衡器，双二阶IIR滤波器
-  - **audio_visualizer.c**：基于FFT之频谱数据提取，供可视化之需
-  - **backend_ops.c**：统一后端操作接口（音量、延时、设备初始化）
-  - **backend/pipewire.c**：PipeWire音声输出（dlopen运行时加载，无编译时依赖）
-  - **backend/pulse.c**：PulseAudio音声输出
-  - **backend/alsa.c**：ALSA音声输出
-- **playlist/**：乐目加载、元数据、CUE解析
-  - **playlist.c**：目录搜检（**递归**子目录搜索）、元数据读取（FFmpeg + APEv2标签）、CUE文件检知、专辑封面提取与MRU暂存、同目录封面回退
-  - **cue_parser.c**：CUE文件逐行解析器，分轨播弄
-  - **encoding.c**：CUE文字符编码自动检知与转换（iconv）
-  - **ape_tag.c**：原生APEv2标签解析器，以增元数据之提取
-- **library/**：SQLite音乐库
-  - **library.c**：数据库模式（tracks + FTS5全文搜检、珍存、往迹、曲帙）、扫描引擎、CRUD操作
-  - **browser/browser.c**：音乐库览器UI（艺术家 → 专辑 → 曲目导航）
-- **config/**：节度子系统
-  - **config.c**：XML节度加载/保存（libxml2、schema v2.2）
-  - **migration.c**：v1 config.json → v2 config.xml 迁之
-  - **schema.h**：XML元素/属性常量定义
-  - **crypto.c**：前端远程藏所之密码加密解密
-- **remote/**：**前端**远程乐源——`remote.c`（SMB/SFTP/FTP/WebDAV/HTTP，libcurl）、
-  `remote_store.c`（服务器之目，藏于 `<制目录>/remote.xml`）、
-  `remote_cache.c`（后台下载与本地之藏）
-- **ui/remote_view.c**：**节度 → 远程设备**之页（览、下载而即播），
-  所下之本地径由 `player` 之门面付于核心
-- **media_session.c**：MPRIS D-Bus媒体会话、专辑封面URL、歌词API，兼Info／Control／Introspectable诸接口（可择）
-- **info/info.c**：播弄信息之快照与渲染（文、JSON、点阵／ASCII封面之缓存），为 `ter-music show` 与D-Bus之Info接口所共用
-- **cli/cli.c, cli/cli_client.c**：CLI子目之分发，及 `play`／`pause`／`show` 等所用之薄D-Bus客
-- **cli/daemon.c**：无文界之背景播弄役使（`daemon start` / `daemon foreground`）
-- **app/open.c**：开径与会话恢复之共用元术（为文墨之界、daemon与 `Control.OpenPath` 所共用）
-- **util/json.c**：歌词与Info二接口所共用之小JSON书写之器
-- **search.c**：异步搜求之能（拼音搜求）
-- **logger.c**：日志纪事之部
+- **main/main.c**：众部之总持、参数之铨叙、前端启途之分叉（远端之式走 `frontend_init_config()`，本地基线走 `init_all_persistent_data()`）
+- **player/**：播弄之门面——`player.c`（分付）、`player_local.c`（进程内之后端）、
+  `player_remote.c`（D-Bus之客，默用者），其宣言见
+  `include/…/player/player_backend.h`
+- **core/core.c**：核心之启导，为役使与进程内基线所共用
+- **cli/cli.c、cli/cli_client.c**：**前端**之符令行子目分发，及
+  `play`／`pause`／`show`／……所用之薄D-Bus客；`play` 于本进程扫描内容、
+  成径表之队列而下付
+- **cli/daemon.c**：**核心**之进程——节度、播弄与前端之守望；绝不扫描目录
+- **queue/backend_queue.c**：核心之径表（序次、游标、版本之号、本地径之验、
+  单次下付之限），兼CUE之前瞻
+- **audio/**：**核心**之音声引擎——解绎与播弄之线、环形之缓冲、`play_queue.c`
+  （转发之层，兼本地基线所用之界面之镜）、atempo之变速、10段均衡器、FFT频谱之数、
+  `backend_ops.c` 与 PipeWire／PulseAudio／ALSA 之输出
+- **lyrics/**：**核心**之歌辞引擎——寻索、内嵌（斐氏）与外部 `.lrc` 之解析、
+  来源之偏好、时轴与分页之构
+- **ui/**：**前端**之ncurses文墨之界——主事之循环、控御之栏、节度、选单、
+  曲帙／队列之视、珍存、往迹、浏览之视、局度、音程、可视化之绘、`lyrics.c`
+  （惟司渲染，其引擎在核心）、点阵绘艺、封面图之加载、对谈之框、鼠迹、滚动条
+  与共用之器
+- **media/**：**核心**之D-Bus会话——`session.c`（总线之名、自省、分发）、
+  `rpc_common.c`（回复之助、分页）、`rpc_info.c`、`rpc_control.c`、
+  `rpc_queue.c`、`rpc_lyrics.c`、`rpc_config.c`，及MPRIS媒体播弄之接口
+- **info/info.c**：播弄信息之快照与渲染（文、JSON、点阵／ASCII封面之缓存），
+  为 `ter-music show` 与 `Info` 接口所共用
+- **config/**：节度之统——`config.c`（libxml2之读写、版本之迁、默认之值）、
+  `config_json.c` + `migration.c`（v1 `config.json` → XML）、schema之常量、
+  `crypto.c`（前端远程藏所之密码加密解密）
+- **playlist/**：**前端**之曲帙加载与元数据——递归目录之扫、斐氏与原生APEv2
+  标签之读、CUE之检知与编码之自识、专辑封面之提与MRU之藏、
+  `playlist_queue.c`（内容 → 径表 之桥）
+- **library/**：**前端**之SQLite曲库——库之模式（tracks与FTS5、珍存、往迹、
+  曲帙）、扫描之引擎、CRUD，及 `browser/browser.c`（艺术家 → 专辑 → 曲目之导）
+- **remote/**：**前端**之远方乐源——`remote.c`（SMB/SFTP/FTP/WebDAV/HTTP，
+  libcurl）、`remote_store.c`（服务器之目，藏于 `<制目录>/remote.xml`）、
+  `remote_cache.c`（后台下载与本地之藏）；`ui/remote_view.c` 乃
+  **节度 → 远程设备**之页
+- **app/open.c**：开径与会话恢复之共用元术，为文墨之界与符令行 `play` 所用
+  （不复付于 `Control.OpenPath`）
+- **util/json.c**：有界之小JSON读写器，为 `Lyrics`／`Info` 接口与队列之载荷所共用
+- **util/utf8.c**：二面皆需之UTF-8之具（核心之歌辞、符令行之出）
+- **search/search.c**：异步之搜求（兼拼音，前端）
+- **i18n/、logger/**：语言包与日志纪事之统（二面共享）
 
 ## 卷七 律例
 本籍遵GNU General Public License v3.0公许之律。君得自由用之、改之、布之，然所改之裔作，必同此律以开源，无得私匿。
