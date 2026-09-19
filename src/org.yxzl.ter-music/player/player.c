@@ -425,6 +425,12 @@ void player_set_visualizer_active(int active)
 
 /* ── 配置 ───────────────────────────────────────────────────────── */
 
+int player_config_persist(void)
+{
+    return use_remote() ? player_remote_config_persist()
+                        : player_local_config_persist();
+}
+
 int player_config_refresh(void)
 {
     return use_remote() ? player_remote_config_refresh() : player_local_config_refresh();

@@ -81,6 +81,10 @@ void eq_set_all_gains(const int gains[EQ_BAND_COUNT]);
  */
 void eq_apply_preset(int idx);
 
+/* 预设的增益表（只读）：前端在远端模式下需要自己把预设写进配置镜像再下发，
+ * 核心侧没有独立的"设预设"命令。索引越界返回 NULL。 */
+const int *eq_preset_gains(int idx);
+
 #ifdef __cplusplus
 }
 #endif

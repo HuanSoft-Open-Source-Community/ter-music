@@ -555,6 +555,14 @@ int player_local_config_refresh(void)
     return 0;   /* 本地后端里 g_app_config 就是权威副本 */
 }
 
+int player_local_config_persist(void)
+{
+    /* 本地后端与核心同进程：它就是配置的拥有者 */
+    save_config();
+    g_local.config_revision++;
+    return 0;
+}
+
 int player_local_config_apply_json(const char *patch_json)
 {
     char reason[256];

@@ -205,6 +205,9 @@ jobs:
       - name: Frontend purity (UI must not touch the playback surface)
         run: scripts/test/check-ui-purity.sh
 
+      - name: Config ownership (the front end must not write the core config)
+        run: scripts/test/check-config-ownership.sh
+
       - name: Unit tests
         run: scripts/test/run-unit-tests.sh
 

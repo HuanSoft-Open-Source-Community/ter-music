@@ -306,7 +306,7 @@ static void prompt_folder_input(int append_mode) {
                 
                 if (g_app_config.remember_last_path) {
                     snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", expanded_path);
-                    save_config();
+                    player_config_persist();
                 }
 
                 if (!append_mode || !had_existing_playlist) {

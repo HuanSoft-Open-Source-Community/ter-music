@@ -13,6 +13,7 @@
 #include "ui/menu_internal.h"
 #include "ui/scrollbar.h"
 #include "config/config.h"
+#include "player/player.h"
 #include "logger/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -225,7 +226,7 @@ void handle_language_input(int ch)
                     strncpy(g_app_config.ui_language, sel,
                             sizeof(g_app_config.ui_language) - 1);
                     g_app_config.ui_language[sizeof(g_app_config.ui_language) - 1] = '\0';
-                    save_config();
+                    player_config_persist();
                     help_free_lines();
                     show_status_message(i18n_get("lang_mgr.switched"));
                     rerender_active_view();
@@ -262,7 +263,7 @@ void handle_language_input(int ch)
                     if (strcmp(sel, i18n_current_lang()) == 0) {
                         i18n_reload("zh_CN");
                         strcpy(g_app_config.ui_language, "zh_CN");
-                        save_config();
+                        player_config_persist();
                         help_free_lines();
                         lang_refresh_list();
                         show_status_message(i18n_get("lang_mgr.deleted"));

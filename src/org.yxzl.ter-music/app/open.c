@@ -10,6 +10,7 @@
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "config/config.h"
+#include "player/player.h"
 #include "logger/logger.h"
 #include "playlist/playlist.h"
 #include "ui/menus.h"
@@ -238,7 +239,7 @@ void app_clear_saved_session(void)
     g_app_config.last_played_position = 0;
     g_app_config.last_played_folder_path[0] = '\0';
     g_app_config.last_played_track_path[0] = '\0';
-    save_config();
+    player_config_persist();
 }
 
 int app_restore_session(int honor_autoplay,
@@ -300,7 +301,7 @@ int app_restore_session(int honor_autoplay,
     if (g_app_config.remember_last_path && path[0] != '\0') {
         snprintf(g_app_config.last_opened_path,
                  sizeof(g_app_config.last_opened_path), "%s", path);
-        save_config();
+        player_config_persist();
     }
 
     /* 队列已由 load_playlist/append_playlist 经播放列表→队列桥下发到后端；

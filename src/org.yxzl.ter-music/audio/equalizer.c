@@ -326,6 +326,14 @@ static const int g_eq_presets[EQ_PRESET_COUNT][EQ_BAND_COUNT] = {
     /* 9 */    {   0,  0,  0,  0,  0,  0,  0,  0,  0,  0 }
 };
 
+const int *eq_preset_gains(int idx)
+{
+    if (idx < 0 || idx >= EQ_PRESET_COUNT) {
+        return NULL;
+    }
+    return g_eq_presets[idx];
+}
+
 void eq_apply_preset(int idx)
 {
     if (idx < 0) idx = 0;

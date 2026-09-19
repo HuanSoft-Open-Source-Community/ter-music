@@ -22,6 +22,7 @@
 #include "ui/ui.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
+#include "player/player.h"
 #include "core/core.h"
 #include "logger/logger.h"
 #include "search/search.h"
@@ -895,7 +896,7 @@ void toggle_ui_language(void)
     else
         strcpy(g_app_config.ui_language, "zh_CN");
     i18n_reload(g_app_config.ui_language);
-    save_config();
+    player_config_persist();
     help_free_lines();
     rerender_active_view();
 }

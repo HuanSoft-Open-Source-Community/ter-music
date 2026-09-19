@@ -185,6 +185,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/remote/remote_store.c
     src/org.yxzl.ter-music/remote/remote_cache.c
     src/org.yxzl.ter-music/config/config.c
+    src/org.yxzl.ter-music/config/config_diff.c
     src/org.yxzl.ter-music/config/migration.c
     src/org.yxzl.ter-music/config/crypto.c
     src/org.yxzl.ter-music/config/config_json.c

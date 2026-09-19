@@ -20,8 +20,12 @@
  */
 
 #include "player/player.h"
+#include "player/player_backend.h"
 
+#include "audio/equalizer.h"
 #include "cli/cli.h"
+#include "config/config_diff.h"
+#include "config/config_json.h"
 #include "core/core.h"
 #include "i18n/i18n.h"
 #include "logger/logger.h"
@@ -113,6 +117,10 @@ typedef struct {
     int lyrics_source;
     int lyrics_current_index;
     LyricLine lyrics_lines[PLAYER_LYRIC_PAGE_MAX];
+
+    /* 上次已知的核心配置：player_config_persist() 只把相对它的差异下发 */
+    AppConfig synced_config;
+    int config_synced;
 } RemoteState;
 
 const char *player_remote_play_mode_name_of(PlayMode mode, int use_english);
@@ -1505,22 +1513,59 @@ static int remote_config_patch(const char *patch_json)
     return rc == 0 && ok ? 0 : -1;
 }
 
+/* 核心是配置的拥有者：把当前镜像记为"已同步"基线 */
+static void remote_config_mark_synced(void)
+{
+    g_remote.synced_config = g_app_config;
+    g_remote.config_synced = 1;
+}
+
+/* 把前端对镜像的改动换算成最小补丁下发；无变化则不发任何消息 */
+int player_remote_config_persist(void)
+{
+    if (!g_remote.connected) {
+        return -1;
+    }
+    if (!g_remote.config_synced) {
+        /* 还没有基线（刚连上）：先取一次核心配置，避免把整份配置推过去 */
+        if (player_remote_config_refresh() != 0) {
+            remote_config_mark_synced();
+            return 0;
+        }
+        return 0;
+    }
+
+    char patch[4096];
+    size_t len = config_diff_json(&g_remote.synced_config, &g_app_config, patch, sizeof(patch));
+    if (len <= 2) {
+        return 0;   /* "{}"：没有变化 */
+    }
+    if (remote_config_patch(patch) != 0) {
+        log_warn("player_remote", "Config persist rejected: %.200s", patch);
+        return -1;
+    }
+    remote_config_mark_synced();
+    return 0;
+}
+
 int player_remote_eq_enabled(void) { return g_app_config.eq_enabled; }
 
+/* 均衡器属于配置（equalizer 分区）：远端模式统一"改镜像 → persist 差异"，
+ * 不再手写补丁串——原先的 eq_enabled/eq_preamp/eq_band_gains/eq_preset 键都
+ * 不在配置 schema 里，Config.Set 会整包拒绝。 */
 void player_remote_eq_set_enabled(int enabled)
 {
-    char patch[128];
-    snprintf(patch, sizeof(patch), "{\"preferences\":{\"eq_enabled\":%s}}",
-             enabled ? "true" : "false");
-    remote_config_patch(patch);
+    g_app_config.eq_enabled = enabled ? 1 : 0;
+    player_remote_config_persist();
 }
 
 void player_remote_eq_set_band_gain(int band, float gain)
 {
-    char patch[256];
-    snprintf(patch, sizeof(patch),
-             "{\"preferences\":{\"eq_band_gains\":{\"%d\":%.2f}}}", band, (double)gain);
-    remote_config_patch(patch);
+    if (band < 0 || band >= EQ_BAND_COUNT) {
+        return;
+    }
+    g_app_config.eq_band_gains[band] = (int)gain;
+    player_remote_config_persist();
 }
 
 float player_remote_eq_get_band_gain(int band)
@@ -1533,16 +1578,21 @@ float player_remote_eq_get_band_gain(int band)
 
 void player_remote_eq_set_preamp(float preamp)
 {
-    char patch[128];
-    snprintf(patch, sizeof(patch), "{\"preferences\":{\"eq_preamp\":%.2f}}", (double)preamp);
-    remote_config_patch(patch);
+    g_app_config.eq_preamp = (int)preamp;
+    player_remote_config_persist();
 }
 
 void player_remote_eq_apply_preset(int preset)
 {
-    char patch[128];
-    snprintf(patch, sizeof(patch), "{\"preferences\":{\"eq_preset\":%d}}", preset);
-    remote_config_patch(patch);
+    const int *gains = eq_preset_gains(preset);
+    if (!gains) {
+        return;
+    }
+    for (int b = 0; b < EQ_BAND_COUNT; b++) {
+        g_app_config.eq_band_gains[b] = gains[b];
+    }
+    g_app_config.eq_enabled = 1;
+    player_remote_config_persist();
 }
 
 /* ── 配置 ───────────────────────────────────────────────────────── */
@@ -1559,6 +1609,13 @@ int player_remote_config_refresh(void)
     if (rc != 0) {
         return -1;
     }
+    /* 回填镜像（GetAll 顶层带 version 键，config_apply_json 容忍它） */
+    char reason[256];
+    if (config_apply_json(json, reason, sizeof(reason)) != 0) {
+        log_warn("player_remote", "Config mirror rejected the core payload: %s", reason);
+        return -1;
+    }
+    remote_config_mark_synced();
     g_remote.config_revision++;
     return 0;
 }

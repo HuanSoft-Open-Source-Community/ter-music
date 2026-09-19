@@ -804,7 +804,7 @@ static void adjust_settings_theme_option(int option_index, int delta)
 
     *color_values[option_index] = next;
     apply_color_theme();
-    save_config();
+    player_config_persist();
 }
 
 static void edit_default_startup_path(void)
@@ -838,7 +838,7 @@ static void edit_default_startup_path(void)
             strncpy(g_app_config.default_startup_path, input_path, MAX_PATH_LEN - 1);
             g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
         }
-        save_config();
+        player_config_persist();
         show_status_message(i18n_get("settings.path.saved"));
     }
 }
@@ -857,33 +857,33 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
     switch (option_index) {
         case SETTINGS_IDX_AUTO_PLAY:
             g_app_config.auto_play_on_start = !g_app_config.auto_play_on_start;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_REMEMBER_PATH:
             g_app_config.remember_last_path = !g_app_config.remember_last_path;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_CLEAR_HISTORY:
             g_app_config.clear_history_on_startup = !g_app_config.clear_history_on_startup;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_LATENCY:
             if (delta == 0) delta = 1;
             g_app_config.audio_latency_ms = clamp_latency_ms(g_app_config.audio_latency_ms + delta * 10);
-            save_config();
+            player_config_persist();
             show_status_message(i18n_get("settings.opt.latency_hint"));
             break;
         case SETTINGS_IDX_SHOW_LYRICS:
             g_app_config.show_lyrics_panel = !g_app_config.show_lyrics_panel;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_SHOW_ALBUM_COVER:
             g_app_config.show_album_cover = !g_app_config.show_album_cover;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_SEAMLESS_PRELOAD:
             g_app_config.seamless_preload = !g_app_config.seamless_preload;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_DEFAULT_PLAY_MODE:
             if (delta < 0) {
@@ -893,7 +893,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             } else {
                 g_app_config.default_play_mode = (g_app_config.default_play_mode + 1) % PLAY_MODE_COUNT;
             }
-            save_config();
+            player_config_persist();
             player_set_play_mode((PlayMode)g_app_config.default_play_mode);
             show_status_message(i18n_get("settings.play_mode.updated"));
             break;
@@ -903,11 +903,11 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             } else {
                 g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment + 1) % 3;
             }
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_ADVANCED_PLAY_MODES:
             g_app_config.advanced_play_modes_enabled = !g_app_config.advanced_play_modes_enabled;
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_DEFAULT_SPEED: {
             static float speed_ratios[] = {0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
@@ -926,7 +926,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             }
             g_app_config.default_playback_speed = speed_ratios[current_idx];
             player_set_speed(g_app_config.default_playback_speed);
-            save_config();
+            player_config_persist();
             char msg[64];
             snprintf(msg, sizeof(msg), "%s: %.2fx",
                      i18n_get("settings.speed.updated"),
@@ -944,18 +944,18 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                     (g_app_config.info_preset + 1) % INFO_PRESET_COUNT;
             }
             info_apply_preset_to_config(g_app_config.info_preset);
-            save_config();
+            player_config_persist();
             show_status_message(i18n_get("settings.info.saved"));
             break;
         case SETTINGS_IDX_INFO_COVER:
             g_app_config.info_show_cover = !g_app_config.info_show_cover;
             info_mark_custom();
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_INFO_PROGRESS:
             g_app_config.info_show_progress = !g_app_config.info_show_progress;
             info_mark_custom();
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_INFO_COVER_SIZE: {
             int index = info_cover_size_index();
@@ -967,7 +967,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.info_cover_cols = k_info_cover_sizes[index][0];
             g_app_config.info_cover_rows = k_info_cover_sizes[index][1];
             info_mark_custom();
-            save_config();
+            player_config_persist();
             break;
         }
         case SETTINGS_IDX_INFO_COVER_CHARSET:
@@ -979,7 +979,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                     (g_app_config.info_cover_charset + 1) % INFO_COVER_CHARSET_COUNT;
             }
             info_mark_custom();
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_INFO_PROGRESS_STYLE:
             if (delta < 0) {
@@ -990,7 +990,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                     (g_app_config.info_progress_style + 1) % INFO_PROGRESS_STYLE_COUNT;
             }
             info_mark_custom();
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_INFO_LYRICS:
             if (delta < 0) {
@@ -1001,7 +1001,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                     (g_app_config.info_lyrics_lines + 1) % (INFO_LYRICS_MAX + 1);
             }
             info_mark_custom();
-            save_config();
+            player_config_persist();
             break;
         case SETTINGS_IDX_AUDIO_BACKEND: {
             int options[] = {AUDIO_BACKEND_AUTO, AUDIO_BACKEND_PIPEWIRE,
@@ -1028,7 +1028,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                 break;
             } while (attempts < count);
             g_app_config.audio_backend = options[next];
-            save_config();
+            player_config_persist();
             show_status_message(i18n_get("settings.backend.hint"));
             break;
         }
@@ -1038,7 +1038,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             } else {
                 g_app_config.sort_mode = (g_app_config.sort_mode + 1) % 5;
             }
-            save_config();
+            player_config_persist();
             recompute_sort_order();
             show_status_message(i18n_get("settings.sort.applied"));
             break;
@@ -1048,13 +1048,13 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             } else {
                 g_app_config.cue_encoding = (g_app_config.cue_encoding + 1) % CUE_ENCODING_COUNT;
             }
-            save_config();
+            player_config_persist();
             show_status_message(i18n_get("settings.cue.saved"));
             break;
         case SETTINGS_IDX_EQ_ENABLED:
             g_app_config.eq_enabled = !g_app_config.eq_enabled;
             player_eq_set_enabled(g_app_config.eq_enabled);
-            save_config();
+            player_config_persist();
             show_status_message(g_app_config.eq_enabled
                 ? i18n_get("eq.enabled")
                 : i18n_get("eq.disabled"));
@@ -1065,7 +1065,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             if (g_app_config.eq_preamp < EQ_PREAMP_MIN) g_app_config.eq_preamp = EQ_PREAMP_MIN;
             if (g_app_config.eq_preamp > EQ_PREAMP_MAX) g_app_config.eq_preamp = EQ_PREAMP_MAX;
             player_eq_set_preamp(g_app_config.eq_preamp);
-            save_config();
+            player_config_persist();
             break;
         default:
             if (option_index >= SETTINGS_IDX_EQ_BAND_0 &&
@@ -1078,7 +1078,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                 if (g_app_config.eq_band_gains[band] > EQ_GAIN_MAX)
                     g_app_config.eq_band_gains[band] = EQ_GAIN_MAX;
                 player_eq_set_band_gain(band, g_app_config.eq_band_gains[band]);
-                save_config();
+                player_config_persist();
             }
             break;
     }
@@ -1124,7 +1124,7 @@ static void close_sel_menu(int apply)
         switch (g_sel_src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 g_app_config.default_play_mode = g_sel_idx;
-                save_config();
+                player_config_persist();
                 player_set_play_mode((PlayMode)g_app_config.default_play_mode);
                 show_status_message(i18n_get("settings.play_mode.updated"));
                 break;
@@ -1132,7 +1132,7 @@ static void close_sel_menu(int apply)
             case SETTINGS_IDX_DEFAULT_SPEED:
                 g_app_config.default_playback_speed = player_speed_steps(NULL)[g_sel_idx];
                 player_set_speed_index(g_sel_idx);
-                save_config();
+                player_config_persist();
                 {
                     char msg[64];
                     snprintf(msg, sizeof(msg), "%s: %.2fx",
@@ -1156,47 +1156,47 @@ static void close_sel_menu(int apply)
                     }
                     idx++;
                 }
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.backend.hint"));
                 break;
             }
 
             case SETTINGS_IDX_SORT_MODE:
                 g_app_config.sort_mode = g_sel_idx;
-                save_config();
+                player_config_persist();
                 recompute_sort_order();
                 show_status_message(i18n_get("settings.sort.applied"));
                 break;
 
             case SETTINGS_IDX_CUE_ENCODING:
                 g_app_config.cue_encoding = g_sel_idx;
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.cue.saved"));
                 break;
 
             case SETTINGS_IDX_LYRICS_ALIGNMENT:
                 g_app_config.lyrics_alignment = g_sel_idx;
-                save_config();
+                player_config_persist();
                 break;
 
             case SETTINGS_IDX_LATENCY: {
                 int latency_opts[] = {20, 40, 60, 80, 100, 120, 150, 200, 250};
                 g_app_config.audio_latency_ms = latency_opts[g_sel_idx];
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.opt.latency_hint"));
                 break;
             }
 
             case SETTINGS_IDX_INFO_PRESET:
                 info_apply_preset_to_config(g_sel_idx);
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
             case SETTINGS_IDX_INFO_FIELDS:
                 g_app_config.info_fields_mask = g_sel_work_mask & INFO_FIELD_ALL;
                 info_mark_custom();
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
@@ -1206,28 +1206,28 @@ static void close_sel_menu(int apply)
                     g_app_config.info_cover_rows = k_info_cover_sizes[g_sel_idx][1];
                 }
                 info_mark_custom();
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
             case SETTINGS_IDX_INFO_COVER_CHARSET:
                 g_app_config.info_cover_charset = g_sel_idx;
                 info_mark_custom();
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
             case SETTINGS_IDX_INFO_PROGRESS_STYLE:
                 g_app_config.info_progress_style = g_sel_idx;
                 info_mark_custom();
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
             case SETTINGS_IDX_INFO_LYRICS:
                 g_app_config.info_lyrics_lines = g_sel_idx;
                 info_mark_custom();
-                save_config();
+                player_config_persist();
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
@@ -1237,7 +1237,7 @@ static void close_sel_menu(int apply)
                 g_app_config.eq_enabled = player_eq_enabled();
                 for (int b = 0; b < EQ_BAND_COUNT; b++)
                     g_app_config.eq_band_gains[b] = player_eq_get_band_gain(b);
-                save_config();
+                player_config_persist();
                 /* Pre-amp is preserved, not reset by preset */
                 break;
 
@@ -1263,7 +1263,7 @@ static void close_sel_menu(int apply)
                         idx++;
                     }
                     apply_color_theme();
-                    save_config();
+                    player_config_persist();
                 }
                 break;
         }
@@ -1836,7 +1836,7 @@ static int handle_sel_input(int ch)
                     if (v != cur && v >= 0 && v < COLORS && v != paired_val) {
                         *cv[g_sel_src] = v;
                         apply_color_theme();
-                        save_config();
+                        player_config_persist();
                     } else if (v == paired_val) {
                         show_status_message(i18n_get("settings.color.same_error"));
                     }
@@ -2390,7 +2390,7 @@ void handle_settings_input(int ch)
 
         case 's':
         case 'S':
-            save_config();
+            player_config_persist();
             show_status_message(i18n_get("status.settings_saved"));
             rerender_settings_view();
             break;

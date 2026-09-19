@@ -500,7 +500,7 @@ int main(int argc, char *argv[]) {
         
         if (g_app_config.remember_last_path) {
             snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", final_path);
-            save_config();
+            player_config_persist();
         }
 
         if (g_app_config.resume_last_playback && !opened_single_file &&

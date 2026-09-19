@@ -206,7 +206,7 @@ void handle_history_input(int ch)
                     exit_current_view();
                     if (g_app_config.remember_last_path) {
                         snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", path);
-                        save_config();
+                        player_config_persist();
                     }
                     char msg[96];
                     snprintf(msg, sizeof(msg), "%s %d %s",

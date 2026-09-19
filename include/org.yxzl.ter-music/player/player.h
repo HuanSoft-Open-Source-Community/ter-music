@@ -182,6 +182,11 @@ int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap
 int player_config_refresh(void);
 /* 应用局部 JSON 补丁（键名同 config.xml）：本地镜像 + 核心落盘 */
 int player_config_apply_json(const char *patch_json);
+
+/* 把前端对配置镜像的改动落到配置的拥有者：本地后端 = 直接写 config.xml；
+ * 远端后端 = 只把"相对上次已知核心配置的差异"经 Config.Set 下发。
+ * 前端不得自己调用 save_config()（见 check-config-ownership.sh）。 */
+int player_config_persist(void);
 int player_config_set_int(const char *key, int value);
 int player_config_set_string(const char *key, const char *value);
 int player_config_set_float(const char *key, float value);

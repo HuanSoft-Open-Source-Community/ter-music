@@ -151,6 +151,30 @@ else
     bad "缺少状态快照"
 fi
 
+info "断言：前端设置改动经门面到达核心（配置归属）"
+core_last_path="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Config.GetAll 2>/dev/null |
+    python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+try:
+    doc = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit
+paths = doc.get("paths") or {}
+print(paths.get("last_opened_path") or "")
+' 2>/dev/null || true)"
+if [ -n "$core_last_path" ] && [ "$core_last_path" = "http://127.0.0.1:$PORT/" ]; then
+    ok "核心配置收到了前端经门面下发的 last_opened_path（$core_last_path）"
+elif [ -n "$core_last_path" ]; then
+    bad "核心配置里的 last_opened_path 不是本次远程 URL：$core_last_path"
+else
+    bad "核心配置里没有 last_opened_path（前端 persist 未到达核心）"
+fi
+
+# 收尾：停掉前端拉起的核心，避免在真实会话总线上留下残留进程
+"$TM_BIN" daemon stop >/dev/null 2>&1 || true
+
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || { KEEP=1; echo "（工作目录保留在 $WORK_DIR）" >&2; }
