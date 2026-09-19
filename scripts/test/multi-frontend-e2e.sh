@@ -144,25 +144,37 @@ fi
 
 info "内容库（SQLite）在多前端读写后仍然可用"
 DB="$XDG_CONFIG_HOME/ter-music/library.db"
-if [ -f "$DB" ]; then
-    if python3 - "$DB" <<'PY'
+if [ ! -f "$DB" ]; then
+    # 内容库属于前端：两种前端模式都必须打开并写入它（曾因"远端模式不初始化内容"
+    # 导致收藏/历史/歌单/会话在退出时全部丢失，故这里缺失即失败）
+    bad "没有生成内容库 $DB（前端未做内容持久化）"
+elif python3 - "$DB" <<'PY'
 import sqlite3, sys
+db = sys.argv[1]
 try:
-    con = sqlite3.connect(sys.argv[1])
-    con.execute("PRAGMA integrity_check").fetchone()
-    con.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    con = sqlite3.connect(db)
+    rows = con.execute("PRAGMA integrity_check").fetchone()
+    if not rows or rows[0] != "ok":
+        print("integrity_check: %r" % (rows,), file=sys.stderr)
+        sys.exit(1)
+    tables = {name for (name,) in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    # 两个前端都留下痕迹：TUI 打开目录写目录历史，退出时会话落盘
+    dir_rows = con.execute("SELECT count(*) FROM dir_history").fetchone()[0] if "dir_history" in tables else 0
+    temp_rows = con.execute("SELECT count(*) FROM temp_playlist").fetchone()[0] if "temp_playlist" in tables else 0
     con.close()
-except Exception as exc:
-    print("integrity check failed: %s" % exc, file=sys.stderr)
+    print("dir_history=%d temp_playlist=%d" % (dir_rows, temp_rows))
+    sys.exit(0 if dir_rows >= 1 and temp_rows >= 1 else 2)
+except SystemExit:
+    raise
+except Exception as exc:                                   # noqa: BLE001
+    print("内容库检查失败：%s" % exc, file=sys.stderr)
     sys.exit(1)
 PY
-    then
-        ok "library.db 通过 integrity_check（多前端共存未损坏）"
-    else
-        bad "library.db 完整性检查失败"
-    fi
+then
+    ok "内容库在多个前端读写后仍可用，且两个前端都写入了内容（目录历史 + 会话）"
 else
-    ok "本次运行未创建内容库（远端模式下前端不做内容持久化）"
+    bad "内容库缺失内容或完整性检查失败（期望 dir_history>=1 且 temp_playlist>=1）"
 fi
 
 info "结果"
