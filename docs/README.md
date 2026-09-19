@@ -407,7 +407,7 @@ its own process and delivers the resulting queue to the core.
 | `speed [0.5-3.0]` | Query or set playback speed |
 | `mode [NAME\|0-16]` | Query or set the play mode (stable names such as `list_repeat`, `folder_shuffle_repeat`) |
 | `show [OPTIONS]` | Print the current info block (basic info / text cover / progress / two lyric lines) |
-| `daemon start\|foreground\|stop\|restart\|status\|reload` | Playback core management |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | Playback core management (`daemon stop --all` also stops `--force` secondary instances) |
 | `version` / `help` | Version / usage |
 
 `show` options (all of them override the stored TUI settings for that call):
@@ -471,7 +471,16 @@ Notes:
 - Only one instance owns the bus name; `daemon start` refuses to start a second
   one while the core is running (use `--force` to start as a secondary instance
   anyway). Front ends — TUI and CLI alike — are clients and can be many at once.
+  A secondary instance is never silent: `daemon status` names every one of them
+  (pid + bus name) on stderr, `daemon start --force` prints the bus name it just
+  created, `daemon stop --all` stops the primary and every secondary in one go,
+  and any CLI subcommand can be pointed at one instance by putting `--bus <name>`
+  **after** the subcommand (`ter-music daemon stop --bus <name>`).
 - `daemon stop` refuses to terminate a running TUI unless `--force` is given.
+- The core also exits by itself when its session bus goes away: with no bus no
+  front end can reach it any more, and a headless player that keeps holding the
+  audio device would be impossible to stop. A core that never had a bus (started
+  by a supervisor without a session bus) is unaffected.
 
 #### 5.2.2 Linyaps (Linglong) Package Environment
 
@@ -1121,8 +1130,10 @@ There are three ways to exit the front end:
 
 Leaving the TUI does not stop the music: playback lives in the core, so the
 current track keeps playing and `ter-music show` / `ter-music next` still work
-from any terminal. Stop it explicitly with `ter-music daemon stop`, or make the
-core exit on its own by setting `core_exit_when_no_frontend` to `true` (see
+from any terminal. Stop it explicitly with `ter-music daemon stop`, make the
+core exit on its own by setting `core_exit_when_no_frontend` to `true`, or let
+it notice that it can no longer be reached at all — the core exits by itself
+when its session bus disappears (see
 [5.2.3 Front End and Core](#523-front-end-and-core)).
 
 ## 6. Frequently Asked Questions

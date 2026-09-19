@@ -352,7 +352,7 @@ ter-music --help
 | `speed [0.5-3.0]` | 查询或设迅疾之度 |
 | `mode [NAME\|0-16]` | 查询或设播弄之制（如 `list_repeat`、`folder_shuffle_repeat` 之定名） |
 | `show [OPTIONS]` | 出当下之信息块（基本信息／文书封面／音程／歌辞二行） |
-| `daemon start\|foreground\|stop\|restart\|status\|reload` | 播弄核心之管摄 |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | 播弄核心之管摄（`daemon stop --all` 兼停以 `--force` 所启之次实例） |
 | `version` / `help` | 版本／用法 |
 
 `show` 之选项（用之，则一时盖过节度所存之设）：
@@ -407,8 +407,9 @@ ter-music daemon stop
 
 - 不附子目者，`ter-music <path>` 仍入文墨之界。欲开恰名 `play`／`show` 之目录，当用 `-o ./play` 或 `ter-music tui play`。
 - `daemon start --open <目录>` 不复令核心扫描：今先启核心，再由此CLI进程（为前端）扫描其目录、成其队列而下付——与 `ter-music play <目录>` 同一途也。不带 `--open` 之 `daemon start` 惟启一空闲之核心，队列由随后接入之前端下付。
-- 总线之名同时惟许一实例执之；核心在行之时，`daemon start` 拒不再启（欲以次实例强启者，可用 `--force`）。前端（文墨之界与符令行）皆客也，可并存多者。
+- 总线之名同时惟许一实例执之；核心在行之时，`daemon start` 拒不再启（欲以次实例强启者，可用 `--force`）。前端（文墨之界与符令行）皆客也，可并存多者。次实例不隐：`daemon status` 以 stderr 历举其 pid 与总线之名，`daemon start --force` 即报新创之名，欲御之者，以 `--bus <名>` 缀于子命令之后（如 `ter-music daemon stop --bus <名>`），欲尽停之则以 `daemon stop --all`（主实例与诸次实例一举而尽）。
 - `daemon stop` 于在行之文墨之界则拒之，非 `--force` 不得终也。
+- 核心所执之会话总线既亡，则核心**自退**：总线既亡，前端无可复联，犹据声器而不舍者，徒成一莫能止之播弄之进程耳。若核心自始未得总线（托管者于无会话总线之境启之），则不在此列。
 
 #### 二之二 Linyaps（如意玲珑）封缄之态
 
@@ -473,7 +474,7 @@ ter-music --attach-only   # 无核心在行，则以退去之码 3 终
 ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
 ```
 
-**退其前端。** 闭文墨之界**不**止播弄：核心仍行仍播，`ter-music show` ／ `ter-music next` 于任何端闱皆能御之。若欲最后一个前端既去而核心自退，则于 `config.xml` 中设 `core_exit_when_no_frontend` 为 `true`（或经 D-Bus `Config.Set` 设之）：前端尽去而后逾十秒之宽限，核心乃退；若核心自始未有前端接入，则终不退出。
+**退其前端。** 闭文墨之界**不**止播弄：核心仍行仍播，`ter-music show` ／ `ter-music next` 于任何端闱皆能御之。若欲最后一个前端既去而核心自退，则于 `config.xml` 中设 `core_exit_when_no_frontend` 为 `true`（或经 D-Bus `Config.Set` 设之）：前端尽去而后逾十秒之宽限，核心乃退；若核心自始未有前端接入，则终不退出。又：核心所执之会话总线既亡，亦自退——其时已无前端可联故也。
 
 **断而复续。** 核心亡时（崩溃、见 `kill`、会话注销），前端不退：入于断线之状，按指数退避而重试（1／2／4／8／15／30 秒），一有核心应答即复接入，并补推其内容之队列。于文墨之界中按 `R`，可即重启已亡之核心而重推其队列。
 

@@ -30,7 +30,14 @@
      `daemon foreground --open` 给出明确提示；`ter-music play <目录>` 同路径；
    - **退出语义**：`q` 只退前端，核心继续播放；新增配置
      `core_exit_when_no_frontend`（默认 0，配置版本 6 → 7），置 1 时最后一个
-     前端离开并过 10 秒宽限期后核心自行退出；
+     前端离开并过 10 秒宽限期后核心自行退出；此外，核心所属的**会话总线消失时
+     核心自行退出**（总线没了就没有任何前端能联系到它，继续占着音频设备只会
+     变成一个谁也停不掉的孤儿进程）；从未拿到总线的核心不受影响；
+   - **次级实例管理**：`daemon start --force` 起的次级实例（总线名
+     `<主名>.instance<pid>`）不再"隐身"——`daemon status` 在 stderr 逐个列出
+     （pid + 总线名，stdout 维持原样以便脚本解析）、`daemon start --force`
+     报告新建实例的总线名、`daemon stop --all` 一次停掉主实例与全部次级实例
+     （主实例已死、只剩次级实例时同样可收尾）；
    - **配置文件归属**：`config.xml` 由核心独占写（前端经 `Config.Set` 提交，
      不直接写文件）；前端自有数据为曲库 `library.db`、`remote.xml` 与
      远程下载缓存 `$XDG_CACHE_HOME/ter-music/remote/`；队列不再落
