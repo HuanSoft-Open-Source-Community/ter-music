@@ -310,6 +310,7 @@ static const char *const k_rpc_methods[] = {
     /* Lyrics */
     "Lyrics.GetLyrics",
     "Lyrics.GetDocument",
+    "Lyrics.SetSource",
     /* Info */
     "Info.GetInfo",
     "Info.GetTrackInfo",

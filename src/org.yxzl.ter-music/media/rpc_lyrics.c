@@ -334,6 +334,26 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
         return reply;
     }
 
+    if (strcmp(member, "SetSource") == 0) {
+        dbus_int32_t source = 0;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error,
+                                   DBUS_TYPE_INT32, &source,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        /* 切换歌词来源（内嵌 / 外部），与界面里的 Ctrl+L → Tab 同一条路。
+         * 来源偏好是**前端的内容库数据**：核心只切换并重新加载，落库由调用方
+         * （前端）负责——核心不认识内容库。 */
+        int rc = lyrics_switch_source((int)source);
+        return rpc_reply_bool(message, rc == 0 ? 1 : 0);
+    }
+
     return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
                                "Unknown lyrics method");
 }
@@ -349,6 +369,10 @@ static const char *const k_lyrics_introspection =
     "      <arg name=\"offset\" type=\"i\" direction=\"in\"/>\n"
     "      <arg name=\"count\" type=\"i\" direction=\"in\"/>\n"
     "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"SetSource\">\n"
+    "      <arg name=\"source\" type=\"i\" direction=\"in\"/>\n"
+    "      <arg name=\"ok\" type=\"b\" direction=\"out\"/>\n"
     "    </method>\n"
     "    <signal name=\"LyricsChanged\">\n"
     "      <arg name=\"json\" type=\"s\"/>\n"

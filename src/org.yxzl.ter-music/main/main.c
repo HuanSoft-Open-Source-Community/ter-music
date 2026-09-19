@@ -283,13 +283,12 @@ int main(int argc, char *argv[]) {
 
     init_menu_views();
 
-    if (frontend == PLAYER_BACKEND_LOCAL) {
-        /* 本地模式：内容与音频栈都在本进程（迁移期回归基线） */
-        init_all_persistent_data();
-    } else {
-        /* 远端模式：只读配置与主题；内容库、音频设备、MPRIS 都归核心 */
-        frontend_init_config();
-    }
+    /* 两种前端模式都要：配置（远端模式下是给界面用的镜像）+ 主题，
+     * 以及**内容**（曲库 SQLite、歌单、收藏、历史、目录历史）。
+     * 内容永远是前端的东西——核心不认识内容，内容类 D-Bus 接口也已撤下，
+     * 前端不落盘就没有第二个进程能落盘。交给核心的只有音频栈与 MPRIS，
+     * 两者在远端模式的前端进程里都不初始化。 */
+    init_all_persistent_data();
 
     i18n_init(g_app_config.ui_language);
     if (frontend == PLAYER_BACKEND_LOCAL) {
@@ -591,15 +590,13 @@ int main(int argc, char *argv[]) {
      * 本地模式才收尾进程内的播放栈与内容。 */
     player_shutdown();
 
-    if (frontend == PLAYER_BACKEND_LOCAL) {
-        /* queue.txt 不再写出：队列内容由内容列表（temp playlist + 上次打开的
-         * 目录）恢复，游标由 resume_last_playback 恢复。 */
-        save_temp_playlist();
-        cleanup();
-        cleanup_temp_playlist();
-    } else {
-        cleanup();
-    }
+    /* 内容归前端：两种模式都要把内容列表落盘（远端模式下核心不认识内容，
+     * 下次启动只能靠这里写下的一行行），随后收尾本进程的资源。
+     * queue.txt 不再写出：队列内容由内容列表（temp playlist + 上次打开的
+     * 目录）恢复，游标由 resume_last_playback 恢复。 */
+    save_temp_playlist();
+    cleanup();
+    cleanup_temp_playlist();
 
     log_info("main", "ter-music exited cleanly");
     logger_shutdown();

@@ -821,7 +821,17 @@ void run_event_loop(void)
                     if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
                         int new_source = (player_lyrics_source() == LYRICS_SOURCE_EMBEDDED)
                             ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
-                        player_lyrics_reload_source(new_source);
+                        if (player_lyrics_reload_source(new_source) == 0 &&
+                            player_backend() == PLAYER_BACKEND_REMOTE) {
+                            /* 来源偏好是前端的**内容**（按曲目记在曲库里）。本地模式
+                             * 下核心与本前端同进程，由核心经 lyrics_set_source_hook
+                             * 回调落库；远端模式下核心是另一个进程、也没有内容库，
+                             * 只能由发起这次切换的前端自己落库。 */
+                            const InfoTrack *track = player_track();
+                            if (track && track->path[0] != '\0') {
+                                library_set_lyrics_source(track->path, new_source);
+                            }
+                        }
                         update_controls_status(
                             new_source == LYRICS_SOURCE_EMBEDDED
                                 ? i18n_get("lyrics.source_embedded")

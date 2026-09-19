@@ -1379,7 +1379,8 @@ int player_remote_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
 
 int player_remote_lyrics_reload_source(int source)
 {
-    DBusMessage *reply = remote_call_i(REMOTE_IFACE_LYRICS, "Reload", 3000, source);
+    /* Lyrics.SetSource：核心切换来源并重新加载（与界面的 Ctrl+L → Tab 同一条路） */
+    DBusMessage *reply = remote_call_i(REMOTE_IFACE_LYRICS, "SetSource", 3000, source);
     int ok = 0;
     int rc = remote_reply_bool(reply, &ok);
     if (reply) {
