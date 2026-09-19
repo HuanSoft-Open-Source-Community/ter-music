@@ -227,7 +227,7 @@ jobs:
             libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
             libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
             libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev \
-            zlib1g-dev ffmpeg dbus
+            zlib1g-dev ffmpeg dbus python3-gi gir1.2-glib-2.0
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -255,6 +255,12 @@ jobs:
 
       - name: Remote source delivered as local files
         run: scripts/test/remote-frontend-e2e.sh --bin ./build/ter-music
+
+      # A6 的实测值记录下来（--report 不判定）：共享 runner 的时延/CPU 抖动大，
+      # 拿它当门禁只会制造假红；本机（scripts/test/perf-check.sh 不带 --report）
+      # 才是阈值判定的地方。
+      - name: Performance (latency and idle CPU, report only)
+        run: scripts/test/perf-check.sh --bin ./build/ter-music --report
 
   required-checks:
     name: required-checks
