@@ -90,7 +90,8 @@ static void render_album_cover(void)
     if (w - cover_char_width - start_col - 4 < min_spectrum_width) return;
 
     char cover_path[MAX_PATH_LEN];
-    if (get_current_album_cover_path(cover_path, sizeof(cover_path)) != 0) return;
+    /* 当前曲目的封面路径是**后端**的“当前曲目信息”，经门面取 */
+    if (player_cover_path(cover_path, sizeof(cover_path)) != 0) return;
 
     if (g_album_cover_size != optimal_size || g_braille_art_buffer[0] == '\0') {
         g_album_cover_size = optimal_size;
@@ -168,7 +169,7 @@ static void render_wave_particle_visualizer(int start_col, int graph_width)
     int levels[VISUALIZER_BAND_COUNT] = {0};
     int peaks[VISUALIZER_BAND_COUNT] = {0};
     uint64_t last_update_ms = 0;
-    get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+    player_visualizer(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
     (void)peaks;
 
     uint64_t now_ms = get_ui_time_ms();

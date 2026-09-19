@@ -15,7 +15,11 @@
 
 #include <ncursesw/ncurses.h>
 
+#include "app/open.h"
 #include "i18n/i18n.h"
+#include "library/library.h"
+#include "playlist/playlist.h"
+#include "playlist/playlist_queue.h"
 #include "logger/logger.h"
 #include "player/player.h"
 #include "remote/remote.h"
@@ -215,12 +219,12 @@ static int remote_collect_protected(char **paths, char **storage, int max)
         }
     }
 
-    int favorites = player_favorites_count();
-    for (int i = 0; i < favorites && count < max; i++) {
-        Track fav;
-        memset(&fav, 0, sizeof(fav));
-        if (player_favorites_get(i, &fav) == 0 && fav.path[0]) {
-            storage[count] = strdup(fav.path);
+    /* 收藏与历史是前端自有内容（library/），直接读内容库 */
+    Track favorites[64];
+    int favorites_count = library_favorites_get_all(favorites, 64);
+    for (int i = 0; i < favorites_count && count < max; i++) {
+        if (favorites[i].path[0]) {
+            storage[count] = strdup(favorites[i].path);
             if (storage[count]) {
                 paths[count] = storage[count];
                 count++;
@@ -228,12 +232,11 @@ static int remote_collect_protected(char **paths, char **storage, int max)
         }
     }
 
-    int history = player_history_count();
-    for (int i = 0; i < history && count < max; i++) {
-        HistoryEntry entry;
-        memset(&entry, 0, sizeof(entry));
-        if (player_history_get(i, &entry) == 0 && entry.path[0]) {
-            storage[count] = strdup(entry.path);
+    HistoryEntry history[64];
+    int history_count = library_history_get_all(history, 64);
+    for (int i = 0; i < history_count && count < max; i++) {
+        if (history[i].path[0]) {
+            storage[count] = strdup(history[i].path);
             if (storage[count]) {
                 paths[count] = storage[count];
                 count++;
@@ -243,7 +246,7 @@ static int remote_collect_protected(char **paths, char **storage, int max)
 
     /* 播放列表可能很长：只登记缓存里的路径（远程缓存根目录下的文件） */
     const char *cache_root = remote_cache_dir();
-    int total = player_playlist_count();
+    int total = playlist_count();
     for (int i = 0; i < total && count < max; i++) {
         Track item;
         memset(&item, 0, sizeof(item));
@@ -286,8 +289,16 @@ static void remote_drain_downloads(void)
     int last = 0;
     while (remote_cache_take_ready(path, sizeof(path), &first, &last)) {
         int autoplay = (first && remote_cache_session_autoplay()) ? 1 : 0;
-        if (player_playlist_load(path, first ? 0 : 1, autoplay) != 0) {
-            log_warn("remote_view", "Core refused cache path '%s'", path);
+        /* 前端自己装载内容（扫描/元数据），随后把路径队列下发给核心 */
+        int loaded = first ? (app_open_path(path, NULL, 0, NULL, NULL) == APP_OPEN_OK)
+                           : (append_playlist(path) > 0);
+        if (!loaded) {
+            log_warn("remote_view", "Failed to load cache path '%s'", path);
+        } else {
+            playlist_queue_sync();
+            if (autoplay) {
+                player_play(0);
+            }
         }
     }
 

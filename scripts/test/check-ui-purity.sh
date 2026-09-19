@@ -33,7 +33,7 @@ MODE="strict"
 PLAYBACK_GLOBALS='(^|[^A-Za-z0-9_])(g_play_state|g_current_play_index|g_current_position|g_total_duration|g_playback_speed|g_play_mode|g_play_queue|g_play_thread_running|g_play_thread_active|g_play_thread_finished|g_pending_playback_index|g_speed_index|g_speed_ratios|g_speed_count|g_lyrics|g_cue_offset|g_seek_request|g_seek_position|g_initial_seek_position|g_active_backend|g_audio_sample_rate|g_audio_bit_rate|g_audio_bit_depth|g_audio_codec_name)'
 
 # 播放面命令（必须经 player_* 门面下发）
-PLAYBACK_COMMANDS='(^|[^A-Za-z0-9_])(play_audio|pause_audio|resume_audio|stop_audio|next_track|prev_track|seek_audio|set_volume_percent|get_volume_percent|adjust_volume|toggle_playback_speed|apply_playback_speed_change|set_play_mode|get_play_mode|get_play_mode_str|play_mode_display_name|play_queue_[a-z_]+|load_lyrics|reload_lyrics_with_source|update_lyrics_display|get_current_album_cover_path|eq_set_[a-z_]+|eq_is_enabled|eq_get_band_gain|eq_apply_preset|reset_playlist_state|playlist_install|get_visualizer_snapshot|audio_backend_shutdown|init_audio_device)\('
+PLAYBACK_COMMANDS='(^|[^A-Za-z0-9_])(play_audio|pause_audio|resume_audio|stop_audio|next_track|prev_track|seek_audio|set_volume_percent|get_volume_percent|adjust_volume|toggle_playback_speed|apply_playback_speed_change|set_play_mode|get_play_mode|get_play_mode_str|play_mode_display_name|play_queue_[a-z_]+|load_lyrics|reload_lyrics_with_source|get_current_album_cover_path|eq_set_[a-z_]+|eq_is_enabled|eq_get_band_gain|eq_apply_preset|reset_playlist_state|playlist_install|get_visualizer_snapshot|audio_backend_shutdown|init_audio_device)\('
 
 # 过滤：注释行与 extern 声明行（声明不是耦合）
 filter_lines() {

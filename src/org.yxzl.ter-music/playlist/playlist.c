@@ -53,6 +53,19 @@ int g_current_control_idx = 1;
 
 SortState g_sort_state = {0};
 
+/* 内容版本号（定义见 playlist.h） */
+static unsigned long long g_content_revision = 1;
+
+unsigned long long playlist_content_revision(void)
+{
+    return g_content_revision;
+}
+
+void playlist_bump_content_revision(void)
+{
+    g_content_revision++;
+}
+
 static pthread_mutex_t g_playlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int is_audio_file(const char *filename);
@@ -350,6 +363,10 @@ static void clear_metadata_cache_locked(Playlist *playlist) {
     playlist->cache_count = 0;
 }
 
+void playlist_clear_content(void) {
+    reset_playlist_state();
+}
+
 void reset_playlist_state(void) {
     log_info("playlist", "Resetting playlist state");
     playlist_lock();
@@ -359,6 +376,7 @@ void reset_playlist_state(void) {
     memset(&g_sort_state, 0, sizeof(g_sort_state));
     /* 内容清空即队列清空：同步告知后端（bq_clear + 句柄对齐） */
     playlist_queue_sync();
+    playlist_bump_content_revision();
 }
 
 static int playlist_contains_track_in(const Playlist *playlist, const char *path) {
@@ -1408,6 +1426,7 @@ int load_single_file(const char *file_path) {
     free(next);
     recompute_sort_order();
     playlist_queue_sync();
+    playlist_bump_content_revision();
     return 1;
 }
 
@@ -1654,6 +1673,7 @@ void playlist_install(Playlist *built)
     recompute_sort_order();
 
     playlist_queue_sync();
+    playlist_bump_content_revision();
 
     request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
 }
@@ -1709,6 +1729,7 @@ int load_playlist(const char *path) {
     log_info("playlist", "load_playlist: loaded %d tracks from '%s'", total, path);
     recompute_sort_order();
     playlist_queue_sync();
+    playlist_bump_content_revision();
     return total;
 }
 
@@ -1750,6 +1771,7 @@ int append_playlist(const char *path) {
         free(next);
         recompute_sort_order();
         playlist_queue_sync();
+    playlist_bump_content_revision();
         return 1;
     }
 
@@ -1782,6 +1804,7 @@ int append_playlist(const char *path) {
     log_info("playlist", "append_playlist: added %d new tracks (total=%d)", added, playlist_count());
     recompute_sort_order();
     playlist_queue_sync();
+    playlist_bump_content_revision();
     return added;
 }
 
@@ -1855,6 +1878,7 @@ void recompute_sort_order(void) {
     rebuild_visible_list(&g_playlist);
 
     request_ui_refresh(UI_DIRTY_PLAYLIST);
+    playlist_bump_content_revision();
 }
 
 void clear_metadata_cache(void) {

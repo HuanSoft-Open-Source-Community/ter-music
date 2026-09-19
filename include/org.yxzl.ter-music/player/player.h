@@ -117,8 +117,27 @@ void player_next(void);
 void player_prev(void);
 void player_seek_seconds(int seconds);
 void player_set_volume(int percent);         /* 立即回显，随后以核心为准 */
+void player_adjust_volume(int delta);        /* ± 档位音量（键盘/鼠标共用） */
 void player_set_speed(float rate);
+/* 倍速档位表（只读，长度写入 out_count）：界面用它渲染档位菜单 */
+const float *player_speed_steps(int *out_count);
+int player_speed_step_count(void);
+int player_speed_index(void);                /* 当前档位下标 */
+void player_set_speed_index(int index);      /* 按档位设置倍速（越界忽略） */
 void player_set_play_mode(PlayMode mode);
+void player_cycle_play_mode(void);           /* 顺序 → 单曲 → 列表 → 随机 → 文件夹 */
+
+/* 播放模式显示名（i18n；界面不再直接调引擎的命名函数） */
+const char *player_play_mode_name(int use_english);
+const char *player_play_mode_name_of(PlayMode mode, int use_english);
+
+/* ── 均衡器（后端在配置写入后热应用） ─────────────────────────── */
+int   player_eq_enabled(void);
+void  player_eq_set_enabled(int enabled);
+void  player_eq_set_band_gain(int band, float gain);
+float player_eq_get_band_gain(int band);
+void  player_eq_set_preamp(float preamp);
+void  player_eq_apply_preset(int preset);
 
 /* ── 队列 ─────────────────────────────────────────────────────── */
 
@@ -146,58 +165,8 @@ int player_queue_find(const char *path);
 int player_queue_page_count(void);
 int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap);
 
-/* ── 播放列表 ─────────────────────────────────────────────────── */
-
-int  player_playlist_count(void);
-int  player_playlist_visible_count(void);
-int  player_playlist_loaded(void);
-int  player_playlist_tree_active(void);
-void player_playlist_folder(char *out, size_t out_size);
-const char *player_playlist_sort_id(void);
-const char *player_playlist_filter(void);
-
-/* 可见行总数与一页内容。本地后端同步填充；远程后端返回当前缓存页
- * （可能为空）并触发异步刷新，随后由 playlist revision 通知界面重取。
- * out 必须至少容纳 count 个 PlaylistRow（约 1 KB/行，堆分配）。 */
-int player_playlist_page_total(void);
-int player_playlist_page(int offset, int count, PlaylistRow *out, int out_cap);
-
-int player_playlist_load(const char *path, int append, int autoplay);
-int player_playlist_toggle_expand(int tree_index);
-int player_playlist_reveal(int track_index);
-int player_playlist_sort(SortMode mode);
-int player_playlist_set_filter(const char *query);
-int player_playlist_search(const char *query, int offset, int count,
-                           PlaylistRow *out, int out_cap);
-/* 后台加载状态（远程/本地一致）：state 写入 out_state（可 NULL） */
-int player_playlist_status(int *progress, int *total);
-
-/* ── 曲库 / 收藏 / 历史 ───────────────────────────────────────── */
-
-int player_library_available(void);
-int player_library_track_count(void);
-int player_library_scan(int *scanning, int *progress, int *total);
-int player_library_rescan(const char *path);
-int player_library_search(const char *query);
-int player_library_item_count(const char *kind, const char *filter_json);
-int player_library_page(const char *kind, const char *filter_json,
-                        int offset, int count, LibraryRow *out, int out_cap);
-
-int player_favorites_count(void);
-int player_favorites_get(int index, Track *out);
-int player_favorites_add(const Track *track);
-int player_favorites_remove(const Track *track);
-int player_favorites_has(const char *track_path);
-
-int player_history_count(void);
-int player_history_get(int index, HistoryEntry *out);
-int player_history_add(const Track *track);
-int player_history_clear(void);
-
-int player_dir_history_count(void);
-int player_dir_history_get(int index, DirHistoryEntry *out);
-int player_dir_history_add(const char *path);
-int player_dir_history_clear(void);
+/* 播放列表 / 曲库 / 收藏 / 历史都是**前端自有内容**（playlist/、library/、
+ * search/），界面直接调用那些模块；门面里不再有它们的位置——门面只包播放面。 */
 
 /* ── 配置（前端持有镜像；写入是唯一入口） ─────────────────────── */
 
@@ -216,9 +185,20 @@ int player_config_reset(void);
 int player_lyrics_document(int offset, int count, PlayerLyricsDoc *out);
 int player_lyrics_reload_source(int source);
 
+/* 后端当前的歌词状态（界面只读）：高亮行、来源、是否有时间戳 */
+int player_lyrics_highlight(int *out_current, int *out_next, int *out_has_timestamps);
+int player_lyrics_highlight_count(void);   /* 同一时间戳一起高亮的行数（1..2） */
+int player_lyrics_source(void);
+int player_lyrics_total(void);               /* 歌词总行数 */
+int player_lyrics_line_at(int index, LyricLine *out);   /* 取某一行（-1 = 越界） */
+
 /* 取当前曲目的字符封面（按尺寸与字符集缓存）；返回是否有内容。
  * 远程后端首次调用会触发异步获取，未就绪时返回 0。 */
 int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_size);
+
+/* 当前曲目的封面文件路径（后端筛选“当前曲目信息”时的结果）。
+ * @return 0 有封面；-1 无当前曲目或无封面 */
+int player_cover_path(char *out, size_t out_size);
 
 /* 可视化：levels/peaks 各 max_levels 个（0-255） */
 void player_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms);

@@ -10,6 +10,7 @@
  */
 
 #include "types.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "info/info.h"
 #include "i18n/i18n.h"
@@ -163,7 +164,7 @@ int get_playlist_scroll_offset(void)
         if (total < 0) total = 0;
         return clamp_playlist_start(total, g_search_state.selected_index, visible_lines);
     } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-        return clamp_playlist_start(g_play_queue.count, g_queue_selected_index, visible_lines);
+        return clamp_playlist_start(player_queue_count(), g_queue_selected_index, visible_lines);
     } else {
         int total = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
         return clamp_playlist_start(total, g_selected_index, visible_lines);
@@ -216,7 +217,7 @@ void render_playlist_content(void)
     } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
         snprintf(title_buf, sizeof(title_buf), " %s [%s] ",
                  i18n_get("player.play_queue"),
-                 get_play_mode_str());
+                 player_play_mode_name(0));
         mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else {
         mvwprintw(win_playlist, 0, 2, "%s", i18n_get("controls.playlist"));
@@ -236,7 +237,7 @@ void render_playlist_content(void)
 
     int total_tracks, current_selected;
     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-        total_tracks = g_play_queue.count;
+        total_tracks = player_queue_count();
         current_selected = g_queue_selected_index;
     } else if ((snap_active || snap_in_progress) && snap_count > 0) {
         total_tracks = snap_count;
@@ -370,8 +371,8 @@ void render_playlist_content(void)
                     format_display_text(truncated_artist, sizeof(truncated_artist), t.artist, artist_width - 1, 1);
 
                     int is_selected = (idx == g_selected_index && g_control_focus == 0);
-                    int is_now_playing = (actual_idx == g_current_play_index &&
-                                          g_play_state != PLAY_STATE_STOPPED);
+                    int is_now_playing = (actual_idx == player_track_index() &&
+                                          player_play_state() != PLAY_STATE_STOPPED);
                     int attrs = A_NORMAL;
                     if (is_selected) attrs |= A_REVERSE;
                     if (is_now_playing) attrs |= A_BOLD;
@@ -387,7 +388,7 @@ void render_playlist_content(void)
                     prefix_width = 5;
 
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                actual_idx = g_play_queue.indices[idx];
+                actual_idx = player_queue_index_at(idx);
             } else if (snap_active || snap_in_progress) {
                 actual_idx = snap_indices[idx];
             } else if (g_sort_state.active) {
@@ -417,14 +418,14 @@ void render_playlist_content(void)
             int is_selected, is_now_playing = 0;
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
                 is_selected = (idx == g_queue_selected_index && g_control_focus == 0);
-                is_now_playing = (idx == g_play_queue.current_position &&
-                                  g_play_state != PLAY_STATE_STOPPED);
+                is_now_playing = (idx == player_queue_position() &&
+                                  player_play_state() != PLAY_STATE_STOPPED);
             } else if (snap_active || snap_in_progress) {
                 is_selected = (idx == snap_selected);
             } else {
                 is_selected = (idx == g_selected_index && g_control_focus == 0);
-                is_now_playing = (actual_idx == g_current_play_index &&
-                                  g_play_state != PLAY_STATE_STOPPED);
+                is_now_playing = (actual_idx == player_track_index() &&
+                                  player_play_state() != PLAY_STATE_STOPPED);
             }
 
             /* Build sequence number prefix for queue mode */
@@ -478,7 +479,7 @@ void render_playlist_content(void)
             mvwaddstr(win_playlist, status_line, x, "\xe2\x94\x80"); /* ─ */
 
         char status_msg[MAX_META_LEN];
-        switch (g_play_state) {
+        switch (player_play_state()) {
             case PLAY_STATE_PLAYING: snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.playing")); break;
             case PLAY_STATE_PAUSED:  snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.paused")); break;
             case PLAY_STATE_STOPPED:
@@ -487,12 +488,12 @@ void render_playlist_content(void)
 
         if (playlist_total > 0) {
             Track t;
-            int index = g_current_play_index >= 0 ? g_current_play_index : g_selected_index;
-            if (g_sort_state.active && !snap_active && g_current_play_index < 0) {
+            int index = player_track_index() >= 0 ? player_track_index() : g_selected_index;
+            if (g_sort_state.active && !snap_active && player_track_index() < 0) {
                 index = g_sort_state.sorted_indices[g_selected_index];
             }
             /* Tree mode: translate visible index to track index */
-            if (tree_active && g_current_play_index < 0) {
+            if (tree_active && player_track_index() < 0) {
                 int ti = get_visible_node_track_index(g_selected_index);
                 if (ti >= 0) index = ti;
             }
@@ -508,7 +509,7 @@ void render_playlist_content(void)
             char cover_path[MAX_PATH_LEN];
             static int g_album_cover_enabled = 1;
             if (g_album_cover_enabled && g_app_config.show_album_cover &&
-                get_current_album_cover_path(cover_path, sizeof(cover_path)) == 0) {
+                player_cover_path(cover_path, sizeof(cover_path)) == 0) {
                 int min_info_width = 52;
                 int max_cover_size = 12;
                 int min_cover_size = 5;
@@ -554,14 +555,14 @@ void render_playlist_content(void)
 
             // Left column: metadata
             mvwprintw(win_playlist, status_line + 1, left_col_x, "%s%s", i18n_get("player.state"), status_msg);
-            mvwprintw(win_playlist, status_line + 2, left_col_x, "%s%s", i18n_get("player.mode"), get_play_mode_str());
+            mvwprintw(win_playlist, status_line + 2, left_col_x, "%s%s", i18n_get("player.mode"), player_play_mode_name(0));
             mvwprintw(win_playlist, status_line + 3, left_col_x, "%s%s", i18n_get("player.title"), truncated_title);
             mvwprintw(win_playlist, status_line + 4, left_col_x, "%s%s", i18n_get("player.artist"), truncated_artist);
-            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && g_play_queue.count > 0) {
+            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && player_queue_count() > 0) {
                 char qbuf[64];
                 snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
                          i18n_get("player.queue_label"),
-                         g_play_queue.current_position + 1, g_play_queue.count);
+                         player_queue_position() + 1, player_queue_count());
                 mvwprintw(win_playlist, status_line + 5, left_col_x, "%s", qbuf);
             } else {
                 mvwprintw(win_playlist, status_line + 5, left_col_x, "%s%s", i18n_get("player.album"), truncated_album);
@@ -594,15 +595,15 @@ void render_playlist_content(void)
             int col_width = (w - 4) / 2;
             int center_col_x = 2 + col_width;
             mvwprintw(win_playlist, status_line + 1, 2, "%s%s", i18n_get("player.state"), status_msg);
-            mvwprintw(win_playlist, status_line + 2, 2, "%s%s", i18n_get("player.mode"), get_play_mode_str());
+            mvwprintw(win_playlist, status_line + 2, 2, "%s%s", i18n_get("player.mode"), player_play_mode_name(0));
             mvwprintw(win_playlist, status_line + 3, 2, "%s--", i18n_get("player.title"));
             mvwprintw(win_playlist, status_line + 4, 2, "%s--", i18n_get("player.artist"));
             mvwprintw(win_playlist, status_line + 5, 2, "%s--", i18n_get("player.album"));
-            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && g_play_queue.count > 0) {
+            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && player_queue_count() > 0) {
                 char qbuf[64];
                 snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
                          i18n_get("player.queue_label"),
-                         g_play_queue.current_position + 1, g_play_queue.count);
+                         player_queue_position() + 1, player_queue_count());
                 mvwprintw(win_playlist, status_line + 5, 2, "%s", qbuf);
             }
             mvwprintw(win_playlist, status_line + 1, center_col_x, "%s--", i18n_get("player.sample_rate"));

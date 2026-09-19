@@ -131,7 +131,7 @@ void update_progress_bar(void)
     wrefresh(win_controls);
 
     if (position_changed) {
-        update_lyrics_display();
+        render_lyrics();
     }
 
     static uint64_t last_spectrum_refresh_ms = 0;

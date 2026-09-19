@@ -14,6 +14,7 @@
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "ui/dialog.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
@@ -619,7 +620,7 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator, align_str);
     } else if (option_index == SETTINGS_IDX_DEFAULT_PLAY_MODE) {
-        const char *mode_str = play_mode_display_name(
+        const char *mode_str = player_play_mode_name_of(
             (PlayMode)g_app_config.default_play_mode, 0);
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator, mode_str);
@@ -893,7 +894,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                 g_app_config.default_play_mode = (g_app_config.default_play_mode + 1) % PLAY_MODE_COUNT;
             }
             save_config();
-            g_play_mode = (PlayMode)g_app_config.default_play_mode;
+            player_set_play_mode((PlayMode)g_app_config.default_play_mode);
             show_status_message(i18n_get("settings.play_mode.updated"));
             break;
         case SETTINGS_IDX_LYRICS_ALIGNMENT:
@@ -924,7 +925,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                 current_idx = (current_idx + 1) % speed_count;
             }
             g_app_config.default_playback_speed = speed_ratios[current_idx];
-            g_playback_speed = g_app_config.default_playback_speed;
+            player_set_speed(g_app_config.default_playback_speed);
             save_config();
             char msg[64];
             snprintf(msg, sizeof(msg), "%s: %.2fx",
@@ -1052,7 +1053,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             break;
         case SETTINGS_IDX_EQ_ENABLED:
             g_app_config.eq_enabled = !g_app_config.eq_enabled;
-            eq_set_enabled(g_app_config.eq_enabled);
+            player_eq_set_enabled(g_app_config.eq_enabled);
             save_config();
             show_status_message(g_app_config.eq_enabled
                 ? i18n_get("eq.enabled")
@@ -1063,7 +1064,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.eq_preamp += delta;
             if (g_app_config.eq_preamp < EQ_PREAMP_MIN) g_app_config.eq_preamp = EQ_PREAMP_MIN;
             if (g_app_config.eq_preamp > EQ_PREAMP_MAX) g_app_config.eq_preamp = EQ_PREAMP_MAX;
-            eq_set_preamp(g_app_config.eq_preamp);
+            player_eq_set_preamp(g_app_config.eq_preamp);
             save_config();
             break;
         default:
@@ -1076,7 +1077,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
                     g_app_config.eq_band_gains[band] = EQ_GAIN_MIN;
                 if (g_app_config.eq_band_gains[band] > EQ_GAIN_MAX)
                     g_app_config.eq_band_gains[band] = EQ_GAIN_MAX;
-                eq_set_band_gain(band, g_app_config.eq_band_gains[band]);
+                player_eq_set_band_gain(band, g_app_config.eq_band_gains[band]);
                 save_config();
             }
             break;
@@ -1124,14 +1125,13 @@ static void close_sel_menu(int apply)
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 g_app_config.default_play_mode = g_sel_idx;
                 save_config();
-                g_play_mode = (PlayMode)g_app_config.default_play_mode;
+                player_set_play_mode((PlayMode)g_app_config.default_play_mode);
                 show_status_message(i18n_get("settings.play_mode.updated"));
                 break;
 
             case SETTINGS_IDX_DEFAULT_SPEED:
-                g_app_config.default_playback_speed = g_speed_ratios[g_sel_idx];
-                g_playback_speed = g_app_config.default_playback_speed;
-                g_speed_index = g_sel_idx;
+                g_app_config.default_playback_speed = player_speed_steps(NULL)[g_sel_idx];
+                player_set_speed_index(g_sel_idx);
                 save_config();
                 {
                     char msg[64];
@@ -1232,11 +1232,11 @@ static void close_sel_menu(int apply)
                 break;
 
             case SETTINGS_IDX_EQ_PRESET:
-                eq_apply_preset(g_sel_idx);
+                player_eq_apply_preset(g_sel_idx);
                 /* Sync config with new EQ state */
-                g_app_config.eq_enabled = eq_is_enabled();
+                g_app_config.eq_enabled = player_eq_enabled();
                 for (int b = 0; b < EQ_BAND_COUNT; b++)
-                    g_app_config.eq_band_gains[b] = eq_get_band_gain(b);
+                    g_app_config.eq_band_gains[b] = player_eq_get_band_gain(b);
                 save_config();
                 /* Pre-amp is preserved, not reset by preset */
                 break;
@@ -1299,8 +1299,13 @@ static void open_sel_menu(int option_index)
             cur   = g_app_config.default_play_mode;
             break;
         case SETTINGS_IDX_DEFAULT_SPEED:
-            count = g_speed_count;
-            cur   = g_speed_index;
+            cur   = player_speed_index();
+            {
+                int step_count = 0;
+                const float *steps = player_speed_steps(&step_count);
+                count = step_count;
+                (void)steps;
+            }
             break;
         case SETTINGS_IDX_AUDIO_BACKEND: {
             int backend_opts[] = {AUDIO_BACKEND_AUTO, AUDIO_BACKEND_PIPEWIRE,
@@ -1437,10 +1442,10 @@ static void create_sel_window(void)
         switch (src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 snprintf(opts[i], 48, "%s",
-                         play_mode_display_name((PlayMode)i, 0)); break;
+                         player_play_mode_name_of((PlayMode)i, 0)); break;
             case SETTINGS_IDX_DEFAULT_SPEED:
-                if (i < g_speed_count)
-                    snprintf(opts[i], 48, "%.2fx", (double)g_speed_ratios[i]);
+                if (i < player_speed_step_count())
+                    snprintf(opts[i], 48, "%.2fx", (double)player_speed_steps(NULL)[i]);
                 break;
             case SETTINGS_IDX_AUDIO_BACKEND: {
                 int be[] = {AUDIO_BACKEND_AUTO,AUDIO_BACKEND_PIPEWIRE,
@@ -1582,10 +1587,10 @@ static void draw_sel_menu(void)
         switch (src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 snprintf(opts[i], 48, "%s",
-                         play_mode_display_name((PlayMode)i, 0)); break;
+                         player_play_mode_name_of((PlayMode)i, 0)); break;
             case SETTINGS_IDX_DEFAULT_SPEED:
-                if (i < g_speed_count)
-                    snprintf(opts[i], 48, "%.2fx", (double)g_speed_ratios[i]);
+                if (i < player_speed_step_count())
+                    snprintf(opts[i], 48, "%.2fx", (double)player_speed_steps(NULL)[i]);
                 break;
             case SETTINGS_IDX_AUDIO_BACKEND: {
                 int be[] = {AUDIO_BACKEND_AUTO,AUDIO_BACKEND_PIPEWIRE,

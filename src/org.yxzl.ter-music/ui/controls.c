@@ -39,9 +39,6 @@ static const char *control_label_keys[] = {
 };
 
 /* ── Speed state (defined in audio.c) ── */
-extern float g_speed_ratios[];
-extern int   g_speed_index;
-extern int   g_speed_count;
 
 /* ── Playlist tab mode (defined in playlist_render.c) ── */
 extern int g_playlist_tab_mode;
@@ -85,7 +82,7 @@ void build_control_label(int index, char *dest, size_t dest_size)
     if (index < 0 || index >= CONTROL_COUNT) return;
 
     if (index == CONTROL_IDX_LOOP) {
-        snprintf(dest, dest_size, "%s:%s", get_control_label(index), get_play_mode_str());
+        snprintf(dest, dest_size, "%s:%s", get_control_label(index), player_play_mode_name(0));
         return;
     }
     if (index == CONTROL_IDX_SPEED) {
@@ -93,7 +90,7 @@ void build_control_label(int index, char *dest, size_t dest_size)
         return;
     }
     if (index == CONTROL_IDX_VOLUME) {
-        snprintf(dest, dest_size, "%s:%d%%", get_control_label(index), get_volume_percent());
+        snprintf(dest, dest_size, "%s:%d%%", get_control_label(index), player_volume_percent());
         return;
     }
     utf8_str_truncate(dest, get_control_label(index), (int)dest_size - 1);
@@ -239,7 +236,7 @@ static void build_popup_option_text(PopupType type, int index,
     switch (type) {
         case POPUP_LOOP_MODE: {
             PlayMode mode = get_available_play_mode_at(index);
-            snprintf(dest, dest_size, "%s", play_mode_display_name(mode, 0));
+            snprintf(dest, dest_size, "%s", player_play_mode_name_of(mode, 0));
             break;
         }
         case POPUP_SPEED: {
@@ -265,8 +262,7 @@ static void apply_popup_selection(void)
             break;
         case POPUP_SPEED: {
             /* 倍速是引擎侧即时项：走门面（本地后端会同时落盘并热应用） */
-            g_speed_index = g_popup.selected_index;
-            player_set_speed(g_speed_ratios[g_speed_index]);
+            player_set_speed_index(g_popup.selected_index);
             char msg[64];
             snprintf(msg, sizeof(msg), "%s: %.2fx",
                      i18n_get("controls.label.speed"), (double)player_speed());
@@ -322,15 +318,16 @@ void activate_current_control(void)
             break;
         case CONTROL_IDX_PLAY_PAUSE: {
             PlayState current_state = player_play_state();
-            int is_thread_running = g_play_thread_running;
+            /* 播放线程状态属播放面：门面用“播放状态”表达同一件事 */
+            int is_thread_running = (player_play_state() != PLAY_STATE_STOPPED);
 
             if (current_state == PLAY_STATE_PLAYING && is_thread_running) {
                 player_pause();
             } else if (current_state == PLAY_STATE_PAUSED && is_thread_running) {
                 player_resume();
             } else if (current_state == PLAY_STATE_STOPPED) {
-                int playlist_total = player_playlist_count();
-                if (player_playlist_loaded() && playlist_total > 0) {
+                int playlist_total = playlist_count();
+                if (playlist_is_loaded() && playlist_total > 0) {
                     int target_index = (player_track_index() >= 0)
                         ? player_track_index()
                         : g_selected_index;
@@ -338,7 +335,7 @@ void activate_current_control(void)
                         target_index = g_sort_state.sorted_indices[g_selected_index];
                     }
                     /* Tree mode: translate visible index to track index */
-                    if (player_playlist_tree_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+                    if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
                         && player_track_index() < 0) {
                         int ti = get_visible_node_track_index(g_selected_index);
                         if (ti >= 0) target_index = ti;
@@ -365,7 +362,7 @@ void activate_current_control(void)
                 /* Find the popup index that maps to the current play mode */
                 g_popup.selected_index = 0;
                 for (int i = 0; i < g_popup.option_count; i++) {
-                    if (get_available_play_mode_at(i) == g_play_mode) {
+                    if ((int)get_available_play_mode_at(i) == player_play_mode()) {
                         g_popup.selected_index = i;
                         break;
                     }
@@ -380,8 +377,8 @@ void activate_current_control(void)
                 popup_dismiss();
             } else {
                 g_popup.type = POPUP_SPEED;
-                g_popup.selected_index = g_speed_index;
-                g_popup.option_count = g_speed_count;
+                g_popup.selected_index = player_speed_index();
+                g_popup.option_count = player_speed_step_count();
                 calculate_popup_dimensions(&g_popup, win_controls);
                 create_popup_window(&g_popup);
                 g_popup.active = (g_popup.popup_win != NULL);
@@ -392,7 +389,7 @@ void activate_current_control(void)
                 popup_dismiss();
             } else {
                 g_popup.type = POPUP_VOLUME;
-                g_popup.selected_index = get_volume_percent() / VOLUME_POPUP_STEP;
+                g_popup.selected_index = player_volume_percent() / VOLUME_POPUP_STEP;
                 g_popup.option_count = 100 / VOLUME_POPUP_STEP + 1;
                 calculate_popup_dimensions(&g_popup, win_controls);
                 create_popup_window(&g_popup);

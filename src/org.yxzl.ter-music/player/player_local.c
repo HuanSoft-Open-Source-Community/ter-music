@@ -20,6 +20,7 @@
 
 #include "app/open.h"
 #include "audio/audio.h"
+#include "audio/audio_internal.h"
 #include "audio/visualizer.h"
 #include "audio/equalizer.h"
 #include "audio/play_queue.h"
@@ -255,6 +256,15 @@ uint64_t player_library_revision(void)  { return g_local.library_revision; }
 
 const InfoTrack    *player_track(void)    { return &g_local.track; }
 const InfoLyrics   *player_lyrics(void)   { return &g_local.lyrics; }
+int player_cover_path(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return -1;
+    }
+    out[0] = '\0';
+    return get_current_album_cover_path(out, out_size) == 0 ? 0 : -1;
+}
+
 const char *player_status_message(void)   { return g_local.status_message; }
 
 const InfoPlayback *player_playback(void)
@@ -352,6 +362,62 @@ void player_set_volume(int percent)
     g_local.state_revision++;
     refresh_snapshot();
 }
+
+const float *player_speed_steps(int *out_count)
+{
+    if (out_count) {
+        *out_count = g_speed_count;
+    }
+    return g_speed_ratios;
+}
+
+int player_speed_step_count(void)
+{
+    return g_speed_count;
+}
+
+int player_speed_index(void)
+{
+    return g_speed_index;
+}
+
+void player_set_speed_index(int index)
+{
+    if (index < 0 || index >= g_speed_count) {
+        return;
+    }
+    player_set_speed(g_speed_ratios[index]);
+}
+
+void player_adjust_volume(int delta)
+{
+    player_set_volume(player_volume_percent() + delta);
+}
+
+const char *player_play_mode_name(int use_english)
+{
+    return play_mode_display_name((PlayMode)player_play_mode(), use_english);
+}
+
+const char *player_play_mode_name_of(PlayMode mode, int use_english)
+{
+    return play_mode_display_name(mode, use_english);
+}
+
+void player_cycle_play_mode(void)
+{
+    cycle_play_mode();
+    refresh_snapshot();
+}
+
+/* ── 均衡器 ───────────────────────────────────────────────────── */
+
+int   player_eq_enabled(void)               { return eq_is_enabled(); }
+void  player_eq_set_enabled(int enabled)    { eq_set_enabled(enabled); }
+void  player_eq_set_band_gain(int band, float gain) { eq_set_band_gain(band, gain); }
+float player_eq_get_band_gain(int band)     { return eq_get_band_gain(band); }
+void  player_eq_set_preamp(float preamp)    { eq_set_preamp(preamp); }
+void  player_eq_apply_preset(int preset)    { eq_apply_preset(preset); }
 
 void player_set_speed(float rate)
 {
@@ -496,305 +562,8 @@ int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap
     return written;
 }
 
-/* ── 播放列表 ─────────────────────────────────────────────────── */
-
-int player_playlist_count(void)        { return playlist_count(); }
-int player_playlist_visible_count(void){ return playlist_visible_count(); }
-int player_playlist_loaded(void)       { return playlist_is_loaded(); }
-int player_playlist_tree_active(void)  { return playlist_tree_is_active(); }
-const char *player_playlist_filter(void) { return g_local.filter; }
-
-void player_playlist_folder(char *out, size_t out_size)
-{
-    if (out && out_size) {
-        playlist_copy_folder_path(out, out_size);
-    }
-}
-
-const char *player_playlist_sort_id(void)
-{
-    switch (g_app_config.sort_mode) {
-        case SORT_TITLE:    return "title";
-        case SORT_ARTIST:   return "artist";
-        case SORT_ALBUM:    return "album";
-        case SORT_FILENAME: return "filename";
-        default:            return "default";
-    }
-}
-
-int player_playlist_page_total(void)
-{
-    return playlist_page_total(g_local.filter[0] ? g_local.filter : NULL);
-}
-
-int player_playlist_page(int offset, int count, PlaylistRow *out, int out_cap)
-{
-    return playlist_page(offset, count, g_local.filter[0] ? g_local.filter : NULL,
-                         out, out_cap);
-}
-
-int player_playlist_load(const char *path, int append, int autoplay)
-{
-    AppOpenResult result = APP_OPEN_ERR_INVALID_PATH;
-    if (append) {
-        result = (append_playlist(path) > 0) ? APP_OPEN_OK : APP_OPEN_ERR_NO_AUDIO;
-    } else {
-        result = app_open_path(path, NULL, 0, NULL, NULL);
-    }
-    refresh_snapshot();
-    g_local.playlist_revision++;
-
-    if (result == APP_OPEN_OK && autoplay && playlist_count() > 0) {
-        int index = (g_current_play_index >= 0) ? g_current_play_index : 0;
-        play_audio(index);
-        app_set_selection_for_track(index);
-        refresh_snapshot();
-    }
-    return result == APP_OPEN_OK ? 0 : -1;
-}
-
-int player_playlist_toggle_expand(int tree_index)
-{
-    playlist_toggle_directory_expand(tree_index);
-    g_local.playlist_revision++;
-    refresh_snapshot();
-    return 0;
-}
-
-int player_playlist_reveal(int track_index)
-{
-    int row = playlist_reveal_track(track_index);
-    g_local.playlist_revision++;
-    return row;
-}
-
-int player_playlist_sort(SortMode mode)
-{
-    g_app_config.sort_mode = (int)mode;
-    save_config();
-    recompute_sort_order();
-    g_local.playlist_revision++;
-    g_local.config_revision++;
-    refresh_snapshot();
-    return 0;
-}
-
-int player_playlist_set_filter(const char *query)
-{
-    snprintf(g_local.filter, sizeof(g_local.filter), "%s", query ? query : "");
-    g_local.playlist_revision++;
-    return 0;
-}
-
-int player_playlist_search(const char *query, int offset, int count,
-                           PlaylistRow *out, int out_cap)
-{
-    return playlist_page(offset, count, query, out, out_cap);
-}
-
-int player_playlist_status(int *progress, int *total)
-{
-    if (progress) *progress = 0;
-    if (total) *total = playlist_count();
-    return 0;
-}
-
-/* ── 曲库 / 收藏 / 历史 ───────────────────────────────────────── */
-
-int player_library_available(void)  { return library_is_available(); }
-int player_library_track_count(void){ return library_is_available() ? library_get_track_count() : 0; }
-
-int player_library_scan(int *scanning, int *progress, int *total)
-{
-    if (scanning) *scanning = library_scan_in_progress();
-    if (progress) *progress = library_scan_progress();
-    if (total) *total = library_scan_total();
-    return 0;
-}
-
-int player_library_rescan(const char *path)
-{
-    if (!library_is_available() || !path || !path[0]) {
-        return -1;
-    }
-    return library_scan_directory_async(path) == 0 ? 0 : -1;
-}
-
-int player_library_search(const char *query)
-{
-    if (!query || !query[0]) {
-        return 0;
-    }
-    LibraryQuery q;
-    memset(&q, 0, sizeof(q));
-    q.kind = LIBRARY_QUERY_SEARCH;
-    snprintf(q.query, sizeof(q.query), "%s", query);
-    return library_query_count(&q);
-}
-
-int player_library_item_count(const char *kind, const char *filter_json)
-{
-    LibraryQuery q = {0};
-    if (strcmp(kind, "artists") == 0)      q.kind = LIBRARY_QUERY_ARTISTS;
-    else if (strcmp(kind, "albums") == 0)  q.kind = LIBRARY_QUERY_ALBUMS;
-    else if (strcmp(kind, "genres") == 0)  q.kind = LIBRARY_QUERY_GENRES;
-    else if (strcmp(kind, "search") == 0)  q.kind = LIBRARY_QUERY_SEARCH;
-    else                                   q.kind = LIBRARY_QUERY_TRACKS;
-
-    if (filter_json && filter_json[0]) {
-        JsonReader reader;
-        json_reader_init(&reader, filter_json, strlen(filter_json));
-        json_get_string(&reader, "artist", q.artist, sizeof(q.artist));
-        json_get_string(&reader, "album", q.album, sizeof(q.album));
-        json_get_string(&reader, "genre", q.genre, sizeof(q.genre));
-        json_get_string(&reader, "query", q.query, sizeof(q.query));
-    }
-    return library_query_count(&q);
-}
-
-int player_library_page(const char *kind, const char *filter_json,
-                        int offset, int count, LibraryRow *out, int out_cap)
-{
-    LibraryQuery q = {0};
-    if (strcmp(kind, "artists") == 0)      q.kind = LIBRARY_QUERY_ARTISTS;
-    else if (strcmp(kind, "albums") == 0)  q.kind = LIBRARY_QUERY_ALBUMS;
-    else if (strcmp(kind, "genres") == 0)  q.kind = LIBRARY_QUERY_GENRES;
-    else if (strcmp(kind, "search") == 0)  q.kind = LIBRARY_QUERY_SEARCH;
-    else                                   q.kind = LIBRARY_QUERY_TRACKS;
-
-    if (filter_json && filter_json[0]) {
-        JsonReader reader;
-        json_reader_init(&reader, filter_json, strlen(filter_json));
-        json_get_string(&reader, "artist", q.artist, sizeof(q.artist));
-        json_get_string(&reader, "album", q.album, sizeof(q.album));
-        json_get_string(&reader, "genre", q.genre, sizeof(q.genre));
-        json_get_string(&reader, "query", q.query, sizeof(q.query));
-    }
-    return library_query_page(&q, offset, count, out, out_cap);
-}
-
-int player_favorites_count(void) { return library_favorites_get_count(); }
-
-int player_favorites_get(int index, Track *out)
-{
-    if (index < 0 || !out) {
-        return -1;
-    }
-    Track *tracks = calloc(MAX_FAVORITES_COUNT, sizeof(Track));
-    if (!tracks) {
-        return -1;
-    }
-    int count = library_favorites_get_all(tracks, MAX_FAVORITES_COUNT);
-    int rc = -1;
-    if (index < count) {
-        *out = tracks[index];
-        rc = 0;
-    }
-    free(tracks);
-    return rc;
-}
-
-int player_favorites_add(const Track *track)
-{
-    if (!track) return -1;
-    int rc = library_favorites_add(track->path);
-    g_local.library_revision++;
-    return rc == 0 ? 0 : -1;
-}
-
-int player_favorites_remove(const Track *track)
-{
-    if (!track) return -1;
-    int rc = library_favorites_remove(track->path);
-    g_local.library_revision++;
-    return rc == 0 ? 0 : -1;
-}
-
-int player_favorites_has(const char *track_path)
-{
-    return track_path ? library_favorites_has(track_path) : 0;
-}
-
-int player_history_count(void) { return library_history_get_count(); }
-
-int player_history_get(int index, HistoryEntry *out)
-{
-    if (index < 0 || !out) {
-        return -1;
-    }
-    HistoryEntry *entries = calloc(MAX_HISTORY_COUNT, sizeof(HistoryEntry));
-    if (!entries) {
-        return -1;
-    }
-    int count = library_history_get_all(entries, MAX_HISTORY_COUNT);
-    int rc = -1;
-    if (index < count) {
-        *out = entries[index];
-        rc = 0;
-    }
-    free(entries);
-    return rc;
-}
-
-int player_history_add(const Track *track)
-{
-    if (!track) return -1;
-    library_history_add(track->path, 0);
-    g_local.library_revision++;
-    return 0;
-}
-
-int player_history_clear(void)
-{
-    library_history_clear();
-    g_local.library_revision++;
-    return 0;
-}
-
-int player_dir_history_count(void)
-{
-    DirHistoryEntry *entries = calloc(MAX_DIR_HISTORY_COUNT, sizeof(DirHistoryEntry));
-    if (!entries) {
-        return 0;
-    }
-    int count = library_dir_history_get_all(entries, MAX_DIR_HISTORY_COUNT);
-    free(entries);
-    return count;
-}
-
-int player_dir_history_get(int index, DirHistoryEntry *out)
-{
-    if (index < 0 || !out) {
-        return -1;
-    }
-    DirHistoryEntry *entries = calloc(MAX_DIR_HISTORY_COUNT, sizeof(DirHistoryEntry));
-    if (!entries) {
-        return -1;
-    }
-    int count = library_dir_history_get_all(entries, MAX_DIR_HISTORY_COUNT);
-    int rc = -1;
-    if (index < count) {
-        *out = entries[index];
-        rc = 0;
-    }
-    free(entries);
-    return rc;
-}
-
-int player_dir_history_add(const char *path)
-{
-    if (!path || !path[0]) return -1;
-    int rc = library_dir_history_add(path);
-    g_local.library_revision++;
-    return rc == 0 ? 0 : -1;
-}
-
-int player_dir_history_clear(void)
-{
-    library_dir_history_clear();
-    g_local.library_revision++;
-    return 0;
-}
+/* 播放列表 / 曲库 / 收藏 / 历史是**前端自有内容**（playlist/、library/、
+ * search/）：界面与这部分门面都不再经播放服务，故此处没有实现。 */
 
 /* ── 配置（前端镜像 + 唯一写入口） ─────────────────────────────── */
 
@@ -903,6 +672,45 @@ int player_lyrics_reload_source(int source)
     lyrics_switch_source(source);
     refresh_snapshot();
     return 0;
+}
+
+int player_lyrics_highlight(int *out_current, int *out_next, int *out_has_timestamps)
+{
+    return lyrics_highlight(out_current, out_next, out_has_timestamps, NULL);
+}
+
+int player_lyrics_highlight_count(void)
+{
+    return lyrics_highlight_count();
+}
+
+int player_lyrics_source(void)
+{
+    return lyrics_source();
+}
+
+int player_lyrics_total(void)
+{
+    int total = 0;
+    pthread_mutex_lock(&g_lyrics.lock);
+    total = g_lyrics.count;
+    pthread_mutex_unlock(&g_lyrics.lock);
+    return total;
+}
+
+int player_lyrics_line_at(int index, LyricLine *out)
+{
+    if (!out || index < 0) {
+        return -1;
+    }
+    int rc = -1;
+    pthread_mutex_lock(&g_lyrics.lock);
+    if (index < g_lyrics.count) {
+        *out = g_lyrics.lines[index];
+        rc = 0;
+    }
+    pthread_mutex_unlock(&g_lyrics.lock);
+    return rc;
 }
 
 int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_size)

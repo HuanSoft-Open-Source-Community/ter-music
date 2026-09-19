@@ -933,6 +933,14 @@ int lyrics_highlight(int *out_current, int *out_next, int *out_has_timestamps, i
     return has ? 1 : 0;
 }
 
+int lyrics_highlight_count(void)
+{
+    pthread_mutex_lock(&g_lyrics.lock);
+    int count = g_lyrics.highlight_count;
+    pthread_mutex_unlock(&g_lyrics.lock);
+    return count;
+}
+
 int lyrics_page(int offset, int count, LyricsPage *out)
 {
     if (!out || offset < 0 || count < 0 || count > LYRICS_PAGE_MAX) {

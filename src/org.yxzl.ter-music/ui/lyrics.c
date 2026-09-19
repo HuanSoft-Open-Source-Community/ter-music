@@ -145,7 +145,7 @@ static void render_no_lyrics_spectrum(int h, int w) {
     int levels[VISUALIZER_BAND_COUNT] = {0};
     int peaks[VISUALIZER_BAND_COUNT] = {0};
     uint64_t last_update_ms = 0;
-    get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+    player_visualizer(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
 
     double spin = (double)(now_ms % 5000ULL) / 5000.0;
     double highlight_angle = (spin * M_PI * 2.0) - (M_PI / 2.0);
@@ -201,7 +201,7 @@ static void render_no_lyrics_spectrum(int h, int w) {
     }
 
     int is_idle = (last_update_ms == 0) || (now_ms > last_update_ms + 260ULL);
-    if (g_play_state == PLAY_STATE_STOPPED) {
+    if (player_play_state() == PLAY_STATE_STOPPED) {
         is_idle = 1;
     }
 
@@ -215,7 +215,7 @@ static void render_no_lyrics_spectrum(int h, int w) {
         if (is_idle) {
             double wave = sin((spin * M_PI * 6.0) + (double)i * 0.42);
             level = 16 + (int)(14.0 * (wave + 1.0));
-            if (g_play_state == PLAY_STATE_STOPPED) {
+            if (player_play_state() == PLAY_STATE_STOPPED) {
                 level /= 2;
             }
         }
@@ -313,7 +313,7 @@ static int render_corner_spectrum(int h, int w) {
     int levels[VISUALIZER_BAND_COUNT] = {0};
     int peaks[VISUALIZER_BAND_COUNT] = {0};
     uint64_t last_update_ms = 0;
-    get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+    player_visualizer(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
     (void)peaks;
 
     uint64_t now_ms = lyric_now_ms();
@@ -322,7 +322,7 @@ static int render_corner_spectrum(int h, int w) {
     if (last_update_ms > 0 && now_ms > last_update_ms) {
         inactive_decay = (int)((now_ms - last_update_ms) / 90ULL);
         if ((now_ms - last_update_ms) < 250ULL &&
-            (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED)) {
+            (player_play_state() == PLAY_STATE_PLAYING || player_play_state() == PLAY_STATE_PAUSED)) {
             is_visualizer_active = 1;
         }
     }
@@ -598,28 +598,30 @@ void render_lyrics(void) {
     if (!win_lyrics || !g_app_config.show_lyrics_panel) {
         return;
     }
-    
+
     int h, w;
     getmaxyx(win_lyrics, h, w);
-    
-    // 清空窗口
+
     werase(win_lyrics);
     wattron(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
-    
-    // 重绘边框和标题
+
     rounded_box(win_lyrics);
     if (g_lyric_cursor_mode) {
         mvwprintw(win_lyrics, 0, 2, "%s", i18n_get("controls.lyrics_seek"));
     } else {
         mvwprintw(win_lyrics, 0, 2, "%s", i18n_get("controls.lyrics"));
     }
-    
+
     wattroff(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
     wbkgd(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
-    pthread_mutex_lock(&g_lyrics.lock);
-    
-    if (!g_lyrics.has_lyrics || g_lyrics.count == 0) {
-        pthread_mutex_unlock(&g_lyrics.lock);
+
+    /* 歌词数据归后端：这里只取当前高亮行与总行数，逐行内容按需取。
+     * 光标（跳转模式）是界面私有状态，后端不认识。 */
+    int highlight = -1;
+    int has_lyrics = player_lyrics_highlight(&highlight, NULL, NULL);
+    int total = player_lyrics_total();
+
+    if (!has_lyrics || total <= 0) {
         render_no_lyrics_spectrum(h, w);
         wrefresh(win_lyrics);
         return;
@@ -627,67 +629,60 @@ void render_lyrics(void) {
 
     int content_top = render_corner_spectrum(h, w);
 
-    // 如果有歌词但没有当前索引（刚开始播放）
-    if (g_lyrics.current_index < 0) {
+    if (highlight < 0) {
         int message_row = content_top + ((h - content_top - 1) / 2);
         if (message_row >= h - 1) {
             message_row = h - 2;
         }
         mvwprintw(win_lyrics, message_row, 2, "%s", i18n_get("lyrics.playing"));
-        pthread_mutex_unlock(&g_lyrics.lock);
         wrefresh(win_lyrics);
         return;
     }
 
-    // 计算可视区域大小
     int visible_lines = h - content_top - 1;
     if (visible_lines <= 0) {
-        pthread_mutex_unlock(&g_lyrics.lock);
         wrefresh(win_lyrics);
         return;
     }
-    
-    int current_center_idx;
-    if (g_lyric_cursor_mode && g_lyrics.cursor_index >= 0) {
-        current_center_idx = g_lyrics.cursor_index;
-    } else {
-        current_center_idx = g_lyrics.current_index;
-    }
-    
-    // 垂直居中策略：使当前高亮/光标行居中显示
+
+    int current_center_idx = (g_lyric_cursor_mode && g_lyric_cursor_index >= 0)
+        ? g_lyric_cursor_index : highlight;
+
     int start_idx = current_center_idx - (visible_lines / 2);
     if (start_idx < 0) start_idx = 0;
-    if (start_idx + visible_lines > g_lyrics.count) {
-        start_idx = g_lyrics.count - visible_lines;
+    if (start_idx + visible_lines > total) {
+        start_idx = total - visible_lines;
     }
-    if (start_idx < 0) start_idx = 0;  // 歌词行数不足时从头显示
-    
-    // 渲染可视区域内的歌词行
-    for (int i = 0; i < visible_lines && (start_idx + i) < g_lyrics.count; i++) {
+    if (start_idx < 0) start_idx = 0;
+
+    for (int i = 0; i < visible_lines && (start_idx + i) < total; i++) {
         int lyric_idx = start_idx + i;
         int row = content_top + i;
-        
+
+        LyricLine line;
+        if (player_lyrics_line_at(lyric_idx, &line) != 0) {
+            break;
+        }
+
         int is_highlighted;
         int show_marker;
-        
-        if (g_lyric_cursor_mode) {
-            is_highlighted = (lyric_idx == g_lyrics.cursor_index);
-            show_marker = (lyric_idx == g_lyrics.cursor_index);
-        } else {
-            is_highlighted = (lyric_idx >= g_lyrics.current_index && 
-                              lyric_idx < g_lyrics.current_index + g_lyrics.highlight_count);
-            show_marker = (lyric_idx == g_lyrics.current_index);
-        }
-        
-        render_lyric_line(row, g_lyrics.lines[lyric_idx].text, 
-                         is_highlighted, show_marker);
-    }
-    
-    pthread_mutex_unlock(&g_lyrics.lock);
 
-    // 绘制滚动条
+        if (g_lyric_cursor_mode) {
+            is_highlighted = (lyric_idx == g_lyric_cursor_index);
+            show_marker = (lyric_idx == g_lyric_cursor_index);
+        } else {
+            int highlight_count = player_lyrics_highlight_count();
+            if (highlight_count < 1) highlight_count = 1;
+            is_highlighted = (lyric_idx >= highlight &&
+                              lyric_idx < highlight + highlight_count);
+            show_marker = (lyric_idx == highlight);
+        }
+
+        render_lyric_line(row, line.text, is_highlighted, show_marker);
+    }
+
     scrollbar_draw(win_lyrics, content_top, visible_lines,
-                   g_lyrics.count, visible_lines, start_idx, w - 2);
+                   total, visible_lines, start_idx, w - 2);
 
     wrefresh(win_lyrics);
 }

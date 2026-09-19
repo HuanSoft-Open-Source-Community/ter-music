@@ -296,7 +296,7 @@ static void prompt_folder_input(int append_mode) {
         
         struct stat s;
         if (stat(expanded_path, &s) == 0 && S_ISDIR(s.st_mode)) {
-            int had_existing_playlist = player_playlist_loaded() && player_playlist_count() > 0;
+            int had_existing_playlist = playlist_is_loaded() && playlist_count() > 0;
             if (!append_mode) {
                 player_stop();
             }
@@ -329,7 +329,7 @@ static void prompt_folder_input(int append_mode) {
                     update_controls_status(i18n_get("dialog.no_new_audio"));
                 } else {
                     update_controls_status(i18n_get("dialog.no_audio_found"));
-                    reset_playlist_state();
+                    playlist_clear_content();
                 }
                 render_playlist_content();
             }
@@ -337,7 +337,7 @@ static void prompt_folder_input(int append_mode) {
             update_controls_status(i18n_get("dialog.path_invalid"));
             if (!append_mode) {
                 player_stop();
-                reset_playlist_state();
+                playlist_clear_content();
             }
             render_playlist_content();
         }

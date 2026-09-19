@@ -97,6 +97,9 @@ void lyrics_set_source_hook(void (*hook)(const char *track_path, int source));
  * @return 1 = 有歌词 */
 int lyrics_highlight(int *out_current, int *out_next, int *out_has_timestamps, int *out_source);
 
+/* 当前高亮行数（同一时间戳的行会一起高亮，最多 2 行） */
+int lyrics_highlight_count(void);
+
 typedef struct {
     int total;
     int offset;

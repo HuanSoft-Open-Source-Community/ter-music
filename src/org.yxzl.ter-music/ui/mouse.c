@@ -92,21 +92,21 @@ int get_playlist_index_from_window_row(int window_y, int *display_index, int *ac
     }
 
     if (g_sort_state.active) {
-        if (clicked_display_index < 0 || clicked_display_index >= player_playlist_count()) return 0;
+        if (clicked_display_index < 0 || clicked_display_index >= playlist_count()) return 0;
         if (display_index) *display_index = clicked_display_index;
         if (actual_index)  *actual_index = g_sort_state.sorted_indices[clicked_display_index];
         return 1;
     }
 
     /* Tree mode: index is a visible line, actual is the track index */
-    else if (player_playlist_tree_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-        if (clicked_display_index < 0 || clicked_display_index >= player_playlist_visible_count()) return 0;
+    else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+        if (clicked_display_index < 0 || clicked_display_index >= playlist_visible_count()) return 0;
         if (display_index) *display_index = clicked_display_index;
         if (actual_index)  *actual_index = get_visible_node_track_index(clicked_display_index);
         return 1;
     }
 
-    if (clicked_display_index < 0 || clicked_display_index >= player_playlist_count()) return 0;
+    if (clicked_display_index < 0 || clicked_display_index >= playlist_count()) return 0;
     if (display_index) *display_index = clicked_display_index;
     if (actual_index)  *actual_index = clicked_display_index;
     return 1;
@@ -194,39 +194,40 @@ int get_lyric_index_from_window_row(int window_y, int *lyric_index, double *time
     int h, w;
     getmaxyx(win_lyrics, h, w);
 
-    pthread_mutex_lock(&g_lyrics.lock);
-
-    if (!g_lyrics.has_lyrics || g_lyrics.count == 0 || g_lyrics.current_index < 0) {
-        pthread_mutex_unlock(&g_lyrics.lock);
+    /* 歌词行与高亮行归后端（门面只读）；跳转光标属界面私有 */
+    int highlight = -1;
+    int total = player_lyrics_total();
+    if (!player_lyrics_highlight(&highlight, NULL, NULL) || total <= 0 || highlight < 0) {
         return 0;
     }
 
     int content_top = calculate_lyrics_content_top(h, w);
     int visible_lines = h - content_top - 1;
     if (visible_lines <= 0 || window_y < content_top || window_y >= content_top + visible_lines) {
-        pthread_mutex_unlock(&g_lyrics.lock);
         return 0;
     }
 
-    int current_center_idx = (g_lyric_cursor_mode && g_lyrics.cursor_index >= 0)
-        ? g_lyrics.cursor_index
-        : g_lyrics.current_index;
+    int current_center_idx = (g_lyric_cursor_mode && g_lyric_cursor_index >= 0)
+        ? g_lyric_cursor_index
+        : highlight;
 
     int start_idx = current_center_idx - (visible_lines / 2);
     if (start_idx < 0) start_idx = 0;
-    if (start_idx + visible_lines > g_lyrics.count) start_idx = g_lyrics.count - visible_lines;
+    if (start_idx + visible_lines > total) start_idx = total - visible_lines;
     if (start_idx < 0) start_idx = 0;
 
     int clicked_lyric_index = start_idx + (window_y - content_top);
-    if (clicked_lyric_index < 0 || clicked_lyric_index >= g_lyrics.count) {
-        pthread_mutex_unlock(&g_lyrics.lock);
+    if (clicked_lyric_index < 0 || clicked_lyric_index >= total) {
+        return 0;
+    }
+
+    LyricLine line;
+    if (player_lyrics_line_at(clicked_lyric_index, &line) != 0) {
         return 0;
     }
 
     if (lyric_index) *lyric_index = clicked_lyric_index;
-    if (timestamp)   *timestamp = g_lyrics.lines[clicked_lyric_index].timestamp;
-
-    pthread_mutex_unlock(&g_lyrics.lock);
+    if (timestamp)   *timestamp = line.timestamp;
     return 1;
 }
 
@@ -318,14 +319,14 @@ int handle_main_view_mouse_event(const MEVENT *event)
         } else {
             g_selected_index = display_index;
             /* Tree mode: toggle directory or play file */
-            if (player_playlist_tree_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+            if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
                 && !g_search_state.active) {
                 int node_type = get_visible_node_type(display_index);
                 if (node_type == TREE_NODE_DIRECTORY) {
                     int tree_idx = get_visible_node_tree_index(display_index);
-                    player_playlist_toggle_expand(tree_idx);
-                    if (g_selected_index >= player_playlist_visible_count())
-                        g_selected_index = player_playlist_visible_count() - 1;
+                    playlist_toggle_directory_expand(tree_idx);
+                    if (g_selected_index >= playlist_visible_count())
+                        g_selected_index = playlist_visible_count() - 1;
                     if (g_selected_index < 0) g_selected_index = 0;
                     render_playlist_content();
                     return 1;
@@ -370,12 +371,10 @@ int handle_main_view_mouse_event(const MEVENT *event)
         if (!get_lyric_index_from_window_row(window_y, &lyric_index, &target_timestamp))
             return 0;
 
-        pthread_mutex_lock(&g_lyrics.lock);
-        g_lyrics.cursor_index = lyric_index;
+        /* 跳转光标是界面私有状态：点哪一行就记哪一行，然后请后端跳转 */
         g_lyric_cursor_index = lyric_index;
-        pthread_mutex_unlock(&g_lyrics.lock);
 
-        player_seek_seconds(target_timestamp);
+        player_seek_seconds((int)target_timestamp);
         render_lyrics();
         return 1;
     }

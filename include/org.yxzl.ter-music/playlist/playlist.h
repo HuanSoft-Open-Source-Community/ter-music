@@ -16,6 +16,9 @@ int load_playlist(const char *folder_path);
 int append_playlist(const char *folder_path);
 int load_single_file(const char *file_path);
 void reset_playlist_state(void);
+
+/* 清空内容列表（并同步清空后端队列）。界面在“打开失败/关闭播放列表”时用。 */
+void playlist_clear_content(void);
 void playlist_lock(void);
 void playlist_unlock(void);
 int playlist_count(void);
@@ -36,6 +39,12 @@ int  cue_get_offset(int track_index);
 int  cue_get_track_number(int track_index);
 void cue_clear_sheet(void);
 int  cue_find_next_offset(int current_index);
+
+/* 内容版本号：曲库/播放列表内容每次变化（装载、追加、排序、树展开、清空）
+ * 递增。界面用它判断“内容是否需要重绘”——播放面另有自己的修订号
+ * （player_*_revision），两者互不替代。 */
+unsigned long long playlist_content_revision(void);
+void playlist_bump_content_revision(void);
 
 /* ── 渲染就绪的一页（D-Bus Playlist.GetPage 与前端共用） ─────────────
  * 行内容即界面渲染所需的最小集合：树模式给出缩进/展开状态，平铺模式
