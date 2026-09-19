@@ -1,48 +1,49 @@
-#include "ui/lyrics.h"
+/**
+ * @file lyrics.c
+ * @brief 歌词面板渲染（前端）
+ *
+ * 歌词数据由后端持有（`lyrics/lyrics.c`）：本文件只负责把**当前状态画出来**
+ * ——无歌词时的频谱动画、歌词行渲染、滚动条、光标模式下的跳转高亮。
+ *
+ * 后端状态经 `lyrics/lyrics.h` 的只读接口获取：
+ *   - `g_lyrics`（行数据与高亮行，读时持有 `g_lyrics.lock`）；
+ *   - `lyrics_tick()` 由 `core_tick()` 每轮推进，界面经 core 的状态监听重绘。
+ *
+ * 界面私有状态：`g_lyric_cursor_mode` / `g_lyric_cursor_index`（光标模式与
+ * 跳转位置），后端不认识它们。
+ *
+ * @author 燕戏竹林 (yxzl666xx@outlook.com)
+ */
+
 #include "types.h"
 #include "audio/audio.h"
 #include "audio/visualizer.h"
-#include "ui/ui.h"
-#include "i18n/i18n.h"
-#include "ui/menu_internal.h"
 #include "config/config.h"
-#include "ui/scrollbar.h"
-#include "remote/remote.h"
+#include "i18n/i18n.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
-#include "playlist/ape_tag.h"
-#include "library/library.h"
+#include "lyrics/lyrics.h"
+#include "player/player.h"
+#include "ui/ui.h"
+#include "ui/lyrics.h"
+#include "ui/menu_internal.h"
+#include "ui/scrollbar.h"
+
+#include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <errno.h>
-#include <iconv.h>
-#include <libgen.h>
-#include <math.h>
 #include <time.h>
-#include <libavformat/avformat.h>
-#include <libavcodec/avcodec.h>
-#include <libavutil/dict.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-// 全局歌词变量实例
-Lyrics g_lyrics = {
-    .count = 0,
-    .current_index = -1,
-    .highlight_count = 0,
-    .has_lyrics = 0,
-    .has_timestamps = 0,
-    .cursor_index = -1,
-    .source = LYRICS_SOURCE_AUTO,
-    .lock = PTHREAD_MUTEX_INITIALIZER
-};
-
 // 外部窗口变量声明
 extern WINDOW *win_lyrics;
+
+/* ASCII 回退渲染用的净化（实现见文件末尾附近） */
+static void sanitize_ascii_lyric(char *dest, size_t dest_size, const char *src);
 
 static uint64_t lyric_now_ms(void) {
     struct timespec ts;
@@ -411,498 +412,8 @@ static int render_corner_spectrum(int h, int w) {
     return graph_bottom + 1;
 }
 
-static void reset_loaded_lyrics(void) {
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = 0;
-    g_lyrics.current_index = -1;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.has_lyrics = 0;
-    g_lyrics.has_timestamps = 0;
-    g_lyrics.cursor_index = -1;
-    g_lyrics.source = LYRICS_SOURCE_AUTO;
-    pthread_mutex_unlock(&g_lyrics.lock);
-}
-
-static int duplicate_text_bytes(const unsigned char *data, size_t len, size_t skip, char **out_text) {
-    if (!out_text) {
-        return -1;
-    }
-
-    if (!data || skip > len) {
-        return -1;
-    }
-
-    size_t text_len = len - skip;
-    char *copy = malloc(text_len + 1);
-    if (!copy) {
-        return -1;
-    }
-
-    if (text_len > 0) {
-        memcpy(copy, data + skip, text_len);
-    }
-    copy[text_len] = '\0';
-    *out_text = copy;
-    return 0;
-}
-
-static int read_file_bytes(const char *path, unsigned char **data_out, size_t *size_out) {
-    if (!path || !data_out || !size_out) {
-        return -1;
-    }
-
-    *data_out = NULL;
-    *size_out = 0;
-
-    FILE *fp = fopen(path, "rb");
-    if (!fp) {
-        return -1;
-    }
-
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return -1;
-    }
-
-    long file_size = ftell(fp);
-    if (file_size < 0) {
-        fclose(fp);
-        return -1;
-    }
-
-    rewind(fp);
-
-    unsigned char *data = malloc((size_t)file_size + 1);
-    if (!data) {
-        fclose(fp);
-        return -1;
-    }
-
-    size_t bytes_read = fread(data, 1, (size_t)file_size, fp);
-    fclose(fp);
-
-    data[bytes_read] = '\0';
-    *data_out = data;
-    *size_out = bytes_read;
-    return 0;
-}
-
-static int is_valid_utf8_bytes(const unsigned char *data, size_t len) {
-    size_t i = 0;
-
-    while (i < len) {
-        unsigned char c = data[i];
-        if (c < 0x80) {
-            i++;
-            continue;
-        }
-
-        if ((c & 0xE0) == 0xC0) {
-            if (i + 1 >= len || (data[i + 1] & 0xC0) != 0x80 || c < 0xC2) {
-                return 0;
-            }
-            i += 2;
-            continue;
-        }
-
-        if ((c & 0xF0) == 0xE0) {
-            if (i + 2 >= len ||
-                (data[i + 1] & 0xC0) != 0x80 ||
-                (data[i + 2] & 0xC0) != 0x80) {
-                return 0;
-            }
-            if (c == 0xE0 && data[i + 1] < 0xA0) {
-                return 0;
-            }
-            if (c == 0xED && data[i + 1] >= 0xA0) {
-                return 0;
-            }
-            i += 3;
-            continue;
-        }
-
-        if ((c & 0xF8) == 0xF0) {
-            if (i + 3 >= len ||
-                (data[i + 1] & 0xC0) != 0x80 ||
-                (data[i + 2] & 0xC0) != 0x80 ||
-                (data[i + 3] & 0xC0) != 0x80) {
-                return 0;
-            }
-            if (c == 0xF0 && data[i + 1] < 0x90) {
-                return 0;
-            }
-            if (c > 0xF4 || (c == 0xF4 && data[i + 1] >= 0x90)) {
-                return 0;
-            }
-            i += 4;
-            continue;
-        }
-
-        return 0;
-    }
-
-    return 1;
-}
-
-static int looks_like_utf16_le(const unsigned char *data, size_t len) {
-    if (!data || len < 4) {
-        return 0;
-    }
-
-    size_t sample_len = len < 128 ? len : 128;
-    int zero_odd = 0;
-    int zero_even = 0;
-    int pair_count = 0;
-
-    for (size_t i = 0; i + 1 < sample_len; i += 2) {
-        if (data[i] == 0x00) {
-            zero_even++;
-        }
-        if (data[i + 1] == 0x00) {
-            zero_odd++;
-        }
-        pair_count++;
-    }
-
-    return pair_count > 0 && zero_odd >= (pair_count / 3) && zero_odd > zero_even;
-}
-
-static int looks_like_utf16_be(const unsigned char *data, size_t len) {
-    if (!data || len < 4) {
-        return 0;
-    }
-
-    size_t sample_len = len < 128 ? len : 128;
-    int zero_odd = 0;
-    int zero_even = 0;
-    int pair_count = 0;
-
-    for (size_t i = 0; i + 1 < sample_len; i += 2) {
-        if (data[i] == 0x00) {
-            zero_even++;
-        }
-        if (data[i + 1] == 0x00) {
-            zero_odd++;
-        }
-        pair_count++;
-    }
-
-    return pair_count > 0 && zero_even >= (pair_count / 3) && zero_even > zero_odd;
-}
-
-static int convert_text_to_utf8(const unsigned char *input,
-                                size_t input_len,
-                                const char *from_code,
-                                char **out_text) {
-    if (!input || !from_code || !out_text) {
-        return -1;
-    }
-
-    iconv_t cd = iconv_open("UTF-8", from_code);
-    if (cd == (iconv_t)-1) {
-        return -1;
-    }
-
-    size_t out_cap = input_len * 4 + 16;
-    if (out_cap < 64) {
-        out_cap = 64;
-    }
-
-    char *output = malloc(out_cap);
-    if (!output) {
-        iconv_close(cd);
-        return -1;
-    }
-
-    char *out_ptr = output;
-    size_t out_left = out_cap - 1;
-    char *in_ptr = (char *)input;
-    size_t in_left = input_len;
-
-    while (in_left > 0) {
-        size_t ret = iconv(cd, &in_ptr, &in_left, &out_ptr, &out_left);
-        if (ret != (size_t)-1) {
-            continue;
-        }
-
-        if (errno == E2BIG) {
-            size_t used = (size_t)(out_ptr - output);
-            size_t new_cap = out_cap * 2;
-            char *grown = realloc(output, new_cap);
-            if (!grown) {
-                free(output);
-                iconv_close(cd);
-                return -1;
-            }
-            output = grown;
-            out_ptr = output + used;
-            out_left = new_cap - used - 1;
-            out_cap = new_cap;
-            continue;
-        }
-
-        free(output);
-        iconv_close(cd);
-        return -1;
-    }
-
-    *out_ptr = '\0';
-    *out_text = output;
-    iconv_close(cd);
-    return 0;
-}
-
-static int process_lyrics_buffer(unsigned char *raw_data, size_t raw_size, char **out_text) {
-    if (!raw_data || !out_text) return -1;
-    *out_text = NULL;
-
-    if (raw_size == 0) {
-        free(raw_data);
-        *out_text = calloc(1, 1);
-        return *out_text ? 0 : -1;
-    }
-
-    if (raw_size >= 3 &&
-        raw_data[0] == 0xEF && raw_data[1] == 0xBB && raw_data[2] == 0xBF &&
-        is_valid_utf8_bytes(raw_data + 3, raw_size - 3)) {
-        int rc = duplicate_text_bytes(raw_data, raw_size, 3, out_text);
-        free(raw_data);
-        return rc;
-    }
-
-    if (raw_size >= 2 && raw_data[0] == 0xFF && raw_data[1] == 0xFE) {
-        int rc = convert_text_to_utf8(raw_data + 2, raw_size - 2, "UTF-16LE", out_text);
-        free(raw_data);
-        return rc;
-    }
-
-    if (raw_size >= 2 && raw_data[0] == 0xFE && raw_data[1] == 0xFF) {
-        int rc = convert_text_to_utf8(raw_data + 2, raw_size - 2, "UTF-16BE", out_text);
-        free(raw_data);
-        return rc;
-    }
-
-    if (is_valid_utf8_bytes(raw_data, raw_size)) {
-        int rc = duplicate_text_bytes(raw_data, raw_size, 0, out_text);
-        free(raw_data);
-        return rc;
-    }
-
-    if (looks_like_utf16_le(raw_data, raw_size) &&
-        convert_text_to_utf8(raw_data, raw_size, "UTF-16LE", out_text) == 0) {
-        free(raw_data);
-        return 0;
-    }
-
-    if (looks_like_utf16_be(raw_data, raw_size) &&
-        convert_text_to_utf8(raw_data, raw_size, "UTF-16BE", out_text) == 0) {
-        free(raw_data);
-        return 0;
-    }
-
-    const char *fallback_encodings[] = {"GB18030", "GBK", "BIG5", NULL};
-    for (int i = 0; fallback_encodings[i] != NULL; i++) {
-        if (convert_text_to_utf8(raw_data, raw_size, fallback_encodings[i], out_text) == 0) {
-            free(raw_data);
-            return 0;
-        }
-    }
-
-    int rc = duplicate_text_bytes(raw_data, raw_size, 0, out_text);
-    free(raw_data);
-    return rc;
-}
-
-static int load_lyrics_text_utf8(const char *path, char **out_text) {
-    if (!path || !out_text) {
-        return -1;
-    }
-
-    *out_text = NULL;
-
-    unsigned char *raw_data = NULL;
-    size_t raw_size = 0;
-    if (read_file_bytes(path, &raw_data, &raw_size) != 0) {
-        return -1;
-    }
-
-    return process_lyrics_buffer(raw_data, raw_size, out_text);
-}
-
-static void sanitize_ascii_lyric(char *dest, size_t dest_size, const char *src) {
-    if (!dest || dest_size == 0) {
-        return;
-    }
-
-    dest[0] = '\0';
-    if (!src || src[0] == '\0') {
-        return;
-    }
-
-    size_t write = 0;
-    int prev_space = 1;
-    int saw_non_ascii = 0;
-
-    for (size_t read = 0; src[read] != '\0' && write + 1 < dest_size; read++) {
-        unsigned char c = (unsigned char)src[read];
-
-        if (c < 0x80) {
-            if (isspace(c)) {
-                if (!prev_space) {
-                    dest[write++] = ' ';
-                    prev_space = 1;
-                }
-            } else if (isprint(c)) {
-                dest[write++] = (char)c;
-                prev_space = 0;
-            }
-        } else {
-            saw_non_ascii = 1;
-            if (!prev_space && write + 1 < dest_size) {
-                dest[write++] = ' ';
-                prev_space = 1;
-            }
-        }
-    }
-
-    while (write > 0 && dest[write - 1] == ' ') {
-        write--;
-    }
-    dest[write] = '\0';
-
-    if (write == 0 && saw_non_ascii) {
-        snprintf(dest, dest_size, "[non-ASCII]");
-    }
-}
-
-/**
- * 解析 LRC 时间戳字符串
- * 格式：[mm:ss.xx]
- * @param time_str 时间戳字符串（不包含方括号）
- * @return 时间戳（秒，包含毫秒）
- */
-static double parse_timestamp(const char *time_str) {
-    int mm, ss, xx;
-    if (sscanf(time_str, "%d:%d.%d", &mm, &ss, &xx) == 3) {
-        return mm * 60 + ss + xx / 100.0;  // 保留毫秒精度
-    }
-    return -1.0;
-}
-/**
- * 解析单行 LRC 内容
- * @param line LRC 文件的一行
- * @param timestamp 输出：时间戳（秒，包含毫秒）
- * @param text 输出：歌词文本
- * @return 1 表示成功，0 表示失败
- */
-static int parse_lrc_line(const char *line, double *timestamp, char *text) {
-    if (!line || !timestamp || !text) {
-        return 0;
-    }
-    
-    // 跳过空行
-    if (line[0] == '\0' || line[0] == '\n') {
-        return 0;
-    }
-    
-    // 查找第一个时间标签 [mm:ss.xx]
-    const char *start = strchr(line, '[');
-    if (!start) {
-        return 0;
-    }
-    
-    const char *end = strchr(start, ']');
-    if (!end) {
-        return 0;
-    }
-    
-    // 提取时间戳字符串（不包含方括号）
-    char time_str[16];
-    int len = end - start - 1;
-    if (len <= 0 || len >= sizeof(time_str)) {
-        return 0;
-    }
-    strncpy(time_str, start + 1, len);
-    time_str[len] = '\0';
-    
-    // 解析时间戳
-    double ts = parse_timestamp(time_str);
-    if (ts < 0) {
-        return 0;
-    }
-    *timestamp = ts;
-    
-    // 提取歌词文本（跳过所有时间标签）
-    const char *text_start = end + 1;
-    while (*text_start == '[') {
-        // 跳过连续的时间标签
-        const char *next_end = strchr(text_start, ']');
-        if (!next_end) {
-            break;
-        }
-        text_start = next_end + 1;
-    }
-    
-    // 去除前导空格
-    while (*text_start == ' ' || *text_start == '\t') {
-        text_start++;
-    }
-    
-    // 复制歌词文本，边复制边过滤嵌入的 [mm:ss.xx] 时间戳标签
-    // 这样 MAX_LYRIC_TEXT_LEN 限制只作用于真正的歌词内容，
-    // 避免卡拉OK式 LRC 因原始文本过长而把时间戳截断成碎片残留
-    int dst = 0;
-    const char *src = text_start;
-    while (*src && dst < MAX_LYRIC_TEXT_LEN - 1) {
-        if (*src == '[') {
-            const char *close = strchr(src, ']');
-            if (close) {
-                int mm, ss, xx;
-                if (sscanf(src + 1, "%d:%d.%d", &mm, &ss, &xx) == 3) {
-                    src = close + 1;
-                    continue;
-                }
-            }
-        }
-        text[dst++] = *src++;
-    }
-    text[dst] = '\0';
-    len = dst;
-
-    // 去除末尾换行符和空格
-    while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r' || text[len-1] == ' ')) {
-        text[--len] = '\0';
-    }
-
-    // 如果歌词文本为空，使用占位符
-    if (len == 0) {
-        snprintf(text, MAX_LYRIC_TEXT_LEN, "%s", i18n_get("lyrics.instrumental"));
-    }
-    
-    return 1;
-}
-
-/**
- * 根据时间戳查找歌词索引
- * @param timestamp_seconds 时间戳（秒，包含毫秒）
- * @return 歌词索引，-1 表示未找到
- */
-static int find_lyric_index(double timestamp_seconds) {
-    int i;
-    int current_index = -1;
-    
-    // 找到最后一个 timestamp <= current_position 的行
-    for (i = 0; i < g_lyrics.count; i++) {
-        if (g_lyrics.lines[i].timestamp <= timestamp_seconds) {
-            current_index = i;
-        } else {
-            break;
-        }
-    }
-    
-    return current_index;
-}
-
+/* 按后端当前高亮行重绘。推进由 lyrics_tick()（core_tick 每轮）完成，
+ * 本函数只把结果画出来——这就是“后端推进、前端渲染”的分界。 */
 /**
  * 渲染单行歌词
  * @param row 行号（窗口内坐标）
@@ -1020,346 +531,68 @@ static void render_lyric_line(int row, const char *text, int is_highlighted, int
  * @param audio_path  Path to the audio file.
  * @return 0 on success (lyrics found), -1 on failure.
  */
-static int extract_embedded_lyrics(const char *audio_path)
-{
-    if (!audio_path) return -1;
-
-    char *lyrics_text = NULL;
-    int found = 0;
-
-    /* ── Step 1: FFmpeg AVDictionary ── */
-    AVFormatContext *fmt_ctx = NULL;
-    if (avformat_open_input(&fmt_ctx, audio_path, NULL, NULL) == 0) {
-        (void)avformat_find_stream_info(fmt_ctx, NULL);
-
-        AVDictionary *stream_meta = NULL;
-        for (unsigned int i = 0; i < fmt_ctx->nb_streams; i++) {
-            if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-                stream_meta = fmt_ctx->streams[i]->metadata;
-                break;
-            }
-        }
-
-        static const char *lyrics_keys[] = {
-            "lyrics", "LYRICS", "unsyncedlyrics", "\xa9lyr", NULL
-        };
-        for (int k = 0; !found && lyrics_keys[k]; k++) {
-            AVDictionaryEntry *entry = av_dict_get(stream_meta, lyrics_keys[k], NULL, 0);
-            if (!entry || !entry->value || !entry->value[0])
-                entry = av_dict_get(fmt_ctx->metadata, lyrics_keys[k], NULL, 0);
-            if (entry && entry->value && entry->value[0]) {
-                lyrics_text = strdup(entry->value);
-                if (lyrics_text) found = 1;
-                break;
-            }
-        }
-        avformat_close_input(&fmt_ctx);
-    }
-
-    /* ── Step 2: APE tag fallback ── */
-    if (!found) {
-        /* APEItem 每项约 8 KB，64 项即 0.5 MB：栈上实测该帧 542 KB，改为堆分配 */
-        APEItem *ape_items = calloc(APE_MAX_ITEMS, sizeof(*ape_items));
-        if (ape_items) {
-            int ape_count = parse_ape_tags(audio_path, ape_items, APE_MAX_ITEMS);
-            for (int i = 0; i < ape_count; i++) {
-                if (ape_items[i].is_binary) continue;
-                if (strcmp(ape_items[i].key, "LYRICS") == 0 &&
-                    ape_items[i].value[0] != '\0') {
-                    lyrics_text = strdup(ape_items[i].value);
-                    if (lyrics_text) { found = 1; break; }
-                }
-            }
-            free(ape_items);
-        }
-    }
-
-    if (!found) return -1;
-
-    /* ── Parse lyrics text into LyricLine[] ── */
-    LyricLine temp_lines[MAX_LYRIC_LINES];
-    int count = 0;
-    int has_timestamps = 0;
-
-    char *cursor = lyrics_text;
-    while (cursor && *cursor != '\0' && count < MAX_LYRIC_LINES) {
-        char *line = cursor;
-        char *newline = strchr(cursor, '\n');
-        if (newline) {
-            *newline = '\0';
-            cursor = newline + 1;
-        } else {
-            cursor = line + strlen(line);
-        }
-
-        /* Strip trailing \r */
-        size_t llen = strlen(line);
-        while (llen > 0 && (line[llen - 1] == '\r' || line[llen - 1] == ' '))
-            line[--llen] = '\0';
-
-        if (line[0] == '\0') continue;
-
-        /* Try LRC parsing */
-        double ts;
-        char lrc_text[MAX_LYRIC_TEXT_LEN];
-        if (parse_lrc_line(line, &ts, lrc_text)) {
-            temp_lines[count].timestamp = ts;
-            decode_html_entities(lrc_text);
-            strncpy(temp_lines[count].text, lrc_text, MAX_LYRIC_TEXT_LEN - 1);
-            temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-            has_timestamps = 1;
-            count++;
-        } else {
-            /* Skip LRC metadata headers like [ti:...], [ar:...], [by:...] */
-            if (line[0] == '[') {
-                const char *colon = strchr(line, ':');
-                const char *close_bracket = strchr(line, ']');
-                if (colon && close_bracket && colon < close_bracket) {
-                    continue;  /* metadata header — skip */
-                }
-            }
-            /* Plain text line */
-            temp_lines[count].timestamp = 0.0;
-            decode_html_entities(line);
-            strncpy(temp_lines[count].text, line, MAX_LYRIC_TEXT_LEN - 1);
-            temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-            count++;
-        }
-    }
-
-    free(lyrics_text);
-
-    if (count == 0) return -1;
-
-    /* Store parsed lyrics */
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = count;
-    memcpy(g_lyrics.lines, temp_lines, sizeof(LyricLine) * count);
-    g_lyrics.has_lyrics = 1;
-    g_lyrics.has_timestamps = has_timestamps;
-    g_lyrics.current_index = has_timestamps ? -1 : 0;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.cursor_index = -1;
-    g_lyric_cursor_mode = 0;
-    g_lyrics.source = LYRICS_SOURCE_EMBEDDED;
-    pthread_mutex_unlock(&g_lyrics.lock);
-
-    log_info("lyrics", "Loaded %d embedded lyric lines from '%s' (timestamps=%d)",
-             count, audio_path, has_timestamps);
-    return 0;
-}
-
-void load_lyrics(const char *audio_path, int lyrics_source) {
-    if (!audio_path) {
-        return;
-    }
-    log_debug("lyrics", "load_lyrics(path='%s', source=%d) called", audio_path, lyrics_source);
-
-    /* Phase 1: Embedded lyrics */
-    if (lyrics_source == LYRICS_SOURCE_AUTO || lyrics_source == LYRICS_SOURCE_EMBEDDED) {
-        if (extract_embedded_lyrics(audio_path) == 0) {
-            log_debug("lyrics", "Using embedded lyrics for '%s'", audio_path);
-            return;
-        }
-        /* AUTO mode: fall through to external LRC. EMBEDDED mode: stop here. */
-        if (lyrics_source == LYRICS_SOURCE_EMBEDDED) {
-            log_debug("lyrics", "Embedded-only mode, no lyrics found for '%s'", audio_path);
-            reset_loaded_lyrics();
-            return;
-        }
-    }
-
-    /* EXTERNAL-only mode: skip embedded entirely */
-    if (lyrics_source == LYRICS_SOURCE_EXTERNAL) {
-        log_debug("lyrics", "External-only mode, skipping embedded for '%s'", audio_path);
-    }
-    
-    // 构造 LRC 文件路径
-    char lrc_path[MAX_PATH_LEN];
-    strncpy(lrc_path, audio_path, MAX_PATH_LEN - 1);
-    lrc_path[MAX_PATH_LEN - 1] = '\0';
-    
-    // 替换扩展名为 .lrc
-    char *ext = strrchr(lrc_path, '.');
-    if (ext) {
-        strcpy(ext, ".lrc");
-    } else {
-        strcat(lrc_path, ".lrc");
-    }
-    
-    char *lyrics_text = NULL;
-    if (load_lyrics_text_utf8(lrc_path, &lyrics_text) != 0 || !lyrics_text) {
-        log_debug("lyrics", "No LRC file found for '%s'", lrc_path);
-        reset_loaded_lyrics();
-        return;
-    }
-    
-    // 临时缓冲区存储解析后的歌词
-    LyricLine temp_lines[MAX_LYRIC_LINES];
-    int count = 0;
-
-    char *cursor = lyrics_text;
-    while (cursor && *cursor != '\0' && count < MAX_LYRIC_LINES) {
-        char *line = cursor;
-        char *newline = strchr(cursor, '\n');
-        if (newline) {
-            *newline = '\0';
-            cursor = newline + 1;
-        } else {
-            cursor = line + strlen(line);
-        }
-
-        if (line[0] == '\0') {
-            continue;
-        }
-
-        // 检测头部元数据行 [ti:曲名]、[ar:歌手]、[al:专辑]
-        if ((line[0] == '[') && (line[1] == 't' && line[2] == 'i' && line[3] == ':') ||
-            (line[0] == '[') && (line[1] == 'a' && line[2] == 'r' && line[3] == ':') ||
-            (line[0] == '[') && (line[1] == 'a' && line[2] == 'l' && line[3] == ':')) {
-            char *close = strchr(line + 4, ']');
-            if (close && close > line + 4) {
-                *close = '\0';
-                temp_lines[count].timestamp = 0.0;
-                strncpy(temp_lines[count].text, line + 4, MAX_LYRIC_TEXT_LEN - 1);
-                temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-                *close = ']';
-                count++;
-                continue;
-            }
-        }
-
-        double timestamp;
-        char text[MAX_LYRIC_TEXT_LEN];
-
-        if (parse_lrc_line(line, &timestamp, text)) {
-            temp_lines[count].timestamp = timestamp;
-            decode_html_entities(text);
-            strncpy(temp_lines[count].text, text, MAX_LYRIC_TEXT_LEN - 1);
-            temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-            count++;
-        }
-    }
-
-    free(lyrics_text);
-    
-    // 如果没有解析到任何歌词
-    if (count == 0) {
-        log_debug("lyrics", "No lyrics content in '%s'", lrc_path);
-        reset_loaded_lyrics();
-        return;
-    }
-
-    // 锁定并更新全局歌词数据
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = count;
-    memcpy(g_lyrics.lines, temp_lines, sizeof(LyricLine) * count);
-    g_lyrics.has_lyrics = 1;
-    g_lyrics.has_timestamps = 1;
-    g_lyrics.current_index = -1;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.cursor_index = -1;
-    g_lyric_cursor_mode = 0;
-    g_lyrics.source = LYRICS_SOURCE_EXTERNAL;
-    pthread_mutex_unlock(&g_lyrics.lock);
-
-    log_info("lyrics", "Loaded %d lyric lines from '%s'", count, lrc_path);
-}
-
-void clear_lyrics(void) {
-    log_debug("lyrics", "clear_lyrics() called");
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = 0;
-    g_lyrics.current_index = -1;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.has_lyrics = 0;
-    g_lyrics.has_timestamps = 0;
-    g_lyrics.source = LYRICS_SOURCE_AUTO;
-    pthread_mutex_unlock(&g_lyrics.lock);
-}
-
-void reload_lyrics_with_source(int new_source) {
-    char track_path[MAX_PATH_LEN];
-    if (playlist_get_track_path(g_current_play_index, track_path, sizeof(track_path)) != 0) {
-        log_warn("lyrics", "reload_lyrics_with_source: cannot get current track path");
-        return;
-    }
-
-    /* Persist the preference to the database */
-    library_set_lyrics_source(track_path, new_source);
-
-    /* Reload lyrics with the new source */
-    load_lyrics(track_path, new_source);
-
-    /* Refresh the display */
-    if (g_current_view == VIEW_MAIN) {
-        render_lyrics();
-    }
-}
-
 void update_lyrics_display(void) {
-    // 只在播放状态且主界面下更新
-    if (g_play_state == PLAY_STATE_STOPPED || g_current_view != VIEW_MAIN) {
+    if (g_current_view != VIEW_MAIN) {
         return;
     }
 
-    pthread_mutex_lock(&g_lyrics.lock);
-
-    if (!g_lyrics.has_lyrics || g_lyrics.count == 0) {
-        pthread_mutex_unlock(&g_lyrics.lock);
+    /* 纯文本歌词（无时间戳）没有“推进”，但需要一次首帧渲染 */
+    int has_timestamps = 0;
+    int has_lyrics = lyrics_highlight(NULL, NULL, &has_timestamps, NULL);
+    if (!has_lyrics) {
         return;
     }
-
-    int changed = 0;
-
-    /* Plain text embedded lyrics — no timestamp tracking needed */
-    if (!g_lyrics.has_timestamps) {
-        /* Ensure we start at line 0 and render once */
-        if (g_lyrics.current_index != 0) {
-            g_lyrics.current_index = 0;
-            g_lyrics.highlight_count = 0;
-            changed = 1;
-        }
-        pthread_mutex_unlock(&g_lyrics.lock);
-        if (changed) render_lyrics();
-        return;
-    }
-
-    // 根据当前播放位置找到对应的歌词行
-    double current_pos = (double)g_current_position;
-    int new_index = -1;
-    int new_highlight_count = 0;
-
-    // 遍历歌词数组，找到最后一个 timestamp <= current_position 的行
-    for (int i = 0; i < g_lyrics.count; i++) {
-        if (g_lyrics.lines[i].timestamp <= current_pos) {
-            new_index = i;
-            new_highlight_count = 1;
-
-            // 检查下一行是否有相同时间戳，最多高亮两行
-            if (i + 1 < g_lyrics.count &&
-                g_lyrics.lines[i + 1].timestamp == g_lyrics.lines[i].timestamp) {
-                new_highlight_count = 2;
-            }
-        } else {
-            break;
-        }
-    }
-
-    // 只有当索引变化时才更新
-    if (new_index != g_lyrics.current_index ||
-        new_highlight_count != g_lyrics.highlight_count) {
-        g_lyrics.current_index = new_index;
-        g_lyrics.highlight_count = new_highlight_count;
-        changed = 1;
-    }
-
-    pthread_mutex_unlock(&g_lyrics.lock);
-
-    if (changed) {
+    if (!has_timestamps) {
         render_lyrics();
     }
 }
+
+static void sanitize_ascii_lyric(char *dest, size_t dest_size, const char *src) {
+    if (!dest || dest_size == 0) {
+        return;
+    }
+
+    dest[0] = '\0';
+    if (!src || src[0] == '\0') {
+        return;
+    }
+
+    size_t write = 0;
+    int prev_space = 1;
+    int saw_non_ascii = 0;
+
+    for (size_t read = 0; src[read] != '\0' && write + 1 < dest_size; read++) {
+        unsigned char c = (unsigned char)src[read];
+
+        if (c < 0x80) {
+            if (isspace(c)) {
+                if (!prev_space) {
+                    dest[write++] = ' ';
+                    prev_space = 1;
+                }
+            } else if (isprint(c)) {
+                dest[write++] = (char)c;
+                prev_space = 0;
+            }
+        } else {
+            saw_non_ascii = 1;
+            if (!prev_space && write + 1 < dest_size) {
+                dest[write++] = ' ';
+                prev_space = 1;
+            }
+        }
+    }
+
+    while (write > 0 && dest[write - 1] == ' ') {
+        write--;
+    }
+    dest[write] = '\0';
+
+    if (write == 0 && saw_non_ascii) {
+        snprintf(dest, dest_size, "[non-ASCII]");
+    }
+}
+
 
 void render_lyrics(void) {
     if (!win_lyrics || !g_app_config.show_lyrics_panel) {

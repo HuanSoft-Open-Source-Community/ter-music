@@ -34,10 +34,7 @@
 #include <libavutil/samplefmt.h>
 #include <libavutil/version.h>
 
-/* 迁移期过渡：播放线程仍需要歌词/封面的加载与清空入口，二者属“当前曲目
- * 信息”（后端职责）。正式的引擎抽取在歌词模块化那一步完成，届时本声明
- * 连同 `ui/lyrics.h` 一起从后端消失（见 check-core-purity.sh 的 B 轴）。 */
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 
 /* ── Write batch size (~23ms at 44100 Hz) ── */
 #define WRITE_BATCH_FRAMES 1024

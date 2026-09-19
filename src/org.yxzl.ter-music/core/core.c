@@ -12,6 +12,7 @@
 
 #include "audio/audio.h"
 #include "config/config.h"
+#include "lyrics/lyrics.h"
 #include "media/session.h"
 #include "logger/logger.h"
 
@@ -23,17 +24,11 @@ volatile sig_atomic_t g_should_exit = 0;
 volatile sig_atomic_t g_config_reload_requested = 0;
 
 /* ── 钩子与状态 ─────────────────────────────────────────────────── */
-static void (*g_lyrics_tick)(void) = NULL;
 static void (*g_config_listener)(void) = NULL;
 static void (*g_status_listener)(const char *message) = NULL;
 static void (*g_state_listener)(void) = NULL;
 static char g_status_last[CORE_STATUS_MAX] = "";
 static unsigned long long g_status_seq = 0;
-
-void core_set_lyrics_tick(void (*tick)(void))
-{
-    g_lyrics_tick = tick;
-}
 
 void core_set_state_listener(void (*listener)(void))
 {
@@ -100,8 +95,9 @@ void core_tick(void)
     reap_finished_playback_thread();
     process_pending_playback_action();
 
-    if (g_lyrics_tick) {
-        g_lyrics_tick();
+    /* 歌词高亮由后端按播放位置推进（数据与推进都归后端） */
+    if (lyrics_tick()) {
+        core_notify_state_changed();
     }
 
     media_session_tick();

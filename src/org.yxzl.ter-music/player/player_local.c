@@ -35,7 +35,7 @@
 #include "remote/remote.h"
 #include "search/search.h"
 #include "ui/braille/braille_art.h"
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 #include "ui/ui.h"
 #include "util/json.h"
 
@@ -900,7 +900,7 @@ int player_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
 
 int player_lyrics_reload_source(int source)
 {
-    reload_lyrics_with_source(source);
+    lyrics_switch_source(source);
     refresh_snapshot();
     return 0;
 }

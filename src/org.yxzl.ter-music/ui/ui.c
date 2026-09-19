@@ -333,7 +333,6 @@ void run_event_loop(void)
     static uint64_t last_rainbow_update_ms = 0;
 
     /* 歌词状态由本模块持有，核心经钩子调用其推进函数 */
-    core_set_lyrics_tick(update_lyrics_display);
     /* 状态消息：核心推送时同步到界面状态栏 */
     core_set_status_listener(show_status_message);
     /* 配置重载：核心应用后由界面重刷配色与内容 */
@@ -757,7 +756,7 @@ void run_event_loop(void)
                     if (g_lyric_cursor_mode && g_lyrics.has_lyrics) {
                         int new_source = (g_lyrics.source == LYRICS_SOURCE_EMBEDDED)
                             ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
-                        reload_lyrics_with_source(new_source);
+                        lyrics_switch_source(new_source);
                         update_controls_status(
                             new_source == LYRICS_SOURCE_EMBEDDED
                                 ? i18n_get("lyrics.source_embedded")

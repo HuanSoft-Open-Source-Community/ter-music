@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 #include "types.h"
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 
 /* ── 基本信息字段位掩码 ─────────────────────────────────────────── */
 #define INFO_FIELD_STATE   0x0001

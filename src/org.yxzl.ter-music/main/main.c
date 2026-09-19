@@ -9,7 +9,8 @@
 #include "logger/logger.h"
 #include "media/session.h"
 #include "ui/menus.h"
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
+#include "library/library.h"
 #include "remote/remote.h"
 #include "remote/remote_cache.h"
 #include "ui/remote_view.h"
@@ -253,6 +254,9 @@ int main(int argc, char *argv[]) {
         clear_dir_history();
     }
     
+    /* 歌词来源偏好由前端的内容库持久化：后端只回调，不直接写库 */
+    lyrics_set_source_hook(library_set_lyrics_source);
+
     init_ffmpeg();
     remote_init();
     /* 前端远程：读入前端自有的 remote.xml 并启动下载线程 */
@@ -495,10 +499,6 @@ int main(int argc, char *argv[]) {
         cleanup();
         return 1;
     }
-
-    /* 歌词状态由 ui/lyrics.c 持有，核心经钩子推进（注册在 run_event_loop 内亦可，
-     * 这里显式注册，便于 grep 到前端与核心的边界） */
-    core_set_lyrics_tick(update_lyrics_display);
 
     log_info("main", "Starting event loop");
     run_event_loop();

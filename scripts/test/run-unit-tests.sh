@@ -39,9 +39,19 @@ for name in "${names[@]}"; do
         done < "$SCRIPT_DIR/$name.srcs"
     fi
 
+    # 可选：<name>.env 里给出额外的编译/链接参数（每行一个），
+    # 例如需要 ffmpeg / sqlite 的单测
+    flags=()
+    if [ -f "$SCRIPT_DIR/$name.env" ]; then
+        while IFS= read -r flag; do
+            [ -n "$flag" ] && flags+=("$flag")
+        done < "$SCRIPT_DIR/$name.env"
+    fi
+
     if ! "$CC" -std=gnu99 -D_GNU_SOURCE -Wall -Wextra \
             -I "$REPO_ROOT/include/org.yxzl.ter-music" \
             "$src" "$REPO_ROOT/src/org.yxzl.ter-music/util/json.c" "${extra[@]}" \
+            "${flags[@]}" \
             -o "$bin" 2>"$OUT_DIR/$name.build.log"; then
         echo "FAIL $name 编译失败："
         sed 's/^/      /' "$OUT_DIR/$name.build.log"

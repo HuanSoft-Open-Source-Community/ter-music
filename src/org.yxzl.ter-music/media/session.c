@@ -6,7 +6,7 @@
 #include "playlist/playlist.h"
 #include "ui/ui.h"
 #include "ui/braille/braille_art.h"
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 #include "media/rpc.h"
 #include "media/session.h"
 #include "app/open.h"

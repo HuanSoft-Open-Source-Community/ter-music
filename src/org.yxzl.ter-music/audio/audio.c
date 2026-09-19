@@ -26,8 +26,7 @@
 #include "queue/backend_queue.h"
 #include "audio/progress/progress.h"
 #include "ui/braille/braille_art.h"
-/* 迁移期过渡：歌词引擎抽取前，后端仍需 load_lyrics/clear_lyrics 入口 */
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

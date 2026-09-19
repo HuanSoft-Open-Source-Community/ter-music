@@ -35,8 +35,8 @@
 #include "library/library.h"
 #include "playlist/playlist.h"
 #include "queue/backend_queue.h"
+#include "lyrics/lyrics.h"
 #include "remote/remote.h"
-#include "ui/lyrics.h"
 
 /* 后端选择 */
 typedef enum {

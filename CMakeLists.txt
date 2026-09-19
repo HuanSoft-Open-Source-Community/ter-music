@@ -161,6 +161,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/help_view.c
     src/org.yxzl.ter-music/ui/language_view.c
     src/org.yxzl.ter-music/i18n/i18n.c
+    src/org.yxzl.ter-music/lyrics/lyrics.c
     src/org.yxzl.ter-music/ui/lyrics.c
     src/org.yxzl.ter-music/ui/braille/braille_art.c
     src/org.yxzl.ter-music/ui/braille/image_loader.c

@@ -23,7 +23,7 @@
 #include "queue/backend_queue.h"
 #include "logger/logger.h"
 #include "ui/braille/braille_art.h"
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 #include "util/utf8.h"
 
 #include <errno.h>

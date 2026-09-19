@@ -21,7 +21,7 @@
 #include "logger/logger.h"
 #include "playlist/playlist.h"
 #include "ui/braille/braille_art.h"
-#include "ui/lyrics.h"
+#include "lyrics/lyrics.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
 #include "util/json.h"

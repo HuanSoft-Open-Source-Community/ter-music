@@ -56,9 +56,4 @@ unsigned long long core_status_seq(void);
 void core_notify_state_changed(void);
 void core_set_state_listener(void (*listener)(void));
 
-/* ── 歌词推进钩子 ───────────────────────────────────────────────── */
-/* 歌词数据由后端持有（lyrics/lyrics.c），其推进由 core_tick() 直接调用
- * `lyrics_tick()`；此处保留注册入口，供需要自定义推进节奏的前端覆盖。 */
-void core_set_lyrics_tick(void (*tick)(void));
-
 #endif /* CORE_H */
