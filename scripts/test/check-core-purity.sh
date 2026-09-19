@@ -32,7 +32,14 @@ INC_ROOT="$REPO_ROOT/include/org.yxzl.ter-music"
 MODE="strict"
 [ "${1:-}" = "--report" ] && MODE="report"
 
-BACKEND_DIRS=(audio cli config core info lyrics media queue)
+BACKEND_DIRS=(audio config core info lyrics media queue)
+
+# 后端文件清单（目录之外的例外与排除）
+#   cli/daemon.c —— 无界面播放进程（后端外壳）
+#   cli/cli.c、cli/cli_client.c —— **前端**：CLI 子命令与 D-Bus 客户端，负责扫描
+#     内容、装配路径队列并下发给核心（内容归前端）
+BACKEND_EXTRA_FILES=(cli/daemon.c)
+BACKEND_EXCLUDE_FILES=(cli/cli.c cli/cli_client.c)
 
 # A 远程符号
 PATTERNS_REMOTE='remote/remote\.h|remote_[a-z_]+\(|RemoteConnectionConfig|RemoteDirEntry|RPC_IFACE_REMOTE|RPC_JOB_REMOTE|rpc_remote_|load_remote_playlist|playlist_build_remote|HAVE_LIBCURL|#include <curl/|is_remote'
@@ -57,10 +64,19 @@ declare -a rows_remote=()
 declare -a rows_content=()
 declare -a samples=()
 
-for dir in "${BACKEND_DIRS[@]}"; do
-    for file in "$SRC_ROOT/$dir"/*.c "$INC_ROOT/$dir"/*.h; do
-        [ -e "$file" ] || continue
-        rel="${file#"$REPO_ROOT"/}"
+is_excluded() {
+    local rel="$1" name
+    for name in "${BACKEND_EXCLUDE_FILES[@]}"; do
+        [ "$rel" = "$name" ] && return 0
+    done
+    return 1
+}
+
+scan_file() {
+        local file="$1"
+        [ -e "$file" ] || return 0
+        local rel="${file#"$REPO_ROOT"/}"
+        is_excluded "$rel" && return 0
 
         rem=$(count_in "$file" "$PATTERNS_REMOTE");  [ -z "$rem" ] && rem=0
         con=$(count_in "$file" "$PATTERNS_CONTENT"); [ -z "$con" ] && con=0
@@ -77,7 +93,15 @@ for dir in "${BACKEND_DIRS[@]}"; do
 
         total_remote=$((total_remote + rem))
         total_content=$((total_content + con))
+}
+
+for dir in "${BACKEND_DIRS[@]}"; do
+    for file in "$SRC_ROOT/$dir"/*.c "$INC_ROOT/$dir"/*.h; do
+        scan_file "$file"
     done
+done
+for rel in "${BACKEND_EXTRA_FILES[@]}"; do
+    scan_file "$SRC_ROOT/$rel"
 done
 
 echo "后端纯度统计："

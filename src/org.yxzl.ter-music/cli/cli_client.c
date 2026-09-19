@@ -10,7 +10,10 @@
 
 #include "cli/cli.h"
 
+#include "app/open.h"
 #include "config/config.h"
+#include "playlist/playlist.h"
+#include "playlist/playlist_queue.h"
 #include "info/info.h"
 #include "types.h"
 
@@ -834,6 +837,39 @@ int cli_client_show(const char *bus, const char *options, int want_json,
 
 /* ── play / quit / reload / playlist ────────────────────────────── */
 
+int cli_client_load_local_content(const char *path, int *out_track_index)
+{
+    if (out_track_index) {
+        *out_track_index = -1;
+    }
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+    /* 内容侧：目录递归扫描或单文件装载（与前端的 app_open_path 同一实现） */
+    AppOpenResult result = app_open_path(path, NULL, 0, NULL, NULL);
+    if (result != APP_OPEN_OK) {
+        return -1;
+    }
+    if (playlist_count() <= 0) {
+        return -1;
+    }
+
+    /* 单文件：定位该文件在内容列表里的**物理下标**。
+     * 目录：从第一首开始。
+     * 注意 g_selected_index 在树模式下是**可见行**下标，不能当曲目下标用。 */
+    if (out_track_index) {
+        int found = playlist_find_track_index_by_path(path);
+        *out_track_index = found >= 0 ? found : 0;
+    }
+    return 0;
+}
+
+char *cli_client_build_queue_json(void)
+{
+    return playlist_queue_render();
+}
+
 int cli_client_play(const char *bus, const char *path, int index, int mode) {
     CliClient client;
     int rc = cli_client_open(&client, bus);
@@ -853,29 +889,55 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
 
     int ok = 0;
     if (path && path[0]) {
-        rc = cli_reply_bool(cli_call_sb(&client, CLI_CONTROL_INTERFACE, "OpenPath",
-                                        path, index < 0 ? 1 : 0), &ok);
+        /* 内容归前端：本进程扫描路径、装配队列，再把路径队列下发给核心 */
+        int selected_track = -1;
+        int loaded = cli_client_load_local_content(path, &selected_track);
+        if (loaded < 0) {
+            fprintf(stderr, "错误：无法打开 '%s'（路径不存在或没有可播放的音频）。\n", path);
+            cli_client_close(&client);
+            return CLI_EXIT_REFUSED;
+        }
+
+        char *queue_json = cli_client_build_queue_json();
+        if (!queue_json) {
+            fprintf(stderr, "错误：装载内容后没有可播放的曲目。\n");
+            cli_client_close(&client);
+            return CLI_EXIT_REFUSED;
+        }
+
+        int written = 0;
+        rc = cli_reply_int(cli_call_s(&client, CLI_QUEUE_INTERFACE, "Set", queue_json), &written);
+        free(queue_json);
+        if (rc != CLI_EXIT_OK) {
+            cli_client_close(&client);
+            return rc;
+        }
+        if (written <= 0) {
+            fprintf(stderr, "错误：核心拒绝了队列。\n");
+            cli_client_close(&client);
+            return CLI_EXIT_REFUSED;
+        }
+
+        /* 未显式给 --index 时从内容侧装载的那一首开始（单文件即该文件） */
+        int position = (index >= 0) ? index : selected_track;
+        if (position < 0) {
+            position = 0;
+        }
+        if (position >= written) {
+            fprintf(stderr, "错误：曲目序号 %d 超出范围（共 %d 首）。\n", position, written);
+            cli_client_close(&client);
+            return CLI_EXIT_REFUSED;
+        }
+
+        rc = cli_reply_bool(cli_call_i(&client, CLI_QUEUE_INTERFACE, "PlayAt", position), &ok);
         if (rc != CLI_EXIT_OK) {
             cli_client_close(&client);
             return rc;
         }
         if (!ok) {
-            fprintf(stderr, "错误：无法打开 '%s'（路径不存在或没有可播放的音频）。\n", path);
+            fprintf(stderr, "错误：核心未能开始播放第 %d 首。\n", position + 1);
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
-        }
-        if (index >= 0) {
-            rc = cli_reply_bool(cli_call_i(&client, CLI_CONTROL_INTERFACE, "PlayIndex", index),
-                                &ok);
-            if (rc != CLI_EXIT_OK) {
-                cli_client_close(&client);
-                return rc;
-            }
-            if (!ok) {
-                fprintf(stderr, "错误：曲目序号 %d 超出播放列表范围。\n", index);
-                cli_client_close(&client);
-                return CLI_EXIT_REFUSED;
-            }
         }
     } else {
         rc = cli_reply_bool(cli_call0(&client, CLI_CONTROL_INTERFACE, "Play"), &ok);

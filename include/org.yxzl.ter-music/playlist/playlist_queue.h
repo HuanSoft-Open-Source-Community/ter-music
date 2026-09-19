@@ -20,6 +20,12 @@
  * @return 实际下发条目数（≥0）；-1 = 失败（内容过大 / 载荷被拒） */
 int playlist_queue_sync(void);
 
+/* 把当前内容列表渲染成队列 JSON（{"entries":[...]}}，调用方 free()）。
+ * 供“没有后端队列可推”的场景使用：CLI 在自己的进程里装载内容后，
+ * 把这个载荷经 D-Bus Queue.Set 交给核心。
+ * @return 堆字符串；NULL = 没有可播放条目或内存不足 */
+char *playlist_queue_render(void);
+
 /* 只把物理下标 index 的单条曲目下发给后端。
  * insert_after != 0 时插到当前条目之后，否则追加到队尾。
  * @return 写入条目数（0/1）；-1 = 失败 */

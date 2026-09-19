@@ -28,6 +28,7 @@
 #define CLI_OBJECT_PATH        "/org/mpris/MediaPlayer2"
 #define CLI_INFO_INTERFACE     "org.yxzl.ter_music.Info"
 #define CLI_CONTROL_INTERFACE  "org.yxzl.ter_music.Control"
+#define CLI_QUEUE_INTERFACE    "org.yxzl.ter_music.Queue"
 
 /* 1 = 当前进程运行在无界面 daemon 模式（供 Info.InstanceInfo / MPRIS 判定） */
 extern int g_daemon_mode;
@@ -81,6 +82,13 @@ int cli_client_show(const char *bus, const char *options, int want_json,
 
 /* play：path 可为 NULL；index < 0 表示不指定曲目序号 */
 int cli_client_play(const char *bus, const char *path, int index, int mode);
+
+/* ── 前端内容装载（play 子命令用） ───────────────────────────────
+ * 扫描/元数据/播放列表都归前端：CLI 进程自己装载内容，再把路径队列下发给核心。 */
+/* 装载本地内容；成功时把“应当开始播放的曲目下标”写入 out_track_index。
+ * @return 0 成功；-1 路径非法/没有可播放音频 */
+int cli_client_load_local_content(const char *path, int *out_track_index);
+char *cli_client_build_queue_json(void);               /* 需 free()；NULL = 队列为空 */
 
 /* 请求会话总线按需激活主实例（D-Bus activation，用于 Linyaps 等沙箱环境）：
  * 返回 CLI_EXIT_OK（含“已在运行”）/CLI_EXIT_REFUSED（不可激活）/CLI_EXIT_DBUS */

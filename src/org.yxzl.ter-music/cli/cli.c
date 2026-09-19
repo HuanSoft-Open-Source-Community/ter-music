@@ -175,7 +175,9 @@ static int cli_wait_until_offline(const char *bus, int timeout_ms) {
  *  - 已有实例 → OK
  *  - 沙箱内 → 尝试 D-Bus 激活（ll-cli run 由宿主机总线拉起 daemon），成功返回 OK
  *  - 否则返回 CLI_EXIT_NO_INSTANCE（调用方决定是否 auto-daemon） */
-static int cli_ensure_instance(void) {
+/* 确保播放服务在跑：已有则直接用；沙箱内走 D-Bus 激活（不能 fork）；
+ * 否则后台拉起 daemon（no_autoplay：核心没有内容可自动播放，队列随后下发）。 */
+static int cli_ensure_core_instance(void) {
     if (cli_client_primary_available(cli_bus())) {
         return CLI_EXIT_OK;
     }
@@ -192,7 +194,14 @@ static int cli_ensure_instance(void) {
             "Linyaps 打包环境下无法自行分叉后台进程（脱离的进程会随容器退出而被回收）。");
         return CLI_EXIT_REFUSED;
     }
-    return CLI_EXIT_NO_INSTANCE;
+    {
+        char pid_text[32] = "";
+        int rc = daemon_start_background(NULL, 0, 0, pid_text, sizeof(pid_text));
+        if (rc != CLI_EXIT_OK) {
+            return rc;
+        }
+    }
+    return CLI_EXIT_OK;
 }
 
 static int cli_require_instance(void) {
@@ -251,47 +260,21 @@ static int cli_cmd_play(int argc, char **argv) {
         return CLI_EXIT_USAGE;
     }
 
-    if (cli_client_primary_available(cli_bus())) {
-        if (foreground) {
-            fprintf(stderr, "提示：已有 ter-music 实例在运行，改为控制该实例（--foreground 仅在无实例时生效）。\n");
-        }
-        return cli_client_play(cli_bus(), path, index, mode);
-    }
-
-    /* --foreground：本进程成为无界面播放进程（不 fork） */
-    if (foreground) {
-        return daemon_run_foreground(path, 0, 0, 0);
-    }
-
-    if (!allow_daemon) {
-        fprintf(stderr, "错误：没有正在运行的实例（已指定 --no-daemon，不自动启动后台播放）。\n");
-        return CLI_EXIT_NO_INSTANCE;
-    }
-
-    /* 沙箱（Linyaps）：不能 fork 脱离进程，改为请求 D-Bus 激活后台播放 */
-    if (cli_in_sandbox()) {
-        int rc = cli_ensure_instance();
-        if (rc != CLI_EXIT_OK) {
-            return rc;
-        }
-        return cli_client_play(cli_bus(), path, index, mode);
-    }
-
-    if (path && path[0] && path[0] != '/' && path[0] != '~') {
-        fprintf(stderr, "提示：'%s' 不是绝对路径，后台 daemon 将按当前目录解析。\n", path);
-    }
-
-    char pid_text[32] = "";
-    int rc = daemon_start_background(path, 0, 0, pid_text, sizeof(pid_text));
+    /* ── 前端负责内容：先确保播放服务在跑，再扫描并下发队列 ── */
+    int rc = cli_ensure_core_instance();
     if (rc != CLI_EXIT_OK) {
+        if (foreground && rc == CLI_EXIT_NO_INSTANCE) {
+            /* 本进程成为无界面播放进程（不 fork）；此时没有前端，队列由调用方下发 */
+            return daemon_run_foreground(NULL, 0, 0, 1);
+        }
         return rc;
     }
 
-    /* daemon 已按 --open 自动播放；此处仅处理需要切换曲目/模式的场景 */
-    if (index >= 0 || mode >= 0) {
-        return cli_client_play(cli_bus(), NULL, index, mode);
+    if (cli_client_primary_available(cli_bus()) && foreground) {
+        fprintf(stderr, "提示：已有 ter-music 实例在运行，改为控制该实例（--foreground 仅在无实例时生效）。\n");
     }
-    return CLI_EXIT_OK;
+
+    return cli_client_play(cli_bus(), path, index, mode);
 }
 
 /* ── daemon ─────────────────────────────────────────────────────── */
@@ -333,13 +316,15 @@ static int cli_cmd_daemon(int argc, char **argv) {
     }
 
     if (strcmp(action, "foreground") == 0) {
+        /* 核心不扫描目录：`--open <路径>` 在这里没有意义（前端负责扫描），
+         * daemon_run_foreground() 会给出明确提示。 */
         return daemon_run_foreground(open_path, debug, force, no_autoplay);
     }
 
     if (strcmp(action, "start") == 0) {
         /* 沙箱（Linyaps）：不能 fork 脱离进程 → 请求 D-Bus 激活后台播放 */
         if (cli_in_sandbox()) {
-            int rc = cli_ensure_instance();
+            int rc = cli_ensure_core_instance();
             if (rc != CLI_EXIT_OK) {
                 return rc;
             }
@@ -350,11 +335,24 @@ static int cli_cmd_daemon(int argc, char **argv) {
             return CLI_EXIT_OK;
         }
 
+        if (open_path && open_path[0]) {
+            /* `daemon start --open <路径>`：核心不再扫描目录。
+             * 语义是“启动核心 → 前端扫描 → 下发队列”，因此这里先起核心，
+             * 再由本进程装载内容并 Queue.Set/PlayAt。 */
+            int rc = cli_ensure_core_instance();
+            if (rc != CLI_EXIT_OK) {
+                return rc;
+            }
+            return cli_client_play(cli_bus(), open_path, -1, -1);
+        }
+
         char pid_text[32] = "";
-        int rc = daemon_start_background(open_path, debug, force, pid_text, sizeof(pid_text));
+        int rc = daemon_start_background(NULL, debug, force, pid_text, sizeof(pid_text));
         if (rc == CLI_EXIT_OK) {
-            printf("后台播放已启动（pid %s）。用 `ter-music show` 查看信息，`ter-music daemon stop` 停止。\n",
-                   pid_text[0] ? pid_text : "?");
+            printf("后台播放已启动（pid %s）。队列由前端下发：\n", pid_text[0] ? pid_text : "?");
+            printf("  ter-music play <路径>   扫描目录并交给核心播放\n");
+            printf("  ter-music show          查看信息\n");
+            printf("  ter-music daemon stop   停止\n");
         }
         return rc;
     }
@@ -428,7 +426,7 @@ static int cli_cmd_daemon(int argc, char **argv) {
                     return CLI_EXIT_REFUSED;
                 }
             }
-            rc = cli_ensure_instance();
+            rc = cli_ensure_core_instance();
             if (rc != CLI_EXIT_OK) {
                 return rc;
             }

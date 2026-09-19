@@ -113,6 +113,50 @@ static const char *current_anchor_path(void)
     return anchor[0] ? anchor : NULL;
 }
 
+char *playlist_queue_render(void)
+{
+    int total = playlist_count();
+    if (total <= 0) {
+        return NULL;
+    }
+
+    size_t capacity = (size_t)total * PLAYLIST_QUEUE_ENTRY_MAX + 64;
+    char *buffer = malloc(capacity);
+    if (!buffer) {
+        return NULL;
+    }
+
+    size_t pos = 0;
+    pos = json_append_char(buffer, capacity, pos, '{');
+    pos = json_append_key(buffer, capacity, pos, "entries");
+    pos = json_append_char(buffer, capacity, pos, '[');
+
+    int written = 0;
+    for (int i = 0; i < total; i++) {
+        char entry[PLAYLIST_QUEUE_ENTRY_MAX];
+        size_t entry_len = entry_json(i, entry, sizeof(entry));
+        if (entry_len == 0) {
+            continue;
+        }
+        if (written > 0) {
+            buffer[pos++] = ',';
+        }
+        memcpy(buffer + pos, entry, entry_len);
+        pos += entry_len;
+        written++;
+    }
+
+    pos = json_append_char(buffer, capacity, pos, ']');
+    pos = json_append_char(buffer, capacity, pos, '}');
+    buffer[pos] = '\0';
+
+    if (written == 0) {
+        free(buffer);
+        return NULL;
+    }
+    return buffer;
+}
+
 int playlist_queue_sync(void)
 {
     int total = playlist_count();
