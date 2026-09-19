@@ -1,3 +1,4 @@
+#include "types.h"
 #include "playlist/encoding.h"
 
 #include <iconv.h>

@@ -1,3 +1,6 @@
+/* 仅校验并转成本地路径（MPRIS OpenUri 用）。
+ * 核心不扫描目录、不构建内容列表，因此这里只做“是不是本地路径”的判定，
+ * 真正的加载由前端完成（前端扫描后经 Queue.Set 下发）。 */
 /**
  * @file rpc_common.c
  * @brief RPC 接口面的共享实现（分页钳制、方法清单、自省拼装）
@@ -12,17 +15,15 @@
 #include "media/rpc.h"
 #include "media/session.h"
 
-#include "app/open.h"
+#include "queue/backend_queue.h"
+#include "core/core.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "cli/cli.h"
 #include "config/config.h"
 #include "info/info.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
 #include "ui/braille/braille_art.h"
-#include "ui/menus.h"
-#include "ui/ui.h"
 #include "util/json.h"
 
 #include <math.h>
@@ -98,7 +99,7 @@ DBusMessage *rpc_error(DBusMessage *message,
 }
 
 int rpc_track_available(void) {
-    return g_current_play_index >= 0 && g_current_play_index < playlist_count();
+    return g_current_play_index >= 0 && g_current_play_index < bq_count();
 }
 
 void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
@@ -108,33 +109,29 @@ void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
 
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->current_index = g_current_play_index;
-    snapshot->playlist_total = playlist_count();
+    snapshot->playlist_total = bq_count();
     snapshot->play_state = g_play_state;
     snapshot->loop_mode = g_play_mode;
     snapshot->volume_percent = get_volume_percent();
-    snapshot->position_us = (int64_t)g_current_position * 1000000LL;
-    snapshot->length_us = (int64_t)g_total_duration * 1000000LL;
-    snapshot->can_seek = rpc_track_available() && g_total_duration > 0;
+    snapshot->position_us = (int64_t)audio_get_position_seconds() * 1000000LL;
+    snapshot->length_us = (int64_t)audio_get_duration_seconds() * 1000000LL;
+    snapshot->can_seek = rpc_track_available() && audio_get_duration_seconds() > 0;
 
     if (!rpc_track_available()) {
         return;
     }
 
-    char track_path[MAX_PATH_LEN];
-    if (playlist_get_track_path(g_current_play_index, track_path, sizeof(track_path)) != 0) {
-        return;
-    }
-
-    Track track;
-    if (get_track_metadata(g_current_play_index, &track) != 0) {
+    /* 曲目信息来自后端队列条目：内容由前端下发时已随带元数据 */
+    BackendQueueEntry entry;
+    if (bq_entry_at(g_current_play_index, &entry) != 0) {
         return;
     }
 
     snapshot->valid = 1;
-    info_build_track_id(snapshot->track_id, sizeof(snapshot->track_id), track_path);
-    snprintf(snapshot->title, sizeof(snapshot->title), "%s", track.title);
-    snprintf(snapshot->artist, sizeof(snapshot->artist), "%s", track.artist);
-    snprintf(snapshot->album, sizeof(snapshot->album), "%s", track.album);
+    info_build_track_id(snapshot->track_id, sizeof(snapshot->track_id), entry.path);
+    snprintf(snapshot->title, sizeof(snapshot->title), "%s", entry.title);
+    snprintf(snapshot->artist, sizeof(snapshot->artist), "%s", entry.artist);
+    snprintf(snapshot->album, sizeof(snapshot->album), "%s", entry.album);
 
     char cover_path[MAX_PATH_LEN];
     if (get_current_album_cover_path(cover_path, sizeof(cover_path)) == 0) {
@@ -142,17 +139,16 @@ void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
     }
 }
 
+/* “播放”：续播当前条目；没有当前条目时从队首开始。
+ * 「选中行」是前端的私有状态，核心不认识——空队列就是没有可播内容。 */
 int rpc_action_play_selected(void) {
-    int playlist_total = playlist_count();
-
-    if (!playlist_is_loaded() || playlist_total <= 0) {
+    int total = bq_count();
+    if (total <= 0) {
         return 0;
     }
 
-    int target_index = (g_current_play_index >= 0)
-        ? g_current_play_index
-        : (g_sort_state.active ? g_sort_state.sorted_indices[g_selected_index] : g_selected_index);
-    if (target_index >= 0 && target_index < playlist_total) {
+    int target_index = (g_current_play_index >= 0) ? g_current_play_index : 0;
+    if (target_index >= 0 && target_index < total) {
         play_audio(target_index);
         return 1;
     }
@@ -220,52 +216,17 @@ int rpc_action_set_speed(double rate) {
     return 1;
 }
 
-int rpc_action_play_index(int index) {
-    int total = playlist_count();
-    if (index < 0 || index >= total) {
+/* 播放指定队列位置。
+ * 旧接口 Control.PlayIndex(i track_index) 传的是**内容列表下标**，后端已不认识；
+ * 前端改用 Queue.PlayAt(i position)（队列位置）。本函数保留给 MPRIS 等仍以
+ * 队列位置寻址的调用方。 */
+int rpc_action_play_position(int position) {
+    if (position < 0 || position >= bq_count()) {
         return 0;
     }
-    play_audio(index);
-    app_set_selection_for_track(index);
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
-    return 1;
-}
-
-/* 打开本地路径（MPRIS OpenUri 与 Control.OpenPath 共用）。
- * 非本地路径一律拒绝：调用方负责回 Error.Unsupported。 */
-int rpc_action_open_path(const char *path, int autoplay) {
-    if (!path || path[0] == '\0') {
-        return 0;
-    }
-    if (!app_path_is_local_playable(path)) {
-        log_warn("rpc", "Refused non-local path '%s': remote sources belong to the front end",
-                 path);
-        return 0;
-    }
-
-    char local_path[MAX_PATH_LEN];
-    if (info_uri_to_path(path, local_path, sizeof(local_path)) != 0) {
-        return 0;
-    }
-    if (local_path[0] == '\0') {
-        return 0;
-    }
-
-    if (app_open_path(local_path, NULL, 0, NULL, NULL) != APP_OPEN_OK) {
-        return 0;
-    }
-
-    /* 新播放列表：清空旧队列，交由 play_audio() 按当前模式重建 */
-    play_queue_clear(&g_play_queue);
-
-    if (autoplay && playlist_count() > 0) {
-        int index = (g_current_play_index >= 0 && g_current_play_index < playlist_count())
-            ? g_current_play_index : 0;
-        play_audio(index);
-        app_set_selection_for_track(index);
-    }
-
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    bq_play_at(position);
+    play_audio(position);
+    core_notify_state_changed();
     return 1;
 }
 
@@ -379,23 +340,8 @@ static const char *const k_rpc_methods[] = {
     "Control.SetPlayMode",
     "Control.GetPlayMode",
     "Control.GetPlayModeName",
-    "Control.OpenPath",
-    "Control.PlayIndex",
-    "Control.GetPlaylist",
     "Control.ReloadConfig",
     "Control.Quit",
-    /* Playlist */
-    "Playlist.Load",
-    "Playlist.Append",
-    "Playlist.Clear",
-    "Playlist.Sort",
-    "Playlist.SetFilter",
-    "Playlist.Search",
-    "Playlist.GetTree",
-    "Playlist.GetPage",
-    "Playlist.ToggleExpand",
-    "Playlist.RevealIndex",
-    "Playlist.Status",
     /* Queue（路径语义：内容由前端下发，后端只执行） */
     "Queue.Get",
     "Queue.Set",
@@ -405,29 +351,8 @@ static const char *const k_rpc_methods[] = {
     "Queue.MoveUp",
     "Queue.MoveDown",
     "Queue.Clear",
-    "Queue.Rebuild",
     "Queue.Shuffle",
     "Queue.PlayAt",
-    /* Library */
-    "Library.Rescan",
-    "Library.Status",
-    "Library.GetTree",
-    "Library.GetPage",
-    "Library.Search",
-    /* Favorites */
-    "Favorites.Add",
-    "Favorites.Remove",
-    "Favorites.Has",
-    "Favorites.List",
-    /* History */
-    "History.Add",
-    "History.List",
-    "History.Clear",
-    /* DirHistory */
-    "DirHistory.Add",
-    "DirHistory.Remove",
-    "DirHistory.List",
-    "DirHistory.Clear",
     /* Config */
     "Config.GetAll",
     "Config.Set",

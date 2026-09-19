@@ -24,7 +24,6 @@
 #include "config/config.h"
 #include "config/schema.h"
 #include "config/migration.h"
-#include "playlist/encoding.h"
 #include "logger/logger.h"
 #include "audio/equalizer.h"
 #include "i18n/i18n.h"

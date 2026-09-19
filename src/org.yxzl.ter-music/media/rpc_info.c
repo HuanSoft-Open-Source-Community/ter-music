@@ -19,12 +19,21 @@
 #include "core/core.h"
 #include "info/info.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
+#include "queue/backend_queue.h"
 #include "ui/braille/braille_art.h"
 #include "lyrics/lyrics.h"
-#include "ui/menus.h"
-#include "ui/ui.h"
 #include "util/json.h"
+
+/* 单调时钟毫秒：可视化节流用（与界面无关，故本层自备） */
+static uint64_t rpc_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
+}
+
+
+#include <time.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -114,7 +123,7 @@ void rpc_info_emit_progress(const RpcPlaybackSnapshot *snapshot) {
         return;
     }
 
-    uint64_t now_ms = get_ui_time_ms();
+    uint64_t now_ms = rpc_now_ms();
     int state_changed = (snapshot->play_state != g_info.last_progress_state);
     if (!state_changed &&
         (now_ms - g_info.last_progress_ms) < INFO_PROGRESS_SIGNAL_INTERVAL_MS) {
@@ -175,7 +184,7 @@ static void rpc_info_sync_visualizer(void)
         return;
     }
 
-    uint64_t now_ms = get_ui_time_ms();
+    uint64_t now_ms = rpc_now_ms();
     if (g_info.visualizer_revision > 0 &&
         (now_ms - g_info.last_visualizer_ms) < RPC_VISUALIZER_INTERVAL_MS) {
         return;
@@ -227,7 +236,7 @@ void rpc_info_sync(void) {
 
     char track_path[MAX_PATH_LEN] = "";
     if (rpc_track_available()) {
-        if (playlist_get_track_path(g_current_play_index, track_path,
+        if (bq_path_at(g_current_play_index, track_path,
                                     sizeof(track_path)) != 0) {
             track_path[0] = '\0';
         }
@@ -238,7 +247,7 @@ void rpc_info_sync(void) {
         changed = 1;
     } else if (g_info.track_index != g_current_play_index ||
                strcmp(g_info.track_path, track_path) != 0 ||
-               g_info.playlist_total != playlist_count() ||
+               g_info.playlist_total != bq_count() ||
                g_info.state != g_play_state ||
                g_info.mode != g_play_mode ||
                g_info.volume != get_volume_percent() ||
@@ -261,7 +270,7 @@ void rpc_info_sync(void) {
     g_info.track_index = g_current_play_index;
     snprintf(g_info.track_path,
              sizeof(g_info.track_path), "%s", track_path);
-    g_info.playlist_total = playlist_count();
+    g_info.playlist_total = bq_count();
     g_info.state = g_play_state;
     g_info.mode = g_play_mode;
     g_info.volume = get_volume_percent();

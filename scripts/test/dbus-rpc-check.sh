@@ -28,17 +28,22 @@ PASS=0
 FAIL=0
 
 # M2 完成后应存在的接口（随里程碑推进逐个加入本清单）
+# api_version 4：内容接口（Playlist/Library/Favorites/History/DirHistory）整体
+# 撤下——曲库与播放列表内容归前端，核心只发布播放面。
 EXPECTED_INTERFACES=(
     "org.yxzl.ter_music.Lyrics"
     "org.yxzl.ter_music.Info"
     "org.yxzl.ter_music.Control"
-    "org.yxzl.ter_music.Playlist"
     "org.yxzl.ter_music.Queue"
+    "org.yxzl.ter_music.Config"
+)
+REMOVED_INTERFACES=(
+    "org.yxzl.ter_music.Playlist"
     "org.yxzl.ter_music.Library"
     "org.yxzl.ter_music.Favorites"
     "org.yxzl.ter_music.History"
     "org.yxzl.ter_music.DirHistory"
-    "org.yxzl.ter_music.Config"
+    "org.yxzl.ter_music.Remote"
 )
 
 usage() {
@@ -153,6 +158,14 @@ check_interfaces() {
         bad "自省失败：$(printf '%s' "$xml" | head -1)"
         return
     fi
+    for iface in "${REMOVED_INTERFACES[@]}"; do
+        if introspect | grep -q "interface $iface"; then
+            bad "接口 $iface 应已撤下（内容归前端）"
+        else
+            ok "接口 $iface 已撤下"
+        fi
+    done
+
     for iface in "${EXPECTED_INTERFACES[@]}"; do
         if printf '%s' "$xml" | grep -q "interface $iface"; then
             ok "接口存在 $iface"
@@ -238,10 +251,10 @@ check_info_extensions() {
     local info api_version
     info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
     api_version="$(json_field "$info" 'doc["core"]["api_version"]')"
-    if [ "$api_version" = "3" ]; then
-        ok "core.api_version=3（握手版本：移除 Remote、路径只接受本地）"
+    if [ "$api_version" = "4" ]; then
+        ok "core.api_version=4（内容接口已撤下，队列为路径语义）"
     else
-        bad "core.api_version 期望 3，实际 '$api_version'"
+        bad "core.api_version 期望 4，实际 '$api_version'"
     fi
 
     local methods
@@ -306,7 +319,7 @@ check_frontends() {
 
     local version
     version="$(json_field "$attached" 'doc["api_version"]')"
-    [ "$version" = "3" ] && ok "Attach 返回 api_version=3" || bad "Attach api_version=$version"
+    [ "$version" = "4" ] && ok "Attach 返回 api_version=4" || bad "Attach api_version=$version"
 
     # 第二个前端
     local attached2
@@ -636,16 +649,24 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
         ok "core.methods 不含 Remote.*"
     fi
 
-    # 核心拒绝远程 URL：远程源由前端下载到本地缓存后再交给核心
+    # 内容接口与内容加载已撤下：这两条调用必须回 UnknownMethod，
+    # 而不是“接受一个路径然后自己扫描”。
     local reject_load reject_open
-    reject_load="$(rpc_py call org.yxzl.ter_music.Playlist.Load 'ftp://127.0.0.1/pub' false false)"
-    reject_open="$(rpc_py call org.yxzl.ter_music.Control.OpenPath 'smb://host/share' false)"
-    printf '%s' "$reject_load" | grep -q "Unsupported" \
-        && ok "Playlist.Load 拒绝远程 URL" \
-        || bad "Playlist.Load 未拒绝远程 URL：$reject_load"
-    printf '%s' "$reject_open" | grep -q "Unsupported" \
-        && ok "Control.OpenPath 拒绝远程 URL" \
-        || bad "Control.OpenPath 未拒绝远程 URL：$reject_open"
+    reject_load="$(dbus_call org.yxzl.ter_music.Playlist Load 'ftp://127.0.0.1/pub' false false)"
+    reject_open="$(dbus_call org.yxzl.ter_music.Control OpenPath 'smb://host/share' false)"
+    printf '%s' "$reject_load" | grep -qE "UnknownMethod|Unknown" \
+        && ok "Playlist.Load 已撤下（内容归前端）" \
+        || bad "Playlist.Load 仍可调用：$reject_load"
+    printf '%s' "$reject_open" | grep -qE "UnknownMethod|Unknown" \
+        && ok "Control.OpenPath 已撤下（加载内容属前端）" \
+        || bad "Control.OpenPath 仍可调用：$reject_open"
+
+    # 远程 URL 仍必须被队列拒绝（核心只播放本地文件）
+    local reject_queue
+    reject_queue="$(dbus_call org.yxzl.ter_music.Queue Set '{"entries":[{"path":"smb://host/share/a.mp3"}]}')"
+    printf '%s' "$reject_queue" | grep -q "InvalidArgs" \
+        && ok "Queue.Set 拒绝远程路径" \
+        || bad "Queue.Set 未拒绝远程路径：$reject_queue"
 
     # 配置面：remote_connections 段已随接口一起消失
     local config_all

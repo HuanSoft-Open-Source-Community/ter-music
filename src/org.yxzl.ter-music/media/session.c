@@ -3,16 +3,13 @@
 #include <ncursesw/ncurses.h>
 #include "audio/audio.h"
 #include "audio/play_queue.h"
-#include "playlist/playlist.h"
-#include "ui/ui.h"
+#include "queue/backend_queue.h"
 #include "ui/braille/braille_art.h"
 #include "lyrics/lyrics.h"
 #include "media/rpc.h"
 #include "media/session.h"
-#include "app/open.h"
 #include "config/config.h"
 #include "info/info.h"
-#include "ui/menus.h"
 #include "util/json.h"
 #include "cli/cli.h"
 #include "logger/logger.h"
@@ -699,15 +696,16 @@ static DBusMessage *handle_player_method(DBusMessage *message,
         }
         dbus_error_free(&error);
 
-        if (!app_path_is_local_playable(uri)) {
+        /* api_version 4：加载内容属前端，核心不再扫描目录、也不再构建内容
+         * 列表，因此 OpenUri 无法在核心里完成——前端接入后应当自行加载并把
+         * 结果经 Queue.Set/Queue.PlayAt 下发。这里明确回“不支持”而不是假装成功。
+         * 非本地 URI 仍然按老规矩单独说明（远程音乐源属前端）。 */
+        if (!bq_path_is_local(uri)) {
             return rpc_error(message, DBUS_ERROR_NOT_SUPPORTED,
                              "OpenUri accepts local files only; remote sources belong to the front end");
         }
-        if (!rpc_action_open_path(uri, 1)) {
-            return rpc_error(message, DBUS_ERROR_INVALID_ARGS,
-                                       "Uri could not be opened");
-        }
-        return dbus_message_new_method_return(message);
+        return rpc_error(message, DBUS_ERROR_NOT_SUPPORTED,
+                         "The core does not load content any more; the front end scans and delivers a queue via Queue.Set/Queue.PlayAt");
     }
 
     return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD, "Unknown player method");
@@ -819,9 +817,7 @@ static void build_introspection(void)
         rpc_lyrics_introspection(),
         rpc_info_introspection(),
         rpc_control_introspection(),
-        rpc_playlist_introspection(),
         rpc_queue_introspection(),
-        rpc_library_introspection(),
         rpc_config_introspection(),
         k_introspection_tail,
         NULL
@@ -1117,17 +1113,18 @@ void media_session_tick(void) {
             reply = rpc_info_handle(message);
         } else if (dbus_message_has_interface(message, RPC_IFACE_CONTROL)) {
             reply = rpc_control_handle(message);
-        } else if (dbus_message_has_interface(message, RPC_IFACE_PLAYLIST)) {
-            reply = rpc_playlist_handle(message);
         } else if (dbus_message_has_interface(message, RPC_IFACE_QUEUE)) {
             reply = rpc_queue_handle(message);
-        } else if (dbus_message_has_interface(message, RPC_IFACE_LIBRARY) ||
-                   dbus_message_has_interface(message, RPC_IFACE_FAVORITES) ||
-                   dbus_message_has_interface(message, RPC_IFACE_HISTORY) ||
-                   dbus_message_has_interface(message, RPC_IFACE_DIRHISTORY)) {
-            reply = rpc_library_handle_all(message);
         } else if (dbus_message_has_interface(message, RPC_IFACE_CONFIG)) {
             reply = rpc_config_handle(message);
+        }
+
+        /* 未匹配任何接口/方法时必须回 UnknownMethod：否则前端（尤其已升级到
+         * 新接口的前端）会对一个不存在的调用一直等到超时，而不是立刻拿到
+         * “该方法不存在”的明确错误。 */
+        if (!reply && dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_METHOD_CALL) {
+            reply = rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
+                              "Unknown interface or method");
         }
 
         if (reply) {
@@ -1141,7 +1138,6 @@ void media_session_tick(void) {
     rpc_lyrics_sync();
     rpc_info_sync();
     rpc_control_tick();
-    rpc_job_tick();
 
     {
         RpcPlaybackSnapshot progress_snapshot;

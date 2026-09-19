@@ -18,11 +18,9 @@
 #include "core/core.h"
 #include "info/info.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
 #include "ui/braille/braille_art.h"
 #include "lyrics/lyrics.h"
-#include "ui/menus.h"
-#include "ui/ui.h"
+#include "queue/backend_queue.h"
 #include "util/json.h"
 
 #include <math.h>
@@ -69,7 +67,7 @@ static void lyrics_api_prepare(char *out, size_t out_size, uint64_t revision) {
     char track_id[96] = "";
     if (rpc_track_available()) {
         char track_path[MAX_PATH_LEN];
-        if (playlist_get_track_path(g_current_play_index, track_path,
+        if (bq_path_at(g_current_play_index, track_path,
                                     sizeof(track_path)) == 0) {
             info_build_track_id(track_id, sizeof(track_id), track_path);
         }
@@ -250,7 +248,7 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
         char track_id[96] = "";
         if (rpc_track_available()) {
             char track_path[MAX_PATH_LEN];
-            if (playlist_get_track_path(g_current_play_index, track_path,
+            if (bq_path_at(g_current_play_index, track_path,
                                         sizeof(track_path)) == 0) {
                 info_build_track_id(track_id, sizeof(track_id), track_path);
             }

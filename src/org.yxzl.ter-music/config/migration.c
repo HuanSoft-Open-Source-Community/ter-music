@@ -20,7 +20,6 @@
 #include "types.h"
 #include "config/schema.h"
 #include "config/config.h"
-#include "ui/menus.h"
 #include "logger/logger.h"
 
 /* ── Public API ───────────────────────────────────────────────────── */

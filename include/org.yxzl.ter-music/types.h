@@ -172,6 +172,15 @@ typedef struct {
 
 #define CONFIG_CURRENT_VERSION 6   /* 与 config/schema.h 保持同步 */
 
+/* ── CUE 文件编码偏好（配置项取值域；转换实现见 playlist/encoding.h） ── */
+#define CUE_ENCODING_AUTO      0  /* detect: UTF-8 → preferred → fallback chain */
+#define CUE_ENCODING_UTF8      1  /* always treat as UTF-8 */
+#define CUE_ENCODING_GB18030   2
+#define CUE_ENCODING_GBK       3
+#define CUE_ENCODING_BIG5      4
+#define CUE_ENCODING_SHIFT_JIS 5
+#define CUE_ENCODING_COUNT     6
+
 /* ── Lyrics source preference ── */
 #define LYRICS_SOURCE_AUTO     0   /* default: embedded first, then external */
 #define LYRICS_SOURCE_EMBEDDED 1   /* force embedded lyrics only */

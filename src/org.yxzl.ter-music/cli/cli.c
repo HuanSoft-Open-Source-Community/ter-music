@@ -12,7 +12,7 @@
 #include "cli/cli.h"
 
 #include "config/config.h"
-#include "app/open.h"
+#include "queue/backend_queue.h"
 #include "info/info.h"
 #include "types.h"
 #include "util/utf8.h"
@@ -245,7 +245,7 @@ static int cli_cmd_play(int argc, char **argv) {
         }
     }
 
-    if (path && !app_path_is_local_playable(path)) {
+    if (path && !bq_path_is_local(path)) {
         fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：\n");
         fprintf(stderr, "      请在 TUI 中打开远程目录，前端会把曲目下载到本地缓存后再交给核心播放。\n");
         return CLI_EXIT_USAGE;
@@ -326,7 +326,7 @@ static int cli_cmd_daemon(int argc, char **argv) {
         }
     }
 
-    if (open_path && !app_path_is_local_playable(open_path)) {
+    if (open_path && !bq_path_is_local(open_path)) {
         fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：\n");
         fprintf(stderr, "      请在 TUI 中打开远程目录，前端会把曲目下载到本地缓存后再交给核心播放。\n");
         return CLI_EXIT_USAGE;

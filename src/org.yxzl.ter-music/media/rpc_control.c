@@ -13,17 +13,14 @@
 #include "media/session.h"
 
 #include "audio/audio.h"
+#include "queue/backend_queue.h"
 #include "audio/play_queue.h"
 #include "config/config.h"
 #include "core/core.h"
 #include "info/info.h"
 #include "logger/logger.h"
-#include "playlist/playlist.h"
-#include "app/open.h"
 #include "ui/braille/braille_art.h"
 #include "lyrics/lyrics.h"
-#include "ui/menus.h"
-#include "ui/ui.h"
 #include "util/json.h"
 
 #include <math.h>
@@ -470,73 +467,6 @@ DBusMessage *rpc_control_handle(DBusMessage *message) {
     if (strcmp(member, "GetPlayModeName") == 0) {
         return rpc_reply_string(message, play_mode_display_name(g_play_mode, 0));
     }
-    if (strcmp(member, "OpenPath") == 0) {
-        DBusError error;
-        const char *path = NULL;
-        dbus_bool_t autoplay = FALSE;
-
-        dbus_error_init(&error);
-        if (!dbus_message_get_args(message, &error,
-                                   DBUS_TYPE_STRING, &path,
-                                   DBUS_TYPE_BOOLEAN, &autoplay,
-                                   DBUS_TYPE_INVALID)) {
-            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS,
-                                                     error.message);
-            dbus_error_free(&error);
-            return reply;
-        }
-        dbus_error_free(&error);
-        if (!app_path_is_local_playable(path)) {
-            return rpc_error(message, RPC_ERROR_UNSUPPORTED,
-                             "OpenPath accepts local files only; remote sources belong to the front end");
-        }
-        return rpc_reply_bool(message, rpc_action_open_path(path, autoplay ? 1 : 0));
-    }
-    if (strcmp(member, "PlayIndex") == 0) {
-        DBusError error;
-        dbus_int32_t index = 0;
-
-        dbus_error_init(&error);
-        if (!dbus_message_get_args(message, &error,
-                                   DBUS_TYPE_INT32, &index,
-                                   DBUS_TYPE_INVALID)) {
-            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS,
-                                                     error.message);
-            dbus_error_free(&error);
-            return reply;
-        }
-        dbus_error_free(&error);
-        return rpc_reply_bool(message, rpc_action_play_index(index));
-    }
-    if (strcmp(member, "GetPlaylist") == 0) {
-        int total = playlist_count();
-        char folder[MAX_PATH_LEN];
-        char json[2048];
-
-        playlist_copy_folder_path(folder, sizeof(folder));
-
-        size_t pos = 0;
-        pos = json_append_char(json, sizeof(json), pos, '{');
-        pos = json_append_key(json, sizeof(json), pos, "loaded");
-        pos = json_append_bool(json, sizeof(json), pos, playlist_is_loaded());
-        pos = json_append_raw(json, sizeof(json), pos, ",");
-        pos = json_append_key(json, sizeof(json), pos, "count");
-        pos = json_append_int(json, sizeof(json), pos, total);
-        pos = json_append_raw(json, sizeof(json), pos, ",");
-        pos = json_append_key(json, sizeof(json), pos, "current_index");
-        if (g_current_play_index >= 0) {
-            pos = json_append_int(json, sizeof(json), pos, g_current_play_index);
-        } else {
-            pos = json_append_raw(json, sizeof(json), pos, "null");
-        }
-        pos = json_append_raw(json, sizeof(json), pos, ",");
-        pos = json_append_key(json, sizeof(json), pos, "folder");
-        pos = json_append_string_or_null(json, sizeof(json), pos,
-                                         folder[0] ? folder : NULL);
-        pos = json_append_char(json, sizeof(json), pos, '}');
-        (void)pos;
-        return rpc_reply_string(message, json);
-    }
     if (strcmp(member, "ReloadConfig") == 0) {
         g_config_reload_requested = 1;
         return rpc_reply_bool(message, 1);
@@ -608,16 +538,8 @@ static const char *const k_control_introspection =
     "    </method>\n"
     "    <method name=\"GetPlayMode\"><arg type=\"i\" direction=\"out\"/></method>\n"
     "    <method name=\"GetPlayModeName\"><arg type=\"s\" direction=\"out\"/></method>\n"
-    "    <method name=\"OpenPath\">\n"
-    "      <arg name=\"path\" type=\"s\" direction=\"in\"/>\n"
-    "      <arg name=\"autoplay\" type=\"b\" direction=\"in\"/>\n"
-    "      <arg type=\"b\" direction=\"out\"/>\n"
-    "    </method>\n"
-    "    <method name=\"PlayIndex\">\n"
-    "      <arg name=\"index\" type=\"i\" direction=\"in\"/>\n"
-    "      <arg type=\"b\" direction=\"out\"/>\n"
-    "    </method>\n"
-    "    <method name=\"GetPlaylist\"><arg name=\"json\" type=\"s\" direction=\"out\"/></method>\n"
+    "    <!-- OpenPath / PlayIndex 已在 api_version 4 撤下：加载内容属前端，\n"
+    "         前端扫描后经 Queue.Set/Queue.PlayAt 下发。 -->\n"
     "    <method name=\"ReloadConfig\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "    <method name=\"Quit\"><arg type=\"b\" direction=\"out\"/></method>\n"
     "  </interface>\n";

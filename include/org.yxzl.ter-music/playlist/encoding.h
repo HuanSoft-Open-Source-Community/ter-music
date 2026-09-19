@@ -4,13 +4,7 @@
 #include <stddef.h>
 
 /* ── CUE encoding preference constants ─────────────────────────────── */
-#define CUE_ENCODING_AUTO      0  /* detect: UTF-8 → preferred → fallback chain */
-#define CUE_ENCODING_UTF8      1  /* always treat as UTF-8 */
-#define CUE_ENCODING_GB18030   2
-#define CUE_ENCODING_GBK       3
-#define CUE_ENCODING_BIG5      4
-#define CUE_ENCODING_SHIFT_JIS 5
-#define CUE_ENCODING_COUNT     6
+/* 取值域定义在 types.h（配置层也要用，内容层只负责实现转换） */
 
 /**
  * @brief Check whether a byte buffer is valid UTF-8.

@@ -31,22 +31,41 @@ SIGNAL_NAMES = {
 }
 
 
+SECTION_RE = re.compile(r"^##\s+org\.yxzl\.ter_music\.([A-Za-z]+)")
+
+
 def documented_methods(text):
-    """从方法表格第一列/第二列提取 `` `Method` `` 形式的成员名。"""
+    """从方法表格第一列/第二列提取方法名。
+
+    表格里通常只写裸方法名（`Get`、`Set`），因此按所在小节的接口名补全成
+    `Interface.Method`；若同名方法出现在多个接口下（例如 Queue.Get 与
+    Config.Get），裸名不会造成“文档描述了未实现的方法”的误报。
+    """
     found = set()
+    section_iface = None
+
     for line in text.splitlines():
+        section = SECTION_RE.match(line)
+        if section:
+            section_iface = section.group(1)
+            continue
+        if line.startswith("## "):
+            section_iface = None
+            continue
         if not line.startswith("|"):
             continue
+
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if len(cells) < 2:
             continue
         for cell in cells[:2]:
             for token in re.findall(r"`([^`]+)`", cell):
                 token = token.strip()
-                if (re.fullmatch(r"[A-Z][A-Za-z0-9]+", token)
-                        and token not in SIGNAL_NAMES
-                        and token not in NON_METHOD_NAMES):
-                    found.add(token)
+                if not re.fullmatch(r"[A-Z][A-Za-z0-9]+", token):
+                    continue
+                if token in SIGNAL_NAMES or token in NON_METHOD_NAMES:
+                    continue
+                found.add("%s.%s" % (section_iface, token) if section_iface else token)
     return found
 
 
@@ -65,7 +84,7 @@ def main():
     else:
         methods = json.load(sys.stdin)
 
-    implemented = {name.split(".", 1)[1]: name for name in methods}
+    implemented = {name: name for name in methods}
     documented = documented_methods(text)
 
     missing_docs = sorted(name for name in implemented if name not in documented)

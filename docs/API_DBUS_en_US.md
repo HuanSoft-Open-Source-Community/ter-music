@@ -11,12 +11,7 @@ library, and change the configuration:
 | `org.yxzl.ter_music.Info` | Read-only snapshots: track, progress, cover art, lyric lines, visualizer, last status message, rendered info block |
 | `org.yxzl.ter_music.Control` | Transport, seek, volume, speed, play mode, opening paths, front-end registration, quitting |
 | `org.yxzl.ter_music.Lyrics` | A/B lyric line snapshot (see [API_LYRICS_en_US.md](API_LYRICS_en_US.md)) |
-| `org.yxzl.ter_music.Playlist` | Playlist loading, sorting, filtering, tree browsing (paged) |
 | `org.yxzl.ter_music.Queue` | Play queue contents and editing |
-| `org.yxzl.ter_music.Library` | Music library browsing and rescanning (paged) |
-| `org.yxzl.ter_music.Favorites` | Favorite tracks |
-| `org.yxzl.ter_music.History` | Play history |
-| `org.yxzl.ter_music.DirHistory` | Recently opened directories |
 | `org.yxzl.ter_music.Config` | Configuration read/write (the only writer) |
 
 `org.freedesktop.DBus.Introspectable`, `.Peer` and `.Properties` are
@@ -64,7 +59,12 @@ of exactly these interfaces.
   `org.freedesktop.DBus.Error.*` names.
 
 - **Handshake.** `Info.GetInfo` carries a `core` object. Read
-  `core.api_version` before using anything else; version 3 is described here.
+  `core.api_version` before using anything else; version 4 is described here.
+  Version 4 handed **all content** to the front end: the `Playlist`, `Library`,
+  `Favorites`, `History` and `DirHistory` interfaces, the background scan job and
+  `Control.OpenPath`/`Control.PlayIndex`/`Control.GetPlaylist`/`Queue.Rebuild`
+  are gone, and MPRIS `OpenUri` reports `NotSupported`. The core keeps only the
+  playback surface, and the front end delivers a queue of local paths.
   Version 3 removed the Remote interface and changed `Queue` from playlist
   indices to **local file paths**: `Queue.Set` was added, and
   `Queue.Append`/`InsertAfter` now take a JSON payload instead of a track index.
@@ -75,21 +75,20 @@ of exactly these interfaces.
 
   ```json
   "core": {
-    "api_version": 3, "payload_max": 262144,
+    "api_version": 4, "payload_max": 262144,
     "page_default": 200, "page_max": 1000,
-    "methods": ["Info.GetInfo", "Control.Play", "Playlist.GetPage", "…"]
+    "methods": ["Info.GetInfo", "Control.Play", "Queue.Set", "…"]
   }
   ```
 
   `core.methods` lists every method the running core implements, so a client
   can degrade gracefully instead of discovering gaps one call at a time.
-- **Local paths only.** Every path argument (`Playlist.Load`, `Playlist.Append`,
-  `Control.OpenPath`, MPRIS `OpenUri`) must be a local path or a `file://` URI.
-  Remote sources (SMB/SFTP/FTP/WebDAV/HTTP) belong to the front end: it lists
-  and downloads them itself, then hands the resulting local file paths to the
-  core. A remote URL is rejected with
-  `org.yxzl.ter_music.Error.Unsupported`.
-- **Blocking work.** Directory scans run on a background worker. Those methods
+- **Local paths only.** Every path in a queue payload must be a local path or a
+  `file://` URI; anything with another scheme is rejected with
+  `org.yxzl.ter_music.Error.InvalidArgs`. Remote sources (SMB/SFTP/FTP/WebDAV/
+  HTTP) belong to the front end: it lists and downloads them itself, then hands
+  the resulting local file paths to the core through `Queue.Set`.
+- **Blocking work.** The core performs no blocking IO of its own any more. Those methods
   return immediately and report progress through their `Status` method plus a
   change signal; the media loop itself never blocks.
 
@@ -145,7 +144,7 @@ separated by `;`. Keys may be combined; later keys win:
   "running": true,
   "instance": { "mode": "daemon", "pid": 1234, "version": "v2.3.0",
                 "bus": "org.mpris.MediaPlayer2.ter_music", "has_primary_name": true },
-  "core": { "api_version": 3, "payload_max": 262144, "page_default": 200,
+  "core": { "api_version": 4, "payload_max": 262144, "page_default": 200,
             "page_max": 1000, "methods": ["Info.GetInfo", "…"] },
   "playback": {
     "state": "playing", "position_ms": 83400, "duration_ms": 296000,
@@ -224,12 +223,9 @@ Transport methods return a boolean (`true` when the request was accepted).
 | `SetVolume` / `GetVolume` | `(i percent) -> b` / `() -> i` | Volume (0-100) |
 | `SetSpeed` / `GetSpeed` | `(d rate) -> b` / `() -> d` | Playback speed (0.5-3.0) |
 | `SetPlayMode` / `GetPlayMode` / `GetPlayModeName` | `(i mode) -> b` / `() -> i` / `() -> s` | Play mode (0-16, stable name, localized name) |
-| `OpenPath` | `(s path, b autoplay) -> b` | Load a local directory, audio file or `file://` URI and optionally start playing |
-| `PlayIndex` | `(i index) -> b` | Play a track by 0-based playlist index |
-| `GetPlaylist` | `() -> s` | `{"loaded":b,"count":n,"current_index":i,"folder":"…"}` |
 | `ReloadConfig` | `() -> b` | Re-read `config.xml` (same as `SIGHUP`); `Config.Reload` is the newer equivalent |
 | `Quit` | `() -> b` | Gracefully stop this instance (persists the playback session) |
-| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":3,"ping_interval_ms":2000,"frontends":n}` |
+| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":4,"ping_interval_ms":2000,"frontends":n}` |
 | `Ping` | `(s token) -> b` | Keep the registration alive. `false` means the token is unknown or expired: attach again |
 | `Detach` | `(s token) -> b` | Leave explicitly |
 | `FrontendInfo` | `() -> s` | `{"frontends":[{"token":"…","role":"tui","pid":n,"last_ping_ms":n}],"count":n}` |
@@ -245,43 +241,6 @@ Front ends attach once and then ping every 2 s; a registration without a
 heartbeat for 6 s is dropped, so `FrontendInfo` always reflects who is
 actually watching. A token identifies a registration, it does not
 authenticate: the session bus is a same-user trust domain.
-
-## org.yxzl.ter_music.Playlist
-
-| Method | Signature | Description |
-| ------ | --------- | ----------- |
-| `Load` | `(s path, b append, b autoplay) -> b` | Start loading a local directory, file or `file://` URI in the background |
-| `Append` | `(s path) -> b` | Same, appending to the current playlist |
-| `Clear` | `() -> b` | Empty the playlist |
-| `Sort` | `(s mode) -> b` | `default`, `title`, `artist`, `album` or `filename`; persisted and applied immediately |
-| `SetFilter` | `(s query) -> b` | Restrict `GetPage` to matching tracks; empty string clears it |
-| `Search` | `(s query, i offset, i count) -> s` | A page of search results without changing the current filter |
-| `GetTree` | `() -> s` | `{"loaded":b,"count":n,"visible_count":n,"tree_mode":b,"folder":"…","sort":"…","filter":"…"\|null,"loading":b}` |
-| `GetPage` | `(i offset, i count) -> s` | A page of visible rows (see below) |
-| `ToggleExpand` | `(i tree_index) -> b` | Expand/collapse a directory node (shared core-side state) |
-| `RevealIndex` | `(i track_index) -> i` | Expand the ancestors of a track and return its visible row |
-| `Status` | `() -> s` | `{"state":"idle"\|"loading"\|"error","progress":n,"total":n,"path":"…","error":"…"}` |
-
-`GetPage` returns render-ready rows, so a client draws a list without looking
-up metadata per row:
-
-```json
-{ "total": 6, "offset": 0, "count": 3, "filter": null,
-  "rows": [
-    { "row": 0, "type": "dir", "depth": 0, "expanded": true,
-      "tree_index": 0, "track_index": null, "name": "Music",
-      "title": null, "artist": null, "album": null, "is_cue": false },
-    { "row": 2, "type": "track", "depth": 2, "expanded": false,
-      "tree_index": 2, "track_index": 0, "name": "song.flac",
-      "title": "Song", "artist": "Artist", "album": "Album", "is_cue": false }
-  ] }
-```
-
-While a filter is set, rows are a flat list of matching tracks (the tree is
-not applied), which matches the search view in the TUI.
-
-Signal `PlaylistChanged(s reason)` with `reason` one of `loading`, `loaded`,
-`sorted`, `filtered`, `expanded`, `search`.
 
 ## org.yxzl.ter_music.Queue
 
@@ -299,7 +258,6 @@ queue positions are the only cursor it knows.
 | `RemoveAt` | `(i position) -> b` | Remove one entry |
 | `MoveUp` / `MoveDown` | `(i position) -> b` | Reorder one entry |
 | `Clear` | `() -> b` | Empty the queue |
-| `Rebuild` | `(i mode) -> b` | Re-apply a play mode to the delivered queue (optional; current mode by default) |
 | `Shuffle` | `() -> b` | Keep the current entry first and shuffle the rest |
 | `PlayAt` | `(i position) -> b` | Move the cursor to a position and start playing |
 
@@ -317,53 +275,14 @@ Rules:
 
 * A single call carries at most **500** entries (`BQ_SET_MAX`); a larger queue is
   delivered as one `Set` plus as many `Append` calls as needed.
-* Array order **is** execution order. `Rebuild` reshapes it for folder/album/
-  artist and shuffle modes while keeping the current entry.
+* Array order **is** execution order. `Control.SetPlayMode` re-applies a play mode to
+  the delivered queue (folder/album/artist and shuffle) while keeping the current entry.
 * `path` must be local: `smb://`, `ftp://`, `http(s)://` and friends are
   rejected with `Error.InvalidArgs`. The front end downloads remote content and
   passes the local cache path.
 * Metadata travels with each entry, so the core does not have to re-read tags.
 
 Signal `QueueChanged(u revision, i count, i current_position)` after every edit.
-
-## org.yxzl.ter_music.Library
-
-| Method | Signature | Description |
-| ------ | --------- | ----------- |
-| `Rescan` | `(s path) -> b` | Scan a directory in the background (incremental by mtime). An empty path is rejected: scanning every registered root is a synchronous in-process call and is not exposed |
-| `Status` | `() -> s` | `{"available":b,"tracks":n,"scanning":b,"progress":n,"total":n}` |
-| `GetTree` | `(s kind, s filter) -> s` | `{"kind":"…","item_count":n,"available":b,"filter":{…}}` |
-| `GetPage` | `(s kind, s filter, i offset, i count) -> s` | A page of rows |
-| `Search` | `(s filter) -> s` | `{"item_count":n}` — the number of matches for `{"query":"…"}` |
-
-`kind` is `artists`, `albums`, `genres`, `tracks` or `search`. `filter` is a
-JSON object (empty string means none):
-
-```json
-{ "artist": "…", "album": "…", "genre": "…", "query": "…" }
-```
-
-Rows: aggregate views return `{"name":"…","artist":"…","album":"…","track_count":n,"rowid":null,"path":null}`,
-track and search views return `{"name":"<title>","artist":"…","album":"…","track_count":0,"rowid":n,"path":"…"}`.
-
-Signal `LibraryChanged(s reason)` with `reason` one of `scan_started`,
-`scan_progress`, `scan_done`, `favorites`, `history`, `dir_history`, `updated`.
-
-## org.yxzl.ter_music.Favorites / .History / .DirHistory
-
-| Interface | Method | Signature | Description |
-| --------- | ------ | --------- | ----------- |
-| `Favorites` | `Add` / `Remove` | `(s path) -> b` | Add/remove a favorite by track path |
-| `Favorites` | `Has` | `(s path) -> b` | Is this path a favorite |
-| `Favorites` | `List` | `(i offset, i count) -> s` | `{"total":n,"offset":n,"rows":[{"path":"…","title":"…","artist":"…","album":"…"}]}` |
-| `History` | `Add` | `(s path, i position) -> b` | Record a play |
-| `History` | `List` | `(i offset, i count) -> s` | Rows `{"path":"…","title":"…","artist":"…","play_time":n}` |
-| `History` | `Clear` | `() -> b` | Remove all entries |
-| `DirHistory` | `Add` / `Remove` | `(s path) -> b` | Add/remove a directory |
-| `DirHistory` | `List` | `(i offset, i count) -> s` | Rows `{"path":"…","open_time":n}` |
-| `DirHistory` | `Clear` | `() -> b` | Remove all entries |
-
-All three broadcast `Library.LibraryChanged` with their own reason.
 
 ## org.yxzl.ter_music.Config
 
@@ -399,6 +318,23 @@ Notes:
 Signal `ConfigChanged(s patch)` carries the patch that was applied; `{}` means
 "everything may have changed" (used by `Reset`).
 
+## Removed in api_version 4: the content interfaces
+
+`Playlist`, `Library`, `Favorites`, `History` and `DirHistory` are gone. The
+library, the playlists, the user song lists, the favourites and the history are
+**front-end** data: the front end owns its SQLite database, scans directories on
+its own threads and renders the results itself. The core publishes playback only.
+
+Consequences for a client:
+
+* `Control.OpenPath`, `Control.PlayIndex`, `Control.GetPlaylist` and
+  `Queue.Rebuild` were removed. Open content locally, then call `Queue.Set`
+  followed by `Queue.PlayAt`.
+* MPRIS `OpenUri` answers `org.freedesktop.DBus.Error.NotSupported`: the core
+  cannot load a URI by itself any more.
+* Calls to a removed interface or method now get
+  `org.freedesktop.DBus.Error.UnknownMethod` immediately instead of a timeout.
+
 ## Removed: org.yxzl.ter_music.Remote
 
 Removed in `core.api_version` 3. Remote music sources (SMB/SFTP/FTP/WebDAV/
@@ -416,10 +352,14 @@ gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
   --method org.yxzl.ter_music.Info.GetInfo
 
-# A page of the playlist tree, then the queue
+# Deliver a queue (the front end scanned this list itself), then play entry 1
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Playlist.GetPage 0 50
+  --method org.yxzl.ter_music.Queue.Set \
+  '{"entries":[{"path":"/home/user/Music/a.flac","title":"A","artist":"X","album":"AL"}]}'
+gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
+  --object-path /org/mpris/MediaPlayer2 \
+  --method org.yxzl.ter_music.Queue.PlayAt 1
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
   --method org.yxzl.ter_music.Queue.Get 0 50
@@ -428,14 +368,6 @@ gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
   --method org.yxzl.ter_music.Config.Set '{"preferences":{"volume_percent":40}}'
-
-# Rescan a library root, then page the artists
-gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
-  --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Library.Rescan "/home/user/Music"
-gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
-  --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Library.GetPage artists "" 0 50
 
 # Watch everything that changes
 gdbus monitor --session --dest org.mpris.MediaPlayer2.ter_music
@@ -458,7 +390,7 @@ scripts/test/rpc_client.py monitor 3                    # list signals seen
 - Interface name components cannot contain hyphens, hence the underscores in
   `org.yxzl.ter_music.*`.
 - `Info` JSON `schema` is `1`; the interface surface is versioned separately by
-  `core.api_version` (currently `3`). Consumers must ignore unknown fields.
+  `core.api_version` (currently `4`). Consumers must ignore unknown fields.
   Version 3 removed `org.yxzl.ter_music.Remote` and the `track.is_remote` field
   and made every path argument local-only; version 2 added the `core` object and
   the Playlist/Queue/Library/Favorites/History/DirHistory/Config interfaces.

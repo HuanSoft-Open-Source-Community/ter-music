@@ -37,9 +37,12 @@
  *     Library/Favorites/History/DirHistory/Config 与增量信号。
  * 3 = 移除 Remote 接口（远程音乐源改为前端功能），Playlist.Load/Append、
  *     Control.OpenPath 与 MPRIS OpenUri 只接受本地路径，Info 快照不再带
- *     远程来源标记字段。
- * 前端在接入时校验 core.api_version >= 3，不兼容则提示升级并退出。 */
-#define TER_MUSIC_API_VERSION 3
+ *     远程来源标记字段；Queue 从“曲目下标”改为**本地路径**语义。
+ * 4 = 内容归前端：Playlist/Library/Favorites/History/DirHistory 与后台扫描
+ *     任务整体撤下，Control.OpenPath/PlayIndex 与 Queue.Rebuild 一并撤下，
+ *     队列内容只能经 Queue.Set/Append/InsertAfter 下发。
+ * 前端在接入时校验 core.api_version >= 4，不兼容则提示“核心过旧”并退出。 */
+#define TER_MUSIC_API_VERSION 4
 
 /* 单响应硬上限（256 KB）：任何 JSON 回复超过它都返回 Error.TooLarge */
 #define RPC_PAYLOAD_MAX 262144
@@ -68,13 +71,14 @@
 #define RPC_IFACE_INFO        "org.yxzl.ter_music.Info"
 #define RPC_IFACE_CONTROL     "org.yxzl.ter_music.Control"
 #define RPC_IFACE_LYRICS      "org.yxzl.ter_music.Lyrics"
-#define RPC_IFACE_PLAYLIST    "org.yxzl.ter_music.Playlist"
 #define RPC_IFACE_QUEUE       "org.yxzl.ter_music.Queue"
-#define RPC_IFACE_LIBRARY     "org.yxzl.ter_music.Library"
-#define RPC_IFACE_FAVORITES   "org.yxzl.ter_music.Favorites"
-#define RPC_IFACE_HISTORY     "org.yxzl.ter_music.History"
-#define RPC_IFACE_DIRHISTORY  "org.yxzl.ter_music.DirHistory"
 #define RPC_IFACE_CONFIG      "org.yxzl.ter_music.Config"
+
+/* 已撤下的接口（api_version 4）
+ * ---------------------------------
+ * 曲库 / 收藏 / 历史 / 目录历史 / 播放列表**内容**归前端：前端自己扫描、
+ * 自己持有 SQLite、自己渲染；核心只接受前端下发的本地路径队列。因此这些
+ * 接口不再发布，旧前端调用会拿到 org.freedesktop.DBus.Error.UnknownMethod。 */
 
 /* ── 分页参数钳制 ───────────────────────────────────────────────────
  * 把调用方给出的 offset/count 收敛到合法区间。
@@ -135,8 +139,7 @@ int rpc_action_seek_to_us(int64_t position_us);
 int rpc_action_seek_by_us(int64_t delta_us);
 int rpc_action_set_volume_percent(int percent);
 int rpc_action_set_speed(double rate);
-int rpc_action_play_index(int index);
-int rpc_action_open_path(const char *path, int autoplay);
+int rpc_action_play_position(int position);
 
 /* ── 共享取值 ───────────────────────────────────────────────────── */
 const char *rpc_playback_status_name(PlayState state);      /* MPRIS 状态名 */
@@ -145,47 +148,22 @@ InfoInstance rpc_instance_info(void);
 
 /* ── 接口处理器与同步钩子 ───────────────────────────────────────── */
 DBusMessage *rpc_lyrics_handle(DBusMessage *message);
-DBusMessage *rpc_playlist_handle(DBusMessage *message);
 DBusMessage *rpc_queue_handle(DBusMessage *message);
 /* Library/Favorites/History/DirHistory 共用一个入口（按接口名分发） */
-DBusMessage *rpc_library_handle_all(DBusMessage *message);
 DBusMessage *rpc_config_handle(DBusMessage *message);
 DBusMessage *rpc_info_handle(DBusMessage *message);
 DBusMessage *rpc_control_handle(DBusMessage *message);
 
 /* 自省片段：各接口提供自己的 <interface> 段，session.c 负责拼装 */
 const char *rpc_lyrics_introspection(void);
-const char *rpc_playlist_introspection(void);
 const char *rpc_queue_introspection(void);
-const char *rpc_library_introspection(void);
 const char *rpc_config_introspection(void);
 const char *rpc_info_introspection(void);
 const char *rpc_control_introspection(void);
 
-/* ── 后台任务（media/rpc_job.c） ────────────────────────────────────
- * 阻塞 IO（目录扫描）走单工作线程；结果由媒体循环在 rpc_job_tick()
- * 内单点换入，随后广播信号。 */
-typedef enum {
-    RPC_JOB_NONE = 0,
-    RPC_JOB_PLAYLIST_LOAD,     /* path = 目录/文件路径 */
-    RPC_JOB_PLAYLIST_APPEND    /* path = 目录/文件路径 */
-} RpcJobKind;
-
-typedef enum {
-    RPC_JOB_IDLE = 0,
-    RPC_JOB_RUNNING,
-    RPC_JOB_FAILED
-} RpcJobState;
-
-int  rpc_job_start(RpcJobKind kind, const char *path, const char *subpath, int autoplay);
-void rpc_job_tick(void);            /* 媒体循环内调用 */
-void rpc_job_cancel(void);
-int  rpc_job_state(void);
-int  rpc_job_kind(void);
-int  rpc_job_progress(void);
-int  rpc_job_total(void);
-const char *rpc_job_error(void);
-const char *rpc_job_path(void);
+/* ── 后台任务 ─────────────────────────────────────────────────────
+ * 旧实现把“目录扫描”作为后台任务发布给前端（media/rpc_job.c）：现在扫描属
+ * 前端职责，核心没有阻塞 IO 需要搬到后台，故整套任务状态机一并撤下。 */
 
 /* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
 void rpc_control_tick(void);       /* 清理超时未心跳的前端登记 */
@@ -193,14 +171,14 @@ int rpc_frontend_count(void);      /* 当前在线前端数 */
 void rpc_control_emit_status(unsigned long long seq, const char *message);
 void rpc_control_emit_error(const char *source, const char *name, const char *message);
 
-/* 播放列表 / 队列的变更广播与状态 */
-void rpc_playlist_emit_changed(const char *reason);
-const char *rpc_playlist_filter(void);
-void rpc_library_emit_changed(const char *reason);
-void rpc_config_emit_changed(const char *patch_json);
+/* 队列变更广播与状态 */
 void rpc_queue_emit_changed(void);
 unsigned long long rpc_queue_revision(void);
 
+/* 配置变更广播（内容侧已撤下，配置仍属后端） */
+void rpc_config_emit_changed(const char *patch_json);
+
+/* 歌词 / 信息快照的同步与广播 */
 void rpc_lyrics_reset(void);
 const char *rpc_lyrics_sync(void);
 void rpc_info_reset(void);
