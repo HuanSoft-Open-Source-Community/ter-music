@@ -332,8 +332,24 @@ UAB 是 ELF 包：`linglong.meta` 段放元数据，`.note.uab.sig` 段的 note 
   （`section .note.uab.sig has an invalid digest`）。
 - 1.14 的 UAB 导出还需要 `cn.org.linyaps.builder.utils ≥ 0.0.4.0`
   （`ll-builder` 的内部常量 `minimumBuilderUtilsVersion`）；官方 stable 源目前只到
-  `0.0.2.0`，此时需要本地构建该层（源码见 linglong 仓库根目录 `linglong.yaml`，
-  版本号 0.0.4.0，`ll-builder build` 即可产出）并让本机仓库能解析到它。
+  `0.0.2.0`。此时自行构建该层并导入本机构建仓库即可（**不需要 root/polkit**）：
+
+  ```bash
+  # 在 linglong 源码仓库根目录（其 linglong.yaml 声明的版本号即 0.0.4.0）
+  ll-builder build
+  ll-builder import cn.org.linyaps.builder.utils_0.0.4.0_x86_64_binary.layer
+  # 之后回到本仓库正常构建，UAB 导出即可通过 utils 解析
+  ```
+  该层首次构建会拉取自身依赖（base 等），耗时较长；构建缓存仍复用
+  `~/.cache/linglong-builder`。若暂时不需要 UAB，可用 `--layer-only` 只出 layer。
+
+  > 自建时注意两点（本轮实测踩过）：
+  > 1. **base 必须选有 `develop` 模块的版本**。构建环境（`apt`、编译器）来自 base 的
+  >    develop 模块；若清单里的 base 版本在软件源中只有 binary、没有 develop，
+  >    `ll-builder` 会在 `buildext.apt` 阶段直接报 `apt: command not found`
+  >    （实测 `org.deepin.base/25.2.0.94` 缺 develop，`25.2.2.8` 正常）。
+  > 2. **构建目录里不要用符号链接冒充源码树**。`ll-builder` 把工程拷进容器时不会
+  >    保留指向工程外的符号链接，构建脚本会找不到 `apps/...` 里的补丁文件。
 - 构建脚本在导出后**断言**签名段与 `linglong.meta` 一致，不一致即判定打包失败，
   不让问题留到安装现场。
 
