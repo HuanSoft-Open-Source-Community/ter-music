@@ -56,8 +56,11 @@ if [ -z "${TM_TEST_BUS_READY:-}" ] && [ "${TM_TEST_REUSE_SESSION_BUS:-0}" != "1"
 fi
 
 cleanup() {
+    # 无条件停核心：最后一步 tui-probe 会让 TUI 自己拉起一个核心，而 `q` 只退前端
+    # （核心继续跑是设计语义），若只在"记录过 DAEMON_PID"时才停就会留下孤儿进程
+    # （实测：本脚本 rc=0 但总线上留下 1 个 daemon foreground）。
+    "$TM_BIN" daemon stop >/dev/null 2>&1 || true
     if [ -n "$DAEMON_PID" ]; then
-        "$TM_BIN" daemon stop >/dev/null 2>&1 || true
         for _ in $(seq 1 20); do
             kill -0 "$DAEMON_PID" 2>/dev/null || break
             sleep 0.1

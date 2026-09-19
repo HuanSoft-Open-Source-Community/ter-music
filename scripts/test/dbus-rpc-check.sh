@@ -73,9 +73,10 @@ if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
 fi
 
 cleanup() {
-    # 显式停止实例；用记录下来的 PID 兜底，避免 pgrep 匹配到本脚本自身
+    # 显式停止实例；用记录下来的 PID 兜底，避免 pgrep 匹配到本脚本自身。
+    # 停止动作不设条件：任何一步（含 TUI 自行拉起核心）留下的实例都要收掉。
+    "$TM_BIN" daemon stop >/dev/null 2>&1 || true
     if [ -n "$DAEMON_PID" ]; then
-        "$TM_BIN" daemon stop >/dev/null 2>&1 || true
         for _ in $(seq 1 20); do
             kill -0 "$DAEMON_PID" 2>/dev/null || break
             sleep 0.1
