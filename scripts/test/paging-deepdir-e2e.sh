@@ -21,6 +21,9 @@ WORK_DIR=""
 
 usage() { sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
+# 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
+ORIG_ARGS=("$@")
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --bin) TM_BIN="$2"; shift 2 ;;
@@ -36,9 +39,18 @@ ok()   { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1"; }
 info() { printf -- '--- %s\n' "$1"; }
 
-if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
-    exec dbus-run-session -- "$0" "$@"
+# ── 独占的总线：默认起私有会话总线 ───────────────────────────────
+# 只允许本脚本拉起的核心在总线上（否则前端会接到桌面残留的实例上）；需要复用
+# 当前总线时显式传 TM_TEST_REUSE_SESSION_BUS=1。TM_TEST_BUS_READY 是再入标记。
+if [ -z "${TM_TEST_BUS_READY:-}" ] && [ "${TM_TEST_REUSE_SESSION_BUS:-0}" != "1" ]; then
+    if ! command -v dbus-run-session >/dev/null 2>&1; then
+        echo "错误：需要 dbus-run-session，或设 TM_TEST_REUSE_SESSION_BUS=1 复用当前会话总线。" >&2
+        exit 2
+    fi
+    export TM_TEST_BUS_READY=1
+    exec dbus-run-session -- "$0" "${ORIG_ARGS[@]}"
 fi
+
 
 cleanup() {
     [ -n "${TUI_PID:-}" ] && kill -9 "$TUI_PID" 2>/dev/null

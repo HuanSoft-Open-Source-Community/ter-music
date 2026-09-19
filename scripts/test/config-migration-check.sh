@@ -30,6 +30,9 @@ ok()  { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1"; }
 info() { printf -- '--- %s\n' "$1"; }
 
+# 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
+ORIG_ARGS=("$@")
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --bin) TM_BIN="$2"; shift 2 ;;
@@ -38,6 +41,19 @@ while [ $# -gt 0 ]; do
         *) echo "未知参数: $1" >&2; exit 2 ;;
     esac
 done
+
+# ── 独占的总线：默认起私有会话总线 ───────────────────────────────
+# 这两个脚本必须只有一个核心在总线上，否则前端会接到上一次运行残留的实例上
+# （实测：远端 e2e 曾接上迁移测试留下的核心）。需要复用当前桌面总线时显式传
+# TM_TEST_REUSE_SESSION_BUS=1；TM_TEST_BUS_READY 是再入标记，防止无限重入。
+if [ -z "${TM_TEST_BUS_READY:-}" ] && [ "${TM_TEST_REUSE_SESSION_BUS:-0}" != "1" ]; then
+    if ! command -v dbus-run-session >/dev/null 2>&1; then
+        echo "错误：需要 dbus-run-session，或设 TM_TEST_REUSE_SESSION_BUS=1 复用当前会话总线。" >&2
+        exit 2
+    fi
+    export TM_TEST_BUS_READY=1
+    exec dbus-run-session -- "$0" "${ORIG_ARGS[@]}"
+fi
 
 cleanup() {
     if [ -n "$DAEMON_PID" ]; then
