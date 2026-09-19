@@ -10,7 +10,8 @@
 
 位于 `scripts/build/launch-auto-build.sh`，是构建 ter-music 所有包格式的统一入口。
 
-**核心设计：** 两阶段执行。先构建所有需要的 Docker 镜像（已存在则跳过），再依次构建所有包。
+**核心设计：** 两阶段执行。先构建 deb/rpm 需要的 Docker 镜像（已存在则跳过），再依次构建所有包；
+linyaps 与 appimage/portable 一样是原生构建（前者由 `ll-builder`/`ll-box` 自带容器化）。
 支持交互式和 CLI 两种模式。
 
 **用法：**
@@ -38,7 +39,7 @@
 |--------|-------|
 | deb | 容器构建（静态链接 + 源码包，`Dockerfile.deb-static`） |
 | rpm | 容器构建（静态链接，`Dockerfile.rpm-static`） |
-| linyaps | 容器构建（Docker，`Dockerfile.uab`） |
+| linyaps | 原生构建（宿主 `ll-builder`，构建容器由 `ll-box` 提供） |
 | appimage | 本地构建 |
 | portable | 本地构建 |
 
@@ -208,26 +209,26 @@ cd ter-music-portable
 
 ### 4. build-linyaps.sh - 构建 Linyaps（如意玲珑）包
 
-通过 Docker 容器构建 Linyaps（如意玲珑）UAB 包，适合 deepin 等使用玲珑包管理的系统。
+在**宿主机**上直接调用 `ll-builder` 构建 Linyaps（如意玲珑）UAB 包，适合 deepin 等使用玲珑包管理的系统。
 
-> **需要 Docker**：Linyaps 构建依赖 `ll-builder`，该工具需要对 `/usr` 的写入权限。为避免污染宿主系统，构建在 Docker 容器（Debian 13）中进行。
+> **不需要 Docker**：Linyaps 自带容器化（`ll-box`）——`ll-builder build` 会在
+> 构建容器里装好 `buildext` 依赖并编译。外面再套一层 Docker 只会带来两个坑：
+> 容器内 `ll-builder` 与宿主 `ll-cli` 版本错配（UAB 签名段不回填，安装时报
+> `section .note.uab.sig has an invalid digest`），以及嵌套 overlayfs 无法挂载
+> （Docker 的 `/tmp` 就在 overlay 上，不能当另一个 overlay 的 upperdir）。
+>
+> **前置条件**：宿主已装玲珑工具链，且 `ll-builder --version` 与
+> `ll-cli --version` 版本匹配（Debian/Ubuntu 系 `sudo apt install linglong-builder
+> linglong-box`）。首次构建会从软件源拉取 base/runtime，缓存在
+> `~/.cache/linglong-builder`（数百 MB 起）。
 
 **使用方法：**
 ```bash
-# 推荐：通过 launch-auto-build.sh 一键构建
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0
+# 推荐：通过 launch-auto-build.sh 一键构建（linyaps 任务已是原生构建，不经 Docker）
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0
 
-# 或手动调用（需 Docker）
-./scripts/docker/docker-build.sh -p \
-  -s build-linyaps.sh \
-  -f scripts/docker/Dockerfile.uab \
-  -n ter-music-uab-builder \
-  -- -v 2.2.0 -a x86_64 --in-container
-
-# 进入容器交互式调试
-./scripts/docker/docker-build.sh -p -i \
-  -f scripts/docker/Dockerfile.uab \
-  -n ter-music-uab-builder
+# 或直接调用构建脚本
+./scripts/build/build-linyaps.sh -v 2.3.0 -a x86_64
 ```
 
 **选项（直接调用 build-linyaps.sh 时）：**
@@ -235,10 +236,11 @@ cd ter-music-portable
 |------|------|
 | `-v, --version VERSION` | 指定版本号 |
 | `-a, --arch ARCH` | 目标架构（默认 x86_64） |
-| `-k, --keep-temp` | 保留临时构建文件 |
+| `-k, --keep-temp` | 保留临时构建文件（默认 `.tmp/linyaps-temp`，可用 `TER_MUSIC_LINYAPS_TEMP` 覆盖） |
 | `-o, --offline` | 强制离线：不拉取源码与依赖，完全使用本地缓存（要求 base/runtime 已在缓存中） |
 | `-r, --refresh` | 强制从软件源刷新 base/runtime（默认仅在缓存为空时拉取） |
-| `--in-container` | 在 Docker 容器内运行，跳过宿主机依赖检查 |
+
+> `--in-container` 已废弃：参数仍被识别，但只会打印提示并被忽略。
 
 **输出：**
 - UAB 包输出到: `build/linyaps/<arch>/org.yxzl.ter-music_<version>_<arch>.uab`
@@ -285,69 +287,55 @@ journalctl --user -u org.yxzl.ter-music -f
 
 **构建缓存（避免重复下载）**
 
-Linyaps 构建需要 base/runtime 环境（数百 MB～1 GB 级），`ll-builder` 会把它们与构建层
-缓存在容器内的 `/root/.cache/linglong-builder`。该目录由 `docker-build.sh` 挂载到宿主机，
-因此**首次构建下载一次，之后构建直接复用**：
+Linyaps 构建需要 base/runtime 环境（数百 MB～1 GB 级），`ll-builder` 把它们与构建层
+缓存在宿主用户的 `~/.cache/linglong-builder`。首次构建下载一次，之后直接复用：
 
-| 宿主机路径 | 容器内路径 | 内容 |
-| --- | --- | --- |
-| `.tmp/linyaps/runtime/linglong-builder` | `/root/.cache/linglong-builder` | base/runtime 的 OSTree 对象与构建层（下载缓存，主要收益点） |
-| `.tmp/linyaps/runtime/var-lib-linglong` | `/var/lib/linglong` | 容器内 ll-builder 的工作存储；与宿主 `/var/lib/linglong`（已安装应用）隔离，实测构建后为空 |
+| 宿主机路径 | 内容 |
+| --- | --- |
+| `~/.cache/linglong-builder/repo` | base/runtime 的 OSTree 对象（下载缓存，主要收益点） |
+| `~/.cache/linglong-builder/layers` | 已缓存的构建层 |
+| `~/.cache/linglong-builder/states.json` | 层状态记录（含 merged 层记录） |
 
 ```bash
 # 查看缓存占用
-du -sh .tmp/linyaps/runtime
+du -sh ~/.cache/linglong-builder
 
 # 常规构建：缓存非空时自动离线，不重复下载（推荐）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0
 
-# 强制离线（缓存为空时快速失败，便于 CI 断言“不联网”）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0 -e "--offline"
+# 强制离线（缓存为空时快速失败，便于断言“不联网”）
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0 -e "--offline"
 # 或直接调用
-./scripts/docker/docker-build.sh -s build-linyaps.sh -f scripts/docker/Dockerfile.uab \
-  -n ter-music-uab-builder -p -- -v 2.2.0 -a x86_64 --in-container --offline
+./scripts/build/build-linyaps.sh -v 2.3.0 -a x86_64 --offline
 
 # 强制刷新依赖（例如 linglong.yaml 中 base 版本变更后）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.2.0 -e "--refresh"
+./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0 -e "--refresh"
 
 # 清空缓存（下次构建会重新下载）
-rm -rf .tmp/linyaps/runtime
+rm -rf ~/.cache/linglong-builder
 ```
 
 > 说明：
-> - `.tmp/*` 已在 `.gitignore` 中，缓存不会被提交。
-> - **缓存非空时默认自动离线**（日志显示“检测到本地 Linyaps 缓存，自动离线构建”）：
->   既不再重复下载，也避开下面提到的容器内 overlayfs 限制。需要新的 base/runtime
->   时用 `-e "--refresh"`（直接调用脚本时为 `--refresh`）。
-> - 首次使用新版脚本时若宿主已存在旧的 `~/.cache/linglong-builder`，会**一次性复制**导入，
->   避免重新下载；旧版少量缓存 `.cache/linglong` 亦会迁移。
+> - **缓存非空时默认自动离线**（日志显示“检测到本地 Linyaps 缓存，自动离线构建”）；
+>   需要新的 base/runtime 时用 `-e "--refresh"`（直接调用脚本时为 `--refresh`）。
 > - `buildext.apt.buildDepends`（编译依赖）由 `ll-builder` 在构建沙箱内每次安装，
->   属于 apt 包而非 Linyaps 依赖，暂不在本缓存范围内。
+>   属于 apt 包而非 Linyaps 依赖，不在本缓存范围内。
+> - 连接 deepin 软件源超时较长：脚本会导出 `LINGLONG_CONNECT_TIMEOUT=120`
+>   （默认 5 秒会导致 `failed to search remote packages from stable: Timeout was reached`）。
 
-**容器内 overlayfs 限制与自动处理**
+**UAB 签名段（`.note.uab.sig`）与工具链版本匹配**
 
-Docker 容器的 `/`、`/tmp` 本身是 overlayfs，而 overlayfs 不能作为另一个 overlay 的
-`upperdir`（内核返回 `EINVAL`：`overlay: filesystem on ... not supported as upperdir`）。
-`ll-builder` 在 Runtime Check 与 UAB 导出阶段需要挂载 overlay 根文件系统，因此在容器内：
+UAB 是 ELF 包：`linglong.meta` 段放元数据，`.note.uab.sig` 段的 note 里存
+`sha256(linglong.meta)` 的 64 字节十六进制。安装时 `ll-cli` 会强制校验它。
 
-- 复用上一次构建留下的 merged 层时，会出现
-  `kernel overlay mount failed: Invalid argument` →
-  `Runtime Check failed` → `failed to generate ld cache` → UAB 导出失败；
-- 由本次构建重新生成 merged 层时，上述两步正常。
-
-脚本据此在容器内构建前**自动刷新 merged 层记录**
-（`build-linyaps.sh` 的 `refresh_merged_state()`，日志显示“已刷新 merged 层记录”）：
-只把 `states.json` 中的 merged 记录清空（备份为 `states.json.bak`），
-由 `ll-builder` 用本地 `layers` 重新合并（以硬链接为主，耗时很短，不联网），
-`layers` 本体与已下载的 base/runtime 完全不动。因此常规构建稳定产出 UAB 且不重新下载。
-
-**Docker 镜像说明：**
-- 镜像名：`ter-music-uab-builder`
-- 基础：Debian 13 (trixie)，使用 USTC 镜像源
-- 预装：`linglong-bin`、`linglong-installer`、`linglong-builder`、`xdg-utils`、`rsync`（构建依赖由 ll-builder 容器内自动安装）
-- Dockerfile 路径：`scripts/docker/Dockerfile.uab`
-- 容器以 `--privileged` 模式运行（`ll-builder` 需要 user namespace 支持）
-- 产物所有权通过 `fix_output_ownership()` 自动修复为宿主用户
+- `ll-builder ≥1.14` 会在导出时回填该摘要；**1.13.x 不会**，导出的包能生成但装不上
+  （`section .note.uab.sig has an invalid digest`）。
+- 1.14 的 UAB 导出还需要 `cn.org.linyaps.builder.utils ≥ 0.0.4.0`
+  （`ll-builder` 的内部常量 `minimumBuilderUtilsVersion`）；官方 stable 源目前只到
+  `0.0.2.0`，此时需要本地构建该层（源码见 linglong 仓库根目录 `linglong.yaml`，
+  版本号 0.0.4.0，`ll-builder build` 即可产出）并让本机仓库能解析到它。
+- 构建脚本在导出后**断言**签名段与 `linglong.meta` 一致，不一致即判定打包失败，
+  不让问题留到安装现场。
 
 ### 5. build-deb.sh - 构建 DEB 包
 将项目构建为标准的 Debian/Ubuntu DEB 包，适合 Debian、Ubuntu、Linux Mint、deepin 等基于 Debian 的发行版。
@@ -467,17 +455,13 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 - `rpm2cpio` 和 `cpio`（仅当从 RPM 转换时需要）
 
 ### build-linyaps.sh 依赖：
-- Docker（必需，构建在容器中进行）
-- 无需宿主机安装 linglong 相关包
-
-容器内自动处理以下依赖（由 `Dockerfile.uab` 定义）：
-- `linglong-builder` (ll-builder)
-- `linglong-bin`
-- `linglong-installer`
-- `cmake`、`make`、`gcc`
-- FFmpeg 开发库
-- ncurses、pulseaudio、sqlite、png、jpeg、xml2、dbus 等开发库
-- curl 开发库（前端远程音乐源；核心不认识远程）
+- 宿主安装玲珑工具链：`ll-builder`（`linglong-builder`）、`ll-box`（`linglong-box`）
+- 宿主 `ll-builder --version` 应与 `ll-cli --version` 匹配（版本错配会导致上面说的签名段问题）
+- `cmake`、`make`
+- 不再需要 Docker；编译依赖由 `ll-builder` 在构建容器内按 `buildext.apt` 自动安装：
+  - FFmpeg 开发库
+  - ncurses、pulseaudio、sqlite、png、jpeg、xml2、dbus 等开发库
+  - curl 开发库（前端远程音乐源；核心不认识远程）
 
 ### build-deb.sh 依赖：
 - `dpkg-dev`

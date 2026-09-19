@@ -39,9 +39,11 @@
      都只接受本地路径，收到远程 URL 会明确报错（远程源由前端下载成缓存文件
      后交给核心播放）。
    回归脚本：`scripts/test/check-core-purity.sh`、`check-ui-purity.sh`、
-   `run-unit-tests.sh`、`dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、
-   `offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、
-   `remote-frontend-e2e.sh`（CI 的 `gates` 与 `e2e` 作业已接入前六项与全部 e2e）。
+   `check-config-ownership.sh`、`run-unit-tests.sh`、`dbus-rpc-check.sh`、
+   `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
+   `multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、
+   `perf-check.sh`（CI 的 `gates` 作业跑三条门禁与单测，`e2e` 作业跑全部 e2e，
+   并以前述性能脚本的 `--report` 记录实测数值）。
    - 历史登记（远程音乐源移交前端的那一版）：配置 schema v5 → v6 把旧的
      `<remote_connections>` 段搬到前端自有的 `<configdir>/remote.xml`
      （密码密文原样保留，文件权限 0600），核心配置此后不再含该段；核心不再
@@ -111,12 +113,22 @@ bash scripts/build/build-rpm.sh -v X.Y.Z -a x86_64
 在真实的 Deepin（推荐 Deepin V25）机器上执行：
 
 ```bash
-# linglong 构建器与工具链（Deepin 仓库自带）
-sudo apt install -y linglong-builder cmake make
+# linglong 构建器与工具链（Deepin 仓库自带）；ll-builder 需要 user namespace 支持
+sudo apt install -y linglong-builder linglong-box cmake make
 
-# 构建（原生模式；ll-builder 需要 user namespace 支持）
+# 构建（原生模式：ll-builder 自带 ll-box 容器，不经过 Docker）
 bash scripts/build/build-linyaps.sh -v X.Y.Z -a x86_64
 ```
+
+> **两条极易踩的前提**（详见 `docs/BUILD_GUIDE.md` 的 Linyaps 章节）：
+> 1. `ll-builder --version` 必须与 `ll-cli --version` 匹配。1.13.x 的 `ll-builder`
+>    导出 UAB 时**不回填** `.note.uab.sig` 段的摘要，包能生成但 1.14+ 的 `ll-cli`
+>    安装会被拒绝（`section .note.uab.sig has an invalid digest`）；构建脚本已加
+>    导出后断言，出问题会在打包阶段直接失败。
+> 2. 1.14 的 UAB 导出还需要 `cn.org.linyaps.builder.utils ≥ 0.0.4.0`
+>    （`ll-builder` 内部常量 `minimumBuilderUtilsVersion`）。官方 stable 源若只到
+>    0.0.2.0，需用 linglong 源码根目录的 `linglong.yaml`（版本号即 0.0.4.0）
+>    本地 `ll-builder build` 出该层并让本机仓库能解析到它。
 
 产物：
 
@@ -218,7 +230,7 @@ git push
 需要"一个包兼容多个发行版版本"（静态链接 FFmpeg，消除 soname 差异）时，使用既有本地 Docker 体系：
 
 ```bash
-# 一键构建全部 5 种包（deb/rpm/linyaps/appimage/portable）
+# 一键构建全部 5 种包（deb/rpm 走 Docker；linyaps/appimage/portable 为原生构建）
 bash scripts/build/launch-auto-build.sh --arch amd64
 
 # 或单独构建
