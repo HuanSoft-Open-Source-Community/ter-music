@@ -22,6 +22,84 @@
 #include "config/config.h"
 #include "logger/logger.h"
 
+/* ── 旧 JSON 配置的取值助手（仅本文件的 v1 → v2 迁移使用） ─────────────
+ * 它们原先定义在 ui/menus.c，而核心侧调用时没有声明，导致隐式声明按 int
+ * 处理返回值（`extract_json_float` 的 double 会被读成 int）。迁移到唯一使用
+ * 方并设为 static，既消除告警，也断开"核心调前端"的依赖。 */
+
+static char *extract_json_string(const char *json, const char *key,
+                                 char *output, size_t output_size)
+{
+    char search_key[128];
+    snprintf(search_key, sizeof(search_key), "\"%s\"", key);
+
+    const char *pos = strstr(json, search_key);
+    if (!pos) { output[0] = '\0'; return output; }
+
+    pos = strchr(pos, ':');
+    if (!pos) { output[0] = '\0'; return output; }
+
+    pos++;
+    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+
+    if (*pos == '"') {
+        pos++;
+        size_t i = 0;
+        while (*pos && *pos != '"' && i < output_size - 1) {
+            if (*pos == '\\' && *(pos + 1)) {
+                pos++;
+                switch (*pos) {
+                    case 'n': output[i++] = '\n'; break;
+                    case 't': output[i++] = '\t'; break;
+                    case '"': output[i++] = '"'; break;
+                    case '\\': output[i++] = '\\'; break;
+                    default: output[i++] = *pos; break;
+                }
+                pos++;
+            } else {
+                output[i++] = *pos++;
+            }
+        }
+        output[i] = '\0';
+    } else {
+        size_t i = 0;
+        while (*pos && *pos != ',' && *pos != '}' && *pos != ']' && i < output_size - 1) {
+            if (*pos != ' ' && *pos != '\t' && *pos != '\n' && *pos != '\r') {
+                output[i++] = *pos;
+            }
+            pos++;
+        }
+        output[i] = '\0';
+    }
+    return output;
+}
+
+static long extract_json_int(const char *json, const char *key)
+{
+    char search_key[128];
+    snprintf(search_key, sizeof(search_key), "\"%s\"", key);
+    const char *pos = strstr(json, search_key);
+    if (!pos) return 0;
+    pos = strchr(pos, ':');
+    if (!pos) return 0;
+    pos++;
+    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+    return atol(pos);
+}
+
+static double extract_json_float(const char *json, const char *key)
+{
+    char search_key[128];
+    snprintf(search_key, sizeof(search_key), "\"%s\"", key);
+    const char *pos = strstr(json, search_key);
+    if (!pos) return 0.0;
+    pos = strchr(pos, ':');
+    if (!pos) return 0.0;
+    pos++;
+    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+    return atof(pos);
+}
+
 /* ── Public API ───────────────────────────────────────────────────── */
 
 int config_needs_migration(void)
