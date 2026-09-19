@@ -504,13 +504,6 @@ int player_local_queue_clear(void)
     return 0;
 }
 
-int player_local_queue_rebuild(void)
-{
-    play_queue_rebuild(&g_play_queue, g_play_mode, NULL);
-    refresh_snapshot();
-    return 0;
-}
-
 int player_local_queue_shuffle(void)
 {
     bq_shuffle_rest();

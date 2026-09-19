@@ -340,10 +340,6 @@ int player_queue_clear(void)
 {
     return use_remote() ? player_remote_queue_clear() : player_local_queue_clear();
 }
-int player_queue_rebuild(void)
-{
-    return use_remote() ? player_remote_queue_rebuild() : player_local_queue_rebuild();
-}
 int player_queue_shuffle(void)
 {
     return use_remote() ? player_remote_queue_shuffle() : player_local_queue_shuffle();

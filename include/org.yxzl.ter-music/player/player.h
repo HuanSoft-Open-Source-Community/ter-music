@@ -162,7 +162,6 @@ int player_queue_remove_at(int position);
 int player_queue_move_up(int position);
 int player_queue_move_down(int position);
 int player_queue_clear(void);
-int player_queue_rebuild(void);
 int player_queue_shuffle(void);
 int player_queue_is_active(void);
 

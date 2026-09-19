@@ -1178,16 +1178,6 @@ int player_remote_queue_move_down(int position) { return remote_queue_int_method
 
 int player_remote_queue_clear(void)             { return remote_bool_call(REMOTE_IFACE_QUEUE, "Clear"); }
 
-int player_remote_queue_rebuild(void)
-{
-    DBusMessage *reply = remote_call_i(REMOTE_IFACE_QUEUE, "Rebuild", 2000, (int)g_remote.playback.play_mode);
-    if (reply) {
-        dbus_message_unref(reply);
-    }
-    remote_refresh_snapshot();
-    return 0;
-}
-
 int player_remote_queue_shuffle(void)           { return remote_bool_call(REMOTE_IFACE_QUEUE, "Shuffle"); }
 
 int player_remote_queue_push(void)
