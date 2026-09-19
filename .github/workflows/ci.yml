@@ -183,12 +183,80 @@ jobs:
         run: shellcheck scripts/build/*.sh scripts/docker/*.sh
 
       - name: Syntax check
-        run: bash -n scripts/build/*.sh scripts/docker/*.sh
+        run: bash -n scripts/build/*.sh scripts/docker/*.sh scripts/test/*.sh
+
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libavcodec-dev libavformat-dev libavutil-dev
+
+      - name: Backend purity (core serves playback, not content)
+        run: scripts/test/check-core-purity.sh
+
+      - name: Frontend purity (UI must not touch the playback surface)
+        run: scripts/test/check-ui-purity.sh
+
+      - name: Unit tests
+        run: scripts/test/run-unit-tests.sh
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libavcodec-dev libavformat-dev libswresample-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
+            libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+            libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev \
+            zlib1g-dev ffmpeg dbus
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j2
+
+      - name: D-Bus RPC surface
+        run: scripts/test/dbus-rpc-check.sh --bin ./build/ter-music
+
+      - name: Config migration
+        run: scripts/test/config-migration-check.sh --bin ./build/ter-music
+
+      - name: Frontend lifecycle
+        run: scripts/test/lifecycle-e2e.sh --bin ./build/ter-music
+
+      - name: Offline and reconnect
+        run: scripts/test/offline-reconnect-e2e.sh --bin ./build/ter-music
+
+      - name: Multiple frontends
+        run: scripts/test/multi-frontend-e2e.sh --bin ./build/ter-music
+
+      - name: Deep directories and queue paging
+        run: scripts/test/paging-deepdir-e2e.sh --bin ./build/ter-music
+
+      - name: Remote source delivered as local files
+        run: scripts/test/remote-frontend-e2e.sh --bin ./build/ter-music
 
   required-checks:
     name: required-checks
     if: always()
-    needs: [build, strict, shellcheck]
+    needs: [build, strict, shellcheck, gates, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -197,7 +265,11 @@ jobs:
           BUILD: ${{ needs.build.result }}
           STRICT: ${{ needs.strict.result }}
           SHELLCHECK: ${{ needs.shellcheck.result }}
+          GATES: ${{ needs.gates.result }}
+          E2E: ${{ needs.e2e.result }}
         run: |
           [ "$BUILD" = "success" ] || { echo "build: $BUILD" >&2; exit 1; }
           [ "$STRICT" = "success" ] || { echo "strict: $STRICT" >&2; exit 1; }
           [ "$SHELLCHECK" = "success" ] || { echo "shellcheck: $SHELLCHECK" >&2; exit 1; }
+          [ "$GATES" = "success" ] || { echo "gates: $GATES" >&2; exit 1; }
+          [ "$E2E" = "success" ] || { echo "e2e: $E2E" >&2; exit 1; }
