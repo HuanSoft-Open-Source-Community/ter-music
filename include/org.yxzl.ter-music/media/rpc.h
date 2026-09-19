@@ -168,6 +168,8 @@ const char *rpc_control_introspection(void);
 /* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
 void rpc_control_tick(void);       /* 清理超时未心跳的前端登记 */
 int rpc_frontend_count(void);      /* 当前在线前端数 */
+int rpc_frontend_ever_attached(void);   /* 是否曾有前端接入（看门狗用） */
+void rpc_frontend_reset_registry(void); /* 关闭 D-Bus 时清空注册表 */
 void rpc_control_emit_status(unsigned long long seq, const char *message);
 void rpc_control_emit_error(const char *source, const char *name, const char *message);
 

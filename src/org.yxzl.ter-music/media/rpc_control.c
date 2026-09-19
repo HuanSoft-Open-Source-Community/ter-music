@@ -97,6 +97,7 @@ typedef struct {
 } RpcFrontend;
 
 static RpcFrontend g_frontends[RPC_FRONTEND_MAX];
+static int g_frontend_ever_attached = 0;
 
 static unsigned long long rpc_now_ms(void)
 {
@@ -192,6 +193,19 @@ int rpc_frontend_count(void)
     return count;
 }
 
+/* 是否**曾经**有前端接入过：看门狗只在“确实服务过前端”之后才考虑随最后
+ * 一个前端退出——否则一个刚起步、还没人来连的核心会立刻自杀。 */
+int rpc_frontend_ever_attached(void)
+{
+    return g_frontend_ever_attached;
+}
+
+void rpc_frontend_reset_registry(void)
+{
+    memset(g_frontends, 0, sizeof(g_frontends));
+    g_frontend_ever_attached = 0;
+}
+
 /*
  * Attach / Ping / Detach / FrontendInfo 处理器在 rpc_control_handle 内实现：
  * 它们与既有控制方法共用同一个成员分发。
@@ -246,6 +260,7 @@ DBusMessage *rpc_control_handle(DBusMessage *message) {
 
         log_info("rpc_control", "Frontend attached: token='%s' role='%s' pid=%d (total=%d)",
                  entry->token, entry->role, entry->pid, rpc_frontend_count());
+        g_frontend_ever_attached = 1;
 
         char json[512];
         size_t pos = 0;

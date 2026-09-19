@@ -19,6 +19,7 @@
 #include "config/config.h"
 #include "i18n/i18n.h"
 #include "info/info.h"
+#include "media/rpc.h"
 #include "media/session.h"
 #include "queue/backend_queue.h"
 #include "logger/logger.h"
@@ -36,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 /* 1 = 当前进程为无界面 daemon（Info.InstanceInfo 与 MPRIS 判定使用） */
@@ -46,6 +48,56 @@ int g_daemon_mode = 0;
 #define DAEMON_LOG_NAME "daemon.log"
 
 extern volatile sig_atomic_t g_should_exit;
+
+static uint64_t daemon_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
+}
+
+/* ── 看门狗：最后一个前端离开后是否随核心退出 ─────────────────────
+ * 默认**否**（关掉 TUI 音乐继续）。开启后要求同时满足：
+ *   1) 本进程持有主总线名（不是次要实例）；
+ *   2) 曾经有前端 Attach 过（刚起步还没人来连时不自杀）；
+ *   3) 前端数已归零；
+ *   4) 归零后等待 CORE_EXIT_GRACE_MS 宽限，期间没有前端回来。
+ * 宽限从“最后一次见到前端”起算，所以短暂重连不会被误杀。 */
+#define CORE_EXIT_GRACE_MS 10000
+
+static int frontend_watchdog_should_exit(int have_primary_name, int frontend_count)
+{
+    static uint64_t last_seen_ms = 0;
+    static int announced = 0;
+
+    if (!g_app_config.core_exit_when_no_frontend) {
+        return 0;
+    }
+    if (!have_primary_name || !rpc_frontend_ever_attached()) {
+        return 0;
+    }
+
+    uint64_t now = daemon_now_ms();
+    if (frontend_count > 0) {
+        last_seen_ms = now;
+        announced = 0;
+        return 0;
+    }
+
+    if (last_seen_ms == 0) {
+        last_seen_ms = now;
+        return 0;
+    }
+    if (now - last_seen_ms < CORE_EXIT_GRACE_MS) {
+        return 0;
+    }
+    if (!announced) {
+        log_info("daemon", "core_exit_when_no_frontend: no front end for %d ms, exiting",
+                 (int)(now - last_seen_ms));
+        announced = 1;
+    }
+    return 1;
+}
 
 /* daemon 模式下 SIGHUP 仅重载配置，不退出（终端挂断无关） */
 static void daemon_sighup_handler(int sig) {
@@ -156,6 +208,10 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     while (!g_should_exit) {
         /* 与 TUI 共用同一套核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */
         core_tick();
+        if (frontend_watchdog_should_exit(media_session_has_primary_name(),
+                                          rpc_frontend_count())) {
+            g_should_exit = 1;
+        }
         usleep(DAEMON_TICK_US);
     }
 

@@ -456,6 +456,10 @@ int library_init(void) {
 
     /* Enable WAL mode for better concurrent read performance */
     exec_sql("PRAGMA journal_mode=WAL");
+    /* 多进程共写（架构反转后 TUI 与 CLI 都可能打开同一份内容库）：
+     * 忙等 5 秒而不是立刻回 SQLITE_BUSY，并让 WAL 检查点不阻塞读者。 */
+    exec_sql("PRAGMA busy_timeout=5000");
+    exec_sql("PRAGMA wal_autocheckpoint=256");
     /* Enable foreign keys */
     exec_sql("PRAGMA foreign_keys=ON");
     /* Performance tuning */
