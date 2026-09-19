@@ -83,11 +83,9 @@ int player_restart_core(void);
 
 uint64_t player_state_revision(void);
 uint64_t player_queue_revision(void);
-uint64_t player_playlist_revision(void);
 uint64_t player_lyrics_revision(void);
 uint64_t player_config_revision(void);
 uint64_t player_cover_revision(void);
-uint64_t player_library_revision(void);
 
 /* ── 快照（只读，生命周期归门面） ─────────────────────────────── */
 

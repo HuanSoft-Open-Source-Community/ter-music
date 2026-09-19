@@ -705,12 +705,15 @@ void try_migrate_from_json(void)
     load_all_playlists();
 }
 
-void init_all_persistent_data(void)
+void frontend_init_config(void)
 {
     ensure_config_dir_exists();
     core_config_apply();   /* 配置读取 + 运行时应用（倍速/播放模式） */
     apply_color_theme();
+}
 
+void content_init(void)
+{
     library_init();
 
     load_history();
@@ -719,6 +722,12 @@ void init_all_persistent_data(void)
     load_all_playlists();
 
     try_migrate_from_json();
+}
+
+void init_all_persistent_data(void)
+{
+    frontend_init_config();
+    content_init();
 }
 
 /* ============================================================
@@ -732,8 +741,6 @@ void init_menu_views(void)
     g_menu_selected_idx = 0;
     g_content_selected_idx = 0;
     g_focus_area = FOCUS_SIDEBAR;
-
-    init_all_persistent_data();
 }
 
 /* ============================================================

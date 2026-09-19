@@ -14,6 +14,7 @@
 #include "config/config.h"
 #include "queue/backend_queue.h"
 #include "info/info.h"
+#include "logger/logger.h"
 #include "types.h"
 #include "util/utf8.h"
 
@@ -202,6 +203,40 @@ static int cli_ensure_core_instance(void) {
         }
     }
     return CLI_EXIT_OK;
+}
+
+int cli_ensure_core_for_frontend(const char *bus, int attach_only)
+{
+    if (cli_client_primary_available(bus)) {
+        return CLI_EXIT_OK;
+    }
+
+    if (attach_only) {
+        fprintf(stderr, "错误：没有正在运行的播放服务（已指定 --attach-only，不自动启动）。\n");
+        fprintf(stderr, "      先运行 `ter-music daemon start`，或去掉 --attach-only。\n");
+        return CLI_EXIT_NO_INSTANCE;
+    }
+
+    if (cli_in_sandbox()) {
+        if (cli_client_activate_instance(bus) != CLI_EXIT_OK) {
+            cli_print_sandbox_guidance("容器内无法自行分叉后台进程。");
+            return CLI_EXIT_REFUSED;
+        }
+        int pid = 0;
+        if (cli_client_wait_for_online(bus, 10000, &pid) != CLI_EXIT_OK) {
+            fprintf(stderr, "错误：已请求启动播放服务，但未在 10 秒内就绪。\n");
+            return CLI_EXIT_DBUS;
+        }
+        return CLI_EXIT_OK;
+    }
+
+    char pid_text[32] = "";
+    int rc = daemon_start_background(NULL, 0, 0, pid_text, sizeof(pid_text));
+    if (rc == CLI_EXIT_OK) {
+        log_info("cli", "Started the playback core in the background (pid %s)",
+                 pid_text[0] ? pid_text : "?");
+    }
+    return rc;
 }
 
 static int cli_require_instance(void) {

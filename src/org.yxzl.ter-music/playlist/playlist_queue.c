@@ -157,6 +157,23 @@ char *playlist_queue_render(void)
     return buffer;
 }
 
+char *playlist_queue_render_entry(int index)
+{
+    char entry[PLAYLIST_QUEUE_ENTRY_MAX];
+    size_t entry_len = entry_json(index, entry, sizeof(entry));
+    if (entry_len == 0) {
+        return NULL;
+    }
+
+    size_t capacity = entry_len + 32;
+    char *payload = malloc(capacity);
+    if (!payload) {
+        return NULL;
+    }
+    snprintf(payload, capacity, "{\"entries\":[%s]}", entry);
+    return payload;
+}
+
 int playlist_queue_sync(void)
 {
     int total = playlist_count();

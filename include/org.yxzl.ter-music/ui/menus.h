@@ -56,6 +56,13 @@ int rename_user_playlist(int index, const char *new_name);
 char* extract_json_string(const char *json, const char *key, char *output, size_t output_size);
 long  extract_json_int(const char *json, const char *key);
 double extract_json_float(const char *json, const char *key);
+/* 启动分叉（架构反转）：
+ *   frontend_init_config() —— 配置 + 主题 + i18n：**两种前端模式都要做**；
+ *   content_init()         —— 曲库/收藏/历史/歌单/迁移：**只有本地模式做**，
+ *                             远端模式的内容库由核心之外的前端进程持有。
+ * init_all_persistent_data() 保留为两者的组合（本地模式与既有调用方沿用）。 */
+void frontend_init_config(void);
+void content_init(void);
 void init_all_persistent_data(void);
 
 void save_temp_playlist(void);

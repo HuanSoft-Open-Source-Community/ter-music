@@ -7,6 +7,7 @@
 #include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
+#include "media/rpc.h"
 #include "media/session.h"
 #include "ui/menus.h"
 #include "lyrics/lyrics.h"
@@ -198,12 +199,21 @@ int main(int argc, char *argv[]) {
     }
 
     char *open_path = NULL;
+    /* 前端模式：默认 remote（前端只管内容与界面，播放交给常驻核心）；
+     * --frontend=local 保留本地直调，作为迁移期回归基线（M6 删除）。 */
+    PlayerBackend frontend = PLAYER_BACKEND_REMOTE;
+    int attach_only = 0;
+    char bus_name[128] = "";
     int opt;
+    enum { OPT_FRONTEND = 1000, OPT_ATTACH_ONLY, OPT_BUS };
     struct option long_options[] = {
         {"open", required_argument, 0, 'o'},
         {"help", no_argument, 0, 'h'},
         {"debug", no_argument, 0, 'd'},
         {"version", no_argument, 0, 'v'},
+        {"frontend", required_argument, 0, OPT_FRONTEND},
+        {"attach-only", no_argument, 0, OPT_ATTACH_ONLY},
+        {"bus", required_argument, 0, OPT_BUS},
         {0, 0, 0, 0}
     };
 
@@ -211,6 +221,22 @@ int main(int argc, char *argv[]) {
         switch (opt) {
             case 'o':
                 open_path = optarg;
+                break;
+            case OPT_FRONTEND:
+                if (strcmp(optarg, "remote") == 0) {
+                    frontend = PLAYER_BACKEND_REMOTE;
+                } else if (strcmp(optarg, "local") == 0) {
+                    frontend = PLAYER_BACKEND_LOCAL;
+                } else {
+                    fprintf(stderr, "错误：--frontend 只接受 local 或 remote。\n");
+                    return 1;
+                }
+                break;
+            case OPT_ATTACH_ONLY:
+                attach_only = 1;
+                break;
+            case OPT_BUS:
+                snprintf(bus_name, sizeof(bus_name), "%s", optarg);
                 break;
             case 'd':
                 g_debug_enabled = 1;
@@ -247,30 +273,49 @@ int main(int argc, char *argv[]) {
     log_info("main", "ncurses initialized, terminal size: %dx%d", COLS, LINES);
 
     init_menu_views();
+
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        /* 本地模式：内容与音频栈都在本进程（迁移期回归基线） */
+        init_all_persistent_data();
+    } else {
+        /* 远端模式：只读配置与主题；内容库、音频设备、MPRIS 都归核心 */
+        frontend_init_config();
+    }
+
     i18n_init(g_app_config.ui_language);
-    set_volume_percent(g_app_config.volume_percent);
-    
-    if (g_app_config.clear_history_on_startup) {
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        set_volume_percent(g_app_config.volume_percent);
+    }
+
+    if (g_app_config.clear_history_on_startup && frontend == PLAYER_BACKEND_LOCAL) {
         clear_dir_history();
     }
-    
-    /* 歌词来源偏好由前端的内容库持久化：后端只回调，不直接写库 */
-    lyrics_set_source_hook(library_set_lyrics_source);
 
-    init_ffmpeg();
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        /* 歌词来源偏好由前端的内容库持久化：后端只回调，不直接写库 */
+        lyrics_set_source_hook(library_set_lyrics_source);
+    }
+
+    /* 前端远程源（SMB/SFTP/…）永远是前端自己的事：两种模式都要初始化 */
     remote_init();
-    /* 前端远程：读入前端自有的 remote.xml 并启动下载线程 */
     remote_view_init();
-    log_info("main", "Subsystems initialized");
 
-    g_active_backend = g_app_config.audio_backend;
-    init_audio_device();
-    media_session_init();
-    
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        init_ffmpeg();
+        g_active_backend = g_app_config.audio_backend;
+        init_audio_device();
+        media_session_init();
+        log_info("main", "Subsystems initialized (local front end)");
+    } else {
+        log_info("main", "Subsystems initialized (remote front end)");
+    }
+
     create_layout();
-    
-    reset_playlist_state();
-    
+
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        reset_playlist_state();
+    }
+
     int loaded = 0;
     int used_fallback = 0;
     int attempted_resume_load = 0;
@@ -493,23 +538,54 @@ int main(int argc, char *argv[]) {
     }
     
     /* 前端门面：界面只经 player_* 访问核心状态与命令。
-     * 迁移期用本地后端（＝今天的直调实现）；M4 起默认改为远程后端。 */
-    if (player_init(PLAYER_BACKEND_LOCAL, NULL) != 0) {
-        fprintf(stderr, "错误：无法初始化播放器门面。\n");
+     *   remote（默认）——界面是播放服务的客户端，先确保核心在跑；
+     *   local（迁移期基线）——本进程即核心，直接调用引擎。 */
+    if (frontend == PLAYER_BACKEND_REMOTE) {
+        int rc = cli_ensure_core_for_frontend(bus_name[0] ? bus_name : NULL, attach_only);
+        if (rc != 0) {
+            cleanup();
+            return rc;
+        }
+    }
+
+    if (player_init(frontend, bus_name[0] ? bus_name : NULL) != 0) {
+        if (frontend == PLAYER_BACKEND_REMOTE) {
+            fprintf(stderr, "错误：无法连接到播放服务（核心）。\n");
+            fprintf(stderr, "      请确认核心版本不低于 %d，或先 `ter-music daemon start`。\n",
+                    TER_MUSIC_API_VERSION);
+        } else {
+            fprintf(stderr, "错误：无法初始化播放器门面。\n");
+        }
         cleanup();
         return 1;
+    }
+
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        /* 本地模式的音量在音频设备初始化时应用；远端模式由核心持有 */
+        set_volume_percent(g_app_config.volume_percent);
+    } else if (loaded) {
+        /* 内容归前端：本进程已经扫描/排序完成，这里把路径队列整表下发给核心 */
+        int pushed = player_queue_push();
+        log_info("main", "Delivered %d queue entries to the core", pushed);
     }
 
     log_info("main", "Starting event loop");
     run_event_loop();
 
     log_info("main", "Event loop exited, beginning shutdown");
+    /* 退出门面：远端模式在这里 Detach（核心继续跑，音乐不中断）；
+     * 本地模式才收尾进程内的播放栈与内容。 */
     player_shutdown();
-    /* queue.txt 不再写出：队列内容由内容列表（temp playlist + 上次打开的
-     * 目录）恢复，游标由 resume_last_playback 恢复。 */
-    save_temp_playlist();
-    cleanup();
-    cleanup_temp_playlist();
+
+    if (frontend == PLAYER_BACKEND_LOCAL) {
+        /* queue.txt 不再写出：队列内容由内容列表（temp playlist + 上次打开的
+         * 目录）恢复，游标由 resume_last_playback 恢复。 */
+        save_temp_playlist();
+        cleanup();
+        cleanup_temp_playlist();
+    } else {
+        cleanup();
+    }
 
     log_info("main", "ter-music exited cleanly");
     logger_shutdown();

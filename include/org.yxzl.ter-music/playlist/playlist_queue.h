@@ -26,6 +26,10 @@ int playlist_queue_sync(void);
  * @return 堆字符串；NULL = 没有可播放条目或内存不足 */
 char *playlist_queue_render(void);
 
+/* 单条曲目的队列载荷（{"entries":[…]}}，调用方 free()）。
+ * 远端后端在“把某一首加进队列”时用它。 */
+char *playlist_queue_render_entry(int index);
+
 /* 只把物理下标 index 的单条曲目下发给后端。
  * insert_after != 0 时插到当前条目之后，否则追加到队尾。
  * @return 写入条目数（0/1）；-1 = 失败 */

@@ -39,6 +39,13 @@ extern int g_daemon_mode;
  * 因此 daemon 的启动策略在此环境下改为 D-Bus 激活 / 前台运行。 */
 int cli_in_sandbox(void);
 
+/* 前端（TUI）启动时确保播放服务可用：
+ *   有核心 → 直接返回 0；
+ *   沙箱   → D-Bus 激活后等待上线；
+ *   否则   → 后台拉起 daemon（no_autoplay）。
+ * attach_only=1 时**不**自动拉起，没有核心即返回 CLI_EXIT_NO_INSTANCE(3)。 */
+int cli_ensure_core_for_frontend(const char *bus, int attach_only);
+
 /* argv[1] 是否为 CLI 子命令（用于 main() 前置分发） */
 int cli_is_command(const char *arg);
 

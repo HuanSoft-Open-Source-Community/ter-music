@@ -9,7 +9,7 @@
  * M6 删除本文件与 PLAYER_BACKEND_LOCAL——那时前端只剩下 D-Bus 客户端一种
  * 形态。在那之前它是回归基线：`--frontend=local` 必须与迁移前行为一致。
  *
- * 修订号语义：player_pump() 重算快照并与上次比较，任何字段变化就递增对应
+ * 修订号语义：player_local_pump() 重算快照并与上次比较，任何字段变化就递增对应
  * 修订号；界面据此重绘。命令后立即改写本地快照（乐观回显），满足
  * “按键到状态变化 < 50 ms”的验收要求。
  *
@@ -57,11 +57,9 @@ static struct {
 
     uint64_t state_revision;
     uint64_t queue_revision;
-    uint64_t playlist_revision;
     uint64_t lyrics_revision;
     uint64_t config_revision;
     uint64_t cover_revision;
-    uint64_t library_revision;
 
     /* 进度外推锚点：核心位置 + 本地单调时钟 */
     uint64_t anchor_ms;
@@ -78,14 +76,12 @@ static struct {
     /* 队列/曲库的变更检测基线 */
     int queue_count;
     int queue_position;
-    int library_tracks;
-    int library_scanning;
 
     /* 本地过滤串（与 D-Bus Playlist.SetFilter 同一语义） */
     char filter[256];
 } g_local = {0};
 
-static unsigned long long player_now_ms(void)
+static unsigned long long player_local_now_ms(void)
 {
     return get_ui_time_ms();
 }
@@ -150,7 +146,7 @@ static void refresh_snapshot(void)
     }
 
     /* 进度锚点：每次刷新都重新锚定，避免外推漂移 */
-    g_local.anchor_ms = player_now_ms();
+    g_local.anchor_ms = player_local_now_ms();
     g_local.anchor_position = playback.position_seconds;
 
     int queue_count = play_queue_count();
@@ -159,14 +155,6 @@ static void refresh_snapshot(void)
         g_local.queue_count = queue_count;
         g_local.queue_position = queue_position;
         g_local.queue_revision++;
-    }
-
-    int tracks = library_is_available() ? library_get_track_count() : 0;
-    int scanning = library_scan_in_progress();
-    if (tracks != g_local.library_tracks || scanning != g_local.library_scanning) {
-        g_local.library_tracks = tracks;
-        g_local.library_scanning = scanning;
-        g_local.library_revision++;
     }
 
     const char *status = core_status_last();
@@ -179,7 +167,7 @@ static void refresh_snapshot(void)
 
 /* ── 生命周期 ─────────────────────────────────────────────────── */
 
-int player_init(PlayerBackend backend, const char *bus_name)
+int player_local_init(PlayerBackend backend, const char *bus_name)
 {
     (void)bus_name;
     if (backend != PLAYER_BACKEND_LOCAL) {
@@ -196,67 +184,56 @@ int player_init(PlayerBackend backend, const char *bus_name)
     refresh_snapshot();
     g_local.state_revision++;
     g_local.queue_revision++;
-    g_local.playlist_revision++;
     g_local.lyrics_revision++;
     log_info("player", "Local player backend initialized (playlist=%d queue=%d)",
              playlist_count(), play_queue_count());
     return 0;
 }
 
-void player_shutdown(void)
+void player_local_shutdown(void)
 {
     g_local.initialized = 0;
     g_local.connected = 0;
 }
 
-int player_pump(void)
+int player_local_pump(void)
 {
     if (!g_local.initialized) {
         return -1;
     }
 
-    int playlist_before = playlist_count();
-    int visible_before = playlist_visible_count();
     refresh_snapshot();
-
-    /* 播放列表变化：数量、可见行数或过滤串变化都算 */
-    if (playlist_before != playlist_count() || visible_before != playlist_visible_count()) {
-        g_local.playlist_revision++;
-    }
-
     return g_local.connected ? 0 : -1;
 }
 
-int player_is_connected(void)
+int player_local_is_connected(void)
 {
     return g_local.connected;
 }
 
-PlayerBackend player_backend(void)
+PlayerBackend player_local_backend(void)
 {
     return PLAYER_BACKEND_LOCAL;
 }
 
-int player_restart_core(void)
+int player_local_restart_core(void)
 {
     return 0;   /* 本地后端就是核心本身 */
 }
 
 /* ── 修订号 ───────────────────────────────────────────────────── */
 
-uint64_t player_state_revision(void)    { return g_local.state_revision; }
-uint64_t player_queue_revision(void)    { return g_local.queue_revision; }
-uint64_t player_playlist_revision(void) { return g_local.playlist_revision; }
-uint64_t player_lyrics_revision(void)   { return g_local.lyrics_revision; }
-uint64_t player_config_revision(void)   { return g_local.config_revision; }
-uint64_t player_cover_revision(void)    { return g_local.cover_revision; }
-uint64_t player_library_revision(void)  { return g_local.library_revision; }
+uint64_t player_local_state_revision(void)    { return g_local.state_revision; }
+uint64_t player_local_queue_revision(void)    { return g_local.queue_revision; }
+uint64_t player_local_lyrics_revision(void)   { return g_local.lyrics_revision; }
+uint64_t player_local_config_revision(void)   { return g_local.config_revision; }
+uint64_t player_local_cover_revision(void)    { return g_local.cover_revision; }
 
 /* ── 快照读取 ─────────────────────────────────────────────────── */
 
-const InfoTrack    *player_track(void)    { return &g_local.track; }
-const InfoLyrics   *player_lyrics(void)   { return &g_local.lyrics; }
-int player_cover_path(char *out, size_t out_size)
+const InfoTrack    *player_local_track(void)    { return &g_local.track; }
+const InfoLyrics   *player_local_lyrics(void)   { return &g_local.lyrics; }
+int player_local_cover_path(char *out, size_t out_size)
 {
     if (!out || out_size == 0) {
         return -1;
@@ -265,14 +242,14 @@ int player_cover_path(char *out, size_t out_size)
     return get_current_album_cover_path(out, out_size) == 0 ? 0 : -1;
 }
 
-const char *player_status_message(void)   { return g_local.status_message; }
+const char *player_local_status_message(void)   { return g_local.status_message; }
 
-const InfoPlayback *player_playback(void)
+const InfoPlayback *player_local_playback(void)
 {
     /* 播放中按本地单调时钟外推，界面进度条才平滑（与远程后端同一语义） */
     if (g_local.playback.state == PLAY_STATE_PLAYING &&
         g_local.playback.duration_seconds > 0) {
-        unsigned long long now = player_now_ms();
+        unsigned long long now = player_local_now_ms();
         double elapsed = (double)(now - g_local.anchor_ms) / 1000.0;
         if (elapsed > 0.0) {
             int position = g_local.anchor_position +
@@ -288,12 +265,12 @@ const InfoPlayback *player_playback(void)
     return &g_local.playback;
 }
 
-int player_track_index(void)
+int player_local_track_index(void)
 {
     return (playlist_count() > 0 && g_current_play_index >= 0) ? g_current_play_index : -1;
 }
 
-int player_track_metadata(int index, Track *out)
+int player_local_track_metadata(int index, Track *out)
 {
     if (!out || index < 0 || index >= playlist_count()) {
         return -1;
@@ -301,16 +278,16 @@ int player_track_metadata(int index, Track *out)
     return get_track_metadata(index, out);
 }
 
-int player_position_seconds(void) { return player_playback()->position_seconds; }
-int player_duration_seconds(void) { return player_playback()->duration_seconds; }
-int player_play_state(void)       { return (int)player_playback()->state; }
-int player_play_mode(void)        { return (int)player_playback()->play_mode; }
-int player_volume_percent(void)   { return player_playback()->volume_percent; }
-float player_speed(void)          { return g_playback_speed; }
+int player_local_position_seconds(void) { return player_local_playback()->position_seconds; }
+int player_local_duration_seconds(void) { return player_local_playback()->duration_seconds; }
+int player_local_play_state(void)       { return (int)player_local_playback()->state; }
+int player_local_play_mode(void)        { return (int)player_local_playback()->play_mode; }
+int player_local_volume_percent(void)   { return player_local_playback()->volume_percent; }
+float player_local_speed(void)          { return g_playback_speed; }
 
 /* ── transport ────────────────────────────────────────────────── */
 
-void player_play(int track_index)
+void player_local_play(int track_index)
 {
     if (track_index >= 0 && track_index < playlist_count()) {
         play_audio(track_index);
@@ -322,24 +299,24 @@ void player_play(int track_index)
     refresh_snapshot();
 }
 
-void player_pause(void)          { pause_audio(); refresh_snapshot(); }
-void player_resume(void)         { resume_audio(); refresh_snapshot(); }
-void player_play_pause(void)
+void player_local_pause(void)          { pause_audio(); refresh_snapshot(); }
+void player_local_resume(void)         { resume_audio(); refresh_snapshot(); }
+void player_local_play_pause(void)
 {
     if (g_play_state == PLAY_STATE_PLAYING) {
         pause_audio();
     } else if (g_play_state == PLAY_STATE_PAUSED) {
         resume_audio();
     } else {
-        player_play(-1);
+        player_local_play(-1);
     }
     refresh_snapshot();
 }
-void player_stop(void)           { stop_audio(); refresh_snapshot(); }
-void player_next(void)           { next_track(); refresh_snapshot(); }
-void player_prev(void)           { prev_track(); refresh_snapshot(); }
+void player_local_stop(void)           { stop_audio(); refresh_snapshot(); }
+void player_local_next(void)           { next_track(); refresh_snapshot(); }
+void player_local_prev(void)           { prev_track(); refresh_snapshot(); }
 
-void player_seek_seconds(int seconds)
+void player_local_seek_seconds(int seconds)
 {
     if (g_total_duration <= 0) {
         return;
@@ -350,12 +327,12 @@ void player_seek_seconds(int seconds)
     /* 乐观回显：进度条立刻跳到目标位置 */
     g_local.playback.position_seconds = seconds;
     g_local.anchor_position = seconds;
-    g_local.anchor_ms = player_now_ms();
+    g_local.anchor_ms = player_local_now_ms();
     g_local.state_revision++;
     refresh_snapshot();
 }
 
-void player_set_volume(int percent)
+void player_local_set_volume(int percent)
 {
     set_volume_percent(percent);
     g_local.playback.volume_percent = get_volume_percent();   /* 已钳制 */
@@ -363,7 +340,7 @@ void player_set_volume(int percent)
     refresh_snapshot();
 }
 
-const float *player_speed_steps(int *out_count)
+const float *player_local_speed_steps(int *out_count)
 {
     if (out_count) {
         *out_count = g_speed_count;
@@ -371,40 +348,40 @@ const float *player_speed_steps(int *out_count)
     return g_speed_ratios;
 }
 
-int player_speed_step_count(void)
+int player_local_speed_step_count(void)
 {
     return g_speed_count;
 }
 
-int player_speed_index(void)
+int player_local_speed_index(void)
 {
     return g_speed_index;
 }
 
-void player_set_speed_index(int index)
+void player_local_set_speed_index(int index)
 {
     if (index < 0 || index >= g_speed_count) {
         return;
     }
-    player_set_speed(g_speed_ratios[index]);
+    player_local_set_speed(g_speed_ratios[index]);
 }
 
-void player_adjust_volume(int delta)
+void player_local_adjust_volume(int delta)
 {
-    player_set_volume(player_volume_percent() + delta);
+    player_local_set_volume(player_local_volume_percent() + delta);
 }
 
-const char *player_play_mode_name(int use_english)
+const char *player_local_play_mode_name(int use_english)
 {
-    return play_mode_display_name((PlayMode)player_play_mode(), use_english);
+    return play_mode_display_name((PlayMode)player_local_play_mode(), use_english);
 }
 
-const char *player_play_mode_name_of(PlayMode mode, int use_english)
+const char *player_local_play_mode_name_of(PlayMode mode, int use_english)
 {
     return play_mode_display_name(mode, use_english);
 }
 
-void player_cycle_play_mode(void)
+void player_local_cycle_play_mode(void)
 {
     cycle_play_mode();
     refresh_snapshot();
@@ -412,14 +389,14 @@ void player_cycle_play_mode(void)
 
 /* ── 均衡器 ───────────────────────────────────────────────────── */
 
-int   player_eq_enabled(void)               { return eq_is_enabled(); }
-void  player_eq_set_enabled(int enabled)    { eq_set_enabled(enabled); }
-void  player_eq_set_band_gain(int band, float gain) { eq_set_band_gain(band, gain); }
-float player_eq_get_band_gain(int band)     { return eq_get_band_gain(band); }
-void  player_eq_set_preamp(float preamp)    { eq_set_preamp(preamp); }
-void  player_eq_apply_preset(int preset)    { eq_apply_preset(preset); }
+int   player_local_eq_enabled(void)               { return eq_is_enabled(); }
+void  player_local_eq_set_enabled(int enabled)    { eq_set_enabled(enabled); }
+void  player_local_eq_set_band_gain(int band, float gain) { eq_set_band_gain(band, gain); }
+float player_local_eq_get_band_gain(int band)     { return eq_get_band_gain(band); }
+void  player_local_eq_set_preamp(float preamp)    { eq_set_preamp(preamp); }
+void  player_local_eq_apply_preset(int preset)    { eq_apply_preset(preset); }
 
-void player_set_speed(float rate)
+void player_local_set_speed(float rate)
 {
     if (!(rate >= 0.5f && rate <= 3.0f)) {
         return;
@@ -434,7 +411,7 @@ void player_set_speed(float rate)
     refresh_snapshot();
 }
 
-void player_set_play_mode(PlayMode mode)
+void player_local_set_play_mode(PlayMode mode)
 {
     if ((int)mode < 0 || (int)mode >= PLAY_MODE_COUNT) {
         return;
@@ -462,11 +439,11 @@ static void play_local_queue_sync_mirror(void)
 
 /* 队列位置 ↔ 内容列表物理下标：前端的内容列表与后端队列一一对应
  * （装配顺序即物理下标顺序，见 playlist/playlist_queue.c）。 */
-int player_queue_count(void)      { return play_queue_count(); }
-int player_queue_position(void)   { return play_queue_position(); }
-int player_queue_is_active(void)  { return play_queue_is_active(&g_play_queue); }
+int player_local_queue_count(void)      { return play_queue_count(); }
+int player_local_queue_position(void)   { return play_queue_position(); }
+int player_local_queue_is_active(void)  { return play_queue_is_active(&g_play_queue); }
 
-int player_queue_index_at(int position)
+int player_local_queue_index_at(int position)
 {
     BackendQueueEntry entry;
     if (bq_entry_at(position, &entry) != 0) {
@@ -475,13 +452,13 @@ int player_queue_index_at(int position)
     return playlist_find_track_index_by_path(entry.path);
 }
 
-int player_queue_play(int position)
+int player_local_queue_play(int position)
 {
     if (bq_play_at(position) != 0) {
         return -1;
     }
     play_audio(position);
-    int track_index = player_queue_index_at(position);
+    int track_index = player_local_queue_index_at(position);
     if (track_index >= 0) {
         app_set_selection_for_track(track_index);
     }
@@ -489,39 +466,39 @@ int player_queue_play(int position)
     return 0;
 }
 
-int player_queue_append(int track_index)
+int player_local_queue_append(int track_index)
 {
     int rc = playlist_queue_push_entry(track_index, 0);
     refresh_snapshot();
     return rc < 0 ? -1 : 0;
 }
 
-int player_queue_insert_after(int track_index)
+int player_local_queue_insert_after(int track_index)
 {
     int rc = playlist_queue_push_entry(track_index, 1);
     refresh_snapshot();
     return rc < 0 ? -1 : 0;
 }
 
-int player_queue_remove_at(int position)        { int rc = play_queue_remove_at(&g_play_queue, position); refresh_snapshot(); return rc; }
-int player_queue_move_up(int position)          { int rc = play_queue_move_up(&g_play_queue, position); refresh_snapshot(); return rc; }
-int player_queue_move_down(int position)        { int rc = play_queue_move_down(&g_play_queue, position); refresh_snapshot(); return rc; }
+int player_local_queue_remove_at(int position)        { int rc = play_queue_remove_at(&g_play_queue, position); refresh_snapshot(); return rc; }
+int player_local_queue_move_up(int position)          { int rc = play_queue_move_up(&g_play_queue, position); refresh_snapshot(); return rc; }
+int player_local_queue_move_down(int position)        { int rc = play_queue_move_down(&g_play_queue, position); refresh_snapshot(); return rc; }
 
-int player_queue_clear(void)
+int player_local_queue_clear(void)
 {
     play_queue_clear(&g_play_queue);
     refresh_snapshot();
     return 0;
 }
 
-int player_queue_rebuild(void)
+int player_local_queue_rebuild(void)
 {
     play_queue_rebuild(&g_play_queue, g_play_mode, NULL);
     refresh_snapshot();
     return 0;
 }
 
-int player_queue_shuffle(void)
+int player_local_queue_shuffle(void)
 {
     bq_shuffle_rest();
     play_local_queue_sync_mirror();
@@ -529,7 +506,7 @@ int player_queue_shuffle(void)
     return 0;
 }
 
-int player_queue_push(void)
+int player_local_queue_push(void)
 {
     int written = playlist_queue_sync();
     play_local_queue_sync_mirror();
@@ -537,17 +514,17 @@ int player_queue_push(void)
     return written < 0 ? -1 : written;
 }
 
-int player_queue_find(const char *path)
+int player_local_queue_find(const char *path)
 {
     return bq_position_of_path(path);
 }
 
-int player_queue_page_count(void)
+int player_local_queue_page_count(void)
 {
     return bq_count();
 }
 
-int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap)
+int player_local_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap)
 {
     if (!out || out_cap <= 0) {
         return 0;
@@ -567,12 +544,12 @@ int player_queue_page(int offset, int count, BackendQueueEntry *out, int out_cap
 
 /* ── 配置（前端镜像 + 唯一写入口） ─────────────────────────────── */
 
-int player_config_refresh(void)
+int player_local_config_refresh(void)
 {
     return 0;   /* 本地后端里 g_app_config 就是权威副本 */
 }
 
-int player_config_apply_json(const char *patch_json)
+int player_local_config_apply_json(const char *patch_json)
 {
     char reason[256];
     if (config_apply_json(patch_json, reason, sizeof(reason)) != 0) {
@@ -586,35 +563,35 @@ int player_config_apply_json(const char *patch_json)
     return 0;
 }
 
-int player_config_set_int(const char *key, int value)
+int player_local_config_set_int(const char *key, int value)
 {
     char patch[256];
     snprintf(patch, sizeof(patch), "{\"preferences\":{\"%s\":%d}}", key, value);
-    return player_config_apply_json(patch);
+    return player_local_config_apply_json(patch);
 }
 
-int player_config_set_string(const char *key, const char *value)
+int player_local_config_set_string(const char *key, const char *value)
 {
     char patch[MAX_PATH_LEN + 128];
     snprintf(patch, sizeof(patch), "{\"preferences\":{\"%s\":\"%s\"}}",
              key, value ? value : "");
-    return player_config_apply_json(patch);
+    return player_local_config_apply_json(patch);
 }
 
-int player_config_set_float(const char *key, float value)
+int player_local_config_set_float(const char *key, float value)
 {
     char patch[256];
     snprintf(patch, sizeof(patch), "{\"preferences\":{\"%s\":%.2f}}", key, (double)value);
-    return player_config_apply_json(patch);
+    return player_local_config_apply_json(patch);
 }
 
-int player_config_reload(void)
+int player_local_config_reload(void)
 {
     g_config_reload_requested = 1;
     return 0;
 }
 
-int player_config_reset(void)
+int player_local_config_reset(void)
 {
     init_default_config();
     save_config();
@@ -626,7 +603,7 @@ int player_config_reset(void)
 
 /* ── 歌词 / 封面 / 可视化 ─────────────────────────────────────── */
 
-int player_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
+int player_local_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
 {
     if (!out || offset < 0 || count <= 0) {
         return -1;
@@ -667,29 +644,29 @@ int player_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
     return written;
 }
 
-int player_lyrics_reload_source(int source)
+int player_local_lyrics_reload_source(int source)
 {
     lyrics_switch_source(source);
     refresh_snapshot();
     return 0;
 }
 
-int player_lyrics_highlight(int *out_current, int *out_next, int *out_has_timestamps)
+int player_local_lyrics_highlight(int *out_current, int *out_next, int *out_has_timestamps)
 {
     return lyrics_highlight(out_current, out_next, out_has_timestamps, NULL);
 }
 
-int player_lyrics_highlight_count(void)
+int player_local_lyrics_highlight_count(void)
 {
     return lyrics_highlight_count();
 }
 
-int player_lyrics_source(void)
+int player_local_lyrics_source(void)
 {
     return lyrics_source();
 }
 
-int player_lyrics_total(void)
+int player_local_lyrics_total(void)
 {
     int total = 0;
     pthread_mutex_lock(&g_lyrics.lock);
@@ -698,7 +675,7 @@ int player_lyrics_total(void)
     return total;
 }
 
-int player_lyrics_line_at(int index, LyricLine *out)
+int player_local_lyrics_line_at(int index, LyricLine *out)
 {
     if (!out || index < 0) {
         return -1;
@@ -713,7 +690,7 @@ int player_lyrics_line_at(int index, LyricLine *out)
     return rc;
 }
 
-int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_size)
+int player_local_cover_rows(int cols, int rows, int charset, char *out, size_t out_size)
 {
     if (!out || out_size == 0) {
         return 0;
@@ -750,12 +727,12 @@ int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_siz
     return have;
 }
 
-void player_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms)
+void player_local_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms)
 {
     get_visualizer_snapshot(levels, peaks, max_levels, last_update_ms);
 }
 
-void player_set_visualizer_active(int active)
+void player_local_set_visualizer_active(int active)
 {
     (void)active;   /* 本地后端始终采样；远程后端用它决定是否订阅帧信号 */
 }
