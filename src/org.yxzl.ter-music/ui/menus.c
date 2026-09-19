@@ -708,7 +708,10 @@ void try_migrate_from_json(void)
 void frontend_init_config(void)
 {
     ensure_config_dir_exists();
-    core_config_apply();   /* 配置读取 + 运行时应用（倍速/播放模式） */
+    /* 配置读取 + 运行时应用（倍速/播放模式）+ 版本迁移（core_config_apply
+     * 内部调用 config_run_migrations）。远端模式在这里读到的只是给界面用的
+     * 镜像；config.xml 的落盘仍由核心独占。 */
+    core_config_apply();
     apply_color_theme();
 }
 

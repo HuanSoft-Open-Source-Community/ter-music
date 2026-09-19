@@ -79,6 +79,17 @@ PlayerBackend player_backend(void);
 /* 请求重启核心（断线后的一键恢复）：本地后端为空操作。 */
 int player_restart_core(void);
 
+/* 重连钩子：远端后端从断线恢复到已连接时回调一次。
+ * 前端用它把内容队列补推给（可能是新起来的）核心。 */
+void player_set_reconnect_hook(void (*hook)(void));
+void player_notify_reconnected(void);
+
+/* 断线状态（远端后端）：界面据此画断线浮层并提示按 R 重启核心。
+ * 本地后端恒为“未断线”。 */
+int player_is_offline(void);
+/* 下次重连尝试还剩多少毫秒（用于提示重试节奏）；未断线时为 0 */
+int player_reconnect_in_ms(void);
+
 /* ── 修订号（界面据此判断是否需要重绘） ───────────────────────── */
 
 uint64_t player_state_revision(void);

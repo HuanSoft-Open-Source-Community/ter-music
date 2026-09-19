@@ -171,6 +171,15 @@ static void print_usage(const char *prog_name) {
     printf("  %s -o /path/to/song.mp3\n", prog_name);
 }
 
+/* 断线重连钩子：把前端持有的内容队列整表推给核心（忽略返回值，失败下次再推） */
+static void push_content_to_core(void)
+{
+    int pushed = player_queue_push();
+    if (pushed >= 0) {
+        log_info("main", "Re-delivered %d queue entries after reconnecting", pushed);
+    }
+}
+
 int main(int argc, char *argv[]) {
     /* 崩溃处理器必须装在独立信号栈上：栈溢出时才能打印 backtrace */
     crash_install_alt_stack();
@@ -558,6 +567,11 @@ int main(int argc, char *argv[]) {
         }
         cleanup();
         return 1;
+    }
+
+    if (frontend == PLAYER_BACKEND_REMOTE) {
+        /* 断线重连后把内容队列补推给核心：核心只执行，内容只有前端有 */
+        player_set_reconnect_hook(push_content_to_core);
     }
 
     if (frontend == PLAYER_BACKEND_LOCAL) {

@@ -18,7 +18,8 @@ extern "C" {
 
 /* ── Version identifiers ──────────────────────────────────────────── */
 #define CONFIG_XML_VERSION          "2.2"
-#define CONFIG_CURRENT_VERSION      6   /* 与 types.h 保持同步 */
+#define CONFIG_CURRENT_VERSION      7   /* 与 types.h 保持同步 */
+#define XML_PREF_CORE_EXIT_NO_FRONTEND "core_exit_when_no_frontend"
 #define CONFIG_MIN_SUPPORTED_VER    2
 
 /* ── Root element ─────────────────────────────────────────────────── */

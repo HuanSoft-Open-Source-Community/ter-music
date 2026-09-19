@@ -44,6 +44,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 前置声明：速度档位辅助函数之间互相调用 */
+void player_local_set_speed(float rate);
+
 /* ── 内部状态 ─────────────────────────────────────────────────── */
 
 static struct {
@@ -214,6 +217,16 @@ int player_local_is_connected(void)
 PlayerBackend player_local_backend(void)
 {
     return PLAYER_BACKEND_LOCAL;
+}
+
+int player_local_is_offline(void)
+{
+    return 0;   /* 本地后端与核心同进程，不存在断线 */
+}
+
+int player_local_reconnect_in_ms(void)
+{
+    return 0;
 }
 
 int player_local_restart_core(void)

@@ -82,6 +82,7 @@ void core_config_apply(void)
 {
     /* config 层负责默认值、XML 读取与版本迁移 */
     load_config();
+    config_run_migrations();
 
     /* 运行时应用：与 load_config() 分开，便于前端在启动时静默应用一次，
      * 而只在“重载”语义下才推送状态消息 */

@@ -178,4 +178,17 @@ void player_remote_set_volume(int percent);
 void player_remote_stop(void);
 void player_remote_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms);
 
+int player_local_is_offline(void);
+int player_local_reconnect_in_ms(void);
+int player_remote_is_offline(void);
+int player_remote_reconnect_in_ms(void);
+
+int  player_local_init(PlayerBackend backend, const char *bus_name);
+
+void player_local_shutdown(void);
+
+int  player_remote_init(PlayerBackend backend, const char *bus_name);
+
+void player_remote_shutdown(void);
+
 #endif /* PLAYER_BACKEND_H */

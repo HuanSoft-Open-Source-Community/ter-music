@@ -55,6 +55,23 @@ void player_shutdown(void)
     g_initialized = 0;
 }
 
+/* 重连钩子：远端后端在“从断线恢复到已连接”时回调一次。
+ * 前端（main）注册它，用来在核心重启后把内容队列补推回去——
+ * 核心不认识内容，队列只有前端能给。 */
+static void (*g_reconnect_hook)(void) = NULL;
+
+void player_set_reconnect_hook(void (*hook)(void))
+{
+    g_reconnect_hook = hook;
+}
+
+void player_notify_reconnected(void)
+{
+    if (g_reconnect_hook) {
+        g_reconnect_hook();
+    }
+}
+
 int player_pump(void)
 {
     return use_remote() ? player_remote_pump() : player_local_pump();
@@ -73,6 +90,16 @@ PlayerBackend player_backend(void)
 int player_restart_core(void)
 {
     return use_remote() ? player_remote_restart_core() : player_local_restart_core();
+}
+
+int player_is_offline(void)
+{
+    return use_remote() ? player_remote_is_offline() : player_local_is_offline();
+}
+
+int player_reconnect_in_ms(void)
+{
+    return use_remote() ? player_remote_reconnect_in_ms() : player_local_reconnect_in_ms();
 }
 
 /* ── 修订号 ─────────────────────────────────────────────────────── */

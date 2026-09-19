@@ -325,6 +325,29 @@ static void lyric_cursor_step(int delta)
     }
 }
 
+/* 断线浮层：只画一行提示（复用状态行区域），不吞按键。
+ * 连续在线时不做事；恢复连接时提示一次。 */
+static void render_offline_overlay(int connected)
+{
+    static int was_offline = 0;
+    int offline = !connected && player_is_offline();
+
+    if (offline) {
+        int retry_s = (player_reconnect_in_ms() + 999) / 1000;
+        char line[256];
+        snprintf(line, sizeof(line), "%s — %s（%s）",
+                 i18n_get("core.offline.title"),
+                 i18n_get("core.offline.hint"),
+                 i18n_get("core.offline.restart"));
+        update_controls_status(line);
+        (void)retry_s;
+        was_offline = 1;
+    } else if (was_offline) {
+        update_controls_status(i18n_get("core.restart.done"));
+        was_offline = 0;
+    }
+}
+
 static void sync_player_revisions(void)
 {
     static uint64_t state = 0;
@@ -394,12 +417,16 @@ void run_event_loop(void)
     while (1) {
         /* 核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */
         core_tick();
-        /* 门面刷新：本地后端重算快照并与上次比较，修订号变化即请求重绘 */
-        player_pump();
+        /* 门面刷新：本地后端重算快照并与上次比较，修订号变化即请求重绘；
+         * 远端后端在这里做心跳与重连（非阻塞），返回 -1 表示与核心断开。 */
+        int connected = (player_pump() == 0);
         /* 前端远程：取回后台线程的列目录结果与已下载曲目（交给核心） */
         remote_view_tick();
         sync_player_revisions();
         process_pending_ui_refresh();
+
+        /* 断线浮层：不清空快照（保留最后一帧），提示自动重连与一键重启 */
+        render_offline_overlay(connected);
 
         /* 响应终端关闭、SIGTERM/SIGINT 等退出信号 */
         if (g_should_exit) {
@@ -547,6 +574,17 @@ void run_event_loop(void)
             g_control_focus = 0;
             render_controls();
             render_playlist_content();
+            continue;
+        }
+
+        /* 断线时 R = 一键重启核心（状态机在门面里，界面不阻塞） */
+        if ((ch == 'R') && player_is_offline()) {
+            if (player_restart_core() == 0) {
+                update_controls_status(i18n_get("core.restart.done"));
+            } else {
+                update_controls_status(i18n_get("core.restart.failed"));
+            }
+            render_controls();
             continue;
         }
 

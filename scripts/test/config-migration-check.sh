@@ -121,13 +121,13 @@ DAEMON_PID="$pid"
 
 sleep 1
 
-info "断言：config.xml 升级为 v6 且不再含远程段"
+info "断言：config.xml 升级到当前版本且不再含远程段"
 cfg_version="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Config.GetAll 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", "?"))' 2>/dev/null || echo "?")"
-if [ "$cfg_version" = "6" ]; then
-    ok "核心配置版本为 6（Config.GetAll version=$cfg_version）"
+if [ "$cfg_version" = "7" ]; then
+    ok "核心配置版本为 7（Config.GetAll version=$cfg_version）"
 else
-    bad "核心配置版本应为 6，实际 '$cfg_version'"
+    bad "核心配置版本应为 7，实际 '$cfg_version'"
 fi
 if grep -q "remote_connections" "$CONFIG"; then
     bad "config.xml 仍含 <remote_connections>"

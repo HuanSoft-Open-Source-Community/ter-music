@@ -170,7 +170,7 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 6   /* 与 config/schema.h 保持同步 */
+#define CONFIG_CURRENT_VERSION 7   /* 与 config/schema.h 保持同步 */
 
 /* ── CUE 文件编码偏好（配置项取值域；转换实现见 playlist/encoding.h） ── */
 #define CUE_ENCODING_AUTO      0  /* detect: UTF-8 → preferred → fallback chain */
@@ -291,6 +291,9 @@ typedef struct {
     int auto_play_on_start;
     int remember_last_path;
     int clear_history_on_startup;
+    /* 核心生命周期：最后一个前端离开后是否随核心退出（默认否——
+     * “关掉 TUI，音乐继续”是默认体验） */
+    int core_exit_when_no_frontend;
     int resume_last_playback;
     int last_played_position;
     char ui_language[32];   /* language ID, e.g. "zh_CN", "en_US" */
@@ -306,7 +309,8 @@ typedef struct {
     int audio_backend;     // 0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire
     int sort_mode;         // SortMode value, 0=default (no sort)
     int cue_encoding;      // CUE_ENCODING_* constant (playlist/encoding.h), 0=auto
-    int config_version;
+    int config_version;             /* 当前配置契约版本（恒为 CONFIG_CURRENT_VERSION） */
+    int config_file_version;        /* 磁盘上那份文件的版本；0 = 新文件/未读到 */
     int eq_enabled;              /* 0/1 — equaliser master switch */
     int eq_preamp;               /* pre-amp gain in dB, -12..12 */
     int eq_band_gains[EQ_BAND_COUNT]; /* per-band gain in dB, -12..12 */

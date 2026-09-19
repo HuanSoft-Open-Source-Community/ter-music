@@ -95,6 +95,7 @@ int config_migrate_v1_to_v2(void)
     memset(&cfg, 0, sizeof(cfg));
 
     cfg.config_version = CONFIG_CURRENT_VERSION;
+    cfg.config_file_version = 0;   /* v1 JSON 没有这个字段 */
 
     /* Strings */
     extract_json_string(json, "default_startup_path", cfg.default_startup_path, MAX_PATH_LEN);

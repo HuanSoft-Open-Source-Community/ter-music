@@ -54,7 +54,10 @@ static void daemon_sighup_handler(int sig) {
 }
 
 static int daemon_prepare_logging(int debug) {
-    if (!debug) {
+    /* TER_MUSIC_FORCE_LOG=1：即使没传 --debug 也把日志落到配置目录，
+     * 方便脚本/CI 诊断后台进程（默认关闭，行为不变）。 */
+    const char *force = getenv("TER_MUSIC_FORCE_LOG");
+    if (!debug && !(force && force[0] == '1')) {
         return 0;
     }
 

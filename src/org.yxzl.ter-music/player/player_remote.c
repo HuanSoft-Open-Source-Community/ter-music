@@ -502,7 +502,6 @@ static int remote_try_connect(void)
     }
 
     g_remote.connected = 1;
-    g_remote.offline = 0;
     g_remote.backoff_index = 0;
     g_remote.next_ping_ms = (int)(remote_now_ms() + (uint64_t)g_remote.ping_interval_ms);
     return 0;
@@ -779,8 +778,11 @@ int player_remote_pump(void)
         if (remote_try_connect() == 0) {
             remote_refresh_snapshot();
             g_remote.state_revision++;
+            /* 通知前端：核心（可能是新起的）里没有队列，需要前端补推 */
+            player_notify_reconnected();
             return 0;
         }
+        g_remote.offline = 1;
         if (g_remote.backoff_index < REMOTE_BACKOFF_COUNT - 1) {
             g_remote.backoff_index++;
         }
@@ -826,15 +828,52 @@ PlayerBackend player_remote_backend(void)
     return PLAYER_BACKEND_REMOTE;
 }
 
+int player_remote_is_offline(void)
+{
+    return g_remote.offline || !g_remote.connected;
+}
+
+int player_remote_reconnect_in_ms(void)
+{
+    if (g_remote.connected) {
+        return 0;
+    }
+    int now = (int)remote_now_ms();
+    return g_remote.reconnect_due_ms > now ? g_remote.reconnect_due_ms - now : 0;
+}
+
 int player_remote_restart_core(void)
 {
     if (!g_remote.initialized) {
         return -1;
     }
+
+    /* 先断开旧连接，再立刻试一次（核心可能只是短暂无响应） */
     remote_close_connection();
     g_remote.backoff_index = 0;
-    g_remote.reconnect_due_ms = (int)remote_now_ms();   /* 立刻重试 */
-    return player_remote_pump() == 0 ? 0 : -1;
+    g_remote.reconnect_due_ms = (int)remote_now_ms();
+    if (player_remote_pump() == 0) {
+        return 0;
+    }
+
+    /* 核心确实不在了：拉起一个新的后台核心，再给它一点时间上线。
+     * 界面在事件循环里调用本函数，其余工作由后续的 player_pump() 继续。 */
+    if (cli_in_sandbox()) {
+        if (cli_client_activate_instance(g_remote.bus_name[0] ? g_remote.bus_name : NULL)
+            != CLI_EXIT_OK) {
+            return -1;
+        }
+    } else {
+        char pid_text[32] = "";
+        if (daemon_start_background(NULL, 0, 0, pid_text, sizeof(pid_text)) != CLI_EXIT_OK) {
+            return -1;
+        }
+    }
+
+    /* 不在这里等待：把下次重连提前，由事件循环的心跳把它接上 */
+    g_remote.reconnect_due_ms = (int)remote_now_ms() + 300;
+    g_remote.offline = 1;
+    return -1;   /* 尚未连上；界面据 offline 状态继续提示，后续 pump 会自动接入 */
 }
 
 /* ── 修订号与快照 ───────────────────────────────────────────────── */
@@ -1598,6 +1637,8 @@ int player_remote_pump(void) { return -1; }
 int player_remote_is_connected(void) { return 0; }
 PlayerBackend player_remote_backend(void) { return PLAYER_BACKEND_REMOTE; }
 int player_remote_restart_core(void) { return -1; }
+int player_remote_is_offline(void) { return 1; }
+int player_remote_reconnect_in_ms(void) { return 0; }
 
 uint64_t player_remote_state_revision(void)  { return 0; }
 uint64_t player_remote_queue_revision(void)  { return 0; }

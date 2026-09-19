@@ -212,6 +212,7 @@ void init_default_config(void)
     g_app_config.auto_play_on_start    = 0;
     g_app_config.remember_last_path    = 1;
     g_app_config.clear_history_on_startup = 0;
+    g_app_config.core_exit_when_no_frontend = 0;
     g_app_config.resume_last_playback  = 0;
     g_app_config.last_played_position  = 0;
     g_app_config.last_played_folder_path[0] = '\0';
@@ -238,6 +239,7 @@ void init_default_config(void)
     g_app_config.info_progress_style   = 0;       /* 进度条+时间 */
     g_app_config.info_lyrics_lines     = 2;       /* 当前句+下一句 */
     g_app_config.config_version        = 0;
+    g_app_config.config_file_version   = 0;
 }
 
 void load_config(void)
@@ -268,9 +270,19 @@ void load_config(void)
         /* Nothing worked — stick with defaults already set by init_default_config */
         log_debug("menu_views", "No valid config found, using defaults");
     }
+}
 
-    /* v5 → v6：旧配置里的远程服务器条目移交前端（一次性数据搬迁）。
-     * 搬迁后立即保存 v6，使核心配置不再含 <remote_connections>。 */
+/* 配置迁移：把旧版本文件推进到 CONFIG_CURRENT_VERSION。
+ * 由**核心**调用（config.xml 归核心独占写）：daemon 与 TUI-local 都在
+ * core_config_apply() 里走到这里；远端模式的前端不写核心配置。
+ * @return 0 完成（含“无需迁移”）；-1 迁移失败 */
+int config_run_migrations(void)
+{
+    /* config_file 是本文件的静态路径（ensure_config_dir_exists 之后有效） */
+    int file_version = g_app_config.config_file_version;
+    int loaded = (file_version > 0);
+    log_info("config", "Migrations: file='%s' file_version=%d current=%d",
+             config_file, file_version, CONFIG_CURRENT_VERSION);
     if (loaded) {
         int moved = legacy_connections_export(config_file);
         if (moved == 1) {
@@ -284,9 +296,9 @@ void load_config(void)
 
     /* Migrate old configs (version < 3): change bg=0 (old C_BLACK default)
      * to -1 (COLOR_DEFAULT / transparent) for all background color fields. */
-    if (g_app_config.config_version < 4) {
+    if (file_version < 4) {
         log_info("menu_views", "Migrating config v%d → v4: bg=0 → -1 (transparent)",
-                 g_app_config.config_version);
+                 file_version);
         #define MIGRATE_BG(field) if ((field) == 0) (field) = -1
         MIGRATE_BG(g_app_config.theme.playlist_bg);
         MIGRATE_BG(g_app_config.theme.controls_bg);
@@ -297,12 +309,26 @@ void load_config(void)
         g_app_config.config_version = CONFIG_CURRENT_VERSION;
         save_config();
     }
+
+    /* v6 → v7：新增 core_exit_when_no_frontend。纯新增键，缺失时按默认值 0
+     * 处理（“关掉 TUI 音乐继续”），因此只需把版本号推进并落盘一次，
+     * 让旧文件里出现这个键、设置页能显示它。 */
+    if (loaded && file_version < 7) {
+        log_info("menu_views", "Migrating config v%d → v7: core_exit_when_no_frontend defaults to off",
+                 file_version);
+        g_app_config.core_exit_when_no_frontend = 0;
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+
+    return 0;
 }
 
 void save_config(void)
 {
     log_debug("menu_views", "Saving config to '%s'", config_file);
     g_app_config.config_version = CONFIG_CURRENT_VERSION;
+    g_app_config.config_file_version = CONFIG_CURRENT_VERSION;
     /* Atomic write: write to temp file first, then rename */
     char tmp_path[MAX_PATH_LEN];
     if (config_path_join(tmp_path, sizeof(tmp_path), config_file, ".tmp") != 0) {
@@ -405,6 +431,7 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_AUTO_PLAY,       cfg->auto_play_on_start);
         SAVE_INT(XML_PREF_REMEMBER_PATH,   cfg->remember_last_path);
         SAVE_INT(XML_PREF_CLEAR_HISTORY,   cfg->clear_history_on_startup);
+        SAVE_INT(XML_PREF_CORE_EXIT_NO_FRONTEND, cfg->core_exit_when_no_frontend);
         SAVE_INT(XML_PREF_RESUME_PLAYBACK, cfg->resume_last_playback);
         SAVE_INT(XML_PREF_LAST_POSITION,   cfg->last_played_position);
         xmlNewChild(prefs, NULL, (const xmlChar *)XML_PREF_LANGUAGE,
@@ -594,6 +621,17 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
     memset(cfg, 0, sizeof(*cfg));
     cfg->config_version = CONFIG_CURRENT_VERSION;
 
+    /* 记下**文件里**的版本：迁移判定必须用它，不能用 cfg->config_version
+     * （那个字段被直接设成当前版本，拿它做 "< N" 判断永远为假——v5→v6 的
+     * 远程段移交正是因此从未执行过）。 */
+    {
+        xmlChar *file_ver = xmlGetProp(root, (const xmlChar *)XML_ATTR_VERSION);
+        cfg->config_file_version = file_ver ? atoi((const char *)file_ver) : 0;
+        if (file_ver) {
+            xmlFree(file_ver);
+        }
+    }
+
     /* ── <paths> ────────────────────────────────────────────────── */
     xmlNodePtr paths = xml_find_child(root, XML_SECTION_PATHS);
     if (paths) {
@@ -630,6 +668,7 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->auto_play_on_start      = xml_get_int(prefs, XML_PREF_AUTO_PLAY, 0);
         cfg->remember_last_path       = xml_get_int(prefs, XML_PREF_REMEMBER_PATH, 1);
         cfg->clear_history_on_startup = xml_get_int(prefs, XML_PREF_CLEAR_HISTORY, 0);
+        cfg->core_exit_when_no_frontend = xml_get_int(prefs, XML_PREF_CORE_EXIT_NO_FRONTEND, 0);
         cfg->resume_last_playback     = xml_get_int(prefs, XML_PREF_RESUME_PLAYBACK, 0);
         cfg->last_played_position     = xml_get_int(prefs, XML_PREF_LAST_POSITION, 0);
         xml_get_string(prefs, XML_PREF_LANGUAGE,
@@ -797,6 +836,7 @@ static void clamp_config_values(AppConfig *cfg)
     cfg->auto_play_on_start      = cfg->auto_play_on_start ? 1 : 0;
     cfg->remember_last_path       = cfg->remember_last_path ? 1 : 0;
     cfg->clear_history_on_startup = cfg->clear_history_on_startup ? 1 : 0;
+    cfg->core_exit_when_no_frontend = cfg->core_exit_when_no_frontend ? 1 : 0;
     cfg->resume_last_playback     = cfg->resume_last_playback ? 1 : 0;
     cfg->show_lyrics_panel        = cfg->show_lyrics_panel ? 1 : 0;
     cfg->show_album_cover         = cfg->show_album_cover ? 1 : 0;
