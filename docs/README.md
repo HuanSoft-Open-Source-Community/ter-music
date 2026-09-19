@@ -1200,18 +1200,21 @@ The seam is deliberately thin and testable:
 
 ### 7.2 Architecture Gates
 
-Two scripts keep the split honest, and both run in CI:
+Three scripts keep the split honest, and all of them run in CI:
 
 | Gate | Command | Rule |
 | ---- | ------- | ---- |
 | Backend purity | `scripts/test/check-core-purity.sh` | Core directories (`audio config core info lyrics media queue` + `cli/daemon.c`) must contain **no** remote-source symbol and no content/UI reference (playlist, library, search, UI rendering, front-end headers) |
 | Front-end purity | `scripts/test/check-ui-purity.sh` | The UI must reach the playback surface **only** through the `player` facade — no engine playback globals or engine playback commands |
+| Config ownership | `scripts/test/check-config-ownership.sh` | The core owns `config.xml`. The front end must not call `save_config()` / `config_save_to_xml()` at all: it changes its own mirror and persists the difference through the facade (`player_config_persist()`, which is `Config.Set` in remote mode) |
 
 Regression suites accompany them: `scripts/test/run-unit-tests.sh` (path queue,
-play-queue contract, lyrics parsing, JSON reader) plus the end-to-end scripts
-`dbus-rpc-check.sh`, `config-migration-check.sh`, `lifecycle-e2e.sh`,
-`offline-reconnect-e2e.sh`, `multi-frontend-e2e.sh`, `paging-deepdir-e2e.sh`
-and `remote-frontend-e2e.sh`.
+play-queue contract, lyrics parsing, JSON reader, configuration diff) plus the
+end-to-end scripts `dbus-rpc-check.sh`, `config-migration-check.sh`,
+`lifecycle-e2e.sh`, `offline-reconnect-e2e.sh`, `multi-frontend-e2e.sh`,
+`paging-deepdir-e2e.sh` and `remote-frontend-e2e.sh`, and the performance probe
+`perf-check.sh` (command-to-visible-state latency and idle CPU, both with
+thresholds; CI records the numbers without gating on them).
 
 ### 7.3 Module Map
 

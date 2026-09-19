@@ -1024,17 +1024,20 @@ D-Bus 接口面相遇：
 
 ### 二 架构门禁
 
-两个脚本守住这条分界，二者都已接入 CI：
+三个脚本守住这条分界，三者都已接入 CI：
 
 | 门禁 | 命令 | 规则 |
 | --- | --- | --- |
 | 后端纯度 | `scripts/test/check-core-purity.sh` | 后端目录（`audio config core info lyrics media queue` 与 `cli/daemon.c`）不得出现任何远程源符号，也不得引用内容/界面（playlist、library、search、界面渲染、前端头文件） |
 | 前端纯度 | `scripts/test/check-ui-purity.sh` | 界面访问播放面**只能**经 `player` 门面——不得直连引擎播放全局或播放命令 |
+| 配置归属 | `scripts/test/check-config-ownership.sh` | `config.xml` 归核心独有。前端**不得**出现 `save_config()` / `config_save_to_xml()`：它只改自己的配置镜像，再经门面 `player_config_persist()` 提交差异（远端模式下即 `Config.Set`） |
 
 与之配套的回归套件：`scripts/test/run-unit-tests.sh`（路径队列、播放队列契约、
-歌词解析、JSON 读取器），以及端到端脚本 `dbus-rpc-check.sh`、
+歌词解析、JSON 读取器、配置差异），以及端到端脚本 `dbus-rpc-check.sh`、
 `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
-`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`。
+`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`，
+还有性能探针 `perf-check.sh`（命令到可见状态的时延与空闲 CPU，均带阈值；
+CI 只记录数值、不做判定）。
 
 ### 三 模块地图
 

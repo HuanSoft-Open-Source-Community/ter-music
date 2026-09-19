@@ -315,6 +315,15 @@ Notes:
   configuration. They belong to the front end, which keeps them in its own
   file; a patch containing `remote_connections` fails with
   `Error.Unsupported`.
+- `Set` is how a front end persists its settings, and `config.xml` belongs to
+  the core alone: a front end must never write that file itself. It changes its
+  own mirror, then sends the **difference** against what it last knew, so a
+  patch stays minimal (an unchanged configuration produces `{}` and no write).
+  In remote mode the facade computes that difference and applies the reply back
+  onto the mirror, which also makes the write safe when several front ends share
+  one core. `scripts/test/check-config-ownership.sh` enforces the rule by
+  rejecting `save_config()` / `config_save_to_xml()` anywhere under the front-end
+  directories (`ui/`, `app/`, `main/`).
 
 Signal `ConfigChanged(s patch)` carries the patch that was applied; `{}` means
 "everything may have changed" (used by `Reset`).

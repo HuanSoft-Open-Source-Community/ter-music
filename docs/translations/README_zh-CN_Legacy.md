@@ -962,14 +962,15 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 
 ### 二 架构门禁
 
-二脚本守此分界，皆已入于CI：
+三脚本守此分界，皆已入于CI：
 
 | 门禁 | 符令 | 律 |
 | --- | --- | --- |
 | 后端之纯 | `scripts/test/check-core-purity.sh` | 后端之目（`audio config core info lyrics media queue` 与 `cli/daemon.c`）不得有远方乐源之符号，亦不得引内容／界面（playlist、library、search、界面渲染、前端之首文） |
 | 前端之纯 | `scripts/test/check-ui-purity.sh` | 界面之达播弄之面，**惟**经 `player` 门面——不得直连引擎播弄之全局或播弄之令 |
+| 配置之属 | `scripts/test/check-config-ownership.sh` | `config.xml` 为核所独有。前端**不得**用 `save_config()`／`config_save_to_xml()`：惟改己之配置镜像，以差异付之门面 `player_config_persist()`（远方之制即 `Config.Set`） |
 
-与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`。
+与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
 
 ### 三 模块地图
 
