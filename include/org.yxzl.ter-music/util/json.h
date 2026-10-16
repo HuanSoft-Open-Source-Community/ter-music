@@ -8,6 +8,10 @@
  * 所有函数采用 “追加 + 返回新偏移” 的风格：调用方维护 pos，
  * 缓冲区不足时安全截断并始终保证 NUL 结尾。
  *
+ * 截断是静默的，因此渲染结束后必须用 json_writer_overflowed() 判定这一轮
+ * 有没有丢内容：丢了的载荷不能发给前端（半截 JSON 比报错更难排查），
+ * 调用方据此回 Error.TooLarge。
+ *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
@@ -53,6 +57,13 @@ size_t json_append_key(char *out, size_t out_size, size_t pos,
 size_t json_append_line_object(char *out, size_t out_size, size_t pos,
                                int index, int timestamp_valid,
                                double timestamp, const char *text);
+
+/* 判定一轮渲染是否撞到缓冲区上界（追加器满时静默丢弃后续内容）。
+ * 用法：渲染前把 pos 置 0，渲染结束后拿返回的 pos 与同一个 out_size 询问。
+ * pos 走到 out_size-1（最后一个可写格）即视为可能截断：宁可误报 TooLarge，
+ * 也绝不把半截 JSON 发给调用方。
+ * @return 1 = 可能已截断，0 = 完整写入 */
+int json_writer_overflowed(size_t out_size, size_t pos);
 
 /* ============================================================
  * 有界 JSON 读取器

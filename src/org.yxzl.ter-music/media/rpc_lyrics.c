@@ -211,7 +211,11 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
     }
 
     if (strcmp(member, "GetLyrics") == 0) {
-        const char *json = rpc_lyrics_sync();
+        /* 只读：返回媒体循环上一次同步好的快照。
+         * 这里绝不能再调 rpc_lyrics_sync()——它是“推进修订号 + 广播
+         * LyricsChanged”的同步入口，被一次 getter 触发会让客户端各自把歌词
+         * 向前推一格并产生多余的总线流量。 */
+        const char *json = g_lyrics_api.last_json;
         DBusMessage *reply = dbus_message_new_method_return(message);
         if (!reply) {
             return NULL;
