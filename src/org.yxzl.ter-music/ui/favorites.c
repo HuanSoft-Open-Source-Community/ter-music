@@ -162,8 +162,15 @@ void handle_favorites_input(int ch)
                     Track *t = &g_favorites.tracks[g_content_selected_idx];
                     int found = playlist_find_track_index_by_path(t->path);
 
+                    /* 直播不在当前列表的曲目（Task 5.2）：追加到前端内容列表尾部，
+                     * 再经 ui_play_track_index 反查队列位置播放（其内部会在需要时
+                     * 整表重推给核心）；复用既有内容→队列桥，不新增核心方法。 */
+                    if (found < 0 && append_playlist(t->path) > 0) {
+                        found = playlist_find_track_index_by_path(t->path);
+                    }
+
                     if (found >= 0) {
-                        player_play(found);
+                        ui_play_track_index(found);
                         exit_current_view();
                     } else {
                         show_status_message(i18n_get("playlist_mgr.track_not_in_queue"));

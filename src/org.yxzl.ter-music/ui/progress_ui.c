@@ -12,8 +12,6 @@
 #include "player/player.h"
 #include "ui/ui.h"
 #include "ui/menu_internal.h"
-#include "audio/audio.h"
-#include "audio/progress/progress.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
 #include "ui/lyrics.h"
@@ -55,14 +53,9 @@ void update_progress_bar(void)
         return;
     }
 
-    if (player_play_state() == PLAY_STATE_PLAYING && progress_tracker_is_ready()) {
-        int tracked_position = progress_tracker_get_position_seconds();
-        if (tracked_position < 0) tracked_position = 0;
-        if (player_duration_seconds() > 0 && tracked_position > player_duration_seconds())
-            tracked_position = player_duration_seconds();
-        /* 位置由播放线程/门面维护：界面只读取（本地后端的外推也一样） */
-        (void)tracked_position;
-    }
+    /* 位置/时长一律经 player 门面读取（见下方 current_pos 取值）：
+     * 界面不再直读引擎进度跟踪器（progress_tracker_*）——旧代码取回
+     * tracked_position 后未参与渲染即被丢弃，属纯死耦合，删除后显示行为不变。 */
 
     /* 弹出菜单时仅保留逻辑计算，暂停进度条 UI 渲染 */
     if (g_popup.active) return;

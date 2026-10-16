@@ -70,6 +70,10 @@ void check_konami_input(int ch);
 void toggle_rainbow_mode(void);
 void update_rainbow_colors(void);
 
+/* 统一的内容下标播放入口：内容下标→路径→队列位（失配先重推队列再播）。
+ * 各界面播放入口都应经它下发，避免把内容下标当队列位置盲发 PlayAt。 */
+void ui_play_track_index(int track_index);
+
 /* ── Internal UI sub-module functions (used across split modules) ── */
 void format_display_text(char *dest, size_t dest_size, const char *src, int width, int pad);
 void sanitize_ascii_text(char *dest, size_t dest_size, const char *src);

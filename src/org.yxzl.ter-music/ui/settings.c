@@ -56,11 +56,6 @@ static WINDOW *g_sel_win = NULL; /* popup sub-window */
 static int g_sel_multiselect = 0; /* 1 = 多选模式（信息显示字段） */
 static int g_sel_work_mask = 0;   /* 多选模式下的工作掩码 */
 
-/* Speed globals from audio.c (used by selection menu) */
-extern float g_speed_ratios[];
-extern int   g_speed_index;
-extern int   g_speed_count;
-
 /* ============================================================
  * Settings option arrays
  * ============================================================ */
@@ -91,7 +86,6 @@ static const char *settings_options[] = {
     "settings.opt.audio_backend",
     "settings.opt.sort_mode",
     "settings.opt.advanced_modes",
-    "settings.opt.play_mode",
     "settings.opt.seamless_preload",
     "settings.opt.cue_encoding",
     "settings.opt.enable_eq",
@@ -106,6 +100,7 @@ static const char *settings_options[] = {
     "settings.opt.eq_4khz",
     "settings.opt.eq_8khz",
     "settings.opt.eq_16khz",
+    "settings.opt.eq_preset",
     "settings.opt.info_preset",
     "settings.opt.info_fields",
     "settings.opt.info_cover",
@@ -113,7 +108,9 @@ static const char *settings_options[] = {
     "settings.opt.info_cover_charset",
     "settings.opt.info_progress",
     "settings.opt.info_progress_style",
-    "settings.opt.info_lyrics"
+    "settings.opt.info_lyrics",
+    "settings.opt.reload_config",
+    "settings.opt.reset_config"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -141,7 +138,6 @@ static const char *settings_options_ascii[] = {
     "Audio Backend",
     "Sort Mode",
     "Advanced Play Modes",
-    "Default Play Mode",
     "Seamless Preload",
     "CUE Encoding",
     "Enable Equalizer",
@@ -156,6 +152,7 @@ static const char *settings_options_ascii[] = {
     "4 kHz",
     "8 kHz",
     "16 kHz",
+    "EQ Preset",
     "Info Display Preset",
     "Basic Info Fields",
     "Show Text Cover",
@@ -163,9 +160,12 @@ static const char *settings_options_ascii[] = {
     "Cover Charset",
     "Show Progress",
     "Progress Style",
-    "Lyric Lines"
+    "Lyric Lines",
+    "Reload Config",
+    "Restore Defaults"
 };
-#define SETTINGS_OPTION_COUNT 48
+/* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5）。 */
+#define SETTINGS_OPTION_COUNT 50
 
 enum {
     SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
@@ -193,31 +193,35 @@ enum {
     SETTINGS_IDX_AUDIO_BACKEND       = 22,
     SETTINGS_IDX_SORT_MODE           = 23,
     SETTINGS_IDX_ADVANCED_PLAY_MODES = 24,
-    SETTINGS_IDX_DEFAULT_PLAY_MODE2  = 25,
-    SETTINGS_IDX_SEAMLESS_PRELOAD    = 26,
-    SETTINGS_IDX_CUE_ENCODING        = 27,
-    SETTINGS_IDX_EQ_ENABLED          = 28,
-    SETTINGS_IDX_EQ_PREAMP           = 29,
-    SETTINGS_IDX_EQ_BAND_0           = 30,  /* 31 Hz */
-    SETTINGS_IDX_EQ_BAND_1           = 31,  /* 62 Hz */
-    SETTINGS_IDX_EQ_BAND_2           = 32,  /* 125 Hz */
-    SETTINGS_IDX_EQ_BAND_3           = 33,  /* 250 Hz */
-    SETTINGS_IDX_EQ_BAND_4           = 34,  /* 500 Hz */
-    SETTINGS_IDX_EQ_BAND_5           = 35,  /* 1 kHz */
-    SETTINGS_IDX_EQ_BAND_6           = 36,  /* 2 kHz */
-    SETTINGS_IDX_EQ_BAND_7           = 37,  /* 4 kHz */
-    SETTINGS_IDX_EQ_BAND_8           = 38,  /* 8 kHz */
-    SETTINGS_IDX_EQ_BAND_9           = 39,  /* 16 kHz */
-    SETTINGS_IDX_EQ_PRESET           = 40,
+    /* 原先这里有一个 DEFAULT_PLAY_MODE2=25 的死项（重复 play_mode，不进任何
+     * section、无处理器），Task 5.4 去重后其后的下标整体前移一格。 */
+    SETTINGS_IDX_SEAMLESS_PRELOAD    = 25,
+    SETTINGS_IDX_CUE_ENCODING        = 26,
+    SETTINGS_IDX_EQ_ENABLED          = 27,
+    SETTINGS_IDX_EQ_PREAMP           = 28,
+    SETTINGS_IDX_EQ_BAND_0           = 29,  /* 31 Hz */
+    SETTINGS_IDX_EQ_BAND_1           = 30,  /* 62 Hz */
+    SETTINGS_IDX_EQ_BAND_2           = 31,  /* 125 Hz */
+    SETTINGS_IDX_EQ_BAND_3           = 32,  /* 250 Hz */
+    SETTINGS_IDX_EQ_BAND_4           = 33,  /* 500 Hz */
+    SETTINGS_IDX_EQ_BAND_5           = 34,  /* 1 kHz */
+    SETTINGS_IDX_EQ_BAND_6           = 35,  /* 2 kHz */
+    SETTINGS_IDX_EQ_BAND_7           = 36,  /* 4 kHz */
+    SETTINGS_IDX_EQ_BAND_8           = 37,  /* 8 kHz */
+    SETTINGS_IDX_EQ_BAND_9           = 38,  /* 16 kHz */
+    SETTINGS_IDX_EQ_PRESET           = 39,
     /* ── 信息显示（CLI `ter-music show` / D-Bus，见 info/info.h） ── */
-    SETTINGS_IDX_INFO_PRESET         = 41,
-    SETTINGS_IDX_INFO_FIELDS         = 42,
-    SETTINGS_IDX_INFO_COVER          = 43,
-    SETTINGS_IDX_INFO_COVER_SIZE     = 44,
-    SETTINGS_IDX_INFO_COVER_CHARSET  = 45,
-    SETTINGS_IDX_INFO_PROGRESS       = 46,
-    SETTINGS_IDX_INFO_PROGRESS_STYLE = 47,
-    SETTINGS_IDX_INFO_LYRICS         = 48
+    SETTINGS_IDX_INFO_PRESET         = 40,
+    SETTINGS_IDX_INFO_FIELDS         = 41,
+    SETTINGS_IDX_INFO_COVER          = 42,
+    SETTINGS_IDX_INFO_COVER_SIZE     = 43,
+    SETTINGS_IDX_INFO_COVER_CHARSET  = 44,
+    SETTINGS_IDX_INFO_PROGRESS       = 45,
+    SETTINGS_IDX_INFO_PROGRESS_STYLE = 46,
+    SETTINGS_IDX_INFO_LYRICS         = 47,
+    /* ── 配置管理（Task 5.5：重新加载 / 恢复默认，动作项） ── */
+    SETTINGS_IDX_RELOAD_CONFIG       = 48,
+    SETTINGS_IDX_RESET_CONFIG        = 49
 };
 
 typedef struct {
@@ -241,7 +245,11 @@ static const int settings_theme_option_indices[] = {
 };
 
 static const int settings_path_option_indices[] = {
-    SETTINGS_IDX_DEFAULT_PATH
+    SETTINGS_IDX_DEFAULT_PATH,
+    /* 配置管理动作项归入"默认路径"分区（无独立 general 分区，且受限于 util.c
+     * 侧栏项不可增删）：与配置文件操作同组，Task 5.5。 */
+    SETTINGS_IDX_RELOAD_CONFIG,
+    SETTINGS_IDX_RESET_CONFIG
 };
 
 static const int settings_playback_option_indices[] = {
@@ -1484,9 +1492,13 @@ static void create_sel_window(void)
                 if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_LATENCY:{
+                /* 输出延迟弹窗：按 "%d ms" 表渲染（Task 5.3，独立完整的 case）。 */
                 int lat[]={20,40,60,80,100,120,150,200,250};
-                if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
+                if (i < 9) snprintf(opts[i], 48, "%d ms", lat[i]);
+                break;
+            }
             case SETTINGS_IDX_EQ_PRESET:{
+                /* EQ 预设弹窗：显示 i18n 预设名（Task 5.3，与延迟 case 彼此独立）。 */
                 const char *preset_keys[] = {
                     "eq.preset.rock", "eq.preset.pop", "eq.preset.classical",
                     "eq.preset.jazz", "eq.preset.electronic", "eq.preset.vocal",
@@ -1505,7 +1517,6 @@ static void create_sel_window(void)
             case SETTINGS_IDX_INFO_LYRICS:
                 info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
                 break;
-            }
             default:
                 if (src >= 0 && src < 12) {
                     int cv[] = {g_app_config.theme.playlist_fg,g_app_config.theme.playlist_bg,
@@ -1629,8 +1640,14 @@ static void draw_sel_menu(void)
                 if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
             }
             case SETTINGS_IDX_LATENCY:{
+                /* 输出延迟弹窗：按 "%d ms" 表渲染（Task 5.3，独立完整的 case，
+                 * 修复原先直落 EQ 预设、毫秒行不可达的结构错乱）。 */
                 int lat[]={20,40,60,80,100,120,150,200,250};
+                if (i < 9) snprintf(opts[i], 48, "%d ms", lat[i]);
+                break;
+            }
             case SETTINGS_IDX_EQ_PRESET:{
+                /* EQ 预设弹窗：显示 i18n 预设名（Task 5.3，与延迟 case 彼此独立）。 */
                 const char *preset_keys[] = {
                     "eq.preset.rock", "eq.preset.pop", "eq.preset.classical",
                     "eq.preset.jazz", "eq.preset.electronic", "eq.preset.vocal",
@@ -1649,8 +1666,6 @@ static void draw_sel_menu(void)
             case SETTINGS_IDX_INFO_LYRICS:
                 info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
                 break;
-                if (i<9) snprintf(opts[i],48,"%d ms",lat[i]); break;
-            }
             default:
                 if (src >= 0 && src < 12) {
                     int cv[] = {g_app_config.theme.playlist_fg,g_app_config.theme.playlist_bg,
@@ -1862,6 +1877,22 @@ static void activate_settings_current_option(void)
 {
     if (g_settings_current_option == SETTINGS_IDX_DEFAULT_PATH) {
         edit_default_startup_path();
+        return;
+    }
+
+    /* 配置管理动作项（Task 5.5）：重新加载 / 恢复默认，均经门面下发。
+     * 生效后由配置修订号变化驱动重刷配色与内容（sync_player_revisions），
+     * 状态提示复用既有 status 机制。 */
+    if (g_settings_current_option == SETTINGS_IDX_RELOAD_CONFIG) {
+        if (player_config_reload() == 0) {
+            show_status_message(i18n_get("menu.config_reloaded"));
+        }
+        return;
+    }
+    if (g_settings_current_option == SETTINGS_IDX_RESET_CONFIG) {
+        if (player_config_reset() == 0) {
+            show_status_message(i18n_get("menu.config_reset"));
+        }
         return;
     }
 

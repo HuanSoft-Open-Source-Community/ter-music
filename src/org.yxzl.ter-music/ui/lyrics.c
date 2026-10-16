@@ -515,38 +515,6 @@ static void render_lyric_line(int row, const char *text, int is_highlighted, int
     }
 }
 
-/* ── Embedded lyrics extraction ── */
-
-/**
- * @brief Extract lyrics embedded in audio file metadata.
- *
- * Searches FFmpeg AVDictionary first, then APE tags.
- * FFmpeg maps:
- *   - MP3 ID3v2 USLT    → key "lyrics"
- *   - FLAC Vorbis Comment → key "LYRICS" / "lyrics"
- *   - M4A/MP4 iTunes     → key "\xa9lyr" / "lyrics"
- * APE tag:
- *   - APE/WV/MP3 etc     → key "LYRICS"
- *
- * @param audio_path  Path to the audio file.
- * @return 0 on success (lyrics found), -1 on failure.
- */
-void update_lyrics_display(void) {
-    if (g_current_view != VIEW_MAIN) {
-        return;
-    }
-
-    /* 纯文本歌词（无时间戳）没有“推进”，但需要一次首帧渲染 */
-    int has_timestamps = 0;
-    int has_lyrics = lyrics_highlight(NULL, NULL, &has_timestamps, NULL);
-    if (!has_lyrics) {
-        return;
-    }
-    if (!has_timestamps) {
-        render_lyrics();
-    }
-}
-
 static void sanitize_ascii_lyric(char *dest, size_t dest_size, const char *src) {
     if (!dest || dest_size == 0) {
         return;

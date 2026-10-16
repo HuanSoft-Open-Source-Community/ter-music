@@ -20,7 +20,6 @@ void render_menu_sidebar(int selected_idx, const char **items, int item_count);
 void handle_menu_input(int ch);
 void switch_to_view(ViewMode view);
 void exit_current_view(void);
-void toggle_ui_language(void);
 
 void render_settings_content(void);
 void render_history_content(void);

@@ -227,9 +227,18 @@ int app_resume_saved_playback(void)
         return 0;
     }
 
+    /* 后端分流（Task 4.1）：远程前端绝不在本进程起播放线程/占音频设备，
+     * 也不预设引擎跳转位置。这里只把选中项落到界面，真正的"恢复播放 + 跳转
+     * 到上次进度"延后到连接建立、队列下发完成后由 main 经门面执行。
+     * 返回 1 表示"应当恢复"，调用侧据此在 remote 分支安排延后下发。 */
+    if (player_backend() == PLAYER_BACKEND_REMOTE) {
+        app_set_selection_for_track(track_index);
+        return 1;
+    }
+
     audio_set_initial_seek_position(g_app_config.last_played_position);
     app_set_selection_for_track(track_index);
-    play_audio(track_index);
+    play_audio(track_index); /* ui-purity-allow: remote 已在上方早退，此行仅 local=TUI 即核心执行 */
     return 1;
 }
 
@@ -312,8 +321,13 @@ int app_restore_session(int honor_autoplay,
         if (!resumed && g_app_config.auto_play_on_start && playlist_count() > 0) {
             int idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
             if (idx >= 0 && idx < playlist_count()) {
-                play_audio(idx);
                 app_set_selection_for_track(idx);
+                /* 后端分流（Task 4.1）：远程前端不直调 play_audio，自动播放的
+                 * 实际下发由调用方在连接+队列就绪后经门面完成（本函数当前无调用者，
+                 * 保留仅为与 app_resume_saved_playback 一致，不在前端起播放线程）。 */
+                if (player_backend() == PLAYER_BACKEND_LOCAL) {
+                    play_audio(idx); /* ui-purity-allow: local 分支=TUI 即核心自动起播（remote 被 guard 挡在外） */
+                }
             }
         }
     }

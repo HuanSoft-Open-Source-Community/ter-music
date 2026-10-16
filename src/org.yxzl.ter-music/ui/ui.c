@@ -34,7 +34,6 @@
 #include "ui/scrollbar.h"
 #include "remote/remote.h"
 #include "logger/logger.h"
-#include "audio/progress/progress.h"
 #include "audio/play_queue.h"
 #include "ui/menu_internal.h"
 #include "ui/remote_view.h"
@@ -274,8 +273,9 @@ void init_ncurses(void)
 /* 把门面的修订号变化翻译成界面脏标记：事件循环里没有任何回调风暴，
  * 远程后端的异步到达也走同一条路径。 */
 /* 按**内容下标**播放：前端把下标翻译成队列位置后经门面下发。
- * 队列内容由内容列表装配，因此内容下标与队列位置一一对应。 */
-static void play_track_index(int track_index)
+ * 队列过期（列表编辑过、尚未重推）时先整表重推再定位，保证远程模式播对曲目。
+ * 导出的播放入口统一走这里，避免各界面入口把内容下标当队列位置盲下发。 */
+void ui_play_track_index(int track_index)
 {
     if (track_index < 0) {
         return;
@@ -320,7 +320,9 @@ static void lyric_cursor_step(int delta)
 
     g_lyric_cursor_index = target;
     render_lyrics();
-    if (player_play_state() != PLAY_STATE_STOPPED && progress_tracker_is_ready()) {
+    /* 只依赖门面的播放状态，不再查本地进度追踪器：remote 下 progress_tracker
+     * 恒不就绪会让 Ctrl+L 回车跳转永久失效。核心 seek 自带钳制（越界夹到时长）。 */
+    if (player_play_state() != PLAY_STATE_STOPPED) {
         player_seek_seconds((int)line.timestamp);
     }
 }
@@ -374,6 +376,31 @@ static void sync_player_revisions(void)
     if (now_config != config) {
         apply_color_theme();
         request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    }
+
+    /* 按曲播放历史（Task 5.1）：本地与远程都在这一处统一检测核心快照的"当前曲目"
+     * 变化——换曲才写一条，连续重复播同一首由 add_history_entry 内部去重。
+     * 历史是前端自有内容，写入发生在前端进程（local 时前端即核心，remote 时是客户端），
+     * 因此不依赖任何后端直调。元数据取自门面快照（InfoTrack 已带 path/title/artist）。 */
+    static char last_hist_track_id[96] = "";
+    static int last_hist_valid = 0;
+    const InfoTrack *hist_track = player_track();
+    if (hist_track && hist_track->valid &&
+        (!last_hist_valid || strcmp(hist_track->track_id, last_hist_track_id) != 0)) {
+        Track t;
+        memset(&t, 0, sizeof(t));
+        snprintf(t.path, sizeof(t.path), "%s", hist_track->path);
+        snprintf(t.title, sizeof(t.title), "%s", hist_track->title);
+        snprintf(t.artist, sizeof(t.artist), "%s", hist_track->artist);
+        snprintf(t.album, sizeof(t.album), "%s", hist_track->album);
+        if (t.path[0]) {
+            add_history_entry(&t);
+        }
+        snprintf(last_hist_track_id, sizeof(last_hist_track_id), "%s", hist_track->track_id);
+        last_hist_valid = 1;
+    } else if (!hist_track || !hist_track->valid) {
+        last_hist_valid = 0;
+        last_hist_track_id[0] = '\0';
     }
 
     state = now_state;
@@ -462,6 +489,18 @@ void run_event_loop(void)
                 uint64_t now = get_ui_time_ms();
                 if (now - esc_pending_time > ESC_TIMEOUT_MS) esc_pending = 0;
             }
+            continue;
+        }
+
+        /* M 曲库浏览器激活时，按键优先交给 handle_library_input（方向键/
+         * Enter/空格/s/S/r/R/a/A/ESC 等全部语义见 browser.c 各视图处理器）。
+         * 保留给主循环的键：'M' 走下方统一 toggle 退出浏览器；q/Q 全局退出；
+         * KEY_RESIZE/KEY_MOUSE 走既有终端与鼠标路径。ESC 必须在这里直达
+         * 浏览器（返回上层/退出），不能再进 esc_pending 功能键链。 */
+        if (g_library_state.active && g_current_view == VIEW_MAIN &&
+            ch != 'M' && ch != 'q' && ch != 'Q' &&
+            ch != KEY_RESIZE && ch != KEY_MOUSE) {
+            handle_library_input(ch);
             continue;
         }
 
@@ -721,7 +760,7 @@ void run_event_loop(void)
                     }
                     if (g_search_state.active && g_search_state.result_count > 0) {
                         int original_index = g_search_state.result_indices[g_search_state.selected_index];
-                        play_track_index(original_index);
+                        ui_play_track_index(original_index);
                         g_search_state.active = 0;
                         g_selected_index = g_sort_state.active ? 0 : original_index;
                         render_playlist_content();
@@ -750,12 +789,12 @@ void run_event_loop(void)
                             /* File node: get real track index */
                             int real_idx = get_visible_node_track_index(g_selected_index);
                             if (real_idx >= 0)
-                                play_track_index(real_idx);
+                                ui_play_track_index(real_idx);
                             break;
                         }
                         int play_idx = g_selected_index;
                         if (g_sort_state.active) play_idx = g_sort_state.sorted_indices[g_selected_index];
-                        play_track_index(play_idx);
+                        ui_play_track_index(play_idx);
                     }
                     break;
                 case 'O': case 'o': prompt_open_folder(); render_playlist_content(); break;
@@ -1115,8 +1154,14 @@ void run_event_loop(void)
                     if (c == KEY_UP && sel > 0) sel--;
                     if (c == KEY_DOWN && sel < g_play_history.count - 1) sel++;
                     if (c == 10 || c == ' ') {
-                        int found = playlist_find_track_index_by_path(g_play_history.entries[sel].path);
-                        if (found >= 0) { play_track_index(found); g_selected_index = found; }
+                        const char *hpath = g_play_history.entries[sel].path;
+                        int found = playlist_find_track_index_by_path(hpath);
+                        /* 历史里的曲目可能不在当前列表：追加到内容列表尾部后播放
+                         * （Task 5.2，与收藏/歌单同一复用路径）。 */
+                        if (found < 0 && append_playlist(hpath) > 0) {
+                            found = playlist_find_track_index_by_path(hpath);
+                        }
+                        if (found >= 0) { ui_play_track_index(found); g_selected_index = found; }
                         break;
                     }
                 }
@@ -1149,9 +1194,16 @@ void cleanup(void)
     }
 
 
-    persist_playback_session_state();
-    player_stop();
-    wait_for_playback_thread_shutdown();
+    /* 退出语义按后端分流（Task 4.3）：
+     *   - local：本进程即核心，持久化会话、停止本地播放、等播放线程收尾；
+     *   - remote：前端不得 Control.Stop 核心、不得等待（本进程没有）播放线程、
+     *            更不得写会话恢复配置（持久化归核心）；Detach 已由 main 的
+     *            player_shutdown 完成，这里不再重复停止。 */
+    if (player_backend() == PLAYER_BACKEND_LOCAL) {
+        persist_playback_session_state(); /* config-ownership-allow: local(TUI-即-核心)分支才会执行到这里的会话持久化；remote 前端被上方 guard 挡离，持久化归核心 */
+        player_stop();
+        wait_for_playback_thread_shutdown();
+    }
     media_session_shutdown();
     library_shutdown();
 
