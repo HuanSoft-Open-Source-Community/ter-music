@@ -341,7 +341,7 @@ ter-music --help
 
 #### 二之一 CLI 模式
 
-凡首参为下列诸目之一者，皆入CLI模式。CLI之令皆薄客也，凭D-Bus而与当下主 `org.mpris.MediaPlayer2.ter_music` 之**播弄核心**（或由 `daemon start` 所启，或经 D-Bus 按需唤起，或由文墨之界拉起）相语，故任于何端闱、脚本、轩窗营理之捷键皆可行之。其中 `play` 兼为前端：于自进程之中扫描其径，而以所成之队列付于核心。
+凡首参为下列诸目之一者，皆入CLI模式。CLI之令皆薄客也，凭D-Bus而与当下主 `org.mpris.MediaPlayer2.ter_music` 之**播弄核心**（或由 `daemon start` 所启，或由文墨之界拉起；惟 Linyaps 封缄之包得以 D-Bus 按需唤起，他般封缄不随包予唤起之文）相语，故任于何端闱、脚本、轩窗营理之捷键皆可行之。其中 `play` 兼为前端：于自进程之中扫描其径，而以所成之队列付于核心。
 
 | 令目 | 所司之事 |
 | --- | --- |
@@ -951,7 +951,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 
 | 面 | 进程 | 所掌之事 |
 | --- | --- | --- |
-| **核心／播弄之役** | `ter-music daemon foreground`（由 `daemon start`、D-Bus 按需唤起或 systemd 用户役使拉起） | 音声之器与解绎、奉行播弄之队列（**惟识径**）、传输之令、音量／迅疾／播弄之制、均衡器、当下曲目之文（歌辞、文书封面、频谱）、所布之 `Lyrics`／`Info`／`Control`／`Queue`／`Config` 接口、前端之登记与心跳、节度之文 |
+| **核心／播弄之役** | `ter-music daemon foreground`（由 `daemon start` 或文墨之界拉起；Linyaps 封缄之包另可经 D-Bus 按需唤起、或以其 systemd 用户役使常驻，deb／RPM 皆不随包予此二类文件） | 音声之器与解绎、奉行播弄之队列（**惟识径**）、传输之令、音量／迅疾／播弄之制、均衡器、当下曲目之文（歌辞、文书封面、频谱）、所布之 `Lyrics`／`Info`／`Control`／`Queue`／`Config` 接口、前端之登记与心跳、节度之文 |
 | **前端／内容之客** | `ter-music`（文墨之界）、`ter-music play\|show\|…`（符令行） | 目录之扫描与元数据、SQLite曲库与FTS5搜求、自定曲帙、珍存／往迹／目录往迹、排序／筛择、远方之源与其下载之藏、ncurses文墨之界 |
 
 其接缝刻意至薄，亦便于验：

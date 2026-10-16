@@ -3,8 +3,8 @@
 ## Overview
 
 Ter-Music publishes one object path with several interfaces, so any D-Bus
-client can read playback data, drive the player, browse and edit the queue and
-library, and change the configuration:
+client can read playback data, drive the player, browse and edit the play queue,
+and change the configuration:
 
 | Interface | Purpose |
 | --------- | ------- |
@@ -27,9 +27,11 @@ integration.
 | Object path | `/org/mpris/MediaPlayer2` |
 | Fallback bus name | `org.mpris.MediaPlayer2.ter_music.instance<pid>` (secondary instances only) |
 
-The interfaces exist while the process owns the primary bus name, which is the
-case for both the TUI and the background daemon. CLI commands are thin clients
-of exactly these interfaces.
+The interfaces exist while a process owns the primary bus name, and that process
+is the **core**: a `daemon` instance, a `play --foreground` process, or a TUI
+started with `--frontend=local`. The default TUI is a front end only — it does
+not claim the name; it starts such a core (or attaches to a running one) and
+talks to it. CLI subcommands are thin clients of exactly these interfaces.
 
 ## Conventions
 
@@ -40,10 +42,13 @@ of exactly these interfaces.
   (`core.payload_max`). A method that would exceed it fails with
   `org.yxzl.ter_music.Error.TooLarge` instead of truncating.
 - **Paging.** Methods that can return many rows take `offset` and `count`.
-  `count` defaults to 200 (`core.page_default`) and may not exceed 1000
-  (`core.page_max`); asking for more returns
-  `org.yxzl.ter_music.Error.InvalidArgs`. An `offset` at or past the end
-  returns an empty page, not an error.
+  `count` of `0` means "default page" (200 rows, `core.page_default`); the
+  largest page is 1000 rows (`core.page_max`). Asking for more — or passing a
+  negative `count` — returns `org.yxzl.ter_music.Error.InvalidArgs` instead of
+  silently truncating. A negative `offset` is clamped to `0`, and an `offset` at
+  or past the end returns an empty page, not an error. If the rendered page
+  still does not fit the payload cap, the call fails with `Error.TooLarge`
+  rather than returning half a JSON document.
 - **Errors.**
 
   | Name | Meaning |
@@ -51,9 +56,9 @@ of exactly these interfaces.
   | `org.yxzl.ter_music.Error.InvalidArgs` | Malformed argument, unknown key or enum value, page limit exceeded |
   | `org.yxzl.ter_music.Error.OutOfRange` | Index or position outside the current data |
   | `org.yxzl.ter_music.Error.TooLarge` | Response would exceed the payload cap |
-  | `org.yxzl.ter_music.Error.Busy` | A background job is already running, or a table is full |
-  | `org.yxzl.ter_music.Error.Unsupported` | Known method, unsupported request (e.g. an unknown config key) |
-  | `org.yxzl.ter_music.Error.Failed` | The operation ran and failed (scan, network, database) |
+  | `org.yxzl.ter_music.Error.Busy` | A fixed-size table is full — today that means `Control.Attach` finding every front-end registration slot taken (the registry holds a fixed maximum; detach an unused front end first) |
+  | `org.yxzl.ter_music.Error.Unsupported` | Known method, unsupported request (e.g. an unknown config key or section in a `Config.Set` patch) |
+  | `org.yxzl.ter_music.Error.Failed` | The operation ran and failed inside the core (e.g. applying an MPRIS rate, rendering the configuration). The asynchronous `Control.Error` signal also defaults to this name |
 
   Protocol-level problems still use the standard
   `org.freedesktop.DBus.Error.*` names.
@@ -83,14 +88,36 @@ of exactly these interfaces.
 
   `core.methods` lists every method the running core implements, so a client
   can degrade gracefully instead of discovering gaps one call at a time.
+  `Control.Attach` echoes the same `api_version` back.
+
+  The list is the audited surface, not a free-form hint. Three checks keep the
+  four places that describe it in step:
+
+  * `scripts/test/dbus-rpc-check.sh` cross-checks `core.methods` against the
+    introspection XML **in both directions** — a declared method that is not
+    introspectable fails, and an introspectable `org.yxzl.ter_music.*` method
+    missing from the list fails too (the standard `org.freedesktop.DBus.*` and
+    `org.mpris.*` surfaces are exempt from the reverse check).
+  * The same script asserts the interface set itself: the five `Info`,
+    `Control`, `Lyrics`, `Queue`, `Config` interfaces must be published and the
+    removed content interfaces (`Playlist`, `Library`, `Favorites`, `History`,
+    `DirHistory`, `Remote`) must not appear.
+  * `scripts/test/doc_api_check.py` compares the method tables of this document
+    with `core.methods`, so neither can drift ahead of the other.
+
+  Adding, renaming or removing a method therefore means editing the handler,
+  the interface's introspection fragment, `k_rpc_methods` in
+  `media/rpc_common.c` and this document together.
 - **Local paths only.** Every path in a queue payload must be a local path or a
   `file://` URI; anything with another scheme is rejected with
   `org.yxzl.ter_music.Error.InvalidArgs`. Remote sources (SMB/SFTP/FTP/WebDAV/
   HTTP) belong to the front end: it lists and downloads them itself, then hands
   the resulting local file paths to the core through `Queue.Set`.
-- **Blocking work.** The core performs no blocking IO of its own any more. Those methods
-  return immediately and report progress through their `Status` method plus a
-  change signal; the media loop itself never blocks.
+- **No background jobs.** The core runs no asynchronous jobs of its own any more
+  (the directory scan job went away with `api_version` 4 — scanning is the front
+  end's work). Every method answers inside the call that carries it, progress and
+  failures still surface through `Info.GetStatus` / `Control.StatusMessage` and
+  the change signals, and the media loop never blocks on a client call.
 
 ## org.yxzl.ter_music.Info
 
@@ -114,7 +141,7 @@ of exactly these interfaces.
 | ------ | --------- | ----------- |
 | `InfoChanged` | `(s json)` | Anything except the playback position changed (track, state, mode, volume, speed, cover availability). Payload equals `GetInfo` |
 | `ProgressChanged` | `(x position_us, x duration_us, s status)` | At most once per second while playing, and immediately on state changes |
-| `CoverChanged` | `(s text, s charset, i cols, i rows)` | Text cover changed (track, size or charset) |
+| `CoverChanged` | `(s text, s charset, i cols, i rows)` | The cover changed (new track, size or charset). `text` is deliberately **empty** on a track change: the core no longer renders character art inside the media tick, it generates it lazily and caches it per (cover, cols, rows, charset). Callers that want to draw fetch `GetCoverArt(charset, cols, rows)`; `charset`/`cols`/`rows` in the signal are the configured values to ask for |
 | `VisualizerFrame` | `(u revision, ay levels, ay peaks)` | At most every 50 ms and only while new audio samples arrive; a paused or idle core sends nothing |
 
 ### `GetDisplay` options
@@ -190,8 +217,11 @@ Field notes:
   even a track downloaded from a remote source appears under its cached local
   path. `track.number` is 1-based;
   `queue_position` is `null` when the track is not in the queue.
-- `cover.text` holds newline-separated lines ready to print; `half` uses
-  `▀`/`▄`/`█`, `ascii` uses `#`, `braille` uses braille patterns.
+- `cover.text` holds newline-separated lines ready to print (`half` uses
+  `▀`/`▄`/`█`, `ascii` uses `#`, `braille` uses braille patterns). It is `null`
+  when the configured `info_show_cover` is off or the track has no cover. The
+  text comes from the same lazily generated, per-size cache `GetCoverArt` uses,
+  so asking for two different sizes never re-decodes the image twice per size.
 - `lyrics.current`/`lyrics.next` are computed from the playback position, so
   they stay correct even while the TUI shows another view.
 - `revision` increases when the non-position part of the snapshot changes; use
@@ -243,6 +273,13 @@ heartbeat for 6 s is dropped, so `FrontendInfo` always reflects who is
 actually watching. A token identifies a registration, it does not
 authenticate: the session bus is a same-user trust domain.
 
+The registry also drives the core's optional watchdog: with
+`core_exit_when_no_frontend` set in `config.xml`, a primary core that once had a
+front end quits 10 s after the last registration disappears (a reconnect within
+that grace window resets the clock). A core that never had any front end, and a
+secondary instance, never self-terminate — and with the setting off, which is
+the default, leaving the TUI keeps the music playing.
+
 ## org.yxzl.ter_music.Queue
 
 The queue is a list of **local file paths** executed by the core. The front end
@@ -252,10 +289,10 @@ queue positions are the only cursor it knows.
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
-| `Get` | `(i offset, i count) -> s` | `{"revision":n,"count":n,"current_position":n\|null,"offset":n,"rows":[{"position":n,"path":"…","title":"…","artist":"…","album":"…","is_cue":b}]}` |
+| `Get` | `(i offset, i count) -> s` | One page of the queue: `{"revision":n,"count":n,"current_position":n\|null,"offset":n,"rows":[{"position":n,"path":"…","title":"…","artist":"…","album":"…","is_cue":b}]}`. `count` follows the paging contract (0 = 200, max 1000, more or negative → `Error.InvalidArgs`); a page that would not fit the payload cap fails with `Error.TooLarge` |
 | `Set` | `(s json) -> i` | Replace the whole queue; returns the number of entries written |
 | `Append` | `(s json) -> i` | Append entries; returns the number written |
-| `InsertAfter` | `(i position, s json) -> i` | Insert entries after a position; returns the number written |
+| `InsertAfter` | `(i position, s json) -> i` | Insert entries after a position; returns the number written. Called with only a payload, the position defaults to the currently playing entry |
 | `RemoveAt` | `(i position) -> b` | Remove one entry |
 | `MoveUp` / `MoveDown` | `(i position) -> b` | Reorder one entry |
 | `Clear` | `() -> b` | Empty the queue |
@@ -274,16 +311,35 @@ array:
 
 Rules:
 
-* A single call carries at most **500** entries (`BQ_SET_MAX`); a larger queue is
-  delivered as one `Set` plus as many `Append` calls as needed.
+* A single `Set`, `Append` or `InsertAfter` call carries at most **500** entries
+  (`BQ_SET_MAX`). A payload with more is rejected **as a whole** with
+  `org.yxzl.ter_music.Error.InvalidArgs` — nothing is stored and no partial
+  prefix is accepted — and the error text tells the caller to chunk it: one
+  `Queue.Set` with at most 500 entries, then `Queue.Append` for the rest. That
+  is exactly what the front end does (`playlist_queue_foreach_chunk()` walks the
+  content list in ≤500-entry blocks, first block `Set`, later blocks `Append`).
 * Array order **is** execution order. `Control.SetPlayMode` re-applies a play mode to
   the delivered queue (folder/album/artist and shuffle) while keeping the current entry.
 * `path` must be local: `smb://`, `ftp://`, `http(s)://` and friends are
   rejected with `Error.InvalidArgs`. The front end downloads remote content and
   passes the local cache path.
 * Metadata travels with each entry, so the core does not have to re-read tags.
+  `duration_seconds` is deliberately sent as `0`: the core reads the duration
+  from the file itself, so front end and core never disagree.
+* Positions are checked: `RemoveAt`, `MoveUp`, `MoveDown` and `PlayAt` outside
+  `0 … count-1` answer `org.yxzl.ter_music.Error.OutOfRange`.
 
 Signal `QueueChanged(u revision, i count, i current_position)` after every edit.
+The revision is `bq_revision()`, the same counter `Get` reports, so a client can
+drop a stale page just by comparing numbers. Internal core changes that do not go
+through these methods (the playback thread advancing, a shuffle rebuild) are
+picked up by comparing that revision each media tick, so the signal never falls
+behind.
+
+Every method in this section, `Queue.Get` included, is published in the object's
+introspection XML **and** listed in `core.methods`; `scripts/test/dbus-rpc-check.sh`
+diffs the two in both directions, so the read path cannot quietly disappear from
+one of them.
 
 ## org.yxzl.ter_music.Config
 
@@ -297,7 +353,7 @@ Signal `QueueChanged(u revision, i count, i current_position)` after every edit.
 `GetAll` mirrors `config.xml`, using the same section and key names:
 
 ```json
-{ "version": 6,
+{ "version": 7,
   "paths": { "default_startup_path": "…", "last_opened_path": "…" },
   "theme": { "playlist_fg": 7, "playlist_bg": -1, "…": 0 },
   "preferences": { "volume_percent": 100, "default_playback_speed": 1.00,
@@ -309,8 +365,15 @@ Notes:
 
 - Numeric values outside their range are clamped, not rejected
   (`volume_percent: 999` becomes `100`).
-- `Set` applying to play mode, speed or volume is visible immediately, because
-  the core re-applies runtime values after saving.
+- `GetAll`'s `version` is the configuration contract version
+  (`CONFIG_CURRENT_VERSION`, currently `7`); it is not the `version` attribute of
+  `config.xml`, which still reads `2.2`. Sending `version` back inside a patch is
+  accepted and ignored, so a front end can re-apply a full snapshot.
+- A `Set` that touches volume, play mode or speed is visible immediately: after
+  saving, the core re-applies those runtime fields straight from the in-memory
+  mirror (`core_config_apply_runtime()`), so `Control.GetVolume`,
+  `Info.GetInfo` and MPRIS all report the new value at once — a patch is never
+  only a file write.
 - Remote server entries and their passwords are **not** part of the core
   configuration. They belong to the front end, which keeps them in its own
   file; a patch containing `remote_connections` fails with
@@ -327,6 +390,55 @@ Notes:
 
 Signal `ConfigChanged(s patch)` carries the patch that was applied; `{}` means
 "everything may have changed" (used by `Reset`).
+
+## MPRIS surface
+
+`org.mpris.MediaPlayer2` and `org.mpris.MediaPlayer2.Player` are served from the
+same snapshot as the interfaces above, so a desktop widget and `ter-music show`
+never disagree. Property access (the standard
+`org.freedesktop.DBus.Properties.Get/GetAll/Set` trio):
+
+- PlaybackStatus — read only — `Playing` / `Paused` / `Stopped`.
+- LoopStatus — read/write — `None` / `Track` / `Playlist`.
+- Shuffle — read/write — boolean.
+- Rate — read/write — the real playback speed.
+- MinimumRate / MaximumRate — read only — `0.5` / `3.0`.
+- Volume — read/write — `0.0`–`1.0`, values outside are clamped.
+- Position, Metadata, Can* — read only — µs positions; `Metadata` carries
+  `mpris:artUrl` when the track has a cover.
+
+- **Rate is genuinely read/write.** `Get` and `GetAll` report the live speed (and
+  `GetAll` includes `Rate`, `MinimumRate` and `MaximumRate`, which an earlier
+  build dropped), `PropertiesChanged` fires when it changes, and `Set` applies it
+  to the running stream. A rate outside `MinimumRate…MaximumRate` answers
+  `org.yxzl.ter_music.Error.OutOfRange`; a rate the core cannot apply answers
+  `Error.Failed`. `Control.SetSpeed`/`GetSpeed` are the same thing on the
+  ter-music interface.
+- **LoopStatus and Shuffle switch whole play modes** rather than storing two
+  cosmetic flags, and they keep the current group (folder/album/artist) and the
+  current repeat level. Writing a value that the current mode already expresses
+  does nothing — no queue rebuild, no config write.
+
+  | Write | Resulting play mode |
+  | ----- | ----------------- |
+  | `LoopStatus = "Track"` | single repeat |
+  | `LoopStatus = "Playlist"` | repeating variant of the same group: sequential → list repeat, shuffle once → shuffle repeat, folder/album/artist sequential → the matching `*_repeat`, `*_shuffle` → `*_shuffle_repeat` |
+  | `LoopStatus = "None"` (or an unknown value) | non-repeating variant of the same group: list repeat → sequential, shuffle repeat → shuffle once, `*_repeat` → `*_sequential`, `*_shuffle_repeat` → `*_shuffle`; single repeat falls back to sequential |
+  | `Shuffle = true` | shuffling variant, repeat level kept: sequential → shuffle once, list/single repeat → shuffle repeat, `*_sequential` → `*_shuffle`, `*_repeat` → `*_shuffle_repeat` |
+  | `Shuffle = false` | ordered variant, repeat level kept: shuffle once → sequential, shuffle repeat → list repeat, `*_shuffle` → `*_sequential`, `*_shuffle_repeat` → `*_repeat` |
+
+  Reading is the projection of the same rule: `LoopStatus` is `Track` for single
+  repeat, `Playlist` for any repeating mode and `None` otherwise, and `Shuffle`
+  is true for the eight shuffling modes. `Info.GetInfo` exposes both as
+  `playback.loop_status` and `playback.shuffle`.
+- **`OpenUri` always answers `org.freedesktop.DBus.Error.NotSupported`.** Since
+  `api_version` 4 the core loads no content by itself: it neither scans a
+  directory nor builds a playlist, so a client must load the content and deliver
+  it through `Queue.Set` plus `Queue.PlayAt`. A non-local URI is rejected with its
+  own message ("remote sources belong to the front end").
+- On the root interface `Raise` is accepted as a no-op and `Quit` answers
+  `NotSupported`. To stop an instance use `org.yxzl.ter_music.Control.Quit` (or
+  `ter-music daemon stop`), which also persists the playback session.
 
 ## Removed in api_version 4: the content interfaces
 
@@ -407,7 +519,13 @@ scripts/test/rpc_client.py monitor 3                    # list signals seen
 - The API shares the MPRIS lifecycle: it exists while the process owns the bus
   name and is torn down on shutdown.
 - Inside a Linyaps (如意玲珑) package the container joins the host session bus,
-  so host applications see the same object path, interfaces and JSON schemas;
-  the package ships a D-Bus activation file for
-  `org.mpris.MediaPlayer2.ter_music` that starts the background player on
-  demand.
+  so host applications see the same object path, interfaces and JSON schemas.
+  The D-Bus activation file for `org.mpris.MediaPlayer2.ter_music` and the
+  systemd user unit are installed **only** by the Linyaps build, which configures
+  `cmake -DINSTALL_LINYAPS_INTEGRATION=ON` (the option is `OFF` by default, see
+  `CMakeLists.txt`); deb, RPM/AUR and plain `make install` builds ship neither.
+  On-demand activation therefore only exists in the Linyaps package: elsewhere
+  the CLI starts a background core itself when none is running, and inside the
+  container — where detaching a process is impossible — `daemon start`, `play`
+  and the front end ask the bus to activate and print host-side guidance when
+  that is unavailable.

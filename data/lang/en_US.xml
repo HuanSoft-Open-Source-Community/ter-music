@@ -56,6 +56,7 @@
   <!-- ===== Menu hint bar ===== -->
   <string key="menu.hint_bar">F1:Home  F2:Settings  F3:History  F4:Playlists  F5:Favorites  F6:Info  F7:Lang  F8:Help  F9:Quit</string>
   <string key="menu.config_reloaded">Config reloaded</string>
+  <string key="menu.config_reset">Config reset</string>
 
   <!-- ===== Settings view ===== -->
   <string key="settings.playback.language">Press Enter to toggle language; latency applies on next playback</string>
@@ -188,6 +189,9 @@
   <string key="settings.opt.eq_4khz">4 kHz</string>
   <string key="settings.opt.eq_8khz">8 kHz</string>
   <string key="settings.opt.eq_16khz">16 kHz</string>
+  <string key="settings.opt.eq_preset">EQ Preset</string>
+  <string key="settings.opt.reload_config">Reload Config</string>
+  <string key="settings.opt.reset_config">Restore Defaults</string>
   <string key="settings.separator">: </string>
 
   <!-- ===== Play modes ===== -->

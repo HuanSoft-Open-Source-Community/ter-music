@@ -56,6 +56,7 @@
   <!-- ===== Menu hint bar ===== -->
   <string key="menu.hint_bar">F1:主页  F2:设置  F3:历史  F4:歌单  F5:收藏  F6:信息  F7:中/EN  F8:帮助  F9:退出</string>
   <string key="menu.config_reloaded">配置已重新加载 / Config reloaded</string>
+  <string key="menu.config_reset">配置已恢复默认 / Config reset</string>
 
   <!-- ===== Settings view ===== -->
   <string key="settings.playback.language">语言可用 ENTER 切换，时延会在下次播放时生效</string>
@@ -188,6 +189,9 @@
   <string key="settings.opt.eq_4khz">4 kHz</string>
   <string key="settings.opt.eq_8khz">8 kHz</string>
   <string key="settings.opt.eq_16khz">16 kHz</string>
+  <string key="settings.opt.eq_preset">均衡器预设</string>
+  <string key="settings.opt.reload_config">重新加载配置</string>
+  <string key="settings.opt.reset_config">恢复默认设置</string>
   <string key="settings.separator">: </string>
 
   <!-- ===== Play modes ===== -->

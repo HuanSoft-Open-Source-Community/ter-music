@@ -343,8 +343,9 @@ ter-music --help
 
 以下任意一个首参数都会切换到 CLI 模式。CLI 命令是轻量的 D-Bus 客户端：
 它们与当前持有 `org.mpris.MediaPlayer2.ter_music` 的**播放核心**（由
-`daemon start`、D-Bus 激活或 TUI 拉起）通信，因此在任意终端、脚本或窗口
-管理器快捷键中都能使用。其中 `play` 还兼任前端：它在自己的进程里扫描路径，
+`daemon start` 或 TUI 拉起；Linyaps 包另可按需经 D-Bus 激活，其他打包格式不随包
+提供那个激活文件）通信，因此在任意终端、脚本或窗口管理器快捷键中都能使用。
+其中 `play` 还兼任前端：它在自己的进程里扫描路径，
 再把生成的队列下发给核心。
 
 | 命令 | 说明 |
@@ -1009,7 +1010,7 @@ D-Bus 接口面相遇：
 
 | 平面 | 进程 | 掌管什么 |
 | --- | --- | --- |
-| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start`、D-Bus 激活或 systemd 用户服务拉起） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
+| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start` 或 TUI 前端拉起；Linyaps 包还能经 D-Bus 激活或其 systemd 用户服务启动，deb/RPM 不随包提供这两类文件） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
 | **前端 / 内容客户端** | `ter-music`（TUI）、`ter-music play\|show\|…`（CLI） | 目录扫描与元数据、SQLite 曲库与 FTS5 搜索、用户歌单、收藏/历史/目录历史、排序/过滤、远程源与下载缓存、ncurses 界面 |
 
 这条接缝刻意做得很薄，也便于测试：
