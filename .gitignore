@@ -54,6 +54,7 @@ oadoc/
 .trae
 .reasonix/
 .claude/
+/AGENTS.md
 .workbuddy/
 .local/
 .tmp/*
@@ -63,3 +64,9 @@ squashfs-root/*.cache/
 .cache/
 scripts/docker/uab-tools/
 __pycache__/
+
+# Local verification build trees (not part of the accepted diff)
+/build-audit-*/
+/build-test9/
+/build-fix12/
+
