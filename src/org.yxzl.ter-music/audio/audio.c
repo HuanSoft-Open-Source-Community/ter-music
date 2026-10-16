@@ -320,7 +320,8 @@ void set_volume_percent(int volume)
     if (changed) {
         log_info("audio", "Volume changed: %d%% -> %d%%", old_volume, clamped);
         g_app_config.volume_percent = clamped;
-        save_config();
+        /* 音量是连续小步变化的字段：只置脏，落盘由 core_tick() 去抖合并 */
+        core_config_mark_dirty();
         char msg[64];
         snprintf(msg, sizeof(msg), i18n_get("status.volume_fmt"), clamped);
         core_status_push(msg);
@@ -386,7 +387,8 @@ void toggle_playback_speed(void)
     g_playback_speed = g_speed_ratios[g_speed_index];
     log_info("audio", "Playback speed changed: %.2fx -> %.2fx", (double)old_speed, (double)g_playback_speed);
     g_app_config.default_playback_speed = g_playback_speed;
-    save_config();
+    /* 与音量同路：配置镜像已更新，落盘交给 core_tick() 去抖 */
+    core_config_mark_dirty();
     char msg[64];
     snprintf(msg, sizeof(msg), "%s: %.2fx", i18n_get("controls.label.speed"), (double)g_playback_speed);
     core_status_push(msg);
@@ -496,6 +498,9 @@ void persist_playback_session_state(void)
     int play_index = -1, play_position = 0;
     char track_path[MAX_PATH_LEN], track_folder_path[MAX_PATH_LEN];
 
+    /* 退出路径：先去抖落盘里攒着的音量/倍速，再写本次会话的恢复字段 */
+    core_config_flush_dirty();
+
     reap_finished_playback_thread();
     pthread_mutex_lock(&g_play_mutex);
     if (g_play_thread_running &&
@@ -525,6 +530,41 @@ void persist_playback_session_state(void)
     snprintf(g_app_config.last_played_track_path, sizeof(g_app_config.last_played_track_path), "%s", track_path);
     extract_parent_directory(track_path, track_folder_path, sizeof(track_folder_path));
     snprintf(g_app_config.last_played_folder_path, sizeof(g_app_config.last_played_folder_path), "%s", track_folder_path);
+    save_config();
+}
+
+/* 核心换曲时的会话恢复字段记录（Task 4.2）。
+ *
+ * 这是"由核心持久化"的换曲钩子：play_audio() 只在核心宿主进程里运行
+ * （本地模式 TUI 即核心；daemon 与远程前端都经 RPC/播放线程走到这里），
+ * 远程 TUI 前端从不调用 play_audio，因此前端进程不会触达本函数、不会写 config。
+ *
+ * 记录"刚切到的当前曲目"路径与它的起始位置：
+ *   - 普通换曲：起始位置为 0（g_initial_seek_position 已被上一曲线程消费清零）；
+ *   - 断点恢复 / 倍速重启：起始位置为 g_initial_seek_position（本次要跳到的进度）。
+ * 退出路径（persist_playback_session_state）仍会写入精确的实时位置，二者互补。
+ *
+ * 字段语义与 persist_playback_session_state 保持一致：resume_last_playback /
+ * last_played_position / last_played_track_path / last_played_folder_path。 */
+static void persist_playback_session_on_switch(int index)
+{
+    char track_path[MAX_PATH_LEN], track_folder_path[MAX_PATH_LEN];
+
+    if (index < 0 ||
+        bq_path_at(index, track_path, sizeof(track_path)) != 0 ||
+        track_path[0] == '\0') {
+        return;
+    }
+
+    int start_position = g_initial_seek_position > 0 ? g_initial_seek_position : 0;
+
+    g_app_config.resume_last_playback = 1;
+    g_app_config.last_played_position = start_position;
+    snprintf(g_app_config.last_played_track_path,
+             sizeof(g_app_config.last_played_track_path), "%s", track_path);
+    extract_parent_directory(track_path, track_folder_path, sizeof(track_folder_path));
+    snprintf(g_app_config.last_played_folder_path,
+             sizeof(g_app_config.last_played_folder_path), "%s", track_folder_path);
     save_config();
 }
 
@@ -650,6 +690,9 @@ start_playback:
     core_status_push(msg);
     log_info("audio", "Now playing: '%s' - '%s' (idx=%d)",
              entry.title, entry.artist, index);
+    /* 换曲持久化改由核心负责（Task 4.2）：记录当前曲目路径与起始位置。
+     * 远程 TUI 前端不会走到这里（其播放经 D-Bus 交给核心），故前端不写 config。 */
+    persist_playback_session_on_switch(index);
     core_notify_state_changed();
     }
 }

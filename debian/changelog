@@ -1,18 +1,54 @@
 ter-music (2.3.0-1) unstable; urgency=medium
 
-  * Command-line mode: ter-music play/pause/seek/volume/speed/mode/show and
-    the detached background player (daemon start|stop|restart|status|reload).
-  * D-Bus service API: org.yxzl.ter_music.Info and .Control next to the
-    existing MPRIS and Lyrics interfaces, sharing one snapshot with the CLI.
-  * Configurable info display (config v5): preset, fields, text cover size and
-    charset, progress style and lyric lines, with a new Settings page.
+  * Split the player into a resident core plus front ends. The core owns the
+    audio stack and the D-Bus service; the TUI and every CLI subcommand are
+    clients that hand it content and commands. Closing the TUI (q, F9 or
+    Ctrl+C) no longer interrupts playback, and a front end starts a core when
+    none runs (inside a Linyaps container it asks the bus to activate instead
+    of forking a detached process).
+  * D-Bus API is now api_version 4, published as org.yxzl.ter_music.Info,
+    Control, Lyrics, Queue and Config. The content interfaces (Playlist,
+    Library, Favorites, History, DirHistory) and Remote are gone: the SQLite
+    library, playlists, favorites, folder history and remote downloads are
+    front-end data. The D-Bus scan job, Control.OpenPath/PlayIndex and
+    Queue.Rebuild were removed, and MPRIS OpenUri answers NotSupported.
+  * The play queue is a list of local paths delivered by the front end in
+    chunks of at most 500 entries (one Queue.Set, then Queue.Append for the
+    rest); an oversized single call is rejected as a whole with
+    Error.InvalidArgs. Queue.Get is paged and part of the introspection.
+    Nothing is persisted to queue.txt any more, and the resume session (last
+    track plus position) is written by the core on every track change.
+  * MPRIS parity: Rate is a real read/write playback rate (0.5-3.0), and
+    LoopStatus and Shuffle switch whole play modes instead of storing two
+    flags. The front-end registry (Control.Attach/Ping/Detach/FrontendInfo,
+    2 s heartbeat, 6 s expiry) tracks live clients; an optional
+    core_exit_when_no_frontend watchdog (config.xml, off by default) stops the
+    core 10 s after the last front end leaves.
+  * Command-line mode: play, pause, resume, toggle, stop, next, prev, seek,
+    volume, speed, mode, show and daemon start|foreground|stop|restart|status|
+    reload, plus the new queue list|append|insert|remove|clear|shuffle,
+    config get|set|reload|reset, lyrics, track and cover subcommands. play
+    accepts "~" and relative paths, hits an exact audio file, takes --index,
+    --mode and --foreground, and without arguments keeps playing the current
+    queue. Exit codes: 0 success, 1 usage error, 3 no running instance,
+    4 D-Bus unavailable, 5 refused or operation failed.
+  * Settings: new "Reload Config" and "Restore Defaults" actions, an equalizer
+    preset dialog and an output-latency dialog as standalone popups, and an
+    info display page (preset, fields, text cover size and charset, progress
+    style, lyric lines) that drives `ter-music show` and the D-Bus output.
+    The configuration contract is version 7 (config.xml keeps its 2.2 XML
+    version attribute), migrated automatically from v1 JSON and from older
+    contract versions.
   * Fix a startup SIGSEGV on directory trees deeper than ~7 levels caused by
-    multi-megabyte stack frames in the recursive scan and playlist loading.
-  * Resolve config/data/cache directories through XDG so Linyaps packages keep
-    their data on the host, and ship the D-Bus activation file plus systemd
-    user unit in the package.
+    multi-megabyte stack frames in the recursive scan and playlist loading;
+    the CUE sheet and the other large frames now live on the heap.
+  * Resolve config, data and cache directories through XDG so Linyaps packages
+    keep their data on the host. The systemd user unit and the D-Bus activation
+    file for org.mpris.MediaPlayer2.ter_music are installed only by the Linyaps
+    build (cmake -DINSTALL_LINYAPS_INTEGRATION=ON, which is OFF by default);
+    this Debian package ships neither.
 
- -- Yanxi Bamboo Forest <yxzl666xx@outlook.com>  Mon, 14 Sep 2026 00:00:00 +0800
+ -- Yanxi Bamboo Forest <yxzl666xx@outlook.com>  Fri, 16 Oct 2026 14:09:47 +0800
 
 ter-music (2.2.0-1) unstable; urgency=medium
 

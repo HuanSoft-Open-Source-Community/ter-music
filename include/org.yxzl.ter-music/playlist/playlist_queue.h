@@ -20,6 +20,19 @@
  * @return 实际下发条目数（≥0）；-1 = 失败（内容过大 / 载荷被拒） */
 int playlist_queue_sync(void);
 
+/* 分块下发辅助的回调类型。playlist_queue_foreach_chunk 每装配满一块
+ * （单块 ≤ BQ_SET_MAX）就回调一次：chunk_json 为 {"entries":[…]} 形态，
+ * chunk_index 从 0 计（0 = 首块，调用方据此选择 Set/Append），entries_in_chunk
+ * 为本块条目数。回调返回非 0 即中止整表下发。 */
+typedef int (*PlaylistQueueChunkCb)(const char *chunk_json, int chunk_index,
+                                    int entries_in_chunk, void *user);
+
+/* 按 ≤BQ_SET_MAX 分块遍历 g_playlist 内容并逐块回调，供本地整表同步与远端
+ * 整表下发复用同一条装配路径。无路径的行（目录行等）跳过、不进队列。
+ * @return 已成功回调下发的条目总数（≥0）；-1 = 出错（含回调失败 / 内存不足）。
+ * 内容为空返回 0（不下发任何块，由调用方决定是否清空核心队列）。 */
+int playlist_queue_foreach_chunk(PlaylistQueueChunkCb cb, void *user);
+
 /* 把当前内容列表渲染成队列 JSON（{"entries":[...]}}，调用方 free()）。
  * 供“没有后端队列可推”的场景使用：CLI 在自己的进程里装载内容后，
  * 把这个载荷经 D-Bus Queue.Set 交给核心。

@@ -341,7 +341,7 @@ void activate_current_control(void)
                         if (ti >= 0) target_index = ti;
                     }
                     if (target_index >= 0 && target_index < playlist_total) {
-                        player_play(target_index);
+                        ui_play_track_index(target_index);
                     }
                 }
             }

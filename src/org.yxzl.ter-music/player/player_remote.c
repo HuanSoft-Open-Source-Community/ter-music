@@ -30,6 +30,7 @@
 #include "i18n/i18n.h"
 #include "logger/logger.h"
 #include "media/rpc.h"
+#include "playlist/playlist.h"
 #include "playlist/playlist_queue.h"
 #include "util/json.h"
 
@@ -120,12 +121,33 @@ typedef struct {
     uint64_t lyrics_retry_ms;       /* 上次拉取失败后的重试门槛（退避 1s） */
     LyricLine lyrics_lines[MAX_LYRIC_LINES];
 
+    /* 队列页缓存（position→条目）：本地后端能就地读 bq，远端只能经 Queue.Get
+     * 分页取。这里缓存一个连续窗口，供 queue_index_at / track_metadata 反查
+     * 内容下标；窗口按 queue_revision 失效，改动队列的方法会顶修订号。 */
+    BackendQueueEntry *queue_page_entries;
+    uint64_t queue_page_revision;   /* 与缓存对应的 queue_revision */
+    int queue_page_base;            /* 窗口起始队列位置 */
+    int queue_page_count;           /* 窗口内已填充条目数 */
+    int queue_page_cap;             /* 窗口已分配槽位 */
+
+    /* 可视化快照缓存（Info.GetVisualizer）：界面每帧取数，这里带节流地拉取。
+     * viz_active=0 时界面要求停止拉取（本期不做帧信号订阅）。 */
+    int viz_active;
+    int viz_valid;
+    uint64_t viz_last_fetch_ms;
+    uint64_t viz_revision;
+    int viz_levels[VISUALIZER_BAND_COUNT];
+    int viz_peaks[VISUALIZER_BAND_COUNT];
+
     /* 上次已知的核心配置：player_config_persist() 只把相对它的差异下发 */
     AppConfig synced_config;
     int config_synced;
 } RemoteState;
 
 const char *player_remote_play_mode_name_of(PlayMode mode, int use_english);
+
+/* 队列页缓存前置声明（定义在队列章节，track_metadata 需要早于它取用） */
+static int remote_queue_cache_at(int position, BackendQueueEntry *out);
 
 static RemoteState g_remote;
 
@@ -138,6 +160,18 @@ static uint64_t remote_now_ms(void)
 
 /* ── 连接与握手 ─────────────────────────────────────────────────── */
 
+/* 队列页缓存失效：释放窗口并复位，下一次读取重新按 Queue.Get 填充。
+ * 断线、重连、以及任何改动队列内容的门面方法都调用它。 */
+static void remote_queue_cache_reset(void)
+{
+    free(g_remote.queue_page_entries);
+    g_remote.queue_page_entries = NULL;
+    g_remote.queue_page_cap = 0;
+    g_remote.queue_page_base = -1;
+    g_remote.queue_page_count = 0;
+    g_remote.queue_page_revision = 0;
+}
+
 static void remote_close_connection(void)
 {
     if (g_remote.connection) {
@@ -147,6 +181,8 @@ static void remote_close_connection(void)
     }
     g_remote.token[0] = '\0';
     g_remote.connected = 0;
+    remote_queue_cache_reset();
+    g_remote.viz_valid = 0;
 }
 
 static void ensure_session_bus(void)
@@ -532,22 +568,16 @@ static void remote_store_track(const char *json)
     memset(&track, 0, sizeof(track));
     track.queue_position = -1;
 
-    if (json_get_path(&reader, "track.valid", &value) == 0 &&
-        json_value_bool(&value, 0)) {
-        track.valid = 1;
-    }
-    if (json_get_path(&reader, "track.index", &value) == 0) {
-        track.index = (int)json_value_int(&value, -1);
-    }
-    if (json_get_path(&reader, "track.queue_position", &value) == 0 &&
-        value.type == JSON_VALUE_NUMBER) {
-        track.queue_position = (int)json_value_int(&value, -1) - 1;   /* 1 基 → 0 基 */
-    }
+    /* 队列长度与游标是后端队列的事实，无论是否有当前曲目都如实报告 */
     if (json_get_path(&reader, "track.playlist_count", &value) == 0) {
         track.playlist_total = (int)json_value_int(&value, 0);
     }
     if (json_get_path(&reader, "track.queue_count", &value) == 0) {
         track.queue_count = (int)json_value_int(&value, 0);
+    }
+    if (json_get_path(&reader, "track.queue_position", &value) == 0 &&
+        value.type == JSON_VALUE_NUMBER) {
+        track.queue_position = (int)json_value_int(&value, -1) - 1;   /* 1 基 → 0 基 */
     }
     if (json_get_path(&reader, "track.id", &value) == 0 && value.type == JSON_VALUE_STRING) {
         json_value_string(&value, track.track_id, sizeof(track.track_id));
@@ -564,6 +594,35 @@ static void remote_store_track(const char *json)
     if (json_get_path(&reader, "track.album", &value) == 0 && value.type == JSON_VALUE_STRING) {
         json_value_string(&value, track.album, sizeof(track.album));
     }
+
+    /* 有效性判定：核心不给 track.valid 键（见 info_append_track_object，键集只有
+     * id/index/number/...），改用真实字段——track.index 非 null 或 track.id 非 null
+     * 即存在当前曲目。这两个键只在核心侧 t->valid 时才写成非 null。 */
+    json_reader_init(&reader, json, strlen(json));
+    int index_present = (json_get_path(&reader, "track.index", &value) == 0 &&
+                         value.type == JSON_VALUE_NUMBER);
+    track.valid = (index_present || track.track_id[0]) ? 1 : 0;
+
+    /* 界面要的是**内容物理下标**（player_track_index 的门面契约）：核心的
+     * track.index 是后端队列位（g_current_play_index），不能直接喂给界面。
+     * 用当前曲目路径反查前端内容列表，与本地后端 queue_index_at 同一口径。 */
+    track.index = -1;
+    if (track.valid && track.path[0]) {
+        track.index = playlist_find_track_index_by_path(track.path);
+    }
+
+    /* 封面文件路径：核心在 Info 的 cover.art_url（file:// URI）里给出，
+     * 还原成本地路径供界面渲染盲文封面（前后端同机，路径可直接读）。 */
+    json_reader_init(&reader, json, strlen(json));
+    if (json_get_path(&reader, "cover.art_url", &value) == 0 &&
+        value.type == JSON_VALUE_STRING) {
+        char art_url[INFO_URI_MAX];
+        art_url[0] = '\0';
+        if (json_value_string(&value, art_url, sizeof(art_url)) > 0) {
+            info_uri_to_path(art_url, track.cover_path, sizeof(track.cover_path));
+        }
+    }
+    track.has_cover = track.cover_path[0] ? 1 : 0;
 
     if (track.queue_count != g_remote.queue_count ||
         track.queue_position != g_remote.queue_position) {
@@ -757,6 +816,8 @@ int player_remote_init(PlayerBackend backend, const char *bus_name)
     g_remote.track.queue_position = -1;
     g_remote.lyrics.current_index = -1;
     g_remote.lyrics.next_index = -1;
+    g_remote.queue_page_base = -1;
+    g_remote.viz_active = 1;   /* 默认允许按需拉取；界面可用 set_visualizer_active 关闭 */
     snprintf(g_remote.bus_name, sizeof(g_remote.bus_name), "%s",
              (bus_name && bus_name[0]) ? bus_name : CLI_PRIMARY_BUS_NAME);
     g_remote.initialized = 1;
@@ -940,12 +1001,23 @@ float player_remote_speed(void)          { return g_remote.playback.speed; }
 
 int player_remote_track_metadata(int index, Track *out)
 {
-    /* 远端后端不做内容查询：元数据来自队列页（Queue.Get） */
-    (void)index;
-    if (out) {
-        memset(out, 0, sizeof(*out));
+    /* 远端不做内容查询：元数据来自队列页缓存（Queue.Get 带回的条目）。
+     * 这里的 index 是**队列位置**（调用方按队列长度遍历即可，整表下发时
+     * 与内容下标一一对应；Shuffle 后仍能给出核心实际持有的那一行）。 */
+    if (!out) {
+        return -1;
     }
-    return -1;
+    memset(out, 0, sizeof(*out));
+
+    BackendQueueEntry entry;
+    if (remote_queue_cache_at(index, &entry) != 0 || !entry.path[0]) {
+        return -1;
+    }
+    snprintf(out->path, sizeof(out->path), "%s", entry.path);
+    snprintf(out->title, sizeof(out->title), "%s", entry.title);
+    snprintf(out->artist, sizeof(out->artist), "%s", entry.artist);
+    snprintf(out->album, sizeof(out->album), "%s", entry.album);
+    return 0;
 }
 
 /* ── transport ──────────────────────────────────────────────────── */
@@ -964,6 +1036,12 @@ static int remote_bool_call(const char *interface_name, const char *method)
 void player_remote_play(int track_index)
 {
     if (track_index >= 0) {
+        /* 越界保护（对齐本地后端 player_local_play 的下标校验）：PlayAt 的入参
+         * 是队列位置，越界时不发命令，避免核心回 OutOfRange 后界面看似“点了没反应”。
+         * 队列内容变化后的正常播放入口走 play_track_index()（路径反查位置再播）。 */
+        if (track_index >= g_remote.queue_count) {
+            return;
+        }
         DBusMessage *reply = remote_call_i(REMOTE_IFACE_QUEUE, "PlayAt", 3000, track_index);
         if (reply) {
             dbus_message_unref(reply);
@@ -1114,14 +1192,69 @@ const char *player_remote_play_mode_name_of(PlayMode mode, int use_english)
 int player_remote_queue_count(void)    { return g_remote.queue_count; }
 int player_remote_queue_position(void) { return g_remote.queue_position; }
 
-int player_remote_queue_index_at(int position)
+/* 队列页缓存窗口大小：一页 ≤256 条，配合 Queue.Get 的接收缓冲（RPC_PAYLOAD_MAX/2）
+ * 让单页载荷稳定在 256 KB 以内；块对齐取页，顺扫时同一块只拉一次。 */
+#define QUEUE_CACHE_WINDOW 256
+
+/* 确保缓存窗口覆盖 position 并把该位置条目拷到 *out。
+ * 未命中即按需拉取 position 所在块（Queue.Get）。成功 0，越界/失败 -1。 */
+static int remote_queue_cache_at(int position, BackendQueueEntry *out)
 {
-    /* 队列页缓存里查找（player_remote_queue_page 会填充）；未命中返回该位置本身，
-     * 因为内容下标与队列位置在“整表下发”语义下一一对应。 */
-    if (position < 0 || position >= g_remote.queue_count) {
+    if (!g_remote.connected || position < 0 || position >= g_remote.queue_count) {
         return -1;
     }
-    return position;
+
+    /* 队列修订号变了：整块作废，重新分配窗口 */
+    if (g_remote.queue_page_revision != g_remote.queue_revision ||
+        !g_remote.queue_page_entries) {
+        remote_queue_cache_reset();
+        g_remote.queue_page_entries =
+            malloc(sizeof(BackendQueueEntry) * (size_t)QUEUE_CACHE_WINDOW);
+        if (!g_remote.queue_page_entries) {
+            return -1;
+        }
+        g_remote.queue_page_cap = QUEUE_CACHE_WINDOW;
+        g_remote.queue_page_base = -1;
+        g_remote.queue_page_count = 0;
+        g_remote.queue_page_revision = g_remote.queue_revision;
+    }
+
+    int block = (position / QUEUE_CACHE_WINDOW) * QUEUE_CACHE_WINDOW;
+    int window_end = g_remote.queue_page_base + g_remote.queue_page_count;
+    if (g_remote.queue_page_base < 0 ||
+        position < g_remote.queue_page_base ||
+        position >= window_end) {
+        int want = QUEUE_CACHE_WINDOW;
+        int remaining = g_remote.queue_count - block;
+        if (want > remaining) {
+            want = remaining;
+        }
+        int got = player_remote_queue_page(block, want, g_remote.queue_page_entries,
+                                           g_remote.queue_page_cap);
+        g_remote.queue_page_base = block;
+        g_remote.queue_page_count = got;
+    }
+
+    if (g_remote.queue_page_base < 0 ||
+        position < g_remote.queue_page_base ||
+        position >= g_remote.queue_page_base + g_remote.queue_page_count) {
+        return -1;
+    }
+    if (out) {
+        *out = g_remote.queue_page_entries[position - g_remote.queue_page_base];
+    }
+    return 0;
+}
+
+int player_remote_queue_index_at(int position)
+{
+    /* 与本地后端同一口径：队列位置 → 条目路径 → 反查内容物理下标。
+     * 路径来自 Queue.Get 的页缓存（Shuffle/InsertAfter 后仍能映射回正确行）。 */
+    BackendQueueEntry entry;
+    if (remote_queue_cache_at(position, &entry) != 0 || !entry.path[0]) {
+        return -1;
+    }
+    return playlist_find_track_index_by_path(entry.path);
 }
 
 int player_remote_queue_is_active(void) { return g_remote.queue_count > 0 && g_remote.queue_position >= 0; }
@@ -1202,26 +1335,71 @@ int player_remote_queue_remove_at(int position) { return remote_queue_int_method
 int player_remote_queue_move_up(int position)   { return remote_queue_int_method("MoveUp", position); }
 int player_remote_queue_move_down(int position) { return remote_queue_int_method("MoveDown", position); }
 
-int player_remote_queue_clear(void)             { return remote_bool_call(REMOTE_IFACE_QUEUE, "Clear"); }
-
-int player_remote_queue_shuffle(void)           { return remote_bool_call(REMOTE_IFACE_QUEUE, "Shuffle"); }
-
-int player_remote_queue_push(void)
+int player_remote_queue_clear(void)
 {
-    char *json = playlist_queue_render();
-    if (!json) {
-        return -1;
-    }
-    DBusMessage *reply = remote_call_s(REMOTE_IFACE_QUEUE, "Set", 5000, json);
+    int rc = remote_bool_call(REMOTE_IFACE_QUEUE, "Clear");
+    remote_queue_cache_reset();
+    g_remote.queue_revision++;
+    remote_refresh_snapshot();
+    return rc;
+}
+
+int player_remote_queue_shuffle(void)
+{
+    int rc = remote_bool_call(REMOTE_IFACE_QUEUE, "Shuffle");
+    /* 洗牌只动后端顺序、未必改 queue_count/游标，快照不一定顶修订号，
+     * 这里显式让页缓存作废并重取快照。 */
+    remote_queue_cache_reset();
+    g_remote.queue_revision++;
+    remote_refresh_snapshot();
+    return rc;
+}
+
+/* 分块下发的回调：首块走 Queue.Set（整表替换），其余走 Queue.Append 追加。
+ * 任一块失败返回非 0，playlist_queue_foreach_chunk 即中止——核心此时停在
+ * 已成功下发的合法前缀上。 */
+static int remote_push_chunk_cb(const char *chunk_json, int chunk_index,
+                                int entries_in_chunk, void *user)
+{
+    (void)entries_in_chunk;
+    (void)user;
+    const char *method = (chunk_index == 0) ? "Set" : "Append";
+    DBusMessage *reply = remote_call_s(REMOTE_IFACE_QUEUE, method, 5000, chunk_json);
     int written = 0;
     int rc = remote_reply_int(reply, &written);
     if (reply) {
         dbus_message_unref(reply);
     }
-    free(json);
+    return (rc == 0 && written >= 0) ? 0 : -1;
+}
+
+int player_remote_queue_push(void)
+{
+    if (!g_remote.connected) {
+        return -1;
+    }
+    remote_queue_cache_reset();
+
+    /* 内容为空：下发空表清空核心队列，避免留着上一次的内容 */
+    if (playlist_count() <= 0) {
+        DBusMessage *reply = remote_call_s(REMOTE_IFACE_QUEUE, "Set", 5000,
+                                           "{\"entries\":[]}");
+        int written = 0;
+        int rc = remote_reply_int(reply, &written);
+        if (reply) {
+            dbus_message_unref(reply);
+        }
+        g_remote.queue_revision++;
+        remote_refresh_snapshot();
+        return (rc == 0 && written >= 0) ? 0 : -1;
+    }
+
+    /* 整表分块下发：首块 Set、余块 Append（单块 ≤ BQ_SET_MAX，规避核心对
+     * >500 单发 Queue.Set 返回 InvalidArgs）。返回实际下发条目数或 -1。 */
+    int total = playlist_queue_foreach_chunk(remote_push_chunk_cb, NULL);
     g_remote.queue_revision++;
     remote_refresh_snapshot();
-    return rc == 0 ? written : -1;
+    return total;
 }
 
 int player_remote_queue_find(const char *path)
@@ -1553,6 +1731,14 @@ int player_remote_lyrics_reload_source(int source)
     g_remote.lyrics_page_valid = 0;
     g_remote.lyrics_retry_ms = 0;
     remote_refresh_snapshot();
+
+    /* 歌词来源偏好落库（Task 5.7）：local 由 main.c 注册的 lyrics_set_source_hook
+     * 在引擎换源时写内容库；remote 下核心不写库，来源偏好归前端内容，故在 SetSource
+     * 成功后由前端对"当前曲目"自行 library_set_lyrics_source（与 local 语义一致）。 */
+    if (rc == 0 && ok && g_remote.track.path[0]) {
+        library_set_lyrics_source(g_remote.track.path, source);
+    }
+
     return rc == 0 && ok ? 0 : -1;
 }
 
@@ -1676,19 +1862,109 @@ int player_remote_cover_path(char *out, size_t out_size)
     return out[0] ? 0 : -1;
 }
 
+/* 拉取一帧可视化快照到缓存（Info.GetVisualizer）。JSON 字段：
+ * revision / bands / levels[] / peaks[]（见 rpc_info.c 的 GetVisualizer）。 */
+static void remote_visualizer_fetch(void)
+{
+    char json[4096];
+    DBusMessage *reply = remote_call0(REMOTE_IFACE_INFO, "GetVisualizer", 1000);
+    g_remote.viz_last_fetch_ms = remote_now_ms();
+    if (!reply) {
+        return;   /* 失败保留上一帧，界面不至于突然归零 */
+    }
+    int rc = remote_reply_string(reply, json, sizeof(json));
+    dbus_message_unref(reply);
+    if (rc != 0) {
+        return;
+    }
+
+    JsonReader reader;
+    JsonValue value;
+    json_reader_init(&reader, json, strlen(json));
+    uint64_t revision = g_remote.viz_revision;
+    if (json_get_path(&reader, "revision", &value) == 0) {
+        revision = (uint64_t)json_value_int(&value, (long long)revision);
+    }
+
+    int new_levels[VISUALIZER_BAND_COUNT] = {0};
+    int new_peaks[VISUALIZER_BAND_COUNT] = {0};
+
+    json_reader_init(&reader, json, strlen(json));
+    if (json_get_path(&reader, "levels", &value) == 0 && value.type == JSON_VALUE_ARRAY) {
+        JsonReader arr = reader;
+        JsonValue el;
+        int i = 0;
+        if (json_reader_enter(&arr, &value) == 0) {
+            while (i < VISUALIZER_BAND_COUNT && json_array_next(&arr, &el) == 1) {
+                new_levels[i++] = (int)json_value_int(&el, 0);
+            }
+        }
+    }
+
+    json_reader_init(&reader, json, strlen(json));
+    if (json_get_path(&reader, "peaks", &value) == 0 && value.type == JSON_VALUE_ARRAY) {
+        JsonReader arr = reader;
+        JsonValue el;
+        int i = 0;
+        if (json_reader_enter(&arr, &value) == 0) {
+            while (i < VISUALIZER_BAND_COUNT && json_array_next(&arr, &el) == 1) {
+                new_peaks[i++] = (int)json_value_int(&el, 0);
+            }
+        }
+    }
+
+    memcpy(g_remote.viz_levels, new_levels, sizeof(new_levels));
+    memcpy(g_remote.viz_peaks, new_peaks, sizeof(new_peaks));
+    g_remote.viz_revision = revision;
+    g_remote.viz_valid = 1;
+}
+
 void player_remote_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms)
 {
     if (max_levels <= 0) {
         return;
     }
-    if (levels) memset(levels, 0, (size_t)max_levels * sizeof(int));
-    if (peaks)  memset(peaks, 0, (size_t)max_levels * sizeof(int));
-    if (last_update_ms) *last_update_ms = remote_now_ms();
+
+    /* 界面每帧取数：带节流地拉核心（≥RPC_VISUALIZER_INTERVAL_MS 才再发一次），
+     * 本期不做帧信号订阅，渲染路径按需同步拉取即可。 */
+    if (g_remote.connected && g_remote.viz_active) {
+        uint64_t now = remote_now_ms();
+        if (!g_remote.viz_valid || (now - g_remote.viz_last_fetch_ms) >= RPC_VISUALIZER_INTERVAL_MS) {
+            remote_visualizer_fetch();
+        }
+    }
+
+    int copy = max_levels < VISUALIZER_BAND_COUNT ? max_levels : VISUALIZER_BAND_COUNT;
+    if (levels) {
+        if (g_remote.viz_valid) {
+            memcpy(levels, g_remote.viz_levels, (size_t)copy * sizeof(int));
+        } else {
+            memset(levels, 0, (size_t)copy * sizeof(int));
+        }
+        for (int i = copy; i < max_levels; i++) levels[i] = 0;
+    }
+    if (peaks) {
+        if (g_remote.viz_valid) {
+            memcpy(peaks, g_remote.viz_peaks, (size_t)copy * sizeof(int));
+        } else {
+            memset(peaks, 0, (size_t)copy * sizeof(int));
+        }
+        for (int i = copy; i < max_levels; i++) peaks[i] = 0;
+    }
+    if (last_update_ms) {
+        *last_update_ms = g_remote.viz_last_fetch_ms ? g_remote.viz_last_fetch_ms
+                                                     : remote_now_ms();
+    }
 }
 
 void player_remote_set_visualizer_active(int active)
 {
-    (void)active;
+    /* 界面进入/离开可视化面板时调用：0 时停止拉取并作废缓存。
+     * 本期经 Info.GetVisualizer 按需取数，不订阅 VisualizerFrame 信号。 */
+    g_remote.viz_active = active ? 1 : 0;
+    if (!active) {
+        g_remote.viz_valid = 0;
+    }
 }
 
 /* ── 均衡器（远端：经 Config.Set 写入，核心热应用） ─────────────── */
@@ -1718,12 +1994,32 @@ int player_remote_config_persist(void)
     if (!g_remote.connected) {
         return -1;
     }
+
+    /* 首次下发还没有基线（Task 5.6）：refresh 会用核心配置整体覆盖 g_app_config
+     * 镜像，若直接 refresh→mark_synced→return，调用方刚做的改动会在算 diff 之前
+     * 被冲掉。这里先记下当前镜像（= 启动镜像 + 本次改动），refresh 建立核心基线后
+     * 把该笔改动重新施加回镜像，再按"相对核心基线的差异"下发。
+     * 与核心侧"Config.Set 不回卷运行时模式/倍速"协同：diff 若含 mode/speed，
+     * 核心按自身运行时值处理，不会被前端旧值卷回（见 rpc_config.c）。 */
     if (!g_remote.config_synced) {
-        /* 还没有基线（刚连上）：先取一次核心配置，避免把整份配置推过去 */
+        AppConfig desired = g_app_config;   /* 调用方本次改动后的本地镜像 */
+
+        /* refresh 成功会顺带把 g_app_config 与 synced_config 都置为核心基线 */
         if (player_remote_config_refresh() != 0) {
+            /* 取不到核心基线：标记为已同步并保留用户改动，下次再试，不吞改动 */
             remote_config_mark_synced();
             return 0;
         }
+
+        g_app_config = desired;             /* 重新施加本次改动 */
+        char patch[4096];
+        size_t len = config_diff_json(&g_remote.synced_config, &g_app_config,
+                                      patch, sizeof(patch));
+        if (len > 2 && remote_config_patch(patch) != 0) {
+            log_warn("player_remote", "First config persist rejected: %.200s", patch);
+            return -1;
+        }
+        remote_config_mark_synced();
         return 0;
     }
 
@@ -1943,7 +2239,6 @@ int player_remote_queue_remove_at(int position) { (void)position; return -1; }
 int player_remote_queue_move_up(int position) { (void)position; return -1; }
 int player_remote_queue_move_down(int position) { (void)position; return -1; }
 int player_remote_queue_clear(void) { return -1; }
-int player_remote_queue_rebuild(void) { return -1; }
 int player_remote_queue_shuffle(void) { return -1; }
 int player_remote_queue_is_active(void) { return 0; }
 int player_remote_queue_push(void) { return -1; }

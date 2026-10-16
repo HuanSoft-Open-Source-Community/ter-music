@@ -307,7 +307,7 @@ int handle_main_view_mouse_event(const MEVENT *event)
                 pthread_mutex_unlock(&g_search_mutex);
             }
             g_search_state.selected_index = display_index;
-            player_play(actual_index);
+            ui_play_track_index(actual_index);
             g_search_state.active = 0;
             g_selected_index = g_sort_state.active ? 0 : actual_index;
             render_playlist_content();
@@ -332,9 +332,9 @@ int handle_main_view_mouse_event(const MEVENT *event)
                     return 1;
                 }
                 int track_idx = get_visible_node_track_index(display_index);
-                if (track_idx >= 0) player_play(track_idx);
+                if (track_idx >= 0) ui_play_track_index(track_idx);
             } else {
-                player_play(actual_index);
+                ui_play_track_index(actual_index);
             }
         }
         render_controls();

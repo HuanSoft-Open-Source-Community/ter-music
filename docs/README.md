@@ -393,10 +393,11 @@ ter-music --help
 
 Any of the following first arguments switches to CLI mode. CLI commands are
 thin D-Bus clients: they talk to the playback core that currently owns
-`org.mpris.MediaPlayer2.ter_music` (started by `daemon start`, by D-Bus
-activation or by the TUI), so they work from any terminal, script or window
-manager shortcut. `play` additionally acts as a front end: it scans the path in
-its own process and delivers the resulting queue to the core.
+`org.mpris.MediaPlayer2.ter_music` (started by `daemon start` or by the TUI;
+the Linyaps package can also start it on demand through D-Bus activation, which
+other package formats do not ship), so they work from any terminal, script or
+window manager shortcut. `play` additionally acts as a front end: it scans the
+path in its own process and delivers the resulting queue to the core.
 
 | Command | Description |
 | ------- | ----------- |
@@ -1184,7 +1185,7 @@ facade and the D-Bus surface:
 
 | Plane | Process | Owns |
 | ----- | ------- | ---- |
-| **Core / playback service** | `ter-music daemon foreground` (started by `daemon start`, by D-Bus activation or by a systemd user service) | Audio device and decoding, play queue execution (**paths only**), transport, volume / speed / play mode, equalizer, current-track info (lyrics, text cover, spectrum), the published `Lyrics` / `Info` / `Control` / `Queue` / `Config` interfaces, front-end registry and heartbeat, configuration |
+| **Core / playback service** | `ter-music daemon foreground` (started by `daemon start` or by a TUI front end; the Linyaps package can also start it via D-Bus activation or its systemd user service — deb/RPM ship neither file) | Audio device and decoding, play queue execution (**paths only**), transport, volume / speed / play mode, equalizer, current-track info (lyrics, text cover, spectrum), the published `Lyrics` / `Info` / `Control` / `Queue` / `Config` interfaces, front-end registry and heartbeat, configuration |
 | **Front end / content client** | `ter-music` (TUI), `ter-music play\|show\|…` (CLI) | Directory scanning and metadata, SQLite library and FTS5 search, user playlists, favorites / history / directory history, sorting / filtering, remote sources and their download cache, the ncurses UI |
 
 The seam is deliberately thin and testable:

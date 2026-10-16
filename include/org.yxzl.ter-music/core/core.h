@@ -34,6 +34,22 @@ void core_tick(void);
  * 默认值/XML 读取/版本迁移由 config 层负责；主题配色与界面刷新由前端负责。 */
 void core_config_apply(void);
 
+/* 只把**内存里那份配置镜像**（g_app_config）的运行时字段应用到播放层，不读文件。
+ * Config.Set 这类“补丁已经落在 g_app_config 上”的路径用它：先 save_config() 再
+ * core_config_apply() 会把刚写的文件读回来，既多一次磁盘 IO，又可能被别的进程
+ * 的旧文件覆盖。运行时字段（g_play_mode/g_playback_speed）与镜像的同步由写入方
+ * 负责（set_play_mode()/Control.SetSpeed/MPRIS 都同时更新 g_app_config），
+ * 因此这里应用的是最新值，重复调用幂等。 */
+void core_config_apply_runtime(void);
+
+/* ── 配置落盘去抖 ───────────────────────────────────────────────── */
+/* 音量/倍速是“连续小步”变化的字段：每次变化都全量写盘会把媒体循环压在磁盘上。
+ * 调用方更新 g_app_config 后只置脏，core_tick() 在最小间隔之后合并落盘一次。
+ * 退出路径若不想等这个间隔，可直接调 core_config_flush_dirty()。 */
+#define CORE_CONFIG_SAVE_DEBOUNCE_MS 500
+void core_config_mark_dirty(void);
+void core_config_flush_dirty(void);
+
 /* ── 配置重载监听 ───────────────────────────────────────────────── */
 /* 核心完成配置应用后回调前端（界面用它重刷配色与脏标记）。
  * 只在“重载”路径触发，启动时的首次应用不触发（与既有行为一致）。 */
@@ -41,9 +57,13 @@ void core_set_config_listener(void (*listener)(void));
 
 /* ── 状态消息 ───────────────────────────────────────────────────── */
 /* 核心侧记录最近一条状态消息，并转发给已注册的界面监听器；
- * 无界面（daemon）时只记录，便于后续经 D-Bus 提供给前端。 */
+ * 无界面（daemon）时只记录，便于后续经 D-Bus 提供给前端。
+ * 写入方既可能是媒体循环（RPC 处理器），也可能是播放线程（解码/写设备失败），
+ * 因此缓冲区与序号都在内部互斥锁下更新。 */
 void core_status_push(const char *message);
 void core_set_status_listener(void (*listener)(const char *message));
+/* 最近一条状态消息：返回**调用线程私有**的副本，在本次调用之后、下一次调用
+ * 之前有效（并发推送不会让它悬垂，也不会读到半条消息）。 */
 const char *core_status_last(void);
 /* 状态消息序号：每次 push 递增。前端据此判断“是否有新消息”，
  * 不必比较文本（同一条消息被再次推送时也应被看到）。 */

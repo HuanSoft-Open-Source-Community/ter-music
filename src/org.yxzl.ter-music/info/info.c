@@ -68,9 +68,16 @@ static const int k_info_field_count =
     (int)(sizeof(k_info_fields) / sizeof(k_info_fields[0]));
 
 /* ── 封面文本缓存（仅主循环线程访问） ───────────────────────────── */
+/* 多槽缓存：D-Bus 侧 CoverChanged 不再预渲染，字符画只在 GetCoverArt/GetDisplay
+ * 被请求时生成。单一槽会被“配置尺寸”和“前端面板尺寸”两种请求互相挤掉，导致每次
+ * 请求都重新解码放大一遍封面图（同步重 IO），因此按 (封面图, 列, 行, 字符集)
+ * 建 4 个槽，写满时淘汰最久未用的一槽。 */
+
+#define INFO_COVER_CACHE_SLOTS 4
 
 typedef struct {
     int valid;
+    unsigned long long used;      /* 访问时钟，越大越新（LRU 淘汰用） */
     int cols;
     int rows;
     int charset;
@@ -78,7 +85,8 @@ typedef struct {
     char text[INFO_COVER_TEXT_MAX];
 } InfoCoverCache;
 
-static InfoCoverCache g_cover_cache;
+static InfoCoverCache g_cover_cache[INFO_COVER_CACHE_SLOTS];
+static unsigned long long g_cover_cache_clock = 0;
 
 /* ── 选项 ───────────────────────────────────────────────────────── */
 
@@ -559,13 +567,22 @@ void info_track_snapshot(InfoTrack *out)
     out->queue_count = bq_count();
     out->queue_position = bq_position();
 
-    if (g_current_play_index < 0 || g_current_play_index >= out->playlist_total) {
-        return;
-    }
-
+    /* 队列里没有这个位置 ≠ 没有曲目：Queue.Set 的契约是“只替换未来曲目、当前
+     * 播放不中断”（见 queue/backend_queue.h），新表短于播放线程下标时退回到在播
+     * 条目，避免 `ter-music show`/Info 出现“正在出声却报无曲目”。 */
     BackendQueueEntry entry;
-    if (bq_entry_at(g_current_play_index, &entry) != 0) {
-        return;
+    int have_entry = 0;
+    if (g_current_play_index >= 0 && g_current_play_index < out->playlist_total) {
+        have_entry = (bq_entry_at(g_current_play_index, &entry) == 0);
+    }
+    if (!have_entry) {
+        if (g_play_state != PLAY_STATE_PLAYING && g_play_state != PLAY_STATE_PAUSED) {
+            return;
+        }
+        if (bq_pinned_entry(&entry) != 0) {
+            return;
+        }
+        have_entry = 1;
     }
 
     out->valid = 1;
@@ -596,9 +613,13 @@ void info_playback_snapshot(InfoPlayback *out)
     out->volume_percent = get_volume_percent();
     out->speed = g_playback_speed;
     out->play_mode = g_play_mode;
-    out->can_seek = (g_current_play_index >= 0 &&
-                     g_current_play_index < bq_count() &&
-                     out->duration_seconds > 0);
+    /* 可寻址的条件与曲目上报同源：队列里已不含该位置时，只要播放线程还在出声
+     * （Queue.Set 只替换未来曲目），进度依然是可以 seek 的 */
+    int index_valid = (g_current_play_index >= 0 &&
+                       g_current_play_index < bq_count());
+    int sounding = (g_play_state == PLAY_STATE_PLAYING ||
+                    g_play_state == PLAY_STATE_PAUSED);
+    out->can_seek = (index_valid || sounding) && out->duration_seconds > 0;
     if (out->duration_seconds > 0 && out->position_seconds > out->duration_seconds) {
         out->position_seconds = out->duration_seconds;
     }
@@ -737,12 +758,53 @@ int info_format_audio_summary(char *out, size_t out_size)
 
 void info_release_cover_cache(void)
 {
-    g_cover_cache.valid = 0;
-    g_cover_cache.path[0] = '\0';
-    g_cover_cache.cols = 0;
-    g_cover_cache.rows = 0;
-    g_cover_cache.charset = -1;
-    g_cover_cache.text[0] = '\0';
+    for (int i = 0; i < INFO_COVER_CACHE_SLOTS; i++) {
+        memset(&g_cover_cache[i], 0, sizeof(g_cover_cache[i]));
+        g_cover_cache[i].charset = -1;
+    }
+    g_cover_cache_clock = 0;
+}
+
+/* 命中已有槽返回它的下标；未命中返回 -1 */
+static int cover_cache_find(const char *cover_path, int cols, int rows, int charset)
+{
+    for (int i = 0; i < INFO_COVER_CACHE_SLOTS; i++) {
+        InfoCoverCache *slot = &g_cover_cache[i];
+        if (slot->valid &&
+            slot->cols == cols &&
+            slot->rows == rows &&
+            slot->charset == charset &&
+            strcmp(slot->path, cover_path) == 0) {
+            slot->used = ++g_cover_cache_clock;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* 取一槽放新结果：优先空槽，否则淘汰最久未用的一槽 */
+static InfoCoverCache *cover_cache_slot(const char *cover_path, int cols, int rows, int charset)
+{
+    InfoCoverCache *victim = &g_cover_cache[0];
+    for (int i = 0; i < INFO_COVER_CACHE_SLOTS; i++) {
+        InfoCoverCache *slot = &g_cover_cache[i];
+        if (!slot->valid) {
+            victim = slot;
+            break;
+        }
+        if (slot->used < victim->used) {
+            victim = slot;
+        }
+    }
+
+    memset(victim, 0, sizeof(*victim));
+    victim->cols = cols;
+    victim->rows = rows;
+    victim->charset = charset;
+    snprintf(victim->path, sizeof(victim->path), "%s", cover_path);
+    victim->used = ++g_cover_cache_clock;
+    victim->valid = 1;
+    return victim;
 }
 
 int info_cover_text(int cols, int rows, int charset, char *out, size_t out_size)
@@ -774,45 +836,37 @@ int info_cover_text(int cols, int rows, int charset, char *out, size_t out_size)
         charset = INFO_COVER_BRAILLE;
     }
 
-    if (g_cover_cache.valid &&
-        g_cover_cache.cols == cols &&
-        g_cover_cache.rows == rows &&
-        g_cover_cache.charset == charset &&
-        strcmp(g_cover_cache.path, cover_path) == 0) {
-        snprintf(out, out_size, "%s", g_cover_cache.text);
+    int hit = cover_cache_find(cover_path, cols, rows, charset);
+    if (hit >= 0) {
+        snprintf(out, out_size, "%s", g_cover_cache[hit].text);
         return out[0] != '\0' ? 1 : 0;
     }
 
+    InfoCoverCache *slot = cover_cache_slot(cover_path, cols, rows, charset);
     int rc;
     if (charset == INFO_COVER_ASCII) {
         rc = generate_ascii_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
-                                        cols, rows, g_cover_cache.text,
-                                        sizeof(g_cover_cache.text));
+                                        cols, rows, slot->text,
+                                        sizeof(slot->text));
     } else if (charset == INFO_COVER_HALF) {
         rc = generate_halfblock_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
-                                            cols, rows, g_cover_cache.text,
-                                            sizeof(g_cover_cache.text));
+                                            cols, rows, slot->text,
+                                            sizeof(slot->text));
     } else {
         rc = generate_braille_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
-                                          cols, rows, g_cover_cache.text,
-                                          sizeof(g_cover_cache.text));
+                                          cols, rows, slot->text,
+                                          sizeof(slot->text));
     }
 
     if (rc != 0) {
         log_debug("info", "Cover text generation failed for '%s' (%dx%d)",
                   cover_path, cols, rows);
-        g_cover_cache.valid = 0;
-        g_cover_cache.text[0] = '\0';
+        slot->valid = 0;
+        slot->text[0] = '\0';
         return 0;
     }
 
-    g_cover_cache.valid = 1;
-    g_cover_cache.cols = cols;
-    g_cover_cache.rows = rows;
-    g_cover_cache.charset = charset;
-    snprintf(g_cover_cache.path, sizeof(g_cover_cache.path), "%s", cover_path);
-
-    snprintf(out, out_size, "%s", g_cover_cache.text);
+    snprintf(out, out_size, "%s", slot->text);
     info_sanitize_utf8(out);
     return out[0] != '\0' ? 1 : 0;
 }

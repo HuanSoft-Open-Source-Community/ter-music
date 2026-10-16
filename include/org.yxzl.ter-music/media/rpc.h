@@ -8,12 +8,16 @@
  *
  * 约定（详见 docs/API_DBUS_en_US.md）：
  *  - 复杂载荷一律 JSON 字符串，用 util/json.c 的追加式写入器生成；
- *  - 单响应硬上限 RPC_PAYLOAD_MAX，超出返回 Error.TooLarge，绝不截断；
+ *  - 单响应硬上限 RPC_PAYLOAD_MAX，超出返回 Error.TooLarge，绝不截断
+ *    （渲染结束必须用 util/json.h 的 json_writer_overflowed() 判定溢出）；
  *  - 分页默认 RPC_PAGE_DEFAULT 行、单次最多 RPC_PAGE_MAX 行；
- *  - 方法必须在媒体循环内非阻塞有界：目录扫描走 media/rpc_job.c 的
- *    后台任务，磁盘结果经信号通知前端；
+ *  - 方法必须在媒体循环内非阻塞有界：核心不做目录扫描，也没有后台任务，
+ *    磁盘结果一律由前端取得后经 Queue.Set/Append 下发；
  *  - 核心只接受**本地文件路径**：远程音乐源由前端负责（前端下载到本地
  *    缓存后再把路径交给核心），故核心不认识任何远程概念。
+ *  - 队列（Queue）契约：内容由前端整表或分块下发，单发条目数上限
+ *    BQ_SET_MAX（500），超过即回 Error.InvalidArgs 并提示先 Set 后 Append；
+ *    `Set` 只替换**未来曲目**，当前播放不中断（见 queue/backend_queue.h）。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -39,13 +43,19 @@
  *     Control.OpenPath 与 MPRIS OpenUri 只接受本地路径，Info 快照不再带
  *     远程来源标记字段；Queue 从“曲目下标”改为**本地路径**语义。
  * 4 = 内容归前端：Playlist/Library/Favorites/History/DirHistory 与后台扫描
- *     任务整体撤下，Control.OpenPath/PlayIndex 与 Queue.Rebuild 一并撤下，
- *     队列内容只能经 Queue.Set/Append/InsertAfter 下发。
+ *     任务整体撤下，Control.OpenPath/PlayIndex 与 Queue.Rebuild（含自省段）
+ *     一并撤下，队列内容只能经 Queue.Set/Append/InsertAfter 下发；单发条目数
+ *     上限 BQ_SET_MAX，超出回 Error.InvalidArgs（前端须分块：先 Set 后 Append）。
  * 前端在接入时校验 core.api_version >= 4，不兼容则提示“核心过旧”并退出。 */
 #define TER_MUSIC_API_VERSION 4
 
 /* 单响应硬上限（256 KB）：任何 JSON 回复超过它都返回 Error.TooLarge */
 #define RPC_PAYLOAD_MAX 262144
+
+/* 倍速合法范围：MPRIS Rate/MinimumRate/MaximumRate 与 Control.SetSpeed 共用
+ * 同一口径（player/player_local.c 的钳制区间一致），不做两套上限。 */
+#define RPC_RATE_MIN 0.5
+#define RPC_RATE_MAX 3.0
 
 /* 分页：未指定 count 时用默认值；超过上限回 Error.InvalidArgs */
 #define RPC_PAGE_DEFAULT 200
@@ -107,6 +117,7 @@ typedef struct {
     PlayState play_state;
     int loop_mode;  /* PlayMode value */
     int volume_percent;
+    double rate;               /* 实际倍速（MPRIS Rate） */
     int can_seek;
     int64_t position_us;
     int64_t length_us;
@@ -173,8 +184,13 @@ void rpc_frontend_reset_registry(void); /* 关闭 D-Bus 时清空注册表 */
 void rpc_control_emit_status(unsigned long long seq, const char *message);
 void rpc_control_emit_error(const char *source, const char *name, const char *message);
 
-/* 队列变更广播与状态 */
+/* 队列变更广播与状态。
+ * QueueChanged 有两个来源：D-Bus 写方法（Set/Append/…）在处理器里同步广播；
+ * 核心内部的游标/顺序变化（自动续播、随机重排、播放模式重建）只递增后端队列
+ * 修订号，由媒体循环每轮的 rpc_queue_sync() 比对后补发——D-Bus 发送只允许发生
+ * 在媒体循环线程，播放线程不得直接发消息。 */
 void rpc_queue_emit_changed(void);
+void rpc_queue_sync(void);
 unsigned long long rpc_queue_revision(void);
 
 /* 配置变更广播（内容侧已撤下，配置仍属后端） */

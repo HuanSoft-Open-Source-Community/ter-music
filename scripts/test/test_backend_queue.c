@@ -3,9 +3,11 @@
  *
  * 运行：scripts/test/run-unit-tests.sh test_backend_queue
  * 依赖（见 test_backend_queue.srcs）：queue/backend_queue.c + 日志桩
+ * （util/json.c 由 run-unit-tests.sh 统一链接，溢出探测用它）
  */
 
 #include "queue/backend_queue.h"
+#include "util/json.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -267,6 +269,136 @@ static void test_render(void)
     bq_shutdown();
 }
 
+/* 生成裸数组载荷：[{"path":"/bulk/<start>…"},…]，共 n 条 */
+static void build_bulk(char *json, size_t capacity, int start, int n)
+{
+    size_t pos = 0;
+    json[pos++] = '[';
+    for (int i = 0; i < n; i++) {
+        int appended = snprintf(json + pos, capacity - pos,
+                                "%s{\"path\":\"/bulk/%04d.mp3\"}",
+                                i == 0 ? "" : ",", start + i);
+        if (appended <= 0) {
+            break;
+        }
+        pos += (size_t)appended;
+    }
+    json[pos++] = ']';
+    json[pos] = '\0';
+}
+
+/* 契约：单发条目数超过 BQ_SET_MAX 必须整体拒绝（回 BQ_ERR_TOO_MANY），
+ * 绝不允许“收下前 500 条却报告成功”的静默截断 */
+static void test_over_limit_rejected(void)
+{
+    bq_init();
+
+    size_t capacity = (size_t)(BQ_SET_MAX + 120) * 32 + 256;
+    char *json = malloc(capacity);
+    CHECK(json != NULL, "分配超限载荷缓冲");
+    if (!json) {
+        bq_shutdown();
+        return;
+    }
+
+    build_bulk(json, capacity, 0, BQ_SET_MAX + 1);
+    CHECK(bq_set_json(json) == BQ_ERR_TOO_MANY, "Set 单发超过 BQ_SET_MAX 被拒");
+    CHECK(bq_count() == 0, "超限的 Set 未改动队列");
+    CHECK(bq_append_json(json) == BQ_ERR_TOO_MANY, "Append 单发超过 BQ_SET_MAX 被拒");
+    CHECK(bq_count() == 0, "超限的 Append 未改动队列");
+    CHECK(bq_insert_after_json(-1, json) == BQ_ERR_TOO_MANY, "InsertAfter 同样拒绝超限");
+
+    /* 正好 BQ_SET_MAX 条是合法的（前端按上限分块） */
+    build_bulk(json, capacity, 0, BQ_SET_MAX);
+    CHECK(bq_set_json(json) == BQ_SET_MAX, "Set 单发正好 BQ_SET_MAX 条被接受");
+    CHECK(bq_count() == BQ_SET_MAX, "上限内的 Set 全量入队");
+
+    free(json);
+    bq_shutdown();
+}
+
+/* 分块下发：Set(500) + Append(100) 之后必须是完整的 600 条且顺序一致 */
+static void test_chunked_set_then_append(void)
+{
+    bq_init();
+
+    size_t capacity = (size_t)BQ_SET_MAX * 32 + 256;
+    char *json = malloc(capacity);
+    CHECK(json != NULL, "分配分块缓冲");
+    if (!json) {
+        bq_shutdown();
+        return;
+    }
+
+    build_bulk(json, capacity, 0, BQ_SET_MAX);
+    CHECK(bq_set_json(json) == BQ_SET_MAX, "首块 Set 写入 500 条");
+    build_bulk(json, capacity, BQ_SET_MAX, 100);
+    CHECK(bq_append_json(json) == 100, "次块 Append 写入 100 条");
+    CHECK(bq_count() == BQ_SET_MAX + 100, "分块后总数 600");
+
+    int ordered = 1;
+    for (int i = 0; i < BQ_SET_MAX + 100; i++) {
+        char path[MAX_PATH_LEN];
+        snprintf(path, sizeof(path), "/bulk/%04d.mp3", i);
+        if (bq_position_of_path(path) != i) {
+            ordered = 0;
+            break;
+        }
+    }
+    CHECK(ordered, "600 条的顺序与下发一致");
+
+    free(json);
+    bq_shutdown();
+}
+
+/* Set 的语义契约：整表替换只作用于未来曲目，替换前的游标条目记为“在播条目”，
+ * 播放线程的下标越界时上层（MPRIS/Info）仍能据此如实上报正在出声的曲目 */
+static void test_pinned_entry_on_set(void)
+{
+    bq_init();
+    bq_set_json(k_payload);          /* 3 条 */
+    bq_set_position(2);              /* /music/b/03.flac */
+
+    BackendQueueEntry pinned;
+    CHECK(bq_set_json("[{\"path\":\"/short/a.mp3\"}]") == 1, "Set 换成 1 条短表");
+    CHECK(bq_pinned_entry(&pinned) == 0, "Set 后仍能取回在播条目");
+    CHECK(strcmp(pinned.path, "/music/b/03.flac") == 0, "在播条目即原游标条目");
+    CHECK(strcmp(pinned.title, "B1") == 0, "在播条目的元数据完整");
+    CHECK(bq_position() == 0, "新表游标置首");
+
+    /* 游标被显式移动：在播记录跟着刷新，不会长期滞留旧条目 */
+    bq_play_at(0);
+    CHECK(bq_pinned_entry(&pinned) == 0 &&
+          strcmp(pinned.path, "/short/a.mp3") == 0, "PlayAt 之后在播条目刷新");
+
+    /* 空队列没有在播条目 */
+    bq_init();
+    CHECK(bq_pinned_entry(&pinned) == -1, "空队列取不到在播条目");
+
+    bq_shutdown();
+}
+
+/* 追加器的溢出探测：缓冲区写满时静默丢弃，渲染结束后必须能查出被截断 */
+static void test_render_overflow_probe(void)
+{
+    bq_init();
+    bq_set_json(k_payload);
+
+    char small[64];
+    size_t pos = bq_render_get(small, sizeof(small), 0, 3);
+    CHECK(json_writer_overflowed(sizeof(small), pos) == 1, "小缓冲渲染判定为溢出");
+    CHECK(pos + 1 == sizeof(small), "溢出时偏移停在上界（未越界写）");
+
+    char big[2048];
+    pos = bq_render_get(big, sizeof(big), 0, 3);
+    CHECK(json_writer_overflowed(sizeof(big), pos) == 0, "足够缓冲渲染判定为完整");
+    CHECK(strstr(big, "\"rows\":[") != NULL, "完整渲染含 rows 数组");
+
+    CHECK(json_writer_overflowed(0, 0) == 1, "零容量视为溢出");
+
+    bq_shutdown();
+}
+
 int main(void)
 {
     test_set_and_query();
@@ -277,6 +409,10 @@ int main(void)
     test_folder_subdirectories();
     test_local_path_guard();
     test_chunked_delivery();
+    test_over_limit_rejected();
+    test_chunked_set_then_append();
+    test_pinned_entry_on_set();
+    test_render_overflow_probe();
     test_render();
 
     printf("%d checks, %d failures\n", checks, failures);

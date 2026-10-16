@@ -7,6 +7,7 @@
 #       --attach-only 在没有核心时以退出码 3 明确失败。
 #   A5  前端 q 退出后核心继续播放；core_exit_when_no_frontend=true 时，
 #       最后一个前端离开并过宽限期后核心自行退出（无人接入过则不退）。
+#   A5′ 播放中按 F9 退出与 'q' 同路：前端没了，核心仍在总线、仍在播同一首。
 #
 # 用法：scripts/test/lifecycle-e2e.sh [--bin <ter-music>] [--keep]
 # 环境：需要会话总线（未设置时用 dbus-run-session）；需要 ffmpeg 造素材。
@@ -21,7 +22,7 @@ KEEP=0
 WORK_DIR=""
 
 usage() {
-    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
@@ -58,6 +59,7 @@ fi
 daemon_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
 
 cleanup() {
+    [ -n "${F9_DRIVER_PID:-}" ] && kill -9 "$F9_DRIVER_PID" 2>/dev/null
     "$TM_BIN" daemon stop >/dev/null 2>&1 || true
     for _ in $(seq 1 20); do
         daemon_up || break
@@ -127,6 +129,81 @@ if daemon_up; then
 else
     bad "TUI 退出后核心也没了"
 fi
+
+# ── A5′：F9 退出（与 q 对称，Task 9.5）───────────────────────────
+# F9 在 menus.c 的 handle_function_keys() 里只置 g_should_exit=1，与 'q' 走同一条
+# 正常退出路径；这里要在**正在播**的状态下验证：前端没了，核心必须还在总线上、
+# 还在播同一首（不能像早期版本那样把后台音乐一起停掉）。
+# 按键用 lifecycle-driver.py 的 drive 会话：F9 是 `\e[20~` 这样的多字节序列，
+# 必须一次写进 pty，ncurses 才会解成 KEY_F(9)（`run` 按字符发键做不到）。
+info "A5′ 播放中按 F9 退出：核心仍在总线且继续播放"
+
+snap_field() {   # $1 = 取值表达式（doc 已绑定）
+    "$TM_BIN" show --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+    print(eval(sys.argv[1], {"doc": doc}))
+except Exception:
+    print("?")' "$1" 2>/dev/null
+}
+
+F9_CTL="$WORK_DIR/f9.cmd"
+: > "$F9_CTL"
+python3 "$DRIVER" drive "$TM_BIN" "$WORK_DIR/music" "$WORK_DIR/f9-tui.log" \
+    --ctl "$F9_CTL" --rc-file "$WORK_DIR/f9.rc" --pid-file "$WORK_DIR/f9.pid" \
+    --max-runtime 60 >/dev/null 2>&1 &
+F9_DRIVER_PID=$!
+
+for _ in $(seq 1 40); do
+    [ "$(snap_field 'doc["track"]["queue_count"]')" = "3" ] && break
+    sleep 0.5
+done
+
+printf 'key:j\n' >> "$F9_CTL"          # 浏览器树首行是根目录节点：一次 j 落到第一个文件
+sleep 1
+printf 'key:<Enter>\n' >> "$F9_CTL"    # Enter 播放选中的文件（ui.c case 10）
+sleep 2
+
+f9_before="$(snap_field 'doc["playback"]["state"]')"
+f9_track_before="$(snap_field 'doc["track"]["path"]')"
+if [ "$f9_before" = "playing" ]; then
+    ok "F9 之前确实在播（state=$f9_before，track=${f9_track_before##*/}）"
+else
+    bad "F9 之前没进入播放（state=$f9_before，track=${f9_track_before##*/}）"
+fi
+
+printf 'key:<F9>\n' >> "$F9_CTL"
+for _ in $(seq 1 20); do
+    kill -0 "$F9_DRIVER_PID" 2>/dev/null || break
+    sleep 0.5
+done
+f9_pid="$(cat "$WORK_DIR/f9.pid" 2>/dev/null)"
+if [ -n "$f9_pid" ] && kill -0 "$f9_pid" 2>/dev/null; then
+    bad "按 F9 之后 TUI 仍在运行（退出键没生效）"
+else
+    f9_rc="$(cat "$WORK_DIR/f9.rc" 2>/dev/null)"
+    if [ "$f9_rc" = "0" ]; then
+        ok "按 F9 的 TUI 已正常退出（退出码 0，与 'q' 同一条路径）"
+    else
+        bad "按 F9 的 TUI 退出码不是 0（实测 '${f9_rc:-空}'）"
+    fi
+fi
+
+if daemon_up; then
+    ok "F9 退出后核心仍在总线上（daemon status 可见）"
+else
+    bad "F9 退出把核心也带走了（daemon status 查不到实例）"
+fi
+f9_after="$(snap_field 'doc["playback"]["state"]')"
+f9_track_after="$(snap_field 'doc["track"]["path"]')"
+if [ "$f9_after" = "playing" ] && [ "$f9_track_after" = "$f9_track_before" ]; then
+    ok "F9 退出后核心仍在播同一首（state=$f9_after，track=${f9_track_after##*/}）"
+else
+    bad "F9 退出后播放被打断或换了曲目（state=$f9_after，track ${f9_track_before##*/} → ${f9_track_after##*/}）"
+fi
+kill -9 "$F9_DRIVER_PID" 2>/dev/null
+F9_DRIVER_PID=""
 
 # ── A1：--attach-only ────────────────────────────────────────────
 info "A1 --attach-only 在没有核心时以退出码 3 失败"

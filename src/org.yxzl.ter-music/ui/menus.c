@@ -309,7 +309,17 @@ int load_temp_playlist(void)
 
 void add_history_entry(Track *track)
 {
-    if (!track || g_play_history.count >= MAX_HISTORY_COUNT) return;
+    if (!track) return;
+
+    /* 同一首连续重复播放不重复写入历史（Task 5.1）：与最近一条同路径即视为重复，
+     * 只刷新它的播放时间，不再新增内存条目、也不再落库（避免历史里连排多条同名）。 */
+    if (g_play_history.count > 0 &&
+        strcmp(g_play_history.entries[0].path, track->path) == 0) {
+        g_play_history.entries[0].play_time = time(NULL);
+        return;
+    }
+
+    if (g_play_history.count >= MAX_HISTORY_COUNT) return;
     log_debug("menu_views", "add_history_entry: '%s' - '%s'", track->title, track->artist);
 
     if (g_play_history.count > 0) {
@@ -889,18 +899,6 @@ void rerender_active_view(void)
     }
 }
 
-void toggle_ui_language(void)
-{
-    if (strcmp(g_app_config.ui_language, "zh_CN") == 0)
-        strcpy(g_app_config.ui_language, "en_US");
-    else
-        strcpy(g_app_config.ui_language, "zh_CN");
-    i18n_reload(g_app_config.ui_language);
-    player_config_persist();
-    help_free_lines();
-    rerender_active_view();
-}
-
 /* ============================================================
  * Function keys
  * ============================================================ */
@@ -918,9 +916,10 @@ void handle_function_keys(int fkey)
         case KEY_F(7): switch_to_view(VIEW_LANGUAGE); break;
         case KEY_F(8): switch_to_view(VIEW_HELP); break;
         case KEY_F(9):
-            cleanup();
-            printf("%s\n", i18n_get("app.exit_clean"));
-            exit(0);
+            /* 与 'q' 走同一条正常退出路径（Task 4.3）：只置退出标志，交由主循环
+             * break → main 的 player_shutdown/cleanup 顺序收尾。remote 下不能在此
+             * 直接 cleanup()+exit(0)，否则会误停后台音乐、与 'q' 不一致。 */
+            g_should_exit = 1;
             break;
         default: break;
     }

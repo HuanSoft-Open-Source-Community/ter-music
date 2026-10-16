@@ -3,12 +3,26 @@ ter-music Quick Start Guide
 
 1. Starting
 -----------
-  ter-music [options]
+  ter-music [options] [path]   Go straight into the TUI
+  ter-music tui [path]         Enter the TUI explicitly
+  ter-music <command> [options] CLI mode (see section 19)
 
-  Options:
-    -o, --open <path>  Open a music directory or audio file at startup
-    -d, --debug        Enable debug logging
-    -h, --help         Show help message
+  TUI options:
+    -o, --open <path>  Open a music directory, audio file or remote URL at startup
+    -d, --debug        Enable debug logging (ter-music-debug.log)
+    -v, --version      Print the version
+    -h, --help         Show usage
+    --frontend=local   Migration baseline: this process makes the sound itself
+                       (the default is remote — playback is left to the core)
+    --attach-only      Only attach to an already running core; fail if there is none
+    --bus <name>       Target instance bus name (default: the primary instance)
+
+  Process model: the default is "resident core + front end". The TUI is only a
+  front end; the audio comes from the core process. When no core runs, the front
+  end starts one in the background (inside a Linyaps container it requests D-Bus
+  activation instead). The core only plays the queue of local paths the front end
+  delivers; the library, playlists, favorites, history and remote sources are all
+  front-end data. The TUI must run in a real terminal — do not pipe its output.
 
   Examples:
     ter-music -o ~/Music
@@ -23,7 +37,7 @@ ter-music Quick Start Guide
   |                           |                   |
   | Control Bar (bottom)       |                   |
   | [<<] [>||] [>>] [Stop]    |                   |
-  | [Mode] [Speed] [Progress]  |                   |
+  | [Mode] [Speed] [Vol] [Progress]                |
   +---------------------------+-------------------+
   | F1:Home F2:Settings ... F8:Help F9:Quit      |
   +----------------------------------------------+
@@ -34,17 +48,20 @@ ter-music Quick Start Guide
   C            Focus to control bar
   L            Focus to list area
   Tab/Shift+Tab  Toggle file browser / play queue view
+  (While lyric seek mode is active, Tab switches the lyric source instead —
+   see section 10.)
 
 4. List Area Controls (File Browser or Queue)
 ----------------------------------------------
   Navigation:
   ↑/↓  or  j/k     Select track up/down
-  Enter or Space    Play selected track
+  Enter or Space    Play selected track (on a directory row in the file browser
+                    view it expands/collapses instead)
 
   Playback:
   n                 Next track
   p                 Previous track
-  h                 Show playback history popup
+  h                 Show the playback history popup (ENTER plays, ESC cancels)
 
   Queue Management:
   a                 Append track to play queue
@@ -55,13 +72,16 @@ ter-music Quick Start Guide
   K                 Move track up in queue
 
   Playlists & Favorites:
-  A                 Add to a custom playlist (opens selection popup)
+  A                 Add to a custom playlist (opens a selection popup; create a
+                    playlist in F4 first)
   F / f             Add to favorites
   O / o             Open a music folder
+  I                 Append a music folder to the current list
 
   Search & Browse:
   S  or  /          Search tracks (pinyin supported)
-  M                 Toggle music library browser
+  M                 Toggle the library browser
+  + / -             Volume up / down (5% per step)
 
   Quick Play Modes:
   1                 Sequential
@@ -70,104 +90,135 @@ ter-music Quick Start Guide
   4                 Shuffle Repeat
   5                 Folder Sequential
 
+  The main view also takes the mouse: click the bottom function-key bar to switch
+  pages, click the list or control bar to select and play.
+
 5. Control Bar (when focused with C)
 -------------------------------------
   ←/→              Select control button
   Space             Activate selected button / open popup menu
+  ↑/↓               Adjust volume while the [Vol] button is selected
   ,                 Seek backward 5 seconds
   .                 Seek forward 5 seconds
   +/=               Increase volume
   -/_               Decrease volume
-  Ctrl+L             Toggle lyric seek mode; ↑/↓ then navigates lyrics
+  Ctrl+L             Toggle lyric seek mode; ↑/↓ then jumps line by line to each
+                     lyric timestamp
 
   Control Buttons:
-  [<<]    Previous track
-  [>||]   Play / Pause
-  [>>]    Next track
-  [Stop]  Stop playback
-  [Mode]  Play mode (ENTER to choose from 17 modes)
-  [Speed] Playback speed (popup: 0.75x - 3.0x)
-  [Vol]   Volume slider (popup)
+  [<<]       Previous track
+  [>||]      Play / Pause
+  [>>]       Next track
+  [Stop]     Stop playback
+  [Mode]     Play mode (the popup lists the modes currently available)
+  [Speed]    Playback speed (popup: 0.75x / 1.00x / 1.25x / 1.50x / 2.00x / 3.00x)
+  [Vol]      Volume popup (0-100, 5% steps)
+  [Progress] Current playback progress
 
-6. Play Modes (17 modes)
+6. Play Modes (17 in total)
 -------------------------
-  Basic modes (always available):
-    Sequential        Play through list, stop at end
-    Single Repeat     Repeat current track
-    List Repeat       Repeat entire list
-    Shuffle Once      Shuffle, play each track once
-    Shuffle Repeat    Continuous shuffle
+  Basic modes (always available, 5):
+    Sequential      Play through the list, stop at the end
+    Single Repeat   Repeat the current track
+    List Repeat     Repeat the whole list
+    Shuffle Once    Shuffle, play each track once
+    Shuffle Repeat  Continuous shuffle
 
-  Advanced modes (require SQLite library metadata):
-    Folder*           Scoped to current directory
-    Album*            Scoped by album tag
-    Artist*           Scoped by artist tag
-    (* each has Sequential/Repeat/Shuffle/Shuffle Repeat variants)
+  Folder modes (4, offered in the file browser view):
+    Folder Sequential / Repeat / Shuffle / Shuffle Repeat — scoped to the
+    current directory
 
-  Press ENTER on the [Mode] button to open the popup menu.
-  Enable advanced modes in Settings -> Play Mode.
+  Advanced modes (8, require album and artist tags in the SQLite library):
+    Album Sequential / Repeat / Shuffle / Shuffle Repeat
+    Artist Sequential / Repeat / Shuffle / Shuffle Repeat
+
+  Press Space on the [Mode] button to open the popup menu.
+  Pick the default mode and enable "Advanced Play Modes" in Settings -> Play Mode.
 
 7. Function Keys (F1-F9)
 -------------------------
-  F1  Home (return to main view)
-  F2  Settings (theme, paths, playback, equalizer, etc.)
-  F3  History (browse playback history)
+  F1  Home (return to the main view)
+  F2  Settings (theme, path, playback, play mode, hotkeys, remote devices,
+        equalizer, info display)
+  F3  Folder history (music folders you opened: ENTER loads, A appends to the
+        queue, D removes the entry, C clears all)
   F4  Playlists (manage and create playlists)
   F5  Favorites (view and manage favorite tracks)
-  F6  Info (version and project info)
-  F7  Lang (open language selection view)
-  F8  Help (this page)
-  F9  Quit
+  F6  About (version and project info)
+  F7  Language (language manager: ENTER switches, A adds a pack, D deletes)
+  F8  Help (this page; / searches, ↑/↓ scroll)
+  F9  Quit the front end (the core keeps playing by default)
+  ESC followed by 1..9 equals F1..F9; q / Q takes the same exit path as F9.
 
-8. Music Library Browser
+8. Library Browser (M)
 ------------------------
-  Press M to toggle library browser.
-  Navigate: Home -> Artists -> Albums -> Tracks
-  Use ↑/↓ to select, Enter to drill down.
-  Press M again or Esc to return to folder browsing.
+  Press M to enter/leave the library browser. Its data is the front-end library
+  (library.db); without a database M does nothing.
+  Home menu (4 entries): Artists / Albums / Genres / All Tracks — ↑/↓ selects,
+  Enter or Space enters.
+  Hierarchy: Home -> Artists -> Albums -> Tracks; Home -> Albums -> Tracks;
+             Home -> Genres -> Tracks; Home -> All Tracks.
+  In a track list:
+    ↑/↓          Select track
+    Enter/Space  Play the selected track (it is appended to the current list
+                 first when missing, then the browser closes)
+    a / A        Append the selected track to the current playlist
+    ESC          Go back one level (at Home it leaves the browser)
+  Extra Home keys: S/s scan a directory, R/r rescan all roots, M or ESC leaves.
 
 9. Search
 ----------
   Press S or / in the main view to enter search mode.
   Type keywords, Enter to filter results.
   Navigate with ↑/↓, Enter to play.
-  Press Esc to cancel.
+  Press Esc to cancel (an async search in progress is aborted).
   Supports pinyin search (e.g., "zhou" finds "Jay Chou").
 
 10. Lyrics
 -----------
-  Priority order: embedded lyrics (FFmpeg/APE) > .lrc file > vinyl animation
+  Priority order: embedded lyrics (FFmpeg/APE) > .lrc file > vinyl + spectrum animation
   .lrc files in the same directory are loaded automatically.
   Embedded lyrics (in ID3/APE tags) take priority when available.
-  Switch between embedded/external: Ctrl+L → Tab (in lyric seek mode).
-  Toggle lyrics panel in Settings.
-  Supports alignment: left, center, right.
+  Ctrl+L enters/leaves lyric seek mode: ↑/↓ moves the cursor and seeks to that
+  line's timestamp.
+  It works in both front-end modes — the seek goes through the player facade to
+  the core instead of a local progress tracker.
+  Switch between embedded/external: Ctrl+L then Tab (in lyric seek mode); the
+  preference is recorded by the front end in its own library.
+  Toggle the lyrics panel in Settings; alignment can be left, center or right.
 
 11. CUE Split-track Support
 ----------------------------
-  CUE sheets for FLAC/APE/WV are parsed automatically.
+  A .cue sheet named like the audio file is parsed automatically (typical for
+  FLAC/APE/WV image files).
   Sub-tracks appear with a [CUE] prefix in the playlist.
-  CUE file encoding is auto-detected (configurable in Settings):
+  CUE file encoding is auto-detected (Settings -> Playback):
     Auto / UTF-8 / GB18030 / GBK / BIG5 / Shift-JIS
 
 12. Equalizer
 -------------
   10-band ISO graphic equalizer (31Hz - 16kHz).
-  Adjust in Settings -> Equalizer.
-  Use ←/→ to select band, ↑/↓ to adjust gain (±12dB).
-  Pre-amp range: ±12dB.
-  Soft-clip and EQ presets are available in the popup menu.
+  Tune it in the Settings -> Equalizer section: ←/→ selects a band, ↑/↓ changes
+  the gain (±12dB), ENTER toggles the master switch; pre-amp is also ±12dB.
+  Press P to open the separate "EQ Preset" popup (Rock, Pop, Classical, Jazz,
+  Electronic, Vocal, Bass Boost, Live, Balanced, Flat — 10 presets). A preset
+  changes band gains only and keeps the pre-amp.
+  The output stage uses tanh soft clipping, so stacked boosts do not wrap around.
 
 13. Remote Playback
 -------------------
   Supports SMB/SFTP/FTP/WebDAV/HTTP protocols.
   Configure connections in Settings -> Remote Devices.
-  Remote URL can also be passed directly on the command line:
+  The front end lists a remote folder and downloads tracks into a local cache,
+  then hands those local paths to the core.
+  A remote URL can also be passed directly on the command line into the TUI:
     ter-music ftp://user:password@host/path/
+  CLI `play` and `daemon start --open` reject remote URLs: the core only plays
+  local paths.
 
 14. Playlist Management
 -----------------------
-  Press F4 to open playlist manager.
+  Press F4 to open the playlist manager.
   Create, rename, and delete playlists.
   Press A (uppercase) in the main view to add a track to a custom playlist.
 
@@ -179,11 +230,17 @@ ter-music Quick Start Guide
 16. Album Art
 -------------
   Enable album cover display in Settings.
-  Covers are rendered as braille dot art in the terminal.
-  Embedded artwork is preferred; otherwise common same-directory files
-  are used (cover/folder/front/album with jpg/jpeg/png/webp extensions).
-  When MPRIS is active, album art is also published as mpris:artUrl
-  so desktop media widgets can display the cover.
+  Covers are rendered as character art in the terminal (braille, ASCII or half
+  blocks).
+  Embedded artwork is preferred; otherwise common same-directory files are used
+  (cover/folder/front/album with jpg/jpeg/png/webp extensions).
+  The character art is generated on demand: on a track change the D-Bus
+  CoverChanged signal only announces "the cover changed" with an empty text
+  argument, and the actual art is fetched via Info.GetCoverArt (cached per size).
+  With D-Bus enabled the cover is also published as mpris:artUrl so desktop
+  media widgets can display it.
+  The CLI can print the current cover directly:
+    ter-music cover [--width --height --charset]
 
 17. Info Bar & Audio Backend
 ----------------------------
@@ -191,41 +248,143 @@ ter-music Quick Start Guide
     Sample Rate, Bit Depth, Bitrate, Codec
 
   Audio backend auto-detection priority: PipeWire > PulseAudio > ALSA
-  Switch manually in Settings -> Audio:
-    Auto, PipeWire, PulseAudio, ALSA
+  Switch it manually in the Settings -> Playback "Audio Backend" entry:
+    Auto, PipeWire, PulseAudio, ALSA (applies on next startup)
+  The "Latency" entry opens a 20–250 ms popup; it takes effect on next playback.
+
+  The Settings -> Info Display section (preset, fields, text cover size and
+  charset, progress style, lyric lines) affects only `ter-music show` and the
+  D-Bus Info.GetDisplay/GetInfo output — it does not change the TUI layout.
 
 18. Configuration & Data
 -------------------------
-  Config file:  ~/.config/ter-music/config.xml  (v2.2 XML format)
-  Library DB:   ~/.config/ter-music/library.db   (SQLite)
-  Queue:        ~/.config/ter-music/queue.txt    (persistent queue)
-
-  Album cover cache is managed automatically under /tmp/ter-music-cover-*.jpg
-  (last 10 tracks, removed on exit).
+  Config:   ~/.config/ter-music/config.xml, written only by the core (XML version
+            attribute 2.2, internal config contract version 7).
+            A front end changes its own mirror and sends the difference via
+            Config.Set.
+  Content:  ~/.config/ter-music/library.db, the front-end SQLite library: track
+            metadata, scan roots, play history, favorites, playlists and their
+            tracks, folder history and the temporary playlist.
+  Queue:    There is no queue.txt any more. The front end scans content and
+            delivers the play queue in chunks (at most 500 entries per call: the
+            first Queue.Set, the rest Queue.Append); the core never persists a
+            queue, and the front end re-delivers the whole list after a reconnect.
+            The resume cursor comes from the resume session fields, not from a
+            queue file.
+  Resume:   The core writes the last track and position to the configuration on
+            every track change, and the front end restores from it at startup.
+            The switch is the config key resume_last_playback (it is not in the
+            settings list); turn it off with
+            `ter-music config set resume_last_playback 0`.
+  Cover cache is managed automatically under /tmp/ter-music-cover-*.jpg
+  (the 10 least-recently-used covers are evicted, everything is removed on exit).
 
   Migration from v1 (config.json + JSON files) is automatic on first run.
 
-19. Tips & Tricks
-------------------
-  Press ? or h in the main view for keyboard shortcut help.
-  The UI adapts automatically when the terminal is resized.
-  Playback state is saved on exit (can be disabled in Settings).
-  Ctrl+C exits safely.
-  The settings sidebar uses ENTER to open option menus (no +/- keys needed).
-
-20. MPRIS & Lyrics API
+19. Command Line (CLI)
 ----------------------
-  With D-Bus available, Ter-Music registers an MPRIS media session for
-  desktop playback controls and album art (mpris:artUrl).
+  `ter-music help` prints the full usage. Every subcommand is a pure D-Bus
+  client that talks to the primary instance (daemon or TUI); use
+  `--bus <name>` after the subcommand to address a secondary instance.
 
-  An open lyrics API is exposed on the same D-Bus object:
-    Interface:  org.yxzl.ter_music.Lyrics
-    Method:     GetLyrics() -> s
-    Signal:     LyricsChanged(s)
+  Playback control:
+    play <path> [--index N] [--mode MODE] [--foreground] [--quiet]
+      · With a path: this process scans it and delivers the local path queue in
+        chunks, then plays. Paths accept ~ and relative forms; pointing at a
+        single audio file plays exactly that file.
+      · No path, no --index: keep playing the core's current queue
+        (Control.Play); it errors out when nothing can be played.
+      · No path but --index: load the configured default music folder
+        (default_startup_path, else last_opened_path when remember_last_path is
+        on), deliver it, then PlayAt(N). N is 0-based and counts entries of the
+        loaded content.
+      · --mode: applied after the queue is delivered (shuffle-like modes reorder
+        the execution order in place).
+      · --foreground: this process becomes the foreground core and plays; no
+        background instance is created. Refused when a primary instance exists.
+    pause | resume | toggle | stop | next | prev
+    seek <+secs|-secs|mm:ss|N%>  Relative / absolute / percentage seek
+    volume [0-100|+N|-N]          Read or set the volume
+    speed  [0.5-3.0]              Read or set the playback rate
+    mode   [name|0-16]            Read or set the play mode
+
+  Queue editing (acts on the core's play queue):
+    queue list [--offset N] [--count N]  Paged listing (count 0 = default 200,
+                                         max 1000)
+    queue append <path>[,<path>...]       Append local files to the end
+    queue insert <pos> <path>             Insert a local file after a position
+    queue remove <pos>                    Remove the entry at a position (0-based)
+    queue clear                           Empty the queue
+    queue shuffle                         Shuffle (current entry first, rest random)
+
+  Configuration (reuses the core Config interface, keys are config.xml names):
+    config get [key]              Full JSON, or one value by key
+    config set <key> <value>      Write one scalar (cast/clamped per the schema)
+    config reload                 Ask the core to re-read the config file
+    config reset --yes            Restore all defaults (explicit --yes required)
+
+  Information output:
+    show [--json|--watch[=ms]|--one-line|--full|--compact|--preset|--fields
+          --cover|--no-cover|--cover-size|--charset|--progress|--lyrics|--width]
+                                  Current playback info (as configured in
+                                  Settings -> Info Display)
+    track                         Human-readable info about the current track
+    cover [--width N --height N --charset braille|ascii|half]
+                                  Text cover of the current track
+    lyrics [--lines N]            Current lyric line context, or the whole timed
+                                  document with --lines N
+
+  Background player:
+    daemon start [--open PATH] [--debug] [--force]
+    daemon foreground [--debug] [--force]
+        Note: the core scans nothing, --open is only informational; use `play`
+        to deliver a queue.
+    daemon stop [--force] [--all] | restart | status [--json] | reload
+
+  Other: version | --version | help | --help | tui
+
+  Exit codes: 0 success; 1 usage error; 3 no running instance; 4 D-Bus not
+  available; 5 the instance refused or the operation failed.
+
+20. Tips & Tricks
+------------------
+  Press F8 for this help page (/ searches, ↑/↓ scroll three lines).
+  Press h for the play-history popup; F3 is the folder-history view — they are
+  not the same thing.
+  Every settings entry opens its option menu with ENTER (no +/- keys needed).
+  Settings -> Default Path now holds "Reload Config" and "Restore Defaults";
+  ENTER runs them immediately and reports through the status line.
+  The UI adapts automatically when the terminal is resized.
+  q / F9 / Ctrl+C only leave the front end and do not interrupt the core by
+  default; to stop the core as well run `ter-music daemon stop` (Control.Quit).
+  To make the core exit once the last front end is gone, set
+  <preferences><core_exit_when_no_frontend> to 1 in config.xml (this key is in
+  neither the settings page nor the Config.Set/`config set` key table). When
+  enabled, the core quits 10 s after the last front end leaves.
+  If the connection to the core drops, the UI reconnects automatically with
+  exponential backoff; press R to restart the core immediately.
+
+21. D-Bus, MPRIS and the Lyrics API
+------------------------------------
+  The core publishes /org/mpris/MediaPlayer2 on the session bus as
+  org.mpris.MediaPlayer2.ter_music, with MPRIS plus the ter-music interfaces
+  org.yxzl.ter_music.Info / Control / Lyrics / Queue / Config.
+  The handshake reads core.api_version from Info.GetInfo (currently 4).
+
+  MPRIS: Rate is a real read/write playback rate (MinimumRate 0.5, MaximumRate
+  3.0); LoopStatus and Shuffle perform full play-mode switching; OpenUri answers
+  NotSupported (loading content belongs to the front end).
+
+  Lyrics interface:
+    Methods: GetLyrics() -> s (A/B line snapshot)
+             GetDocument(offset, count) -> s (paged full document)
+             SetSource(source) -> b (1 = embedded, 2 = external)
+    Signal:  LyricsChanged(s)
 
   Read the current A/B lyric snapshot with:
     gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
       --object-path /org/mpris/MediaPlayer2 \
       --method org.yxzl.ter_music.Lyrics.GetLyrics
 
-  Full JSON schema: see docs/API_LYRICS_en_US.md in the source tree.
+  Full specification: see docs/API_DBUS_en_US.md and docs/API_LYRICS_en_US.md
+  in the source tree.

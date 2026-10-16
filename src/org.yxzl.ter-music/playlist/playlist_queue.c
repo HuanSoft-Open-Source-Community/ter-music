@@ -20,6 +20,7 @@
  */
 
 #include "playlist/playlist.h"
+#include "playlist/playlist_queue.h"
 
 #include "audio/audio_internal.h"
 #include "audio/play_queue.h"
@@ -99,6 +100,114 @@ static int resolve_index(const char *path, void *user)
     return playlist_find_track_index_by_path(path);
 }
 
+/* 写一块的块头：{"entries":[ ；游标复位到 0。返回新的 pos。 */
+static size_t chunk_open(char *buffer, size_t capacity)
+{
+    size_t pos = 0;
+    pos = json_append_char(buffer, capacity, pos, '{');
+    pos = json_append_key(buffer, capacity, pos, "entries");
+    pos = json_append_char(buffer, capacity, pos, '[');
+    return pos;
+}
+
+/* 收尾并下发一块：buffer 当前是 {"entries":[ …，补上 ]} 再回调。
+ * @return 0 成功；非 0 = 回调判定失败（调用方据此中止） */
+static int chunk_close_and_emit(char *buffer, size_t capacity, size_t pos,
+                                int chunk_index, int in_chunk,
+                                PlaylistQueueChunkCb cb, void *user)
+{
+    pos = json_append_char(buffer, capacity, pos, ']');
+    pos = json_append_char(buffer, capacity, pos, '}');
+    buffer[pos] = '\0';
+    return cb(buffer, chunk_index, in_chunk, user);
+}
+
+int playlist_queue_foreach_chunk(PlaylistQueueChunkCb cb, void *user)
+{
+    if (!cb) {
+        return -1;
+    }
+    int total = playlist_count();
+    if (total <= 0) {
+        return 0;   /* 无条目：不下发任何块，由调用方决定是否清空核心队列 */
+    }
+
+    /* 一块最多 BQ_SET_MAX 条；容量预留每条后的逗号，杜绝块内溢出 */
+    size_t capacity = (size_t)BQ_SET_MAX * (PLAYLIST_QUEUE_ENTRY_MAX + 2) + 64;
+    char *buffer = malloc(capacity);
+    if (!buffer) {
+        log_error("playlist_queue", "out of memory assembling %d queue entries", total);
+        return -1;
+    }
+
+    int dispatched = 0;    /* 已成功下发的条目总数 */
+    int chunk_index = 0;
+    int in_chunk = 0;
+    int failed = 0;
+    size_t pos = chunk_open(buffer, capacity);
+
+    for (int i = 0; i < total && !failed; i++) {
+        char entry[PLAYLIST_QUEUE_ENTRY_MAX];
+        size_t entry_len = entry_json(i, entry, sizeof(entry));
+        if (entry_len == 0) {
+            continue;   /* 无路径（目录行等）→ 不进队列 */
+        }
+
+        /* 先判溢出（不含本条的逗号）：满了就另起一块，避免留下悬挂逗号 */
+        if (in_chunk > 0 && pos + entry_len + 8 >= capacity) {
+            if (chunk_close_and_emit(buffer, capacity, pos, chunk_index, in_chunk,
+                                     cb, user) != 0) {
+                failed = 1;
+                break;
+            }
+            dispatched += in_chunk;
+            chunk_index++;
+            pos = chunk_open(buffer, capacity);
+            in_chunk = 0;
+        }
+
+        if (in_chunk > 0) {
+            pos = json_append_char(buffer, capacity, pos, ',');
+        }
+        if (pos + entry_len + 8 >= capacity) {
+            /* 单条就把容量顶爆：entry_json 已按 PLAYLIST_QUEUE_ENTRY_MAX 截断，
+             * 走到这里说明缓冲分配异常，按失败处理而不是写出畸形 JSON */
+            log_error("playlist_queue", "entry buffer overflow at index %d", i);
+            failed = 1;
+            break;
+        }
+        memcpy(buffer + pos, entry, entry_len);
+        pos += entry_len;
+        in_chunk++;
+
+        /* 装满 BQ_SET_MAX 条：立即下发一块（对齐核心单次上限） */
+        if (in_chunk >= BQ_SET_MAX) {
+            if (chunk_close_and_emit(buffer, capacity, pos, chunk_index, in_chunk,
+                                     cb, user) != 0) {
+                failed = 1;
+                break;
+            }
+            dispatched += in_chunk;
+            chunk_index++;
+            pos = chunk_open(buffer, capacity);
+            in_chunk = 0;
+        }
+    }
+
+    /* 收尾未满的一块 */
+    if (!failed && in_chunk > 0) {
+        if (chunk_close_and_emit(buffer, capacity, pos, chunk_index, in_chunk,
+                                 cb, user) != 0) {
+            failed = 1;
+        } else {
+            dispatched += in_chunk;
+        }
+    }
+
+    free(buffer);
+    return failed ? -1 : dispatched;
+}
+
 /* 取当前游标所在条目的路径（作为重建播放模式时的锚点）。
  * 后端不认识内容列表下标，锚点只能用路径给。 */
 static const char *current_anchor_path(void)
@@ -174,6 +283,18 @@ char *playlist_queue_render_entry(int index)
     return payload;
 }
 
+/* 本地整表同步的分块回调：首块 bq_set_json（替换），其余 bq_append_json。
+ * bq_*_json 同时接受 {"entries":[…]} 与裸数组，这里喂统一的块对象形态。 */
+static int local_sync_chunk(const char *chunk_json, int chunk_index,
+                            int entries_in_chunk, void *user)
+{
+    (void)entries_in_chunk;
+    (void)user;
+    int result = (chunk_index == 0) ? bq_set_json(chunk_json)
+                                    : bq_append_json(chunk_json);
+    return result < 0 ? -1 : 0;
+}
+
 int playlist_queue_sync(void)
 {
     int total = playlist_count();
@@ -183,71 +304,10 @@ int playlist_queue_sync(void)
         return 0;
     }
 
-    size_t capacity = (size_t)BQ_SET_MAX * PLAYLIST_QUEUE_ENTRY_MAX + 32;
-    char *buffer = malloc(capacity);
-    if (!buffer) {
-        log_error("playlist_queue", "out of memory assembling %d queue entries", total);
-        return -1;
-    }
-
-    int written = 0;
-    int offset = 0;
-    int first_chunk = 1;
-    int in_chunk = 0;
-    int failed = 0;
-    size_t pos = 0;
-
-    buffer[pos++] = '[';
-
-    for (int i = 0; i < total && !failed; i++) {
-        char entry[PLAYLIST_QUEUE_ENTRY_MAX];
-        size_t entry_len = entry_json(i, entry, sizeof(entry));
-        if (entry_len == 0) {
-            continue;   /* 无路径（目录行等）→ 不进队列 */
-        }
-
-        if (in_chunk > 0) {
-            buffer[pos++] = ',';
-        }
-        if (pos + entry_len + 2 >= capacity) {
-            log_error("playlist_queue", "entry buffer overflow at index %d", i);
-            failed = 1;
-            break;
-        }
-        memcpy(buffer + pos, entry, entry_len);
-        pos += entry_len;
-        in_chunk++;
-
-        if (in_chunk >= BQ_SET_MAX) {
-            buffer[pos++] = ']';
-            buffer[pos] = '\0';
-            int result = first_chunk ? bq_set_json(buffer) : bq_append_json(buffer);
-            if (result < 0) {
-                failed = 1;
-                break;
-            }
-            written += result;
-            first_chunk = 0;
-
-            pos = 0;
-            buffer[pos++] = '[';
-            in_chunk = 0;
-        }
-    }
-
-    if (!failed && in_chunk > 0) {
-        buffer[pos++] = ']';
-        buffer[pos] = '\0';
-        int result = first_chunk ? bq_set_json(buffer) : bq_append_json(buffer);
-        if (result < 0) {
-            failed = 1;
-        } else {
-            written += result;
-        }
-    }
-    free(buffer);
-
-    if (failed) {
+    /* 装配与分块下发复用 playlist_queue_foreach_chunk：单块 ≤ BQ_SET_MAX，
+     * 首块替换、余块追加，行为与逐块手写下发一致。 */
+    int written = playlist_queue_foreach_chunk(local_sync_chunk, NULL);
+    if (written < 0) {
         log_error("playlist_queue", "Queue.Set rejected while pushing %d entries", total);
         return -1;
     }

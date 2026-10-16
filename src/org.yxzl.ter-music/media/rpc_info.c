@@ -88,34 +88,35 @@ static void emit_info_changed(const char *json) {
     rpc_send(signal);
 }
 
+/* 封面变化通知：**懒生成**。这里不再调用 info_cover_text()——解码封面图并
+ * 放大成字符画是整轮 tick 里最重的一次同步 IO，放在媒体循环里会让换曲那一轮
+ * 明显卡顿。字符画只在 Info.GetCoverArt / Info.GetDisplay 被请求时生成，并由
+ * info/info.c 的按 (曲目, 尺寸, 字符集) 多槽缓存兜住重复请求。
+ * 因此本信号的 text 参数在换曲时为空：它表达的是“封面变了”（charset/cols/rows
+ * 仍是配置值，供前端决定要什么尺寸），前端换曲后本来就会重新取数
+ * （remote 面板走 player_remote_cover() → GetCoverArt），拿到的仍是完整字符画。 */
 static void emit_cover_changed(void) {
     InfoRenderOptions options;
     info_options_from_config(&options);
 
-    char *text = malloc(INFO_COVER_TEXT_MAX);
-    if (!text) {
-        return;
-    }
-    int have = info_cover_text(options.cover_cols, options.cover_rows,
-                               options.cover_charset, text, INFO_COVER_TEXT_MAX);
-
     DBusMessage *signal = dbus_message_new_signal(MPRIS_OBJECT_PATH,
                                                   INFO_API_INTERFACE,
                                                   "CoverChanged");
-    if (signal) {
-        const char *value = have ? text : "";
-        const char *charset = info_cover_charset_id(options.cover_charset);
-        dbus_int32_t cols = options.cover_cols;
-        dbus_int32_t rows = options.cover_rows;
-        dbus_message_append_args(signal,
-                                 DBUS_TYPE_STRING, &value,
-                                 DBUS_TYPE_STRING, &charset,
-                                 DBUS_TYPE_INT32, &cols,
-                                 DBUS_TYPE_INT32, &rows,
-                                 DBUS_TYPE_INVALID);
-        rpc_send(signal);
+    if (!signal) {
+        return;
     }
-    free(text);
+
+    const char *value = "";
+    const char *charset = info_cover_charset_id(options.cover_charset);
+    dbus_int32_t cols = options.cover_cols;
+    dbus_int32_t rows = options.cover_rows;
+    dbus_message_append_args(signal,
+                             DBUS_TYPE_STRING, &value,
+                             DBUS_TYPE_STRING, &charset,
+                             DBUS_TYPE_INT32, &cols,
+                             DBUS_TYPE_INT32, &rows,
+                             DBUS_TYPE_INVALID);
+    rpc_send(signal);
 }
 
 void rpc_info_emit_progress(const RpcPlaybackSnapshot *snapshot) {
@@ -297,6 +298,29 @@ void rpc_info_sync(void) {
 }
 
 
+/* 取一份可视化样本，并给出与**这份样本**一致的修订号。
+ * 旧实现返回刚采到的 levels/peaks，却配上上一次广播时缓存的旧修订号，
+ * 前端按 revision 去重时会把新样本当成旧帧丢掉。
+ * 样本与缓存相同就沿用当前修订号；不同就刷新缓存并递增——只动内存，
+ * 不发 VisualizerFrame（那是 rpc_info_sync_visualizer() 的职责）。 */
+static unsigned long long rpc_info_visualizer_sample(int *levels, int *peaks)
+{
+    uint64_t last_update_ms = 0;
+    get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+
+    size_t span = sizeof(int) * (size_t)VISUALIZER_BAND_COUNT;
+    if (g_info.visualizer_revision > 0 &&
+        memcmp(g_info.visualizer_levels, levels, span) == 0 &&
+        memcmp(g_info.visualizer_peaks, peaks, span) == 0) {
+        return g_info.visualizer_revision;
+    }
+
+    memcpy(g_info.visualizer_levels, levels, span);
+    memcpy(g_info.visualizer_peaks, peaks, span);
+    g_info.visualizer_revision++;
+    return g_info.visualizer_revision;
+}
+
 DBusMessage *rpc_info_handle(DBusMessage *message) {
     const char *member = dbus_message_get_member(message);
     if (!member) {
@@ -427,14 +451,13 @@ DBusMessage *rpc_info_handle(DBusMessage *message) {
     if (strcmp(member, "GetVisualizer") == 0) {
         int levels[VISUALIZER_BAND_COUNT];
         int peaks[VISUALIZER_BAND_COUNT];
-        uint64_t last_update_ms = 0;
-        get_visualizer_snapshot(levels, peaks, VISUALIZER_BAND_COUNT, &last_update_ms);
+        unsigned long long revision = rpc_info_visualizer_sample(levels, peaks);
 
         char json[4096];
         size_t pos = 0;
         pos = json_append_char(json, sizeof(json), pos, '{');
         pos = json_append_key(json, sizeof(json), pos, "revision");
-        pos = json_append_int(json, sizeof(json), pos, (long long)g_info.visualizer_revision);
+        pos = json_append_int(json, sizeof(json), pos, (long long)revision);
         pos = json_append_raw(json, sizeof(json), pos, ",");
         pos = json_append_key(json, sizeof(json), pos, "bands");
         pos = json_append_int(json, sizeof(json), pos, VISUALIZER_BAND_COUNT);

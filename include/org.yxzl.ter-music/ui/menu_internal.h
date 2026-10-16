@@ -102,7 +102,7 @@ void load_dir_history(void);
 void load_all_playlists(void);
 void add_dir_history_entry(const char *path);
 void clear_dir_history(void);
-void add_history_entry(Track *track);
+/* add_history_entry 是跨模块（ui.c 换曲钩子）调用的公开入口，声明归 menus.h。 */
 int  add_to_favorites(Track *track);
 int  remove_from_favorites(int index);
 int  create_user_playlist(const char *name);

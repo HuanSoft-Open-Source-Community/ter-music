@@ -129,6 +129,16 @@ size_t json_append_key(char *out, size_t out_size, size_t pos,
     return json_append_char(out, out_size, pos, ':');
 }
 
+/* 追加器写满时静默丢弃（见 json.h）：pos 触及最后一个可写格就说明这一轮
+ * 渲染被截断了。这里不看 out 的内容，只用上界判定，因此对任何写入器通用。 */
+int json_writer_overflowed(size_t out_size, size_t pos)
+{
+    if (out_size == 0) {
+        return 1;
+    }
+    return (pos + 1 >= out_size) ? 1 : 0;
+}
+
 size_t json_append_line_object(char *out, size_t out_size, size_t pos,
                                int index, int timestamp_valid,
                                double timestamp, const char *text)
