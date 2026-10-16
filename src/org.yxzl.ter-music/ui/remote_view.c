@@ -244,9 +244,11 @@ static int remote_collect_protected(char **paths, char **storage, int max)
         }
     }
 
-    /* 播放列表可能很长：只登记缓存里的路径（远程缓存根目录下的文件） */
+    /* 播放列表可能很长：只登记缓存里的路径（远程缓存根目录下的文件）。
+     * remote 下元数据来自核心队列页（player_track_metadata 以队列位置为入参），
+     * 故按队列长度遍历，拿到的正是核心当前持有的那批路径。 */
     const char *cache_root = remote_cache_dir();
-    int total = playlist_count();
+    int total = player_queue_page_count();
     for (int i = 0; i < total && count < max; i++) {
         Track item;
         memset(&item, 0, sizeof(item));
@@ -295,9 +297,12 @@ static void remote_drain_downloads(void)
         if (!loaded) {
             log_warn("remote_view", "Failed to load cache path '%s'", path);
         } else {
-            playlist_queue_sync();
+            /* 走门面下发整表（remote 下 playlist_queue_sync 只写进程内镜像、
+             * 不会把路径交给核心）；自动播放用内容下标入口，队列新鲜度由
+             * ui_play_track_index 内部保证（必要时先重推再定位）。 */
+            player_queue_push();
             if (autoplay) {
-                player_play(0);
+                ui_play_track_index(0);
             }
         }
     }

@@ -1,7 +1,26 @@
+/**
+ * @file session.c
+ * @brief MPRIS / D-Bus 会话：总线名、对象派发与属性变更广播（核心侧）
+ *
+ * 进程在 /org/mpris/MediaPlayer2 上同时发布 MPRIS 与 org.yxzl.ter_music.*
+ * 两组接口：本文件负责连接与总线名、消息派发循环、MPRIS 属性读写与
+ * PropertiesChanged 广播，以及每轮媒体循环的同步钩子；各接口的处理器在
+ * media/rpc_info.c、rpc_control.c、rpc_lyrics.c、rpc_queue.c、rpc_config.c，
+ * 共享的发送/错误/回复与引擎动作在 media/rpc_common.c（旧 rpc_playlist.c /
+ * rpc_library.c / rpc_job.c / rpc_remote.c 已随 api_version 3/4 撤下，不存在）。
+ *
+ * 线程约束：D-Bus 的收发只发生在调用 media_session_tick() 的媒体循环线程
+ * （core_tick() 内），播放线程不得直接发消息——需要广播的内部状态变化一律
+ * 先落到状态（修订号/快照），由本文件的 tick 比较后发出。
+ *
+ * @author 燕戏竹林 (yxzl666xx@outlook.com)
+ */
+
 #include "types.h"
 #include "core/core.h"
 #include <ncursesw/ncurses.h>
 #include "audio/audio.h"
+#include "audio/play_mode_util.h"
 #include "audio/play_queue.h"
 #include "queue/backend_queue.h"
 #include "ui/braille/braille_art.h"
@@ -44,6 +63,12 @@ typedef struct {
 } MediaSessionState;
 
 static MediaSessionState g_media_session = {0};
+
+/* 1 = 曾经持有总线名，随后 D-Bus 连接断开（总线消失）。
+ * 只在 media_session_tick() 的断连分支置位、永不清零：核心据此判定
+ * “再也没有任何前端能联系到我”，由主循环决定退出。从未拿到总线的进程
+ * （无会话总线的 systemd/纯音频场景）不会被置位。 */
+static int g_session_lost = 0;
 
 /* ── 会话访问器（供 rpc_common.c 与各 rpc_*.c 查询总线状态） ─────── */
 
@@ -148,6 +173,9 @@ static int snapshots_equal(const RpcPlaybackSnapshot *lhs,
            lhs->play_state == rhs->play_state &&
            lhs->loop_mode == rhs->loop_mode &&
            lhs->volume_percent == rhs->volume_percent &&
+           /* 倍速是 readwrite 属性，变了就得发 PropertiesChanged，
+            * 否则 MPRIS 客户端永远看不到 Rate 的变化 */
+           lhs->rate == rhs->rate &&
            lhs->can_seek == rhs->can_seek &&
            lhs->length_us == rhs->length_us &&
            strcmp(lhs->track_id, rhs->track_id) == 0 &&
@@ -157,7 +185,7 @@ static int snapshots_equal(const RpcPlaybackSnapshot *lhs,
            strcmp(lhs->art_url, rhs->art_url) == 0;
 }
 
-/* ── Lyrics JSON API (org.yxzl.ter-music.Lyrics) ─────────────────── */
+/* ── 共享的 D-Bus 参数拼装助手（MPRIS 属性与 Metadata 用） ───────── */
 
 
 static void append_string_array(DBusMessageIter *iter, const char *const *values) {
@@ -357,10 +385,15 @@ static void append_player_property_value(DBusMessageIter *iter,
     } else if (strcmp(property_name, "LoopStatus") == 0) {
         const char *value = info_loop_status_mpris((PlayMode)current->loop_mode);
         dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &value);
-    } else if (strcmp(property_name, "Rate") == 0 ||
-               strcmp(property_name, "MinimumRate") == 0 ||
-               strcmp(property_name, "MaximumRate") == 0) {
-        double value = 1.0;
+    } else if (strcmp(property_name, "Rate") == 0) {
+        /* 真实倍速：旧实现恒报 1.0，与 introspection 声明的 readwrite 自相矛盾 */
+        double value = current->rate > 0.0 ? current->rate : 1.0;
+        dbus_message_iter_append_basic(iter, DBUS_TYPE_DOUBLE, &value);
+    } else if (strcmp(property_name, "MinimumRate") == 0) {
+        double value = RPC_RATE_MIN;
+        dbus_message_iter_append_basic(iter, DBUS_TYPE_DOUBLE, &value);
+    } else if (strcmp(property_name, "MaximumRate") == 0) {
+        double value = RPC_RATE_MAX;
         dbus_message_iter_append_basic(iter, DBUS_TYPE_DOUBLE, &value);
     } else if (strcmp(property_name, "Shuffle") == 0) {
         dbus_bool_t value = info_shuffle_mpris(current->loop_mode);
@@ -457,12 +490,19 @@ static void append_player_properties(DBusMessageIter *dict_iter,
     dbus_bool_t can_navigate = snapshot->playlist_total > 0;
     dbus_bool_t can_pause = snapshot->play_state != PLAY_STATE_STOPPED;
     double volume = (double)snapshot->volume_percent / 100.0;
+    double rate = snapshot->rate > 0.0 ? snapshot->rate : 1.0;
+    double rate_min = RPC_RATE_MIN;
+    double rate_max = RPC_RATE_MAX;
 
     append_string_variant(dict_iter, "PlaybackStatus", playback_status);
     append_string_variant(dict_iter, "LoopStatus", loop_status);
     append_boolean_variant(dict_iter, "Shuffle", info_shuffle_mpris(snapshot->loop_mode));
     append_metadata_variant(dict_iter, "Metadata", snapshot);
     append_double_variant(dict_iter, "Volume", volume);
+    /* 自省里声明了这三个属性，GetAll 就必须给全（旧实现整组漏掉 Rate） */
+    append_double_variant(dict_iter, "Rate", rate);
+    append_double_variant(dict_iter, "MinimumRate", rate_min);
+    append_double_variant(dict_iter, "MaximumRate", rate_max);
     append_boolean_variant(dict_iter, "CanGoNext", can_navigate);
     append_boolean_variant(dict_iter, "CanGoPrevious", can_navigate);
     append_boolean_variant(dict_iter, "CanPlay", can_navigate);
@@ -506,20 +546,108 @@ static DBusMessage *handle_get_all_properties(DBusMessage *message,
     return reply;
 }
 
+/* ── MPRIS LoopStatus / Shuffle ⇄ PlayMode 映射 ────────────────────
+ * MPRIS 只有“循环档位”（None/Track/Playlist）与“是否随机”两个维度，而核心有
+ * 17 个播放模式（含文件夹/专辑/艺术家分组）。因此写属性时只在**同一维度**内
+ * 取近邻模式，分组与随机取向保持不变。
+ * 两个助手都经 set_play_mode() 落地：它才做 play_queue_rebuild + 配置镜像同步
+ * + save_config + 状态通知；旧实现直接改 g_play_mode，绕过了整套派生状态。 */
+
+/* 把模式换到“循环”一侧（Playlist）；已经是循环档就原样返回 */
+static PlayMode mpris_mode_with_repeat(PlayMode mode)
+{
+    switch (mode) {
+        case PLAY_MODE_SEQUENTIAL:         return PLAY_MODE_LIST_REPEAT;
+        case PLAY_MODE_SINGLE_REPEAT:      return PLAY_MODE_LIST_REPEAT;
+        case PLAY_MODE_SHUFFLE_ONCE:       return PLAY_MODE_SHUFFLE_REPEAT;
+        case PLAY_MODE_FOLDER_SEQUENTIAL:  return PLAY_MODE_FOLDER_REPEAT;
+        case PLAY_MODE_FOLDER_SHUFFLE:     return PLAY_MODE_FOLDER_SHUFFLE_REPEAT;
+        case PLAY_MODE_ALBUM_SEQUENTIAL:   return PLAY_MODE_ALBUM_REPEAT;
+        case PLAY_MODE_ALBUM_SHUFFLE:      return PLAY_MODE_ALBUM_SHUFFLE_REPEAT;
+        case PLAY_MODE_ARTIST_SEQUENTIAL:  return PLAY_MODE_ARTIST_REPEAT;
+        case PLAY_MODE_ARTIST_SHUFFLE:     return PLAY_MODE_ARTIST_SHUFFLE_REPEAT;
+        default:                           return mode;
+    }
+}
+
+/* 把模式换到“不循环”一侧（None）；本来就不循环就原样返回 */
+static PlayMode mpris_mode_without_repeat(PlayMode mode)
+{
+    switch (mode) {
+        case PLAY_MODE_LIST_REPEAT:           return PLAY_MODE_SEQUENTIAL;
+        case PLAY_MODE_SINGLE_REPEAT:         return PLAY_MODE_SEQUENTIAL;
+        case PLAY_MODE_SHUFFLE_REPEAT:        return PLAY_MODE_SHUFFLE_ONCE;
+        case PLAY_MODE_FOLDER_REPEAT:         return PLAY_MODE_FOLDER_SEQUENTIAL;
+        case PLAY_MODE_FOLDER_SHUFFLE_REPEAT: return PLAY_MODE_FOLDER_SHUFFLE;
+        case PLAY_MODE_ALBUM_REPEAT:          return PLAY_MODE_ALBUM_SEQUENTIAL;
+        case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:  return PLAY_MODE_ALBUM_SHUFFLE;
+        case PLAY_MODE_ARTIST_REPEAT:         return PLAY_MODE_ARTIST_SEQUENTIAL;
+        case PLAY_MODE_ARTIST_SHUFFLE_REPEAT: return PLAY_MODE_ARTIST_SHUFFLE;
+        default:                              return mode;
+    }
+}
+
+/* 打开随机：保持循环档位与分组取向 */
+static PlayMode mpris_mode_shuffled(PlayMode mode)
+{
+    switch (mode) {
+        case PLAY_MODE_SEQUENTIAL:         return PLAY_MODE_SHUFFLE_ONCE;
+        case PLAY_MODE_LIST_REPEAT:        return PLAY_MODE_SHUFFLE_REPEAT;
+        case PLAY_MODE_SINGLE_REPEAT:      return PLAY_MODE_SHUFFLE_REPEAT;
+        case PLAY_MODE_FOLDER_SEQUENTIAL:  return PLAY_MODE_FOLDER_SHUFFLE;
+        case PLAY_MODE_FOLDER_REPEAT:      return PLAY_MODE_FOLDER_SHUFFLE_REPEAT;
+        case PLAY_MODE_ALBUM_SEQUENTIAL:   return PLAY_MODE_ALBUM_SHUFFLE;
+        case PLAY_MODE_ALBUM_REPEAT:       return PLAY_MODE_ALBUM_SHUFFLE_REPEAT;
+        case PLAY_MODE_ARTIST_SEQUENTIAL:  return PLAY_MODE_ARTIST_SHUFFLE;
+        case PLAY_MODE_ARTIST_REPEAT:      return PLAY_MODE_ARTIST_SHUFFLE_REPEAT;
+        default:                           return mode;   /* 已是随机档 */
+    }
+}
+
+/* 关闭随机：回到同组、同循环档位的顺序模式 */
+static PlayMode mpris_mode_unshuffled(PlayMode mode)
+{
+    switch (mode) {
+        case PLAY_MODE_SHUFFLE_ONCE:          return PLAY_MODE_SEQUENTIAL;
+        case PLAY_MODE_SHUFFLE_REPEAT:        return PLAY_MODE_LIST_REPEAT;
+        case PLAY_MODE_FOLDER_SHUFFLE:        return PLAY_MODE_FOLDER_SEQUENTIAL;
+        case PLAY_MODE_FOLDER_SHUFFLE_REPEAT: return PLAY_MODE_FOLDER_REPEAT;
+        case PLAY_MODE_ALBUM_SHUFFLE:         return PLAY_MODE_ALBUM_SEQUENTIAL;
+        case PLAY_MODE_ALBUM_SHUFFLE_REPEAT:  return PLAY_MODE_ALBUM_REPEAT;
+        case PLAY_MODE_ARTIST_SHUFFLE:        return PLAY_MODE_ARTIST_SEQUENTIAL;
+        case PLAY_MODE_ARTIST_SHUFFLE_REPEAT: return PLAY_MODE_ARTIST_REPEAT;
+        default:                              return mode;   /* 本来不随机 */
+    }
+}
+
 static void apply_bus_loop_status(const char *value) {
     if (!value) {
         return;
     }
 
+    PlayMode mode = g_play_mode;
     if (strcmp(value, "Track") == 0) {
-        g_play_mode = PLAY_MODE_SINGLE_REPEAT;
+        mode = PLAY_MODE_SINGLE_REPEAT;
     } else if (strcmp(value, "Playlist") == 0) {
-        if (!play_mode_is_shuffle(g_play_mode)) {
-            g_play_mode = PLAY_MODE_LIST_REPEAT;
-        }
+        mode = mpris_mode_with_repeat(mode);
     } else {
-        g_play_mode = PLAY_MODE_SEQUENTIAL;
+        /* "None"（以及无法识别的取值）：不循环 */
+        mode = mpris_mode_without_repeat(mode);
     }
+
+    if (mode == g_play_mode) {
+        return;
+    }
+    set_play_mode(mode);
+}
+
+static void apply_bus_shuffle(int enabled) {
+    PlayMode mode = enabled ? mpris_mode_shuffled(g_play_mode)
+                            : mpris_mode_unshuffled(g_play_mode);
+    if (mode == g_play_mode) {
+        return;   /* 已经是该状态：不做无谓的重建与落盘 */
+    }
+    set_play_mode(mode);
 }
 
 static DBusMessage *handle_set_property(DBusMessage *message) {
@@ -576,10 +704,21 @@ static DBusMessage *handle_set_property(DBusMessage *message) {
         }
         dbus_bool_t enabled = FALSE;
         dbus_message_iter_get_basic(&variant_iter, &enabled);
-        if (enabled) {
-            g_play_mode = PLAY_MODE_SHUFFLE_REPEAT;
-        } else if (play_mode_is_shuffle(g_play_mode)) {
-            g_play_mode = PLAY_MODE_LIST_REPEAT;
+        apply_bus_shuffle(enabled ? 1 : 0);
+    } else if (strcmp(property_name, "Rate") == 0) {
+        if (dbus_message_iter_get_arg_type(&variant_iter) != DBUS_TYPE_DOUBLE) {
+            return rpc_error(message, DBUS_ERROR_INVALID_ARGS, "Rate must be a double");
+        }
+        double rate = 0.0;
+        dbus_message_iter_get_basic(&variant_iter, &rate);
+        /* 自省里 Rate 是 readwrite：旧实现恒报 1.0 并把写入当只读拒绝。
+         * 范围与 MinimumRate/MaximumRate 同源，越界明确回 OutOfRange。 */
+        if (!(rate >= RPC_RATE_MIN && rate <= RPC_RATE_MAX)) {
+            return rpc_error(message, RPC_ERROR_OUT_OF_RANGE,
+                             "rate is out of the supported range");
+        }
+        if (!rpc_action_set_speed(rate)) {
+            return rpc_error(message, RPC_ERROR_FAILED, "failed to apply the rate");
         }
     } else {
         return rpc_error(message, DBUS_ERROR_PROPERTY_READ_ONLY, "Property is read only");
@@ -1012,6 +1151,10 @@ int media_session_has_primary_name(void) {
     return g_media_session.active && g_media_session.has_primary_name;
 }
 
+int media_session_lost(void) {
+    return g_session_lost;
+}
+
 const char *media_session_bus_name(void) {
     return g_media_session.active ? g_media_session.bus_name : "";
 }
@@ -1021,6 +1164,7 @@ void media_session_shutdown(void) {
     if (!g_media_session.connection) {
         rpc_lyrics_reset();
         rpc_info_reset();
+        rpc_frontend_reset_registry();
         memset(&g_media_session, 0, sizeof(g_media_session));
         return;
     }
@@ -1042,6 +1186,9 @@ void media_session_shutdown(void) {
     dbus_connection_unref(g_media_session.connection);
     rpc_lyrics_reset();
     rpc_info_reset();
+    /* 关闭 D-Bus 会话时清空前端注册表（rpc.h 承诺的清理钩子，防止
+     * 同进程重开总线时残留旧登记占满 RPC_FRONTEND_MAX）。 */
+    rpc_frontend_reset_registry();
     memset(&g_media_session, 0, sizeof(g_media_session));
 }
 
@@ -1072,6 +1219,9 @@ void media_session_tick(void) {
     }
     if (!dbus_connection_get_is_connected(g_media_session.connection)) {
         log_warn("media_session", "D-Bus connection lost, shutting down");
+        /* 闩锁先置位：media_session_shutdown() 会把整个 session 结构清零，
+         * 而“曾经持有总线名、随后连接断开”这件事必须活到进程决定退出为止。 */
+        g_session_lost = 1;
         media_session_shutdown();
         return;
     }
@@ -1084,7 +1234,16 @@ void media_session_tick(void) {
         DBusMessage *reply = NULL;
         RpcPlaybackSnapshot snapshot;
 
+        /* 本进程只发布 /org/mpris/MediaPlayer2 一个对象。对**方法调用**必须回错，
+         * 否则调用方（前端）会一直等到超时；对信号/回复等非方法消息则不能回错。 */
         if (!path || strcmp(path, MPRIS_OBJECT_PATH) != 0) {
+            if (dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_METHOD_CALL) {
+                DBusMessage *reply = rpc_error(message, DBUS_ERROR_UNKNOWN_OBJECT,
+                                               "Unknown object path");
+                if (reply) {
+                    rpc_send(reply);
+                }
+            }
             dbus_message_unref(message);
             continue;
         }
@@ -1137,6 +1296,9 @@ void media_session_tick(void) {
     sync_player_state();
     rpc_lyrics_sync();
     rpc_info_sync();
+    /* 核心内部的游标/顺序变化（播放线程续播、随机重排、播放模式重建）只能在这里
+     * 补发 QueueChanged：D-Bus 发送必须留在媒体循环线程内 */
+    rpc_queue_sync();
     rpc_control_tick();
 
     {
@@ -1163,6 +1325,10 @@ void media_session_notify_seek(uint64_t position_ms) {
 }
 
 int media_session_has_primary_name(void) {
+    return 0;
+}
+
+int media_session_lost(void) {
     return 0;
 }
 

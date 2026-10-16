@@ -4,7 +4,9 @@
  *
  * 前端不再自己读写 config.xml：GetAll 返回完整配置镜像，Set 接受局部
  * JSON 补丁（键名同 config.xml），由核心原子应用、落盘并广播 ConfigChanged。
- * 运行时应用（倍速/播放模式）走 core_config_apply()，与 SIGHUP 重载同一路径。
+ * 运行时应用（倍速/播放模式）走 core_config_apply_runtime()：补丁已经落在内存
+ * 镜像上，写盘后直接从镜像应用，不再回读文件（SIGHUP 重载才需要 core_config_apply()
+ * 的“读文件 + 迁移”整条路径）。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -89,8 +91,13 @@ DBusMessage *rpc_config_handle(DBusMessage *message)
                              reason[0] ? reason : "invalid configuration patch");
         }
 
+        /* 补丁已经原子地落在内存里的 g_app_config 上：写盘即可，不再把刚写出的
+         * 文件读回来（那既是一次多余的同步磁盘 IO，也可能被别的进程留下的旧文件
+         * 覆盖）。运行时字段用 core_config_apply_runtime() 从内存镜像应用；
+         * MPRIS/Control 改播放模式与倍速时都会同步更新那份镜像，所以这里不会把
+         * 刚设置的运行时值卷回文件里的旧值。 */
         save_config();
-        core_config_apply();
+        core_config_apply_runtime();
         rpc_config_emit_changed(patch);
         rpc_control_emit_status(core_status_seq(), "配置已更新 / Config updated");
         log_info("rpc_config", "Configuration updated via D-Bus (patch=%zu bytes)",
@@ -104,9 +111,11 @@ DBusMessage *rpc_config_handle(DBusMessage *message)
     }
 
     if (strcmp(member, "Reset") == 0) {
+        /* 默认值已经在内存里（init_default_config 不读文件），因此同样是
+         * “写盘 + 应用内存镜像”，不需要再回读一遍磁盘 */
         init_default_config();
         save_config();
-        core_config_apply();
+        core_config_apply_runtime();
         rpc_config_emit_changed(NULL);
         rpc_control_emit_status(core_status_seq(), "配置已重置 / Config reset");
         return rpc_reply_bool(message, 1);

@@ -343,8 +343,9 @@ ter-music --help
 
 以下任意一个首参数都会切换到 CLI 模式。CLI 命令是轻量的 D-Bus 客户端：
 它们与当前持有 `org.mpris.MediaPlayer2.ter_music` 的**播放核心**（由
-`daemon start`、D-Bus 激活或 TUI 拉起）通信，因此在任意终端、脚本或窗口
-管理器快捷键中都能使用。其中 `play` 还兼任前端：它在自己的进程里扫描路径，
+`daemon start` 或 TUI 拉起；Linyaps 包另可按需经 D-Bus 激活，其他打包格式不随包
+提供那个激活文件）通信，因此在任意终端、脚本或窗口管理器快捷键中都能使用。
+其中 `play` 还兼任前端：它在自己的进程里扫描路径，
 再把生成的队列下发给核心。
 
 | 命令 | 说明 |
@@ -356,7 +357,7 @@ ter-music --help
 | `speed [0.5-3.0]` | 查询或设置播放倍速 |
 | `mode [NAME\|0-16]` | 查询或设置播放模式（支持 `list_repeat`、`folder_shuffle_repeat` 等稳定名称） |
 | `show [OPTIONS]` | 打印当前信息块（基本信息 / 字符封面 / 进度 / 两行歌词） |
-| `daemon start\|foreground\|stop\|restart\|status\|reload` | 播放核心管理 |
+| `daemon start\|foreground\|stop\|restart\|status\|reload` | 播放核心管理（`daemon stop --all` 连 `--force` 起的次级实例一起停） |
 | `version` / `help` | 版本 / 用法 |
 
 `show` 选项（每项都会在该次调用中覆盖已保存的 TUI 设置）：
@@ -417,8 +418,14 @@ ter-music daemon stop
   不带 `--open` 的 `daemon start` 只起一个空闲核心，队列由随后接入的前端下发。
 - 总线名称同时只允许一个实例持有；核心在运行时 `daemon start` 会拒绝再起一个
   （可用 `--force` 强制以次级实例启动）。前端（TUI 与 CLI）都是客户端，可以
-  同时存在多个。
+  同时存在多个。次级实例不会"隐身"：`daemon status` 会在 stderr 逐个列出它
+  们（pid + 总线名），`daemon start --force` 会打印刚创建的总线名，
+  `daemon stop --all` 一次停掉主实例与全部次级实例；要让某条命令只作用于那个
+  实例，把 `--bus <名称>` 写在子命令**之后**（如 `ter-music daemon stop --bus <名称>`）。
 - 除非显式指定 `--force`，`daemon stop` 会拒绝终止正在运行的 TUI。
+- 核心所属的会话总线消失时，核心会**自行退出**：总线没了就再也没有前端能联
+  系到它，继续占着音频设备只会变成一个谁也停不掉的播放进程。从未拿到总线的
+  核心（由托管程序在没有会话总线的环境里启动）不受影响。
 
 #### 5.2.2 Linyaps（如意玲珑）打包环境
 
@@ -990,7 +997,8 @@ v1.0的JSON存储（config.json、独立的favorites、history、dir_history、p
 退出 TUI 不会停止音乐：播放发生在核心里，当前曲目会继续播放，
 `ter-music show` / `ter-music next` 在任意终端里依然有效。要显式停止请用
 `ter-music daemon stop`；若希望核心自行退出，把 `core_exit_when_no_frontend`
-设为 `true`（见 [5.2.3 前端与核心](#523-前端与核心)）。
+设为 `true`；核心也会在"自己所属的会话总线消失"时自行退出——那时已经没有任何
+前端能联系到它（见 [5.2.3 前端与核心](#523-前端与核心)）。
 
 ## 第六章 技术架构
 
@@ -1002,7 +1010,7 @@ D-Bus 接口面相遇：
 
 | 平面 | 进程 | 掌管什么 |
 | --- | --- | --- |
-| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start`、D-Bus 激活或 systemd 用户服务拉起） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
+| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start` 或 TUI 前端拉起；Linyaps 包还能经 D-Bus 激活或其 systemd 用户服务启动，deb/RPM 不随包提供这两类文件） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
 | **前端 / 内容客户端** | `ter-music`（TUI）、`ter-music play\|show\|…`（CLI） | 目录扫描与元数据、SQLite 曲库与 FTS5 搜索、用户歌单、收藏/历史/目录历史、排序/过滤、远程源与下载缓存、ncurses 界面 |
 
 这条接缝刻意做得很薄，也便于测试：

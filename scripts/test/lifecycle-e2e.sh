@@ -7,6 +7,7 @@
 #       --attach-only 在没有核心时以退出码 3 明确失败。
 #   A5  前端 q 退出后核心继续播放；core_exit_when_no_frontend=true 时，
 #       最后一个前端离开并过宽限期后核心自行退出（无人接入过则不退）。
+#   A5′ 播放中按 F9 退出与 'q' 同路：前端没了，核心仍在总线、仍在播同一首。
 #
 # 用法：scripts/test/lifecycle-e2e.sh [--bin <ter-music>] [--keep]
 # 环境：需要会话总线（未设置时用 dbus-run-session）；需要 ffmpeg 造素材。
@@ -21,7 +22,7 @@ KEEP=0
 WORK_DIR=""
 
 usage() {
-    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
@@ -58,6 +59,7 @@ fi
 daemon_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
 
 cleanup() {
+    [ -n "${F9_DRIVER_PID:-}" ] && kill -9 "$F9_DRIVER_PID" 2>/dev/null
     "$TM_BIN" daemon stop >/dev/null 2>&1 || true
     for _ in $(seq 1 20); do
         daemon_up || break
@@ -128,6 +130,81 @@ else
     bad "TUI 退出后核心也没了"
 fi
 
+# ── A5′：F9 退出（与 q 对称，Task 9.5）───────────────────────────
+# F9 在 menus.c 的 handle_function_keys() 里只置 g_should_exit=1，与 'q' 走同一条
+# 正常退出路径；这里要在**正在播**的状态下验证：前端没了，核心必须还在总线上、
+# 还在播同一首（不能像早期版本那样把后台音乐一起停掉）。
+# 按键用 lifecycle-driver.py 的 drive 会话：F9 是 `\e[20~` 这样的多字节序列，
+# 必须一次写进 pty，ncurses 才会解成 KEY_F(9)（`run` 按字符发键做不到）。
+info "A5′ 播放中按 F9 退出：核心仍在总线且继续播放"
+
+snap_field() {   # $1 = 取值表达式（doc 已绑定）
+    "$TM_BIN" show --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+    print(eval(sys.argv[1], {"doc": doc}))
+except Exception:
+    print("?")' "$1" 2>/dev/null
+}
+
+F9_CTL="$WORK_DIR/f9.cmd"
+: > "$F9_CTL"
+python3 "$DRIVER" drive "$TM_BIN" "$WORK_DIR/music" "$WORK_DIR/f9-tui.log" \
+    --ctl "$F9_CTL" --rc-file "$WORK_DIR/f9.rc" --pid-file "$WORK_DIR/f9.pid" \
+    --max-runtime 60 >/dev/null 2>&1 &
+F9_DRIVER_PID=$!
+
+for _ in $(seq 1 40); do
+    [ "$(snap_field 'doc["track"]["queue_count"]')" = "3" ] && break
+    sleep 0.5
+done
+
+printf 'key:j\n' >> "$F9_CTL"          # 浏览器树首行是根目录节点：一次 j 落到第一个文件
+sleep 1
+printf 'key:<Enter>\n' >> "$F9_CTL"    # Enter 播放选中的文件（ui.c case 10）
+sleep 2
+
+f9_before="$(snap_field 'doc["playback"]["state"]')"
+f9_track_before="$(snap_field 'doc["track"]["path"]')"
+if [ "$f9_before" = "playing" ]; then
+    ok "F9 之前确实在播（state=$f9_before，track=${f9_track_before##*/}）"
+else
+    bad "F9 之前没进入播放（state=$f9_before，track=${f9_track_before##*/}）"
+fi
+
+printf 'key:<F9>\n' >> "$F9_CTL"
+for _ in $(seq 1 20); do
+    kill -0 "$F9_DRIVER_PID" 2>/dev/null || break
+    sleep 0.5
+done
+f9_pid="$(cat "$WORK_DIR/f9.pid" 2>/dev/null)"
+if [ -n "$f9_pid" ] && kill -0 "$f9_pid" 2>/dev/null; then
+    bad "按 F9 之后 TUI 仍在运行（退出键没生效）"
+else
+    f9_rc="$(cat "$WORK_DIR/f9.rc" 2>/dev/null)"
+    if [ "$f9_rc" = "0" ]; then
+        ok "按 F9 的 TUI 已正常退出（退出码 0，与 'q' 同一条路径）"
+    else
+        bad "按 F9 的 TUI 退出码不是 0（实测 '${f9_rc:-空}'）"
+    fi
+fi
+
+if daemon_up; then
+    ok "F9 退出后核心仍在总线上（daemon status 可见）"
+else
+    bad "F9 退出把核心也带走了（daemon status 查不到实例）"
+fi
+f9_after="$(snap_field 'doc["playback"]["state"]')"
+f9_track_after="$(snap_field 'doc["track"]["path"]')"
+if [ "$f9_after" = "playing" ] && [ "$f9_track_after" = "$f9_track_before" ]; then
+    ok "F9 退出后核心仍在播同一首（state=$f9_after，track=${f9_track_after##*/}）"
+else
+    bad "F9 退出后播放被打断或换了曲目（state=$f9_after，track ${f9_track_before##*/} → ${f9_track_after##*/}）"
+fi
+kill -9 "$F9_DRIVER_PID" 2>/dev/null
+F9_DRIVER_PID=""
+
 # ── A1：--attach-only ────────────────────────────────────────────
 info "A1 --attach-only 在没有核心时以退出码 3 失败"
 "$TM_BIN" daemon stop >/dev/null 2>&1
@@ -189,6 +266,119 @@ if daemon_up; then
     bad "宽限期后核心应随最后前端退出"
 else
     ok "最后一个前端离开并过宽限期后，核心自行退出"
+fi
+
+# ── A7：核心随总线消失而退出 ──────────────────────────────────────
+# 总线没了 = 再也没有前端能联系到这个核心；若它继续播放，就变成一个谁也
+# 停不掉、`daemon stop` 也看不见的孤儿播放进程（本轮实测踩到过）。这条
+# 断言需要一条**会死掉**的总线，所以在一层嵌套的私有会话里起核心。
+info "A7 核心所属的会话总线消失后必须自行退出"
+
+core_alive() {   # $1 = pid：既要存在，也要确实是 ter-music 核心（防 pid 复用误判）
+    kill -0 "$1" 2>/dev/null || return 1
+    ps -p "$1" -o cmd= 2>/dev/null | grep -q "ter-music"
+}
+
+nested_home="$WORK_DIR/nested-home"
+mkdir -p "$nested_home/.config"
+rm -f "$WORK_DIR/nested.pid"
+timeout 30 dbus-run-session -- bash -c '
+    export HOME="$1" XDG_CONFIG_HOME="$1/.config"
+    out="$("$2" daemon start 2>&1)"
+    printf "%s\n" "$out" | sed -n "s/.*pid \([0-9]\{1,\}\).*/\1/p" | head -1 > "$3"
+    sleep 2
+' _ "$nested_home" "$TM_BIN" "$WORK_DIR/nested.pid" >/dev/null 2>&1 || true
+
+nested_pid="$(cat "$WORK_DIR/nested.pid" 2>/dev/null)"
+if [ -z "$nested_pid" ]; then
+    bad "未能记录嵌套会话里的核心 pid（bus-loss 场景无法判定）"
+else
+    nested_exited=0
+    for _ in $(seq 1 40); do          # 最多等 10 秒
+        core_alive "$nested_pid" || { nested_exited=1; break; }
+        sleep 0.25
+    done
+    if [ "$nested_exited" -eq 1 ]; then
+        ok "总线消失后核心自行退出（pid $nested_pid）"
+    else
+        bad "总线消失后核心仍在运行（pid $nested_pid），会成为无人可控的孤儿"
+        kill -9 "$nested_pid" 2>/dev/null
+    fi
+fi
+
+# ── A4″：次要实例可见、可一次收尾 ────────────────────────────────
+# `daemon start --force` 起的第二个核心是**有文档的功能**，但它不接收普通
+# CLI 命令：必须能从 `daemon status` 看见、能一次收干净，否则就成了“后台
+# 莫名其妙有两个 ter-music 在跑”。
+info "A4″ --force 起的次要实例可见、可一次收尾"
+
+"$TM_BIN" daemon start >/dev/null 2>&1
+sleep 1.5
+"$TM_BIN" daemon start --force >"$WORK_DIR/force.out" 2>"$WORK_DIR/force.err" || true
+
+if grep -q "instance" "$WORK_DIR/force.err" 2>/dev/null; then
+    ok "--force 启动时报出次要实例的总线名（可据此 --bus 控制）"
+else
+    bad "--force 启动时未报出次要实例的总线名：$(tail -2 "$WORK_DIR/force.err" | tr '\n' ' ')"
+fi
+
+if "$TM_BIN" daemon status 2>&1 >/dev/null | grep -q "次要实例"; then
+    ok "daemon status 会提示次要实例（含 pid 与总线名）"
+else
+    bad "daemon status 没有提示次要实例"
+fi
+
+status_pids="$("$TM_BIN" daemon status 2>/dev/null | grep -c "pid")"
+if [ "$status_pids" = "1" ]; then
+    ok "daemon status 的 stdout 未被次要实例污染（仍是 1 行 pid，脚本解析不受影响）"
+else
+    bad "daemon status 的 stdout 出现 $status_pids 行 pid（应为 1）"
+fi
+
+# 提示里给出的控制方式必须真的可用：`--bus` 写在**子命令之后**
+secondary_bus="$(sed -n 's/^次要实例总线名：\(org[^ ]*\)$/\1/p' "$WORK_DIR/force.err" 2>/dev/null | head -1)"
+if [ -z "$secondary_bus" ]; then
+    secondary_bus="$("$TM_BIN" daemon status 2>&1 >/dev/null |
+        sed -n 's/.*pid [0-9]\{1,\}  [^ ]*  \(org[^ ]*\)$/\1/p' | head -1)"
+fi
+if [ -z "$secondary_bus" ]; then
+    bad "未能取到次要实例的总线名（无法验证 --bus 控制路径）"
+else
+    if "$TM_BIN" daemon stop --bus "$secondary_bus" >/dev/null 2>&1; then
+        ok "ter-music daemon stop --bus <次要实例> 能单独停掉它"
+    else
+        bad "ter-music daemon stop --bus $secondary_bus 失败"
+    fi
+    if "$TM_BIN" daemon status >/dev/null 2>&1; then
+        ok "--bus 只停次要实例，主实例不受影响"
+    else
+        bad "次要实例被 --bus 停掉时主实例也一起没了"
+    fi
+    "$TM_BIN" daemon start --force >/dev/null 2>&1 || true   # 后面还要一个次要实例
+    sleep 1.5
+fi
+
+"$TM_BIN" daemon stop >/dev/null 2>&1
+sleep 2
+status_err="$("$TM_BIN" daemon status 2>&1 >/dev/null || true)"
+if printf '%s' "$status_err" | grep -q "主实例未在运行，但仍有"; then
+    ok "主实例退出后，次要实例仍被明确指出（这正是最容易变成孤儿的形态）"
+else
+    bad "主实例退出后没有提示残留的次要实例：$(printf '%s' "$status_err" | head -1)"
+fi
+
+if "$TM_BIN" daemon stop --all >/dev/null 2>&1; then
+    ok "daemon stop --all 收掉主实例与次要实例"
+else
+    bad "daemon stop --all 失败（rc=$?）"
+fi
+
+"$TM_BIN" daemon status >/dev/null 2>&1
+no_instance_rc=$?
+if [ "$no_instance_rc" -eq 3 ]; then
+    ok "--all 之后确实没有实例在运行（退出码 3）"
+else
+    bad "--all 之后仍有实例在运行（退出码 $no_instance_rc）"
 fi
 
 info "结果"

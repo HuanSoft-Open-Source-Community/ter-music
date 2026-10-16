@@ -256,6 +256,18 @@ jobs:
       - name: Remote source delivered as local files
         run: scripts/test/remote-frontend-e2e.sh --bin ./build/ter-music
 
+      - name: CLI subcommands smoke
+        run: scripts/test/cli-subcommands-smoke.sh --bin ./build/ter-music
+
+      - name: Content playback (browser / favourites / history / search)
+        run: scripts/test/content-playback-e2e.sh --bin ./build/ter-music
+
+      - name: Big library delivered in chunks (600 entries)
+        run: scripts/test/big-library-e2e.sh --bin ./build/ter-music
+
+      - name: Config across restart and play-mode regrouping
+        run: scripts/test/config-restart-e2e.sh --bin ./build/ter-music
+
       # A6 的实测值记录下来（--report 不判定）：共享 runner 的时延/CPU 抖动大，
       # 拿它当门禁只会制造假红；本机（scripts/test/perf-check.sh 不带 --report）
       # 才是阈值判定的地方。

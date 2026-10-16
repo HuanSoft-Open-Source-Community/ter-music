@@ -303,7 +303,11 @@ static void prompt_folder_input(int append_mode) {
             int count = append_mode ? append_playlist(expanded_path) : load_playlist(expanded_path);
             if (count > 0) {
                 add_dir_history_entry(expanded_path);
-                
+
+                /* 内容变了：把路径队列整表重推给核心（remote 下核心只认门面下发，
+                 * 不重推则列表与核心队列脱节，播放/下一首会对不上）。 */
+                player_queue_push();
+
                 if (g_app_config.remember_last_path) {
                     snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", expanded_path);
                     player_config_persist();

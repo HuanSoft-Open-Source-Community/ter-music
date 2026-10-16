@@ -16,7 +16,4 @@
 /* 把歌词面板画到 win_lyrics（无歌词时画频谱动画） */
 void render_lyrics(void);
 
-/* 按后端当前高亮行重绘（纯文本歌词的首帧也由它触发） */
-void update_lyrics_display(void);
-
 #endif /* UI_LYRICS_H */

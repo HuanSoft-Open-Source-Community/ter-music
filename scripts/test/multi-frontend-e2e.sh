@@ -6,7 +6,9 @@
 #   - 一个 TUI + 多个 CLI 命令同时存在：后端只有**一份**播放状态；
 #   - 所有前端看到同一份队列与同一个游标；
 #   - 两个前端（TUI 与 CLI）交替下发队列与命令时，内容库（SQLite）不损坏
-#     （TUI 另一个进程里在扫描/读库，CLI 也在读，共写要活得下来）。
+#     （TUI 另一个进程里在扫描/读库，CLI 也在读，共写要活得下来）；
+#   - TUI 的歌词栏渲染的是**核心持有的那份歌词**（回归：远端门面曾从不拉取
+#     Lyrics.GetDocument，歌词栏永远停在“暂无歌词”）。
 #
 # 用法：scripts/test/multi-frontend-e2e.sh [--bin <ter-music>] [--keep]
 
@@ -74,6 +76,13 @@ if command -v ffmpeg >/dev/null 2>&1; then
         ffmpeg -hide_banner -loglevel error -f lavfi \
             -i "sine=frequency=$((300 + i * 110)):duration=6" \
             -c:a pcm_s16le -y "$WORK_DIR/music/tone$i.wav" 2>/dev/null
+        # 外部歌词（ASCII 标记行）：给歌词栏断言一个不依赖终端宽度与 CJK
+        # 渲染的稳定文本。240 行 > 单次分页上限 200，顺带覆盖门面的分页拉取；
+        # 时间戳 0.00→5.39s 严格递增，落在 6 秒音频内（LRC 的小数部分是百分秒）。
+        for j in $(seq 0 239); do
+            printf '[00:%02d.%02d]LRC-REG-%d-%03d\n' \
+                $((j / 40)) $((j % 40)) "$i" "$j"
+        done > "$WORK_DIR/music/tone$i.lrc"
     done
 fi
 
@@ -88,19 +97,26 @@ except Exception:
 }
 
 info "TUI（前端 A）拉起核心并推入 4 条内容"
-python3 - "$TM_BIN" "$WORK_DIR/music" "$WORK_DIR/tui.pid" <<'PY' &
-import os, pty, sys
-bin_path, music, pid_path = sys.argv[1], sys.argv[2], sys.argv[3]
+# pty 输出落到 tui.out：歌词栏断言要看**界面实际画出来的字**。窗口尺寸显式
+# 设定，歌词面板的几何才与本地/CI 无关（TUI 只在终端里渲染，没有别的出口）。
+python3 - "$TM_BIN" "$WORK_DIR/music" "$WORK_DIR/tui.pid" "$WORK_DIR/tui.out" <<'PY' &
+import fcntl, os, pty, struct, sys, termios
+bin_path, music, pid_path, out_path = sys.argv[1:5]
 pid, fd = pty.fork()
 if pid == 0:
+    os.environ.update({"COLUMNS": "100", "LINES": "30", "TERM": "xterm-256color"})
     os.execve(bin_path, [bin_path, "-o", music], dict(os.environ))
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
 open(pid_path, "w").write(str(pid))
-while True:
-    try:
-        if not os.read(fd, 65536):
+with open(out_path, "wb", buffering=0) as capture:
+    while True:
+        try:
+            chunk = os.read(fd, 65536)
+        except OSError:
             break
-    except OSError:
-        break
+        if not chunk:
+            break
+        capture.write(chunk)
 PY
 sleep 5
 TUI_PID="$(cat "$WORK_DIR/tui.pid" 2>/dev/null || echo)"
@@ -140,6 +156,29 @@ if [ "$rc" -eq 0 ]; then
     ok "TUI 退出后 CLI 仍能控制核心"
 else
     bad "TUI 退出后 CLI 控制失败（rc=$rc）"
+fi
+
+info "TUI 歌词栏渲染核心持有的歌词（回归：远端门面曾从不拉取 Lyrics.GetDocument）"
+# 断言看的是界面**实际画出来的字**：核心侧 GetDocument 一直是对的，坏掉的是
+# 前端门面没把行数据拉过来，歌词栏于是永远停在“暂无歌词”占位（曾整版回归）。
+capture="$(python3 - "$WORK_DIR/tui.out" <<'PY'
+import re, sys
+try:
+    raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+except OSError:
+    print("0 0")
+    raise SystemExit
+# ncurses 只写变化的单元格，文案可能被转义序列切开：先去转义再找标记
+text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\(B", "", raw)
+print("%d %d" % (text.count("LRC-REG-"), 1 if "暂无歌词" in text else 0))
+PY
+)"
+markers="${capture%% *}"
+placeholder="${capture##* }"
+if [ "${markers:-0}" -gt 0 ] 2>/dev/null; then
+    ok "TUI 歌词栏渲染出核心持有的歌词（捕获到 $markers 处歌词标记）"
+else
+    bad "TUI 歌词栏没有渲染核心的歌词（标记数=${markers:-0}，占位符“暂无歌词”出现=${placeholder:-?}）"
 fi
 
 info "内容库（SQLite）在多前端读写后仍然可用"

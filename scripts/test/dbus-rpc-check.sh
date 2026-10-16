@@ -4,7 +4,7 @@
 #
 # 验证内容：
 #   1. 自省 XML 中 org.yxzl.ter_music.* 各接口及方法齐备；
-#   2. Info.GetInfo 的 core.methods 声明与实际发布的方法一致（防漂移）；
+#   2. core.methods 声明与自省 XML 双向核对（正向防漏方法、反向防漏声明）；
 #   3. 各接口的 schema、分页边界与超大响应拒绝（随 M2 逐步补充）；
 #   4. 退出时不留残留进程。
 #
@@ -225,7 +225,69 @@ print("\n".join(methods))
     done <<< "$declared"
 
     if [ "$missing" -eq 0 ]; then
-        ok "core.methods 与实际发布一致（$checked 个方法）"
+        ok "core.methods 正向与实际发布一致（$checked 个方法）"
+    fi
+
+    # ── 反向核对（Task 10.3）：自省 XML 里已发布的方法必须都在 core.methods ──
+    # 例外（设计上不属 core.methods 清单，见 media/rpc_common.c:398 注释——
+    # 该清单只登记 ter_music RPC 面，文档 API_DBUS 同口径）：
+    #   - org.freedesktop.* 标准接口的方法（Properties 的 Get/Set/GetAll、
+    #     Introspectable.Introspect、Peer.Ping/GetMachineId）；
+    #   - org.mpris.* 的 MPRIS 桌面标准面（Raise/Quit/Play/…/OpenUri）。
+    # 凡 org.yxzl.ter_music.<Iface>.<Member> 而 core.methods 缺
+    # "<Iface>.<Member>" 者，逐条记 bad。
+    printf '%s\n' "$declared" > "$WORK_DIR/declared-methods.txt"
+    local reverse published rev_missed=0
+    reverse="$(printf '%s' "$xml" | python3 -c '
+import re, sys
+
+declared = {l.strip() for l in open(sys.argv[1]) if l.strip()}
+STANDARD_PREFIXES = ("org.freedesktop.", "org.mpris.")
+PREFIX = "org.yxzl.ter_music."
+iface = section = None
+published = 0
+undeclared = []
+for raw in sys.stdin:
+    line = raw.rstrip()
+    m = re.match(r"\s*interface ([A-Za-z0-9_.]+) \{", line)
+    if m:
+        iface, section = m.group(1), None
+        continue
+    if re.match(r"\s*methods:\s*$", line):
+        section = "methods"
+        continue
+    if re.match(r"\s*(properties|signals|annotations):", line):
+        section = None
+        continue
+    if re.match(r"\s*\};", line):
+        iface, section = None, None
+        continue
+    if not iface or section != "methods":
+        continue
+    m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
+    if not m:
+        continue
+    member = m.group(1)
+    if iface.startswith(STANDARD_PREFIXES):
+        continue                      # 标准接口/MPRIS 面豁免
+    if iface.startswith(PREFIX):
+        short = iface[len(PREFIX):]
+        published += 1
+        if "%s.%s" % (short, member) not in declared:
+            undeclared.append("%s.%s" % (short, member))
+print(published)
+for u in undeclared:
+    print("UNDECLARED " + u)
+' "$WORK_DIR/declared-methods.txt")"
+    published="$(printf '%s\n' "$reverse" | head -1)"
+    while IFS= read -r u; do
+        [ -n "$u" ] || continue
+        bad "自省 XML 发布了 $u 但 core.methods 未声明（反向核对）"
+        rev_missed=$((rev_missed + 1))
+    done < <(printf '%s\n' "$reverse" | sed -n 's/^UNDECLARED //p')
+
+    if [ "$rev_missed" -eq 0 ]; then
+        ok "反向核对：自省 XML 的 ter_music 方法 ${published:-0} 个均已在 core.methods 声明（freedesktop/mpris 标准接口除外）"
     fi
 }
 
@@ -489,101 +551,6 @@ check_queue() {
 }
 
 
-# ── 检查 6：曲库与收藏/历史（分页、搜索、序列化） ────────────────────
-check_library() {
-    local status available tracks
-    status="$(dbus_call org.yxzl.ter_music.Library Status)"
-    available="$(json_field "$status" 'doc["available"]')"
-    tracks="$(json_field "$status" 'doc["tracks"]')"
-    case "$available" in
-        ''|ERR:*) bad "Library.Status 失败：$status"; return ;;
-        *) ok "Library.Status available=$available tracks=$tracks" ;;
-    esac
-
-    # 按扫描根的路径重扫一次，验证异步扫描与进度上报
-    local root="$WORK_DIR/music"
-    dbus_call org.yxzl.ter_music.Library Rescan "$root" >/dev/null
-    local waited=0 scanned=0
-    while [ "$waited" -lt 10 ]; do
-        sleep 1
-        waited=$((waited + 1))
-        scanned="$(json_field "$(dbus_call org.yxzl.ter_music.Library Status)" 'doc["tracks"]')"
-        [ "${scanned:-0}" -gt 0 ] 2>/dev/null && break
-    done
-    if [ "${scanned:-0}" -gt 0 ] 2>/dev/null; then
-        ok "Library.Rescan 编入 $scanned 首曲目（${waited}s）"
-    else
-        bad "Library.Rescan 后 tracks=$scanned"
-    fi
-
-    # 空路径必须被拒绝（全根扫描是阻塞调用，未暴露）
-    local empty_rc
-    empty_rc="$(dbus_call org.yxzl.ter_music.Library Rescan "")"
-    printf '%s' "$empty_rc" | grep -q "InvalidArgs" && ok "Rescan 拒绝空路径" || bad "Rescan 未拒绝空路径"
-
-    # 非法视图名
-    local bad_kind
-    bad_kind="$(dbus_call org.yxzl.ter_music.Library GetPage bogus "" 0 10)"
-    printf '%s' "$bad_kind" | grep -q "InvalidArgs" && ok "GetPage 拒绝未知 kind" || bad "GetPage 未拒绝未知 kind"
-
-    # 分页与总数一致
-    local page count total
-    page="$(dbus_call org.yxzl.ter_music.Library GetPage tracks "" 0 10)"
-    count="$(json_field "$page" 'doc["count"]')"
-    total="$(json_field "$page" 'doc["total"]')"
-    if [ "${count:-0}" -le "${total:-0}" ] 2>/dev/null; then
-        ok "曲库分页 count=$count total=$total"
-    else
-        bad "曲库分页 count=$count > total=$total"
-    fi
-
-    # 搜索（filter JSON）
-    local search_n
-    search_n="$(json_field "$(dbus_call org.yxzl.ter_music.Library Search '{"query":"a"}')" 'doc["item_count"]')"
-    case "$search_n" in
-        ''|ERR:*) bad "Library.Search 失败：$search_n" ;;
-        *) ok "Library.Search 命中 $search_n 条" ;;
-    esac
-
-    # 收藏往返：Add → Has → List → Remove
-    local fav_path="$WORK_DIR/music/a.wav"
-    dbus_call org.yxzl.ter_music.Favorites Add "$fav_path" >/dev/null
-    local has
-    has="$(dbus_call org.yxzl.ter_music.Favorites Has "$fav_path")"
-    printf '%s' "$has" | grep -q "true" && ok "Favorites.Add 后可 Has" || bad "Favorites.Has 返回 $has"
-    local fav_total
-    fav_total="$(json_field "$(dbus_call org.yxzl.ter_music.Favorites List 0 10)" 'doc["total"]')"
-    [ "${fav_total:-0}" -ge 1 ] 2>/dev/null && ok "Favorites.List total=$fav_total" || bad "Favorites.List total=$fav_total"
-    dbus_call org.yxzl.ter_music.Favorites Remove "$fav_path" >/dev/null
-
-    # 历史往返：Add → List → Clear → 空
-    dbus_call org.yxzl.ter_music.History Add "$fav_path" 0 >/dev/null
-    local hist_total
-    hist_total="$(json_field "$(dbus_call org.yxzl.ter_music.History List 0 10)" 'doc["total"]')"
-    dbus_call org.yxzl.ter_music.History Clear >/dev/null
-    local hist_after
-    hist_after="$(json_field "$(dbus_call org.yxzl.ter_music.History List 0 10)" 'doc["total"]')"
-    if [ "${hist_total:-0}" -ge 1 ] && [ "${hist_after:-1}" = "0" ]; then
-        ok "History Add/List/Clear 往返正常（$hist_total → 0）"
-    else
-        bad "History 往返异常：add=$hist_total after_clear=$hist_after"
-    fi
-
-    # 目录历史往返
-    dbus_call org.yxzl.ter_music.DirHistory Add "$WORK_DIR/music" >/dev/null
-    local dir_total
-    dir_total="$(json_field "$(dbus_call org.yxzl.ter_music.DirHistory List 0 10)" 'doc["total"]')"
-    dbus_call org.yxzl.ter_music.DirHistory Clear >/dev/null
-    local dir_after
-    dir_after="$(json_field "$(dbus_call org.yxzl.ter_music.DirHistory List 0 10)" 'doc["total"]')"
-    if [ "${dir_total:-0}" -ge 1 ] && [ "${dir_after:-1}" = "0" ]; then
-        ok "DirHistory Add/List/Clear 往返正常（$dir_total → 0）"
-    else
-        bad "DirHistory 往返异常：add=$dir_total after_clear=$dir_after"
-    fi
-}
-
-
 # ── 检查 7：Config / Remote ─────────────────────────────────────────
 check_config_remote() {
     local all volume
@@ -762,10 +729,6 @@ check_frontends
 
 info "检查 5：Queue（路径语义：内容由前端下发）"
 check_queue
-
-info "检查 6：曲库与收藏/历史（后端不再拥有内容，本段随内容接口一并撤下）"
-# 后端只做播放：曲库/收藏/历史归前端（TUI/CLI），daemon 进程内不再打开 SQLite。
-# 这一段针对 daemon 的断言已无意义，内容接口撤下时整段删除。
 
 info "检查 7：Config / Remote（M2.6）"
 check_config_remote

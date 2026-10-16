@@ -173,12 +173,15 @@ void handle_history_input(int ch)
                     g_content_selected_idx < g_dir_history.count) {
 
                     const char *path = g_dir_history.entries[g_content_selected_idx].path;
-                    extern void stop_audio(void);
                     player_stop();
                     int count = load_playlist(path);
+                    /* 目录历史加载的内容需经门面下发给核心（remote 下 load_playlist
+                     * 只写进程内镜像，不会把路径交给核心）（Task 4.3）。 */
+                    if (count > 0) {
+                        player_queue_push();
+                    }
 
                     if (count > 0) {
-                        extern int g_selected_index;
                         g_selected_index = 0;
                         add_dir_history_entry(path);
                         exit_current_view();
@@ -202,6 +205,9 @@ void handle_history_input(int ch)
                 int count = append_playlist(path);
 
                 if (count > 0) {
+                    /* 追加的内容也要经门面下发给核心（remote 下 append_playlist
+                     * 只写进程内镜像）（Task 4.3）。 */
+                    player_queue_push();
                     add_dir_history_entry(path);
                     exit_current_view();
                     if (g_app_config.remember_last_path) {

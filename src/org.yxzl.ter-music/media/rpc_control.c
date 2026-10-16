@@ -37,8 +37,11 @@
 
 
 /* ── 前端可见的状态/错误信号（Control 接口） ───────────────────────
- * 状态消息的源头在 core（core_status_push），作业/远程失败在 rpc_job.c 与
- * rpc_remote.c；它们都通过这两个助手广播，避免各自拼信号。 */
+ * 状态消息的源头在 core（core_status_push），音频层的失败（打不开文件、
+ * 写设备失败等）也走同一条路；媒体循环每轮由 rpc_info_sync_status() 比较
+ * 序号后转发到这里，避免各处自己拼信号。
+ * 后台扫描任务与远程来源（旧 rpc_job.c / rpc_remote.c）已随 api_version 3/4
+ * 撤下，Error 信号目前只由核心侧的异常路径使用。 */
 
 void rpc_control_emit_status(unsigned long long seq, const char *message)
 {

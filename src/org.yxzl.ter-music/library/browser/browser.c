@@ -20,7 +20,6 @@
 #include "library/library.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
-#include "audio/audio.h"
 #include "ui/ui.h"
 #include "ui/dialog.h"
 #include "logger/logger.h"
@@ -53,7 +52,9 @@ static void truncate_text(char *buf, size_t buf_size, const char *text, int max_
 
 void library_browser_toggle(void) {
     if (!g_library_state.active) {
-        if (!g_library_state.available) return;
+        /* available 只有 enter() 会赋值，首按前恒为 0——拿它当闸会把 M 永久闸死。
+         * 直接按曲库真实可用性判断（enter() 内仍同步该字段供渲染分支使用）。 */
+        if (!library_is_available()) return;
         library_browser_enter();
     } else {
         library_browser_exit();
@@ -660,19 +661,32 @@ static void handle_track_list_input(int ch, const int *rowids, int count) {
         break;
     case '\n':
     case ' ':
-    case KEY_ENTER:
-        /* Play the selected track */
+    case KEY_ENTER: {
+        /* Play the selected track through the front-end play path
+         * (ui_play_track_index → player facade). The old code called
+         * play_audio() directly, which starts a local playback thread in
+         * the remote front-end process — that bypasses the core. */
         if (g_library_state.selected_index < count) {
-            library_load_into_playlist(&rowids[g_library_state.selected_index], 1, 0);
-            /* Auto-play doesn't happen with library_load_into_playlist alone.
-             * We need to set the current play index and start playback. */
-            /* The existing event loop handles this if we set state properly */
-            search_clear();
-            g_selected_index = 0;
-            play_audio(0);
-            library_browser_exit();
+            int rowid = rowids[g_library_state.selected_index];
+            Track t;
+            memset(&t, 0, sizeof(t));
+            if (library_get_track_metadata(rowid, &t) == 0 && t.path[0]) {
+                int found = playlist_find_track_index_by_path(t.path);
+                if (found < 0 && append_playlist(t.path) > 0) {
+                    found = playlist_find_track_index_by_path(t.path);
+                }
+                if (found >= 0) {
+                    g_selected_index = found;
+                    ui_play_track_index(found);
+                    library_browser_exit();
+                } else {
+                    log_warn("library_browser",
+                             "cannot queue library track: %s", t.path);
+                }
+            }
         }
         break;
+    }
     case 'a':
     case 'A':
         /* Append to current playlist */

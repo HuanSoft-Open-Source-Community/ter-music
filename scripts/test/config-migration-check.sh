@@ -42,6 +42,16 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# --bin 规范成绝对路径：本脚本会先 `cd "$WORK_DIR"` 再跑 tui-probe.py（好让被测
+# 程序的调试日志落在工作目录里），此时相对路径（CI 传的就是 ./build/ter-music）
+# 已经失效——探针只会报“不可执行”，而那条 remote.xml 断言就会长期 skip。
+if [ "${TM_BIN#/}" = "$TM_BIN" ]; then
+    bin_dir="$(cd "$(dirname "$TM_BIN")" 2>/dev/null && pwd)" || bin_dir=""
+    if [ -n "$bin_dir" ]; then
+        TM_BIN="$bin_dir/$(basename "$TM_BIN")"
+    fi
+fi
+
 # ── 独占的总线：默认起私有会话总线 ───────────────────────────────
 # 这两个脚本必须只有一个核心在总线上，否则前端会接到上一次运行残留的实例上
 # （实测：远端 e2e 曾接上迁移测试留下的核心）。需要复用当前桌面总线时显式传

@@ -292,7 +292,7 @@ int main(int argc, char *argv[]) {
 
     i18n_init(g_app_config.ui_language);
     if (frontend == PLAYER_BACKEND_LOCAL) {
-        set_volume_percent(g_app_config.volume_percent);
+        set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支） */
     }
 
     if (g_app_config.clear_history_on_startup && frontend == PLAYER_BACKEND_LOCAL) {
@@ -310,8 +310,8 @@ int main(int argc, char *argv[]) {
 
     if (frontend == PLAYER_BACKEND_LOCAL) {
         init_ffmpeg();
-        g_active_backend = g_app_config.audio_backend;
-        init_audio_device();
+        g_active_backend = g_app_config.audio_backend; /* ui-purity-allow: local 分支=核心宿主初始化引擎全局（远端永不进此分支） */
+        init_audio_device();                            /* ui-purity-allow: local 分支=核心宿主初始化音频设备 */
         media_session_init();
         log_info("main", "Subsystems initialized (local front end)");
     } else {
@@ -321,7 +321,7 @@ int main(int argc, char *argv[]) {
     create_layout();
 
     if (frontend == PLAYER_BACKEND_LOCAL) {
-        reset_playlist_state();
+        reset_playlist_state(); /* ui-purity-allow: local 分支=核心宿主复位引擎队列状态 */
     }
 
     int loaded = 0;
@@ -330,6 +330,9 @@ int main(int argc, char *argv[]) {
     int resumed_playback = 0;
     int opened_single_file = 0;
     int opened_track_index = -1;
+    /* remote 前端：连接建立、队列下发完成后再经门面驱动的自动播放内容下标
+     * （-1 = 无）。断点恢复优先于它（Task 4.1）。 */
+    int remote_autoplay_index = -1;
     char final_path[MAX_PATH_LEN] = "";
 
     int temp_loaded = load_temp_playlist();
@@ -510,7 +513,7 @@ int main(int argc, char *argv[]) {
             resumed_playback = app_resume_saved_playback();
             if (resumed_playback) {
                 log_info("main", "Playback session restored: track idx=%d pos=%d",
-                         g_current_play_index, g_app_config.last_played_position);
+                         g_current_play_index, g_app_config.last_played_position); /* ui-purity-allow: local 恢复日志只读引擎全局（remote 分支在 app_resume_saved_playback 早退，不会置 resumed_playback） */
             } else {
                 log_info("main", "Resume playback failed, clearing saved session");
                 app_clear_saved_session();
@@ -534,8 +537,16 @@ int main(int argc, char *argv[]) {
             }
             if (auto_idx >= 0) {
                 log_info("main", "Auto-playing track idx=%d", auto_idx);
-                play_audio(auto_idx);
-                app_set_selection_for_track(auto_idx);
+                /* 后端分流（Task 4.1）：remote 不在前端进程直调 play_audio，
+                 * 只把选中项落到界面并记下内容下标，待连接+队列下发后经门面播放。
+                 * local（TUI 即核心）保持原有的直接播放行为不变。 */
+                if (frontend == PLAYER_BACKEND_REMOTE) {
+                    app_set_selection_for_track(auto_idx);
+                    remote_autoplay_index = auto_idx;
+                } else {
+                    play_audio(auto_idx); /* ui-purity-allow: local 分支（else=非 remote）=TUI 即核心直接起播 */
+                    app_set_selection_for_track(auto_idx);
+                }
             }
         }
         if (attempted_resume_load && !open_path && !resumed_playback) {
@@ -561,9 +572,12 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "错误：无法连接到播放服务（核心）。\n");
             fprintf(stderr, "      请确认核心版本不低于 %d，或先 `ter-music daemon start`。\n",
                     TER_MUSIC_API_VERSION);
-        } else {
-            fprintf(stderr, "错误：无法初始化播放器门面。\n");
+            cleanup();
+            /* 语义化退出码：名字不在线=无实例(3)，名字在线却连不上=总线不可用(4) */
+            return cli_client_primary_available(bus_name[0] ? bus_name : NULL)
+                       ? CLI_EXIT_DBUS : CLI_EXIT_NO_INSTANCE;
         }
+        fprintf(stderr, "错误：无法初始化播放器门面。\n");
         cleanup();
         return 1;
     }
@@ -575,11 +589,32 @@ int main(int argc, char *argv[]) {
 
     if (frontend == PLAYER_BACKEND_LOCAL) {
         /* 本地模式的音量在音频设备初始化时应用；远端模式由核心持有 */
-        set_volume_percent(g_app_config.volume_percent);
+        set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支） */
     } else if (loaded) {
         /* 内容归前端：本进程已经扫描/排序完成，这里把路径队列整表下发给核心 */
         int pushed = player_queue_push();
         log_info("main", "Delivered %d queue entries to the core", pushed);
+
+        /* 断点恢复 / 自动播放改由门面驱动核心（Task 4.1）：此刻连接已建立、
+         * 队列已下发，前端绝不在本进程起播放线程，只下发命令。
+         *   - resume：按上次曲目路径反查队列位置播放，再跳到上次进度；
+         *   - 否则若 auto_play_on_start：经统一入口按内容下标播放首曲。 */
+        if (resumed_playback) {
+            int pos = player_queue_find(g_app_config.last_played_track_path);
+            if (pos >= 0) {
+                player_queue_play(pos);
+                if (g_app_config.last_played_position > 0) {
+                    player_seek_seconds(g_app_config.last_played_position);
+                }
+                log_info("main", "Restored playback via facade at queue position=%d", pos);
+            } else {
+                log_warn("main", "Resume track is not in the delivered queue");
+            }
+        } else if (remote_autoplay_index >= 0) {
+            ui_play_track_index(remote_autoplay_index);
+            log_info("main", "Auto-play started via facade for content idx=%d",
+                     remote_autoplay_index);
+        }
     }
 
     log_info("main", "Starting event loop");

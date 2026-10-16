@@ -8,7 +8,9 @@
  *    条目；`bq_advance()/bq_rewind()` 只动游标（语义与
  *    `audio/play_queue.c` 的 `play_queue_advance/rewind` 一致）；
  *  - 路径合法性由 D-Bus 边界层负责（核心只接受本地路径），本模块不做校验；
- *  - 单线程使用（媒体循环内），故不加锁。
+ *  - 媒体循环（`Queue.*`）与播放线程（自动续播、预取）都会碰它，故全部共享
+ *    状态都在 `g_bq_mutex` 下读写；公开函数互调一律走 `*_locked` 内部版本，
+ *    避免同一线程二次加锁。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -19,6 +21,7 @@
 #include "logger/logger.h"
 #include "util/json.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,14 +33,21 @@ typedef struct {
     int position;                 /* 游标，-1 = 无 */
     unsigned long long revision;
     int shuffle_generation;
+    /* Set 契约（见头文件）：整表替换前把原游标条目另存于此，播放线程的下标
+     * 因此越界时上层仍能如实上报正在出声的曲目 */
+    int pinned_valid;
+    BackendQueueEntry pinned;
 } BackendQueue;
 
 static BackendQueue g_bq;
 static int g_bq_ready = 0;
 
+/* 媒体循环与播放线程共用队列，所有字段都在这把锁下读写 */
+static pthread_mutex_t g_bq_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /* ── 基础 ─────────────────────────────────────────────────────────── */
 
-void bq_init(void)
+static void bq_init_locked(void)
 {
     memset(&g_bq, 0, sizeof(g_bq));
     g_bq.position = -1;
@@ -45,20 +55,30 @@ void bq_init(void)
     g_bq_ready = 1;
 }
 
+void bq_init(void)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_init_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
+}
+
 void bq_shutdown(void)
 {
+    pthread_mutex_lock(&g_bq_mutex);
     free(g_bq.entries);
     memset(&g_bq, 0, sizeof(g_bq));
     g_bq.position = -1;
     g_bq_ready = 0;
+    pthread_mutex_unlock(&g_bq_mutex);
 }
 
 /* 惰性初始化：调用方（核心启动路径、单测、queue.txt 恢复）不必记住先调
- * bq_init()，首次触碰队列入口就把状态置成“空队列”（position = -1）。 */
-static void bq_ensure_ready(void)
+ * bq_init()，首次触碰队列入口就把状态置成“空队列”（position = -1）。
+ * 只在持锁时调用。 */
+static void bq_ensure_ready_locked(void)
 {
     if (!g_bq_ready) {
-        bq_init();
+        bq_init_locked();
     }
 }
 
@@ -74,16 +94,51 @@ int bq_path_is_local(const char *path)
     return strncmp(path, "file://", 7) == 0;
 }
 
-int bq_count(void)      { bq_ensure_ready(); return g_bq.count; }
-int bq_position(void)   { bq_ensure_ready(); return g_bq.position; }
-
-unsigned long long bq_revision(void) { bq_ensure_ready(); return g_bq.revision; }
-
-void bq_bump_revision(void) { bq_ensure_ready(); g_bq.revision++; }
-
-static int bq_reserve(int wanted)
+int bq_count(void)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int count = g_bq.count;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return count;
+}
+
+int bq_position(void)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int position = g_bq.position;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return position;
+}
+
+unsigned long long bq_revision(void)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    unsigned long long revision = g_bq.revision;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return revision;
+}
+
+/* 只在持锁时调用：条目内容、顺序或游标的任何变化都要递增修订号，
+ * 媒体循环（media/rpc_queue.c 的 rpc_queue_sync）据此补发 QueueChanged。 */
+static void bq_bump_revision_locked(void)
+{
+    bq_ensure_ready_locked();
+    g_bq.revision++;
+}
+
+void bq_bump_revision(void)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_bump_revision_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
+}
+
+static int bq_reserve_locked(int wanted)
+{
+    bq_ensure_ready_locked();
     if (wanted <= g_bq.capacity) {
         return 0;
     }
@@ -101,6 +156,33 @@ static int bq_reserve(int wanted)
     return 0;
 }
 
+/* 把当前游标条目另存为“在播条目”；游标无效时清除该记录 */
+static void bq_pin_current_locked(void)
+{
+    if (g_bq.position >= 0 && g_bq.position < g_bq.count) {
+        g_bq.pinned = g_bq.entries[g_bq.position];
+        g_bq.pinned_valid = 1;
+    } else {
+        g_bq.pinned_valid = 0;
+        memset(&g_bq.pinned, 0, sizeof(g_bq.pinned));
+    }
+}
+
+int bq_pinned_entry(BackendQueueEntry *out)
+{
+    if (!out) {
+        return -1;
+    }
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int have = g_bq.pinned_valid;
+    if (have) {
+        *out = g_bq.pinned;
+    }
+    pthread_mutex_unlock(&g_bq_mutex);
+    return have ? 0 : -1;
+}
+
 static void bq_clear_locked_soft(void)
 {
     g_bq.count = 0;
@@ -109,15 +191,19 @@ static void bq_clear_locked_soft(void)
 
 int bq_clear(void)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    /* 清空前记住在播条目：正在出声的曲目不因队列表被清空而“消失” */
+    bq_pin_current_locked();
     bq_clear_locked_soft();
-    bq_bump_revision();
+    bq_bump_revision_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
     return 0;
 }
 
-int bq_entry_at(int position, BackendQueueEntry *out)
+static int bq_entry_at_locked(int position, BackendQueueEntry *out)
 {
-    bq_ensure_ready();
+    bq_ensure_ready_locked();
     if (!out || position < 0 || position >= g_bq.count) {
         return -1;
     }
@@ -125,28 +211,47 @@ int bq_entry_at(int position, BackendQueueEntry *out)
     return 0;
 }
 
-int bq_current(BackendQueueEntry *out)
+int bq_entry_at(int position, BackendQueueEntry *out)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    int rc = bq_entry_at_locked(position, out);
+    pthread_mutex_unlock(&g_bq_mutex);
+    return rc;
+}
+
+static int bq_current_locked(BackendQueueEntry *out)
+{
+    bq_ensure_ready_locked();
     if (g_bq.position < 0) {
         return -1;
     }
-    return bq_entry_at(g_bq.position, out);
+    return bq_entry_at_locked(g_bq.position, out);
+}
+
+int bq_current(BackendQueueEntry *out)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    int rc = bq_current_locked(out);
+    pthread_mutex_unlock(&g_bq_mutex);
+    return rc;
 }
 
 int bq_path_at(int position, char *out, size_t size)
 {
-    bq_ensure_ready();
-    if (!out || size == 0 || position < 0 || position >= g_bq.count) {
-        return -1;
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int rc = -1;
+    if (out && size > 0 && position >= 0 && position < g_bq.count) {
+        snprintf(out, size, "%s", g_bq.entries[position].path);
+        rc = 0;
     }
-    snprintf(out, size, "%s", g_bq.entries[position].path);
-    return 0;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return rc;
 }
 
-int bq_position_of_path(const char *path)
+static int bq_position_of_path_locked(const char *path)
 {
-    bq_ensure_ready();
+    bq_ensure_ready_locked();
     if (!path || path[0] == '\0') {
         return -1;
     }
@@ -158,26 +263,43 @@ int bq_position_of_path(const char *path)
     return -1;
 }
 
+int bq_position_of_path(const char *path)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    int position = bq_position_of_path_locked(path);
+    pthread_mutex_unlock(&g_bq_mutex);
+    return position;
+}
+
 int bq_set_position(int position)
 {
-    bq_ensure_ready();
-    if (position < -1 || position >= g_bq.count) {
-        return -1;
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int rc = -1;
+    if (position >= -1 && position < g_bq.count) {
+        g_bq.position = position;
+        /* 游标就是“将要出声的条目”：在播记录随之刷新 */
+        bq_pin_current_locked();
+        bq_bump_revision_locked();
+        rc = 0;
     }
-    g_bq.position = position;
-    g_bq.revision++;
-    return 0;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return rc;
 }
 
 int bq_play_at(int position)
 {
-    bq_ensure_ready();
-    if (position < 0 || position >= g_bq.count) {
-        return -1;
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int rc = -1;
+    if (position >= 0 && position < g_bq.count) {
+        g_bq.position = position;
+        bq_pin_current_locked();
+        bq_bump_revision_locked();
+        rc = 0;
     }
-    g_bq.position = position;
-    g_bq.revision++;
-    return 0;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return rc;
 }
 
 /* ── JSON 解析（前端下发） ────────────────────────────────────────── */
@@ -221,14 +343,17 @@ static void entry_from_json(JsonReader *reader, BackendQueueEntry *entry)
 }
 
 /* 解析载荷里的条目数组：既接受 {"entries":[...]} 也接受裸数组。
- * @return 条目数（>=0）；-1 = 无法解析 */
+ * 整表解析完再判超限：**绝不**在 BQ_SET_MAX 处早退（旧实现在那里静默截断，
+ * 前端把 600 条单发过来时只收下 500 条却报告成功）。
+ * @return 条目数（>=0）；BQ_ERR_INVALID = 无法解析；
+ *         BQ_ERR_TOO_MANY = 单发条目数超过 BQ_SET_MAX */
 static int parse_entries(const char *json, BackendQueueEntry **out, char *err, size_t err_size)
 {
     *out = NULL;
     if (err && err_size) err[0] = '\0';
     if (!json || json[0] == '\0') {
         if (err && err_size) snprintf(err, err_size, "empty payload");
-        return -1;
+        return BQ_ERR_INVALID;
     }
 
     JsonReader reader;
@@ -241,22 +366,23 @@ static int parse_entries(const char *json, BackendQueueEntry **out, char *err, s
         json_reader_init(&reader, json, strlen(json));
         if (json_reader_enter(&reader, &root) != 0) {
             if (err && err_size) snprintf(err, err_size, "expected an entry array");
-            return -1;
+            return BQ_ERR_INVALID;
         }
     } else if (json_reader_enter(&reader, &array) != 0) {
         if (err && err_size) snprintf(err, err_size, "cannot enter entry array");
-        return -1;
+        return BQ_ERR_INVALID;
     }
 
     BackendQueueEntry *parsed = calloc(BQ_SET_MAX, sizeof(*parsed));
     if (!parsed) {
         if (err && err_size) snprintf(err, err_size, "out of memory");
-        return -1;
+        return BQ_ERR_INVALID;
     }
 
-    int count = 0;
+    int stored = 0;     /* 实际写进 parsed 的条目数（<= BQ_SET_MAX） */
+    int accepted = 0;   /* 载荷里的合法条目总数（超限判定用它） */
     JsonValue element;
-    while (count < BQ_SET_MAX && json_array_next(&reader, &element) == 1) {
+    while (json_array_next(&reader, &element) == 1) {
         if (element.type != JSON_VALUE_OBJECT) {
             continue;
         }
@@ -272,35 +398,58 @@ static int parse_entries(const char *json, BackendQueueEntry **out, char *err, s
         if (!bq_path_is_local(entry.path)) {
             free(parsed);
             if (err && err_size) snprintf(err, err_size, "non-local path rejected");
-            return -1;
+            return BQ_ERR_INVALID;
         }
-        parsed[count++] = entry;
+        if (stored < BQ_SET_MAX) {
+            parsed[stored++] = entry;
+        }
+        accepted++;
     }
 
     if (!json_reader_ok(&reader)) {
         free(parsed);
         if (err && err_size) snprintf(err, err_size, "malformed JSON");
-        return -1;
+        return BQ_ERR_INVALID;
+    }
+
+    if (accepted > BQ_SET_MAX) {
+        free(parsed);
+        if (err && err_size) {
+            snprintf(err, err_size,
+                     "payload carries %d entries, over the %d per-call limit",
+                     accepted, BQ_SET_MAX);
+        }
+        return BQ_ERR_TOO_MANY;
     }
 
     *out = parsed;
-    return count;
+    return stored;
 }
 
+/* 载荷下发（Set/Append/InsertAfter）都在锁外完成解析：单条载荷可达 256 KB，
+ * 解析期间不持锁，避免播放线程的续播读取被拖住。 */
 int bq_set_json(const char *json)
 {
-    bq_ensure_ready();
     char err[128];
     BackendQueueEntry *parsed = NULL;
     int count = parse_entries(json, &parsed, err, sizeof(err));
     if (count < 0) {
         log_warn("bq", "Queue.Set rejected: %s", err);
-        return -1;
+        return count;
     }
-    if (bq_reserve(count) != 0) {
+
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    if (bq_reserve_locked(count) != 0) {
+        pthread_mutex_unlock(&g_bq_mutex);
         free(parsed);
-        return -1;
+        return BQ_ERR_INVALID;
     }
+
+    /* Set 契约：整表替换的是**未来曲目**，正在播放的曲目不中断。替换前把原
+     * 游标条目记为“在播条目”，新表短于播放线程下标时上层（MPRIS/Info）仍能
+     * 用它如实上报正在出声的曲目。游标随后置到新表首。 */
+    bq_pin_current_locked();
 
     if (count > 0) {
         memcpy(g_bq.entries, parsed, (size_t)count * sizeof(*parsed));
@@ -308,26 +457,32 @@ int bq_set_json(const char *json)
     free(parsed);
     g_bq.count = count;
     g_bq.position = count > 0 ? 0 : -1;
-    bq_bump_revision();
+    bq_bump_revision_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
+
     log_info("bq", "Queue set to %d entr%s", count, count == 1 ? "y" : "ies");
     return count;
 }
 
 int bq_append_json(const char *json)
 {
-    bq_ensure_ready();
     char err[128];
     BackendQueueEntry *parsed = NULL;
     int count = parse_entries(json, &parsed, err, sizeof(err));
     if (count < 0) {
         log_warn("bq", "Queue.Append rejected: %s", err);
-        return -1;
-    }
-    if (bq_reserve(g_bq.count + count) != 0) {
-        free(parsed);
-        return -1;
+        return count;
     }
 
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    if (bq_reserve_locked(g_bq.count + count) != 0) {
+        pthread_mutex_unlock(&g_bq_mutex);
+        free(parsed);
+        return BQ_ERR_INVALID;
+    }
+
+    bq_pin_current_locked();
     if (count > 0) {
         memcpy(g_bq.entries + g_bq.count, parsed, (size_t)count * sizeof(*parsed));
         g_bq.count += count;
@@ -335,31 +490,40 @@ int bq_append_json(const char *json)
     free(parsed);
     if (g_bq.position < 0 && g_bq.count > 0) {
         g_bq.position = 0;
+        bq_pin_current_locked();
     }
-    bq_bump_revision();
-    log_info("bq", "Queue appended %d entr%s (total %d)", count, count == 1 ? "y" : "ies", g_bq.count);
+    bq_bump_revision_locked();
+    int total = g_bq.count;
+    pthread_mutex_unlock(&g_bq_mutex);
+
+    log_info("bq", "Queue appended %d entr%s (total %d)", count, count == 1 ? "y" : "ies", total);
     return count;
 }
 
 int bq_insert_after_json(int position, const char *json)
 {
-    bq_ensure_ready();
     char err[128];
     BackendQueueEntry *parsed = NULL;
     int count = parse_entries(json, &parsed, err, sizeof(err));
     if (count < 0) {
         log_warn("bq", "Queue.InsertAfter rejected: %s", err);
-        return -1;
-    }
-    if (position < -1 || position >= g_bq.count) {
-        free(parsed);
-        return -1;
-    }
-    if (bq_reserve(g_bq.count + count) != 0) {
-        free(parsed);
-        return -1;
+        return count;
     }
 
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    if (position < -1 || position >= g_bq.count) {
+        pthread_mutex_unlock(&g_bq_mutex);
+        free(parsed);
+        return BQ_ERR_INVALID;
+    }
+    if (bq_reserve_locked(g_bq.count + count) != 0) {
+        pthread_mutex_unlock(&g_bq_mutex);
+        free(parsed);
+        return BQ_ERR_INVALID;
+    }
+
+    bq_pin_current_locked();
     int at = position + 1;
     memmove(g_bq.entries + at + count, g_bq.entries + at,
             (size_t)(g_bq.count - at) * sizeof(*g_bq.entries));
@@ -374,7 +538,8 @@ int bq_insert_after_json(int position, const char *json)
     if (g_bq.position < 0 && g_bq.count > 0) {
         g_bq.position = 0;
     }
-    bq_bump_revision();
+    bq_bump_revision_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
     return count;
 }
 
@@ -382,10 +547,15 @@ int bq_insert_after_json(int position, const char *json)
 
 int bq_remove_at(int position)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
     if (position < 0 || position >= g_bq.count) {
+        pthread_mutex_unlock(&g_bq_mutex);
         return -1;
     }
+    /* 删掉的有可能正是游标条目：先记住在播条目，播放线程的下标越界时上层
+     * 仍能用它如实上报正在出声的曲目 */
+    bq_pin_current_locked();
     memmove(g_bq.entries + position, g_bq.entries + position + 1,
             (size_t)(g_bq.count - position - 1) * sizeof(*g_bq.entries));
     g_bq.count--;
@@ -397,13 +567,14 @@ int bq_remove_at(int position)
     } else if (position == g_bq.position && g_bq.position >= g_bq.count) {
         g_bq.position = g_bq.count - 1;
     }
-    bq_bump_revision();
+    bq_bump_revision_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
     return 0;
 }
 
-static int bq_swap(int lhs, int rhs)
+static int bq_swap_locked(int lhs, int rhs)
 {
-    bq_ensure_ready();
+    bq_ensure_ready_locked();
     if (lhs < 0 || rhs < 0 || lhs >= g_bq.count || rhs >= g_bq.count) {
         return -1;
     }
@@ -416,8 +587,16 @@ static int bq_swap(int lhs, int rhs)
     } else if (g_bq.position == rhs) {
         g_bq.position = lhs;
     }
-    bq_bump_revision();
+    bq_bump_revision_locked();
     return 0;
+}
+
+static int bq_swap(int lhs, int rhs)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    int rc = bq_swap_locked(lhs, rhs);
+    pthread_mutex_unlock(&g_bq_mutex);
+    return rc;
 }
 
 int bq_move_up(int position)   { return bq_swap(position, position - 1); }
@@ -425,7 +604,7 @@ int bq_move_down(int position) { return bq_swap(position, position + 1); }
 
 /* ── 执行顺序 ─────────────────────────────────────────────────────── */
 
-void bq_shuffle_rest(void);
+static void bq_shuffle_rest_locked(void);
 
 static const char *path_dirname(const char *path, char *out, size_t size)
 {
@@ -457,24 +636,26 @@ static int same_text(const char *lhs, const char *rhs)
     return lhs[0] != '\0' && rhs[0] != '\0' && strcmp(lhs, rhs) == 0;
 }
 
-/* 洗牌模式重建：当前条目置首、其余打乱。`bq_shuffle_rest()` 本身不做
+/* 洗牌模式重建：当前条目置首、其余打乱。`bq_shuffle_rest_locked()` 本身不做
  * “当前是否已在首位”的判断，直接调用会在已经正确的队列上白打乱一遍；
- * 这里按路径先定位再决定，与旧实现 `found > 0` 的分支等价。 */
-static void bq_shuffle_keeping_current(const BackendQueueEntry *current)
+ * 这里按路径先定位再决定，与旧实现 `found > 0` 的分支等价。
+ * 只在持锁时调用。 */
+static void bq_shuffle_keeping_current_locked(const BackendQueueEntry *current)
 {
-    int position = current ? bq_position_of_path(current->path) : -1;
+    int position = current ? bq_position_of_path_locked(current->path) : -1;
     if (position > 0) {
         BackendQueueEntry tmp = g_bq.entries[0];
         g_bq.entries[0] = g_bq.entries[position];
         g_bq.entries[position] = tmp;
     }
     g_bq.position = 0;
-    bq_shuffle_rest();
+    bq_shuffle_rest_locked();
 }
 
 /* 组模式：把队列重建为"同一组"的条目（当前条目在前），与
- * audio/play_queue.c 的 filter_tracks_by_folder/album/artist 语义一致 */
-static int bq_apply_group(const BackendQueueEntry *current, PlayMode mode)
+ * audio/play_queue.c 的 filter_tracks_by_folder/album/artist 语义一致。
+ * 只在持锁时调用。 */
+static int bq_apply_group_locked(const BackendQueueEntry *current, PlayMode mode)
 {
     BackendQueueEntry *grouped = malloc((size_t)g_bq.count * sizeof(*grouped));
     if (!grouped) {
@@ -506,17 +687,19 @@ static int bq_apply_group(const BackendQueueEntry *current, PlayMode mode)
     g_bq.count = written;
 
     /* 游标回到当前条目（按路径匹配） */
-    int position = bq_position_of_path(current->path);
+    int position = bq_position_of_path_locked(current->path);
     g_bq.position = position >= 0 ? position : 0;
     return 0;
 }
 
-void bq_shuffle_rest(void)
+static void bq_shuffle_rest_locked(void)
 {
-    bq_ensure_ready();
+    bq_ensure_ready_locked();
     if (g_bq.count <= 1) {
         return;
     }
+    /* 随机重排改变的是执行顺序：先记住在播条目，再打乱游标之后的部分 */
+    bq_pin_current_locked();
     int first = g_bq.position > 0 ? g_bq.position : 0;
     for (int i = g_bq.count - 1; i > first; i--) {
         int j = first + (int)(rand() % (i - first + 1));
@@ -525,47 +708,63 @@ void bq_shuffle_rest(void)
         g_bq.entries[j] = tmp;
     }
     g_bq.shuffle_generation++;
-    bq_bump_revision();
+    bq_bump_revision_locked();
+}
+
+void bq_shuffle_rest(void)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_shuffle_rest_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
 }
 
 void bq_apply_mode(PlayMode mode)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
     if (g_bq.count == 0) {
         g_bq.position = -1;
+        pthread_mutex_unlock(&g_bq_mutex);
         return;
     }
 
+    /* 模式重建会改执行顺序（也可能收敛成一组）：先记住在播条目 */
+    bq_pin_current_locked();
+
     BackendQueueEntry current;
-    int have_current = bq_current(&current) == 0;
+    int have_current = bq_current_locked(&current) == 0;
 
     if (have_current && (pm_is_folder_mode(mode) || pm_is_album_mode(mode) || pm_is_artist_mode(mode))) {
-        if (bq_apply_group(&current, mode) != 0) {
+        if (bq_apply_group_locked(&current, mode) != 0) {
             log_warn("bq", "mode %d: no entry shares the current group, keeping the full queue", (int)mode);
         }
     }
 
     if (pm_is_shuffle(mode)) {
         if (have_current) {
-            bq_shuffle_keeping_current(&current);
+            bq_shuffle_keeping_current_locked(&current);
         } else {
             g_bq.position = 0;
-            bq_shuffle_rest();
+            bq_shuffle_rest_locked();
         }
     } else if (have_current) {
-        int position = bq_position_of_path(current.path);
+        int position = bq_position_of_path_locked(current.path);
         g_bq.position = position >= 0 ? position : 0;
     } else {
         g_bq.position = 0;
     }
 
-    bq_bump_revision();
+    bq_bump_revision_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
 }
 
 int bq_peek_next(PlayMode mode, int *out_position)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    int result = 0;
     if (g_bq.count == 0) {
+        pthread_mutex_unlock(&g_bq_mutex);
         return 0;
     }
     int position;
@@ -575,6 +774,7 @@ int bq_peek_next(PlayMode mode, int *out_position)
         position = g_bq.position + 1;
         if (position >= g_bq.count) {
             if (!pm_repeats(mode)) {
+                pthread_mutex_unlock(&g_bq_mutex);
                 return 0;
             }
             position = 0;
@@ -583,13 +783,17 @@ int bq_peek_next(PlayMode mode, int *out_position)
     if (out_position) {
         *out_position = position;
     }
-    return 1;
+    result = 1;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return result;
 }
 
 int bq_advance(PlayMode mode, int *out_position)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
     if (g_bq.count == 0) {
+        pthread_mutex_unlock(&g_bq_mutex);
         return 0;
     }
 
@@ -597,16 +801,20 @@ int bq_advance(PlayMode mode, int *out_position)
         if (out_position) {
             *out_position = g_bq.position >= 0 ? g_bq.position : 0;
         }
+        pthread_mutex_unlock(&g_bq_mutex);
         return 1;   /* 同一位置重播 */
     }
 
     if (pm_is_shuffle(mode) && pm_repeats(mode) && g_bq.position + 1 >= g_bq.count) {
-        bq_shuffle_rest();
+        bq_shuffle_rest_locked();
         g_bq.position = 1 < g_bq.count ? 1 : 0;
-        bq_bump_revision();
+        /* 游标指向即将出声的条目：在播记录随之刷新 */
+        bq_pin_current_locked();
+        bq_bump_revision_locked();
         if (out_position) {
             *out_position = g_bq.position;
         }
+        pthread_mutex_unlock(&g_bq_mutex);
         return 1;
     }
 
@@ -615,26 +823,32 @@ int bq_advance(PlayMode mode, int *out_position)
         if (!pm_repeats(mode)) {
             position = g_bq.count - 1;
             g_bq.position = position;
-            bq_bump_revision();
+            bq_pin_current_locked();
+            bq_bump_revision_locked();
             if (out_position) {
                 *out_position = position;
             }
+            pthread_mutex_unlock(&g_bq_mutex);
             return 0;   /* 到头，停 */
         }
         position = 0;
     }
     g_bq.position = position;
-    bq_bump_revision();
+    bq_pin_current_locked();
+    bq_bump_revision_locked();
     if (out_position) {
         *out_position = position;
     }
+    pthread_mutex_unlock(&g_bq_mutex);
     return 1;
 }
 
 int bq_rewind(PlayMode mode, int *out_position)
 {
-    bq_ensure_ready();
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
     if (g_bq.count == 0) {
+        pthread_mutex_unlock(&g_bq_mutex);
         return 0;
     }
 
@@ -642,6 +856,7 @@ int bq_rewind(PlayMode mode, int *out_position)
         if (out_position) {
             *out_position = g_bq.position >= 0 ? g_bq.position : 0;
         }
+        pthread_mutex_unlock(&g_bq_mutex);
         return 1;
     }
 
@@ -650,10 +865,12 @@ int bq_rewind(PlayMode mode, int *out_position)
         position = pm_repeats(mode) ? g_bq.count - 1 : 0;
     }
     g_bq.position = position;
-    bq_bump_revision();
+    bq_pin_current_locked();
+    bq_bump_revision_locked();
     if (out_position) {
         *out_position = position;
     }
+    pthread_mutex_unlock(&g_bq_mutex);
     return 1;
 }
 
@@ -698,10 +915,12 @@ size_t bq_render_entry_json(const BackendQueueEntry *entry, char *out, size_t ou
 
 size_t bq_render_get(char *out, size_t out_size, int offset, int count)
 {
-    bq_ensure_ready();
     if (!out || out_size == 0) {
         return 0;
     }
+    /* 整页渲染期间持锁：播放线程可能同时在推进游标 */
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
     if (offset < 0) offset = 0;
     if (count < 0) count = 0;
     int end = offset + count;
@@ -758,5 +977,7 @@ size_t bq_render_get(char *out, size_t out_size, int offset, int count)
     }
     pos = json_append_char(out, out_size, pos, ']');
     pos = json_append_char(out, out_size, pos, '}');
-    return pos;
+    size_t written = pos;
+    pthread_mutex_unlock(&g_bq_mutex);
+    return written;
 }

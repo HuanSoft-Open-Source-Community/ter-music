@@ -305,6 +305,24 @@ void render_playlist_content(void)
             preload_visible_tracks(start_idx, start_idx + visible_lines - 1);
         }
 
+        /* 队列视图：行数据直接取核心队列页（player_queue_page），保证
+         * Shuffle/InsertAfter 之后界面行与核心实际持有的条目一致，而不是
+         * 再绕回内容列表按物理下标猜。仅服务当前可见区间，越界行回退到
+         * queue_index_at + get_track_metadata。 */
+        BackendQueueEntry *queue_page = NULL;
+        int queue_page_count = 0;
+        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
+            total_tracks > 0 && visible_lines > 0 && start_idx < total_tracks) {
+            int want = visible_lines;
+            if (start_idx + want > total_tracks) {
+                want = total_tracks - start_idx;
+            }
+            queue_page = malloc(sizeof(BackendQueueEntry) * (size_t)want);
+            if (queue_page) {
+                queue_page_count = player_queue_page(start_idx, want, queue_page, want);
+            }
+        }
+
         for (int i = 0; i < visible_lines && (start_idx + i) < total_tracks; i++) {
             int idx = start_idx + i;
             int actual_idx = idx;
@@ -388,14 +406,32 @@ void render_playlist_content(void)
                     prefix_width = 5;
 
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                actual_idx = player_queue_index_at(idx);
+                int row = idx - start_idx;
+                if (queue_page && row >= 0 && row < queue_page_count) {
+                    /* 直接用核心队列页的条目渲染这一行 */
+                    memset(&t, 0, sizeof(t));
+                    snprintf(t.title, sizeof(t.title), "%s", queue_page[row].title);
+                    snprintf(t.artist, sizeof(t.artist), "%s", queue_page[row].artist);
+                    snprintf(t.album, sizeof(t.album), "%s", queue_page[row].album);
+                    snprintf(t.path, sizeof(t.path), "%s", queue_page[row].path);
+                    if (queue_page[row].is_cue) {
+                        /* 让下面的 [CUE] 前缀判定成立（页缓存不单独带 cue_offset） */
+                        t.cue_offset = 1;
+                        t.cue_track_number = 1;
+                    }
+                } else {
+                    actual_idx = player_queue_index_at(idx);
+                    get_track_metadata(actual_idx, &t);
+                }
             } else if (snap_active || snap_in_progress) {
                 actual_idx = snap_indices[idx];
+                get_track_metadata(actual_idx, &t);
             } else if (g_sort_state.active) {
                 actual_idx = g_sort_state.sorted_indices[idx];
+                get_track_metadata(actual_idx, &t);
+            } else {
+                get_track_metadata(actual_idx, &t);
             }
-
-            get_track_metadata(actual_idx, &t);
 
             int title_width  = (w - 4 - prefix_width) * 3 / 5;
             int artist_width = (w - 4 - prefix_width) * 2 / 5;
@@ -454,6 +490,8 @@ void render_playlist_content(void)
             } /* end flat mode */
         }
 
+        free(queue_page);
+        queue_page = NULL;
         if (total_tracks == 0) {
             if (snap_in_progress) {
                 mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.searching"));

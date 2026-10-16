@@ -14,6 +14,12 @@
  * 播放模式（顺序/单曲/列表循环/随机/文件夹/专辑/艺术家）重建顺序并保持当前
  * 条目，`bq_advance()/bq_rewind()` 推进游标供自动续播使用。
  *
+ * 线程模型：队列由**媒体循环**（`Queue.*` 写、`Queue.Get` 渲染）与**播放线程**
+ * （续播 `bq_advance()`、预取 `bq_peek_next()`）共同访问，因此本模块内部用一把
+ * 互斥锁保护全部共享状态；公开函数之间一律通过 `*_locked` 内部版本互调，避免
+ * 自锁。条目内容、顺序或游标的任何变化都会递增修订号（`bq_revision()`），
+ * 媒体循环据此补发 `QueueChanged` 广播（见 `media/rpc_queue.c`）。
+ *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
@@ -25,8 +31,14 @@
 #include "types.h"
 
 /* 单次下发的条目上限（JSON 载荷受 256 KB 上限约束；更大的队列由前端
- * 先 Set 分块再 Append 补齐） */
+ * 先 Set 分块再 Append 补齐）。超过它**必须**失败，绝不静默截断。 */
 #define BQ_SET_MAX 500
+
+/* 载荷下发（bq_set_json / bq_append_json / bq_insert_after_json）的失败码：
+ * 成功时返回写入的条目数（>=0），失败时返回下列负值之一，调用方据此
+ * 决定回给前端哪个错误名。 */
+#define BQ_ERR_INVALID  (-1)   /* JSON 非法 / 路径非本地 / 内存不足 */
+#define BQ_ERR_TOO_MANY (-2)   /* 单发条目数超过 BQ_SET_MAX，需分块下发 */
 
 typedef struct {
     char path[MAX_PATH_LEN];
@@ -49,10 +61,20 @@ int bq_path_is_local(const char *path);
 
 /* ── 内容下发（前端 → 核心） ─────────────────────────────────────── */
 /* JSON 形态：{"entries":[{"path":"…","title":"…",…}]} 或裸数组。
- * @return 写入条目数（>=0）；-1 = JSON 非法/超限/路径非本地 */
+ * 单发条目数上限是 BQ_SET_MAX，超过它整体拒绝（不截断、不报成功）。
+ * @return 写入条目数（>=0）；BQ_ERR_INVALID = JSON 非法/路径非本地；
+ *         BQ_ERR_TOO_MANY = 单发超过 BQ_SET_MAX，需分块 */
 int bq_set_json(const char *json);
 int bq_append_json(const char *json);
 int bq_insert_after_json(int position, const char *json);
+
+/* Set 的语义契约：**只替换未来曲目，当前播放不中断**。
+ * 整表替换会把游标置到新表首（0），但替换前游标所在条目会被记为“在播条目”：
+ * 新表比正在播放的下标短时，上层（MPRIS 属性、Info 快照）仍能用它如实上报
+ * 正在出声的曲目，而不是报“无曲目”。游标被显式移动（`bq_play_at()`/
+ * `bq_advance()` 等）或换曲之后该记录随之刷新，不会长期滞留旧条目。
+ * @return 0 = 有在播条目（out 已填充）；-1 = 无 */
+int bq_pinned_entry(BackendQueueEntry *out);
 
 /* ── 队列编辑（前端下发编辑意图，核心镜像之） ─────────────────────── */
 int bq_remove_at(int position);

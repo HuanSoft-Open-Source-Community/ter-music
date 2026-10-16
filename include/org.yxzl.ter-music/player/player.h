@@ -6,10 +6,11 @@
  * 不再直调引擎命令（play_audio / play_queue_* / library_*…）。界面只依赖
  * 本头文件，后端可以是：
  *
- *   - PLAYER_BACKEND_LOCAL：直接调用进程内引擎（player_local.c，今天的
- *     行为，迁移期默认），M6 删除；
- *   - PLAYER_BACKEND_REMOTE：D-Bus 客户端（player_remote.c），核心在别的
- *     进程里，界面只是客户端（M4 起成为默认）。
+ *   - PLAYER_BACKEND_REMOTE：默认后端（M4 起即默认，main.c 不带 --frontend 时
+ *     选它）。D-Bus 客户端（player_remote.c），核心在别的进程里，界面只是
+ *     客户端：只下发内容与命令，本进程不起播放线程；
+ *   - PLAYER_BACKEND_LOCAL：迁移期回归基线（`--frontend=local`），直接调用
+ *     进程内引擎（player_local.c），本进程即核心宿主，M6 删除。
  *
  * 两个后端必须给出一致的语义：同一组快照字段、同一组分页结果、同样的
  * 乐观回显与修订号语义。
@@ -134,7 +135,10 @@ int player_speed_step_count(void);
 int player_speed_index(void);                /* 当前档位下标 */
 void player_set_speed_index(int index);      /* 按档位设置倍速（越界忽略） */
 void player_set_play_mode(PlayMode mode);
-void player_cycle_play_mode(void);           /* 顺序 → 单曲 → 列表 → 随机 → 文件夹 */
+void player_cycle_play_mode(void);   /* (mode+1)%5：顺序 → 单曲循环 → 列表循环 →
+                                      * 随机一次 → 随机重复 → 回到顺序。只在基础 5 档
+                                      * 里轮转，不会进入文件夹/专辑/艺术家组档位
+                                      * （与 audio.c cycle_play_mode 与 remote 侧同口径） */
 
 /* 播放模式显示名（i18n；界面不再直接调引擎的命名函数） */
 const char *player_play_mode_name(int use_english);
@@ -165,7 +169,10 @@ int player_queue_clear(void);
 int player_queue_shuffle(void);
 int player_queue_is_active(void);
 
-/* 内容列表变化后整表重推（分块下发），返回下发条目数；-1 = 失败 */
+/* 内容列表变化后整表重推：走 playlist_queue_foreach_chunk() 的真分块装配，
+ * 单块 ≤ BQ_SET_MAX(500)，远端首块 Queue.Set、余块 Queue.Append（本地模式
+ * 由 playlist_queue_sync() 经同一装配路径直写后端队列）。
+ * 返回实际下发的条目数；-1 = 失败（未连接 / 某块被核心拒绝） */
 int player_queue_push(void);
 /* 按路径反查队列位置（-1 = 不在队列） */
 int player_queue_find(const char *path);
@@ -213,7 +220,9 @@ int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_siz
  * @return 0 有封面；-1 无当前曲目或无封面 */
 int player_cover_path(char *out, size_t out_size);
 
-/* 可视化：levels/peaks 各 max_levels 个（0-255） */
+/* 可视化：levels/peaks 各 max_levels 个（0-255）。
+ * 远端后端按需经 Info.GetVisualizer 取数并带节流缓存（本期不订阅帧信号）；
+ * player_set_visualizer_active(0) 可停止拉取（离开可视化面板时调用）。 */
 void player_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms);
 void player_set_visualizer_active(int active);
 

@@ -1,13 +1,10 @@
-/* 仅校验并转成本地路径（MPRIS OpenUri 用）。
- * 核心不扫描目录、不构建内容列表，因此这里只做“是不是本地路径”的判定，
- * 真正的加载由前端完成（前端扫描后经 Queue.Set 下发）。 */
 /**
  * @file rpc_common.c
- * @brief RPC 接口面的共享实现（分页钳制、方法清单、自省拼装）
+ * @brief RPC 接口面的共享实现（分页钳制、方法清单、引擎动作、播放快照）
  *
  * 本文件不含任何接口专属逻辑：接口处理器分散在 rpc_info.c / rpc_control.c /
- * rpc_lyrics.c / rpc_playlist.c / rpc_queue.c / rpc_library.c / rpc_config.c，
- * 共用同一份会话与连接（media/session.c）。
+ * rpc_lyrics.c / rpc_queue.c / rpc_config.c，共用同一份会话与连接
+ * （media/session.c）。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -102,6 +99,17 @@ int rpc_track_available(void) {
     return g_current_play_index >= 0 && g_current_play_index < bq_count();
 }
 
+/* 播放线程仍在出声、但后端队列里没有它的位置时，取“在播条目”顶上。
+ * 触发场景就是 Queue.Set 的契约（只替换未来曲目、当前播放不中断）：新表比
+ * 正在播放的下标短时，g_current_play_index 越界，若不回退就会变成“正在出声却
+ * 报无曲目”。见 queue/backend_queue.h 的 bq_pinned_entry()。 */
+static int rpc_playing_entry(BackendQueueEntry *entry) {
+    if (g_play_state != PLAY_STATE_PLAYING && g_play_state != PLAY_STATE_PAUSED) {
+        return -1;
+    }
+    return bq_pinned_entry(entry);
+}
+
 void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
     if (!snapshot) {
         return;
@@ -113,17 +121,23 @@ void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
     snapshot->play_state = g_play_state;
     snapshot->loop_mode = g_play_mode;
     snapshot->volume_percent = get_volume_percent();
+    snapshot->rate = (double)g_playback_speed;
     snapshot->position_us = (int64_t)audio_get_position_seconds() * 1000000LL;
     snapshot->length_us = (int64_t)audio_get_duration_seconds() * 1000000LL;
     snapshot->can_seek = rpc_track_available() && audio_get_duration_seconds() > 0;
 
-    if (!rpc_track_available()) {
-        return;
-    }
-
-    /* 曲目信息来自后端队列条目：内容由前端下发时已随带元数据 */
+    /* 曲目信息来自后端队列条目：内容由前端下发时已随带元数据；
+     * 队列已不含该位置时退回到在播条目（见上），保持 valid=true 的诚实上报。 */
     BackendQueueEntry entry;
-    if (bq_entry_at(g_current_play_index, &entry) != 0) {
+    int have_entry = 0;
+    if (rpc_track_available()) {
+        have_entry = (bq_entry_at(g_current_play_index, &entry) == 0);
+    }
+    if (!have_entry) {
+        snapshot->can_seek = audio_get_duration_seconds() > 0;
+        have_entry = (rpc_playing_entry(&entry) == 0);
+    }
+    if (!have_entry) {
         return;
     }
 
@@ -206,12 +220,15 @@ int rpc_action_set_volume_percent(int percent) {
 }
 
 int rpc_action_set_speed(double rate) {
-    if (!(rate >= 0.5 && rate <= 3.0)) {
+    /* 倍速合法范围与 MPRIS Rate/MinimumRate/MaximumRate 同一口径（见 rpc.h） */
+    if (!(rate >= RPC_RATE_MIN && rate <= RPC_RATE_MAX)) {
         return 0;
     }
     g_playback_speed = (float)rate;
+    /* 同步更新配置镜像，让 core_config_apply_runtime() 成为幂等应用：
+     * 之后任何一次 Config.Set 都不会把 MPRIS/Control 刚设置的倍速卷回旧值。 */
     g_app_config.default_playback_speed = g_playback_speed;
-    save_config();
+    core_config_mark_dirty();
     apply_playback_speed_change();
     return 1;
 }
