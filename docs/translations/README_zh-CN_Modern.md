@@ -508,9 +508,17 @@ ter-music --attach-only   # 没有核心在跑则以退出码 3 结束
 ter-music --bus org.yxzl.ter_music.instance1   # 指定要接入的实例
 ```
 
-**退出前端。** 关闭 TUI **不会**停止播放：核心继续运行并继续播放，
-`ter-music show` / `ter-music next` 在任何终端里依然指挥得动它。若希望最后一个
-前端离开后核心自行退出，把 `core_exit_when_no_frontend` 设为 `true`
+**退出前端。** 关闭 TUI 会不会停播，由**前端自己的配置镜像**里的
+`preferences.stop_core_on_exit`（`0`/`1`，缺省 `1`；可在设置页开关，或在
+`config.xml`、经 D-Bus `Config.Set` / `ter-music config set` 切换）决定：
+这份镜像启动时已从磁盘读入，设置页的每次改动也即时下发给了核心，因此退出
+路径上不必再回头问核心。缺省开启时，前端的一切退出路径（`q`、F9、
+Ctrl+C、SIGTERM、终端断开）都会发送 `Control.Quit`：核心先把会话/resume 状态
+落盘，再停播退出。置 `0` 时前端只发 `Control.Detach`——核心继续运行并继续播放，
+`ter-music show` / `ter-music next` 在任何终端里依然指挥得动它。这两种消息都以
+「该前端确实接入过核心」（握手完成且持有 `Attach` 令牌）为前提；从未接入成功的
+前端退出时一条总线消息也不发，不会去动别人正在用的核心。与之独立，若希望
+最后一个前端离开后核心自行退出，把 `core_exit_when_no_frontend` 设为 `true`
 （`config.xml`，或经 D-Bus `Config.Set`）：前端全部离开并过 10 秒宽限期后核心
 退出；从未有前端接入过的核心不会退出。
 
@@ -773,8 +781,13 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `sort_mode`：排序模式（0=默认、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文件字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
 - `core_exit_when_no_frontend`：无人接入时让核心自行退出（0/1，默认 0）。
-  默认关闭表示「关掉 TUI，音乐继续放」；置 1 时最后一个前端离开并过 10 秒
-  宽限期后核心退出
+  置 1 时最后一个前端离开并过 10 秒宽限期后核心退出
+- `stop_core_on_exit`：前端退出时停止播放核心——前端改发 `Control.Quit`
+  而非 `Control.Detach`，且仅在该前端确实接入过核心（握手完成、持有 `Attach`
+  令牌）时才发（0/1，默认 1——置 0 才会「关掉 TUI，音乐后台继续放」）。该键
+  随配置契约版本 8 引入，`config.xml` 根属性 `version` 如今写的就是这个数字
+  （旧为 `2.2`）；降回旧版不会报错，但旧版不认识该键，保存时会把属性写回
+  `2.2` 并丢掉该键，显式取值随之丢失，再次升级时按缺省 `1` 补回
 - 远程服务器连接（SMB/SFTP/FTP/WebDAV/HTTP）**不**存在 `config.xml` 里：
   前端把它保存在同目录下自有的 `remote.xml`（服务器条目 + 密码密文，权限 0600），
   下载的曲目缓存在 `$XDG_CACHE_HOME/ter-music/remote/`
@@ -994,11 +1007,16 @@ v1.0的JSON存储（config.json、独立的favorites、history、dir_history、p
 - 按`Ctrl+C`/`Ctrl+D`/`Ctrl+\`（播放器会优雅退出，支持SIGHUP/SIGTERM/SIGINT信号）
 - 在选项菜单中选择"Exit"（即`F9`键）
 
-退出 TUI 不会停止音乐：播放发生在核心里，当前曲目会继续播放，
-`ter-music show` / `ter-music next` 在任意终端里依然有效。要显式停止请用
-`ter-music daemon stop`；若希望核心自行退出，把 `core_exit_when_no_frontend`
-设为 `true`；核心也会在"自己所属的会话总线消失"时自行退出——那时已经没有任何
-前端能联系到它（见 [5.2.3 前端与核心](#523-前端与核心)）。
+缺省情况下退出 TUI 也会停止音乐：前端自己的配置镜像里
+`preferences.stop_core_on_exit` 默认开启（`1`），
+上述任一条退出路径都会发送 `Control.Quit`——前提是该前端确实接入过核心
+（握手完成、持有 `Attach` 令牌）——核心先把会话/resume 状态落盘，
+再停播退出。想让音乐继续，把该项置 `0`：前端只发 `Control.Detach`，当前曲目
+会继续播放，`ter-music show` / `ter-music next` 在任意终端里依然有效。要显式
+停止仍在运行的核心请用 `ter-music daemon stop`；若希望最后一个前端离开并过
+10 秒后核心自行退出，把 `core_exit_when_no_frontend` 设为 `true`；核心也会在
+"自己所属的会话总线消失"时自行退出——那时已经没有任何前端能联系到它
+（见 [5.2.3 前端与核心](#523-前端与核心)）。
 
 ## 第六章 技术架构
 

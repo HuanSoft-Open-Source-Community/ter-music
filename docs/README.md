@@ -581,12 +581,24 @@ ter-music --attach-only   # exit code 3 when no core is running
 ter-music --bus org.yxzl.ter_music.instance1   # address a specific instance
 ```
 
-**Leaving the front end.** Closing the TUI does **not** stop playback: the core
-keeps running and playing, and `ter-music show` / `ter-music next` still reach
-it from any terminal. Set `core_exit_when_no_frontend` to `true` in
-`config.xml` (or with `Config.Set` over D-Bus) when the core should instead exit
-by itself after the last front end has been gone for a grace period (10 s); a
-core that no front end ever attached to stays up.
+**Leaving the front end.** Whether closing the TUI stops playback is decided by
+`preferences.stop_core_on_exit` **in the front end's own configuration mirror**
+(`0`/`1`, default `1`; toggle it on the settings page, in `config.xml`, or with
+`Config.Set` / `ter-music config set` over D-Bus): the mirror is read from disk
+at start-up, and the settings page pushes every change to the core right away, so
+the exit path itself never stops to ask the core. With the default, every
+front-end exit path (`q`, F9, Ctrl+C, SIGTERM, a lost TTY) sends `Control.Quit`:
+the core persists its session/resume state, stops playback and exits. With `0`
+the front end only sends `Control.Detach` — the core keeps running and playing,
+and `ter-music show` / `ter-music next` still reach it from any terminal. Either
+message is sent only when this front end really did attach to the core
+(handshake completed and an `Attach` token held); a front end that never got that
+far exits without touching the bus and leaves somebody else's core alone.
+Independent of that, set
+`core_exit_when_no_frontend` to `true` in `config.xml` (or with `Config.Set`
+over D-Bus) when the core should exit by itself after the last front end has
+been gone for a grace period (10 s); a core that no front end ever attached to
+stays up.
 
 **Reconnect.** When the core disappears (crash, `kill`, logout), the front end
 does not exit: it marks itself offline, retries with exponential backoff
@@ -891,7 +903,8 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire)
 - `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `cue_encoding`: CUE file character encoding (0=Auto, 1=UTF-8, 2=GB18030, 3=GBK, 4=BIG5, 5=Shift-JIS)
-- `core_exit_when_no_frontend`: let the core exit by itself once no front end has been attached for 10 s (0/1, default 0 — closing the TUI keeps the music playing)
+- `core_exit_when_no_frontend`: let the core exit by itself once no front end has been attached for 10 s (0/1, default 0)
+- `stop_core_on_exit`: stop the playback core when a front end exits — the front end sends `Control.Quit` instead of `Control.Detach`, and only when it really attached to that core (handshake done, `Attach` token held) (0/1, default 1 — with 0, closing the TUI keeps the music playing in the background). The key arrived with configuration contract version 8, whose number the `version` attribute of `config.xml` now carries instead of the old `2.2`; downgrading to an older build does not fail, but that build ignores the key and writes `2.2` back on its next save, so the explicit value is lost and the upgrade re-applies the default
 - Remote server connections (SMB/SFTP/FTP/WebDAV/HTTP) are **not** stored in
   `config.xml`: the front end keeps them in its own `remote.xml` next to it
   (server entries plus password ciphertext, file mode 0600), and caches
@@ -1129,12 +1142,18 @@ There are three ways to exit the front end:
 - Press `Ctrl+C` / `Ctrl+D` / `Ctrl+\` (the program handles SIGHUP/SIGTERM/SIGINT gracefully and exits cleanly)
 - Select "Exit" in the options menu (which is the `F9` key)
 
-Leaving the TUI does not stop the music: playback lives in the core, so the
+By default, leaving the TUI also stops the music: `preferences.stop_core_on_exit`
+is on (`1`) in the front end's own configuration mirror, so every exit path above
+sends `Control.Quit` — provided the front end had actually attached to the core
+(handshake done, `Attach` token held) — and the core persists its session/resume
+state, stops playback and exits. Set the option to `0` to
+keep the music playing: the front end then only sends `Control.Detach`, the
 current track keeps playing and `ter-music show` / `ter-music next` still work
-from any terminal. Stop it explicitly with `ter-music daemon stop`, make the
-core exit on its own by setting `core_exit_when_no_frontend` to `true`, or let
-it notice that it can no longer be reached at all — the core exits by itself
-when its session bus disappears (see
+from any terminal. Stop a running core explicitly with `ter-music daemon stop`,
+make any core exit on its own after the last front end has been gone for 10 s by
+setting `core_exit_when_no_frontend` to `true`, or let it notice that it can no
+longer be reached at all — the core exits by itself when its session bus
+disappears (see
 [5.2.3 Front End and Core](#523-front-end-and-core)).
 
 ## 6. Frequently Asked Questions

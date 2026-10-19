@@ -277,8 +277,30 @@ The registry also drives the core's optional watchdog: with
 `core_exit_when_no_frontend` set in `config.xml`, a primary core that once had a
 front end quits 10 s after the last registration disappears (a reconnect within
 that grace window resets the clock). A core that never had any front end, and a
-secondary instance, never self-terminate — and with the setting off, which is
-the default, leaving the TUI keeps the music playing.
+secondary instance, never self-terminate.
+
+Separate from the watchdog, remote/daemon-mode front ends branch on
+`preferences.stop_core_on_exit` in **their own configuration mirror** when they
+shut down. That mirror is filled from disk at start-up (`load_config()`) and kept
+up to date by the settings page, which pushes every change to the core
+immediately with `player_config_persist()`; the exit path therefore adds no
+synchronous read of the core's value — no `Config.GetAll` or any other query is
+issued on the way out, only the one `Quit`/`Detach` call described below. Every
+front-end exit path (`q`, F9, Ctrl+C, SIGTERM,
+a lost TTY) converges on the same shutdown routine: with the option at `1` — the
+default — it sends `Control.Quit`, and the core persists its session/resume
+state, stops playback and exits; with `0` it sends `Control.Detach` instead and
+the core keeps playing in the background. Both messages presuppose that this
+front end actually attached to the core — handshake completed and an `Attach`
+token held. A front end that never got that far (failed handshake, offline
+back-off, `Attach` never succeeded) tears down its own connection and sends not
+a single D-Bus message, so it can never take somebody else's core down with it.
+While the option is `1`, an exit from an attached front end stops the core
+unconditionally; remaining front ends are not counted. Local-mode front ends
+(in-process audio) are unaffected. The `Quit` call is best effort: it is
+deliberately **not** part of the required handshake methods, a core that lacks
+it still connects, and a failed call only logs — it never blocks the front end's
+exit.
 
 ## org.yxzl.ter_music.Queue
 
@@ -353,10 +375,11 @@ one of them.
 `GetAll` mirrors `config.xml`, using the same section and key names:
 
 ```json
-{ "version": 7,
+{ "version": 8,
   "paths": { "default_startup_path": "…", "last_opened_path": "…" },
   "theme": { "playlist_fg": 7, "playlist_bg": -1, "…": 0 },
   "preferences": { "volume_percent": 100, "default_playback_speed": 1.00,
+                   "stop_core_on_exit": 1,
                    "info_preset": 0, "info_fields": 2047, "…": 0 },
   "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] } }
 ```
@@ -366,9 +389,27 @@ Notes:
 - Numeric values outside their range are clamped, not rejected
   (`volume_percent: 999` becomes `100`).
 - `GetAll`'s `version` is the configuration contract version
-  (`CONFIG_CURRENT_VERSION`, currently `7`); it is not the `version` attribute of
-  `config.xml`, which still reads `2.2`. Sending `version` back inside a patch is
-  accepted and ignored, so a front end can re-apply a full snapshot.
+  (`CONFIG_CURRENT_VERSION`, currently `8`). The `version` attribute of
+  `config.xml` is now written with that same number (`"8"`); it used to read
+  `2.2`. Historical `2.2` files still load — the attribute parses as `2`, which
+  is above the minimum supported version — and the first run after an upgrade
+  migrates them and rewrites the attribute to the number. Sending `version`
+  back inside a patch is accepted and ignored, so a front end can re-apply a
+  full snapshot.
+  **Downgrade:** a build from before contract v8 reads the attribute with the
+  same integer parse, so `version="8"` loads without error and its own migration
+  blocks (`file_version < 4`, `< 7`) correctly stay inactive. But that build has
+  no `stop_core_on_exit` field at all — it ignores the key, exits by detaching
+  (the core keeps playing), and on its next save it writes the attribute back as
+  `2.2` and drops the v8 key from `<preferences>`. Downgrading therefore costs
+  the explicit value: after moving back to the current build, the one-shot v8
+  migration re-applies the default `1`.
+- `preferences.stop_core_on_exit` is a boolean that defaults to `1`. Contract
+  version 8 added it: existing files below v8 are migrated once and receive the
+  default `1`, flipping the upgrade-time behaviour from "the core keeps playing
+  when the front end exits" to "an attached front-end exit stops the core" (see
+  the Control section for the exit branching and the attach precondition; the
+  switch is also on the settings page).
 - A `Set` that touches volume, play mode or speed is visible immediately: after
   saving, the core re-applies those runtime fields straight from the in-memory
   mirror (`core_config_apply_runtime()`), so `Control.GetVolume`,

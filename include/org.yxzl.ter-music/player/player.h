@@ -66,6 +66,11 @@ typedef struct {
 /* 连接/初始化。backend=REMOTE 时 bus_name 可为 NULL（用主名）。
  * 远程后端在返回前完成版本握手；不兼容返回 -1。 */
 int player_init(PlayerBackend backend, const char *bus_name);
+/* 收尾（幂等，重复调用不再发消息）。本地后端：停进程内播放。
+ * 远端后端按**前端配置镜像** preferences.stop_core_on_exit 分流：
+ * 1 = Control.Quit 让核心进程收尾退出；0 = Control.Detach 只注销注册，
+ * 核心继续播放。两条消息都**只在**本前端确实接入过核心（握手完成且持有
+ * Attach 令牌）时才发送；从未接入过核心的收尾不动核心。 */
 void player_shutdown(void);
 
 /* 每轮事件循环调用，非阻塞。

@@ -135,7 +135,8 @@ ter-music 快速上手
   F6  关于（版本和项目信息）
   F7  语言（语言管理：ENTER 切换、A 添加语言包、D 删除）
   F8  帮助（本页面，/ 可搜索、↑/↓ 滚动）
-  F9  退出前端界面（默认不打断核心播放，音乐继续）
+  F9  退出前端界面（stop_core_on_exit=1 为缺省，退出时同时终止播放核心；
+      设为 0 才只退前端、音乐后台续播，见第 20 节）
   ESC + 1..9 与 F1..F9 等价；q / Q 与 F9 走同一条退出路径。
 
 8. 曲库浏览器（M）
@@ -231,8 +232,8 @@ ter-music 快速上手
 
 18. 配置与数据
 --------------
-  配置：  ~/.config/ter-music/config.xml   由核心独占写盘（XML 版本属性 2.2，
-          内部配置契约版本 7）。
+  配置：  ~/.config/ter-music/config.xml   由核心独占写盘（XML 根版本属性写配置
+          契约号，当前为 8；历史 "2.2" 文件仍可加载，升级首启迁移后改写为数字）。
           前端只修改自己的配置镜像，再把差异经 Config.Set 交给核心落盘。
   内容：  ~/.config/ter-music/library.db   前端 SQLite 曲库，含曲目元数据、
           扫描根、播放历史、收藏、歌单与歌单曲目、目录历史、临时播放列表。
@@ -313,8 +314,15 @@ ter-music 快速上手
   设置中每项都用 ENTER 打开选项菜单（不再需要 +/- 键调节）。
   设置 → 默认路径 分区新增“重新加载配置”“恢复默认设置”两项，ENTER 即执行。
   调整终端大小后界面自动适应。
-  q / F9 / Ctrl+C 只退出前端界面，默认不中断核心播放；
-  想连核心一起停：ter-music daemon stop（或 Control.Quit）。
+  q / F9 / Ctrl+C、SIGTERM 与 TTY 断开都收敛到同一条收尾路径，按前端自己的
+  配置镜像里的 preferences.stop_core_on_exit 分流（启动时已读盘，设置页的改动
+  即时下发核心，退出时不再回问核心）：1（缺省启用）发 Control.Quit 终止播放
+  核心——核心先落盘会话/resume 状态再停播退出；0 发 Control.Detach，只关前端
+  界面、核心后台续播。两者都仅在该前端确实接入过核心（握手完成、持有 Attach
+  令牌）时才发；没接入过的退出不会带走核心。切换：设置页开关“退出时停止播放
+  进程”，或 `ter-music config set stop_core_on_exit 0`。多前端时，已接入的前端
+  一退即无条件终止核心（=1），不判断剩余前端；local 模式（同进程出声）不受
+  影响。随时单独停核心：ter-music daemon stop。
   想让“关掉 TUI 后核心一并退出”：把 config.xml 的
   <preferences><core_exit_when_no_frontend> 设为 1（该键不在设置页，也不在
   Config.Set/`config set` 的键表里）。开启后核心在最后一个前端离开并静默

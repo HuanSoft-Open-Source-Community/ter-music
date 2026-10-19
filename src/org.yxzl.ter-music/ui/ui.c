@@ -1197,8 +1197,9 @@ void cleanup(void)
     /* 退出语义按后端分流（Task 4.3）：
      *   - local：本进程即核心，持久化会话、停止本地播放、等播放线程收尾；
      *   - remote：前端不得 Control.Stop 核心、不得等待（本进程没有）播放线程、
-     *            更不得写会话恢复配置（持久化归核心）；Detach 已由 main 的
-     *            player_shutdown 完成，这里不再重复停止。 */
+     *            更不得写会话恢复配置（持久化归核心）；Detach 或 Quit 已由 main 的
+     *            player_shutdown 按 stop_core_on_exit 决定，且仅在该前端已接入核心
+     *            （握手完成且持有 Attach 令牌）时才发送，这里不再重复停止。 */
     if (player_backend() == PLAYER_BACKEND_LOCAL) {
         persist_playback_session_state(); /* config-ownership-allow: local(TUI-即-核心)分支才会执行到这里的会话持久化；remote 前端被上方 guard 挡离，持久化归核心 */
         player_stop();

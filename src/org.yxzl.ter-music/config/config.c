@@ -213,6 +213,7 @@ void init_default_config(void)
     g_app_config.remember_last_path    = 1;
     g_app_config.clear_history_on_startup = 0;
     g_app_config.core_exit_when_no_frontend = 0;
+    g_app_config.stop_core_on_exit     = 1;  /* 退出即终止核心播放进程（与看门狗默认相反） */
     g_app_config.resume_last_playback  = 0;
     g_app_config.last_played_position  = 0;
     g_app_config.last_played_folder_path[0] = '\0';
@@ -321,6 +322,16 @@ int config_run_migrations(void)
         save_config();
     }
 
+    /* v7 → v8：新增 stop_core_on_exit。纯新增键，v7 及更早文件必然没有显式值，
+     * 按缺省 1（“退出即终止核心播放进程”，回到前后端分离前的行为）补写一次并落盘。 */
+    if (loaded && file_version < 8) {
+        log_info("menu_views", "Migrating config v%d → v8: stop_core_on_exit defaults to on",
+                 file_version);
+        g_app_config.stop_core_on_exit = 1;
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+
     return 0;
 }
 
@@ -383,8 +394,16 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
 {
     xmlDocPtr doc = xmlNewDoc((const xmlChar *)"1.0");
     xmlNodePtr root = xmlNewNode(NULL, (const xmlChar *)XML_ROOT);
-    xmlSetProp(root, (const xmlChar *)XML_ATTR_VERSION,
-               (const xmlChar *)CONFIG_XML_VERSION);
+    /* 根属性自本版本起写契约版本号（数字 CONFIG_CURRENT_VERSION）。
+     * 加载路径用 atoi() 把该属性记为 config_file_version，迁移块按
+     * file_version < N 判定；旧"2.2"字面量 atoi 后恒为 2，导致迁移块
+     * 每次启动都重跑、把用户显式值反复重置为默认。
+     * "2.2"时代的历史文件 atoi 得 2，仍 >= CONFIG_MIN_SUPPORTED_VER(2)
+     * 可加载，升级首启会按既有迁移语义补写一次默认值，之后属性即为
+     * 当前数字版本，迁移块不再命中。 */
+    char ver_buf[16];
+    snprintf(ver_buf, sizeof(ver_buf), "%d", CONFIG_CURRENT_VERSION);
+    xmlSetProp(root, (const xmlChar *)XML_ATTR_VERSION, (const xmlChar *)ver_buf);
     xmlDocSetRootElement(doc, root);
 
     /* ── <paths> ────────────────────────────────────────────────── */
@@ -432,6 +451,7 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_REMEMBER_PATH,   cfg->remember_last_path);
         SAVE_INT(XML_PREF_CLEAR_HISTORY,   cfg->clear_history_on_startup);
         SAVE_INT(XML_PREF_CORE_EXIT_NO_FRONTEND, cfg->core_exit_when_no_frontend);
+        SAVE_INT(XML_PREF_STOP_CORE_ON_EXIT, cfg->stop_core_on_exit);
         SAVE_INT(XML_PREF_RESUME_PLAYBACK, cfg->resume_last_playback);
         SAVE_INT(XML_PREF_LAST_POSITION,   cfg->last_played_position);
         xmlNewChild(prefs, NULL, (const xmlChar *)XML_PREF_LANGUAGE,
@@ -669,6 +689,7 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->remember_last_path       = xml_get_int(prefs, XML_PREF_REMEMBER_PATH, 1);
         cfg->clear_history_on_startup = xml_get_int(prefs, XML_PREF_CLEAR_HISTORY, 0);
         cfg->core_exit_when_no_frontend = xml_get_int(prefs, XML_PREF_CORE_EXIT_NO_FRONTEND, 0);
+        cfg->stop_core_on_exit          = xml_get_int(prefs, XML_PREF_STOP_CORE_ON_EXIT, 1);
         cfg->resume_last_playback     = xml_get_int(prefs, XML_PREF_RESUME_PLAYBACK, 0);
         cfg->last_played_position     = xml_get_int(prefs, XML_PREF_LAST_POSITION, 0);
         xml_get_string(prefs, XML_PREF_LANGUAGE,
@@ -837,6 +858,7 @@ static void clamp_config_values(AppConfig *cfg)
     cfg->remember_last_path       = cfg->remember_last_path ? 1 : 0;
     cfg->clear_history_on_startup = cfg->clear_history_on_startup ? 1 : 0;
     cfg->core_exit_when_no_frontend = cfg->core_exit_when_no_frontend ? 1 : 0;
+    cfg->stop_core_on_exit          = cfg->stop_core_on_exit ? 1 : 0;
     cfg->resume_last_playback     = cfg->resume_last_playback ? 1 : 0;
     cfg->show_lyrics_panel        = cfg->show_lyrics_panel ? 1 : 0;
     cfg->show_album_cover         = cfg->show_album_cover ? 1 : 0;

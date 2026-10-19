@@ -17,9 +17,12 @@ extern "C" {
 #endif
 
 /* ── Version identifiers ──────────────────────────────────────────── */
-#define CONFIG_XML_VERSION          "2.2"
-#define CONFIG_CURRENT_VERSION      7   /* 与 types.h 保持同步 */
+/* 根属性现写 CONFIG_CURRENT_VERSION 数字契约版；"2.2" 为旧格式版字面量，
+ * 仅存在于历史文件（atoi 得 2，仍可加载并触发一次性迁移补写）。 */
+#define CONFIG_CURRENT_VERSION      8   /* 与 types.h 保持同步 */
 #define XML_PREF_CORE_EXIT_NO_FRONTEND "core_exit_when_no_frontend"
+/* 前端退出时是否终止核心播放进程，缺省启用（= 与前后端分离前的行为一致） */
+#define XML_PREF_STOP_CORE_ON_EXIT  "stop_core_on_exit"
 #define CONFIG_MIN_SUPPORTED_VER    2
 
 /* ── Root element ─────────────────────────────────────────────────── */

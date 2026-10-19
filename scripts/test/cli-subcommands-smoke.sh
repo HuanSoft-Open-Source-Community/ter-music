@@ -52,6 +52,14 @@ if [ -z "${TM_TEST_BUS_READY:-}" ] && [ "${TM_TEST_REUSE_SESSION_BUS:-0}" != "1"
     exec dbus-run-session -- "$0" "${ORIG_ARGS[@]}"
 fi
 
+# 子 shell 里 cd 之后相对路径的 --bin 会失效（如 `( cd "$dir" && "$TM_BIN" play ... )`），
+# 所以在任何用例使用 $TM_BIN 之前先绝对化。realpath 不可用或失败（文件不存在）时保持原值，
+# 下面 "[ -x ] → 报错并 exit 2" 的既有语义不变。
+if command -v realpath >/dev/null 2>&1; then
+    TM_BIN_ABS="$(realpath -- "$TM_BIN" 2>/dev/null)"
+    [ -n "$TM_BIN_ABS" ] && TM_BIN="$TM_BIN_ABS"
+fi
+
 [ -x "$TM_BIN" ] || { echo "错误：找不到可执行文件 $TM_BIN" >&2; exit 2; }
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tm-cli-smoke-XXXXXX")"

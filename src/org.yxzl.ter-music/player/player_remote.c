@@ -56,7 +56,10 @@
 static const int k_backoff_ms[] = { 1000, 2000, 4000, 8000, 15000, 30000 };
 #define REMOTE_BACKOFF_COUNT (int)(sizeof(k_backoff_ms) / sizeof(k_backoff_ms[0]))
 
-/* 握手要求的方法：缺一即视为“核心过旧” */
+/* 握手要求的方法：缺一即视为“核心过旧”。
+ * 这里只列“没有它就没法用”的方法。Control.Quit **不入表**：它是退出时的
+ * 尽力而为（要不要发只看前端自己的配置镜像，发送失败只记日志），列进来会让不带 Quit 的
+ * 老核心直接连不上，把一个可选能力升级成硬性要求。 */
 static const char *const k_required_methods[] = {
     "Info.GetInfo",
     "Control.Play", "Control.Pause", "Control.Stop", "Control.Next", "Control.Previous",
@@ -837,9 +840,69 @@ int player_remote_init(PlayerBackend backend, const char *bus_name)
     return 0;
 }
 
+/* 让核心自己收尾退出（Control.Quit）：要不要走这里由**前端自己的配置镜像**
+ * preferences.stop_core_on_exit 判定，本函数不参与取值，且只在调用方确认已接入核心
+ * （握手完成并持有 Attach 令牌）之后才被调用。核心的 Quit 处理器置退出标志后回 true，
+ * 主循环收尾会先持久化会话再停播——前端**不得**改发 Control.Stop（那会半途停播
+ * 却不退进程）。语义与 cli_client_quit() 一致：核心可能在回复送达前就关掉了连接
+ * （它正在退出），所以“没回复/连接断开类错误”同样算成功；其它错误只记一条日志。
+ * 只发一次同步调用，不等进程消亡、不轮询总线名消失，绝不阻塞前端退出。 */
+static void remote_quit_core(void)
+{
+    if (!g_remote.connection) {
+        return;
+    }
+    DBusMessage *message = NULL;
+    if (!remote_call_begin(REMOTE_IFACE_CONTROL, "Quit", 1500, &message)) {
+        return;
+    }
+
+    DBusError error;
+    dbus_error_init(&error);
+    DBusMessage *reply = dbus_connection_send_with_reply_and_block(
+        g_remote.connection, message, 1500, &error);
+    dbus_message_unref(message);
+    if (reply) {
+        dbus_message_unref(reply);
+        return;
+    }
+
+    if (dbus_error_is_set(&error)) {
+        int going_away = dbus_error_has_name(&error, DBUS_ERROR_NO_REPLY) ||
+                         dbus_error_has_name(&error, DBUS_ERROR_DISCONNECTED) ||
+                         dbus_error_has_name(&error, DBUS_ERROR_SERVICE_UNKNOWN) ||
+                         dbus_error_has_name(&error, DBUS_ERROR_NAME_HAS_NO_OWNER);
+        if (!going_away) {
+            log_warn("player_remote", "Control.Quit failed: %s",
+                     error.message ? error.message : "unknown D-Bus error");
+        }
+        dbus_error_free(&error);
+    }
+}
+
 void player_remote_shutdown(void)
 {
-    if (g_remote.connected && g_remote.token[0]) {
+    /* 幂等：initialized 在收尾末尾清零，重复调用不再发任何消息 */
+    if (!g_remote.initialized) {
+        return;
+    }
+
+    /* 接入门控：本前端从没成功接入过核心（握手失败、离线退避中、Attach 未成功），
+     * 那个总线名对应的核心不由本前端登记，退出时 Quit 和 Detach 都不该发——
+     * 一条总线消息都不发，只收掉自己的连接。 */
+    if (!g_remote.connected || !g_remote.token[0]) {
+        remote_close_connection();
+        g_remote.initialized = 0;
+        return;
+    }
+
+    /* 分流开关取自前端自己的配置镜像：启动时 load_config() 已读盘，设置页的改动
+     * 也已通过 player_config_persist() 即时下发核心，退出路径不再额外打总线。 */
+    if (g_app_config.stop_core_on_exit) {
+        /* 1 = 退出即终止核心：进程将亡，Detach 没有意义，直接 Quit */
+        remote_quit_core();
+    } else {
+        /* 0 = “关掉 TUI，音乐继续”：只注销前端注册 */
         DBusMessage *reply = remote_call_s(REMOTE_IFACE_CONTROL, "Detach", 1000, g_remote.token);
         if (reply) {
             dbus_message_unref(reply);
