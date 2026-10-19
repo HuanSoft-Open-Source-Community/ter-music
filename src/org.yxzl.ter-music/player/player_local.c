@@ -566,7 +566,7 @@ int player_local_config_persist(void)
 int player_local_config_apply_json(const char *patch_json)
 {
     char reason[256];
-    if (config_apply_json(patch_json, reason, sizeof(reason)) != 0) {
+    if (config_apply_json_set(patch_json, reason, sizeof(reason)) != 0) {
         log_warn("player", "Config patch rejected: %s", reason);
         return -1;
     }

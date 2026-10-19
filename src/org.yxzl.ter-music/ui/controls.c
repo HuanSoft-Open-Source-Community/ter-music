@@ -11,6 +11,7 @@
 #include "types.h"
 #include "player/player.h"
 #include "ui/ui.h"
+#include "ui/keymap.h"
 #include "i18n/i18n.h"
 #include "ui/menu_internal.h"
 #include "audio/audio.h"
@@ -278,32 +279,41 @@ static void apply_popup_selection(void)
     }
 }
 
-int handle_popup_input(int ch)
+int handle_popup_action(ActionId action)
 {
     if (!g_popup.active) return 0;
 
-    switch (ch) {
-        case KEY_UP:
+    switch (action) {
+        case ACTION_POPUP_UP:
             if (g_popup.selected_index > 0)
                 g_popup.selected_index--;
             render_controls_popup();  /* only redraw popup, not full controls */
             return 1;
-        case KEY_DOWN:
+        case ACTION_POPUP_DOWN:
             if (g_popup.selected_index < g_popup.option_count - 1)
                 g_popup.selected_index++;
             render_controls_popup();  /* only redraw popup, not full controls */
             return 1;
-        case ' ':
-        case 10:
+        case ACTION_POPUP_ACCEPT:
             apply_popup_selection();
             popup_dismiss();
             return 1;
-        case 27:
-        case KEY_LEFT:
+        case ACTION_POPUP_CANCEL:
             popup_dismiss();
             return 1;
+        default:
+            return 0;
     }
-    return 0;
+}
+
+int handle_popup_input(int ch)
+{
+    if (!g_popup.active) return 0;
+
+    if (ch == 27) {
+        return handle_popup_action(ACTION_POPUP_CANCEL);
+    }
+    return handle_popup_action(keymap_resolve(CTX_POPUP, ch));
 }
 
 /* ============================================================

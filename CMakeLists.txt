@@ -179,8 +179,12 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/cli/cli.c
     src/org.yxzl.ter-music/cli/cli_client.c
     src/org.yxzl.ter-music/cli/daemon.c
+    src/org.yxzl.ter-music/cli/keys.c
     src/org.yxzl.ter-music/app/open.c
     src/org.yxzl.ter-music/util/json.c
+    src/org.yxzl.ter-music/util/keyname.c
+    src/org.yxzl.ter-music/keymap/actions.c
+    src/org.yxzl.ter-music/ui/keymap.c
     src/org.yxzl.ter-music/remote/remote.c
     src/org.yxzl.ter-music/remote/remote_store.c
     src/org.yxzl.ter-music/remote/remote_cache.c

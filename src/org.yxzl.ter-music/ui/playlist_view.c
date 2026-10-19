@@ -16,6 +16,7 @@
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include "config/config.h"
 #include "playlist/playlist.h"
 #include <stdio.h>
@@ -156,7 +157,7 @@ void render_playlist_manager_content(void)
  * Playlist view input handling
  * ============================================================ */
 
-void handle_playlist_input(int ch)
+int handle_playlist_input(int ch)
 {
     /* ESC in track view mode goes back to playlist list */
     if (ch == 27) {
@@ -164,14 +165,16 @@ void handle_playlist_input(int ch)
             g_playlist_view_mode = 0;
             g_content_selected_idx = g_playlist_selected_playlist;
             render_playlist_manager_content();
-            return;
+            return 1;
         }
         exit_current_view();
-        return;
+        return 1;
     }
 
-    switch (ch) {
-        case KEY_UP:
+    ActionId action = keymap_resolve(CTX_PLAYLIST_VIEW, ch);
+
+    switch (action) {
+        case ACTION_PLAYLIST_VIEW_UP:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx--;
                 if (g_menu_selected_idx < 0) g_menu_selected_idx = PLAYLIST_ITEM_COUNT - 1;
@@ -194,9 +197,9 @@ void handle_playlist_input(int ch)
                 }
                 render_playlist_manager_content();
             }
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_PLAYLIST_VIEW_DOWN:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx++;
                 if (g_menu_selected_idx >= PLAYLIST_ITEM_COUNT) g_menu_selected_idx = 0;
@@ -216,19 +219,18 @@ void handle_playlist_input(int ch)
                 }
                 render_playlist_manager_content();
             }
-            break;
+            return 1;
 
-        case KEY_RIGHT:
-        case 9:
+        case ACTION_PLAYLIST_VIEW_RIGHT:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_focus_area = FOCUS_CONTENT;
                 g_content_selected_idx = 0;
                 render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
                 render_playlist_manager_content();
             }
-            break;
+            return 1;
 
-        case KEY_LEFT:
+        case ACTION_PLAYLIST_VIEW_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
                 if (g_playlist_view_mode == 1) {
                     g_playlist_view_mode = 0;
@@ -240,10 +242,9 @@ void handle_playlist_input(int ch)
                     render_playlist_manager_content();
                 }
             }
-            break;
+            return 1;
 
-        case 10:
-        case ' ':
+        case ACTION_PLAYLIST_VIEW_ACTIVATE:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == 0) {
                     g_focus_area = FOCUS_CONTENT;
@@ -317,10 +318,9 @@ void handle_playlist_input(int ch)
                     }
                 }
             }
-            break;
+            return 1;
 
-        case 'd':
-        case 'D':
+        case ACTION_PLAYLIST_VIEW_DELETE:
             if (g_focus_area == FOCUS_CONTENT) {
                 if (g_playlist_view_mode == 0) {
                     if (g_content_selected_idx >= 0 &&
@@ -346,10 +346,9 @@ void handle_playlist_input(int ch)
                     }
                 }
             }
-            break;
+            return 1;
 
-        case 'r':
-        case 'R':
+        case ACTION_PLAYLIST_VIEW_RENAME:
             if (g_focus_area == FOCUS_CONTENT && g_playlist_view_mode == 0) {
                 if (g_content_selected_idx >= 0 &&
                     g_content_selected_idx < g_playlist_manager.count) {
@@ -382,7 +381,10 @@ void handle_playlist_input(int ch)
                     render_playlist_manager_content();
                 }
             }
-            break;
+            return 1;
+
+        default:
+            return 0;
     }
 }
 

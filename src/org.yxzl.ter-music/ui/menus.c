@@ -30,6 +30,8 @@
 #include "ui/lyrics.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
+#include "library/browser/browser.h"
 #include "remote/remote.h"
 #include "config/crypto.h"
 #include "config/migration.h"
@@ -736,6 +738,50 @@ void render_menu_sidebar(int selected_idx, const char **items, int item_count)
     refresh();
 }
 
+int build_menu_hint_items(MenuHintItem *items, int max)
+{
+    static const struct {
+        ActionId action;
+        const char *label_key;
+    } defs[] = {
+        { ACTION_VIEW_MAIN,      "hint.main" },
+        { ACTION_VIEW_SETTINGS,  "hint.settings" },
+        { ACTION_VIEW_HISTORY,   "hint.history" },
+        { ACTION_VIEW_PLAYLIST,  "hint.playlist" },
+        { ACTION_VIEW_FAVORITES, "hint.favorites" },
+        { ACTION_VIEW_INFO,      "hint.info" },
+        { ACTION_VIEW_LANGUAGE,  "hint.language" },
+        { ACTION_VIEW_HELP,      "hint.help" },
+        { ACTION_APP_QUIT,       "hint.quit" }
+    };
+
+    if (!items || max <= 0) return 0;
+
+    int count = (int)(sizeof(defs) / sizeof(defs[0]));
+    int written = 0;
+    for (int i = 0; i < count && written < max; i++) {
+        char keys[4][KEYNAME_MAX_LEN];
+        int key_count = keymap_action_keys(defs[i].action, keys, 4);
+
+        char key_display[KEYNAME_MAX_LEN * 2];
+        snprintf(key_display, sizeof(key_display), "?");
+        if (key_count > 0) {
+            KeyStroke stroke;
+            if (keyname_parse(keys[0], &stroke) == 0 &&
+                keyname_format_display(stroke, key_display, sizeof(key_display)) != 0) {
+                snprintf(key_display, sizeof(key_display), "%s", keys[0]);
+            }
+        }
+
+        snprintf(items[written].label, sizeof(items[written].label), "%s:%s",
+                 key_display, i18n_get(defs[i].label_key));
+        items[written].width = utf8_str_width(items[written].label);
+        items[written].action = defs[i].action;
+        written++;
+    }
+    return written;
+}
+
 void render_menu_hint_bar(void)
 {
     int max_y, max_x;
@@ -747,15 +793,22 @@ void render_menu_hint_bar(void)
              max_y, max_x, COLOR_PAIR_BORDER, (int)fg, (int)bg,
              (int)g_app_config.theme.border_fg, (int)g_app_config.theme.border_bg);
 
+    MenuHintItem items[9];
+    int item_count = build_menu_hint_items(items, 9);
+
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
     for (int x = 0; x < max_x; x++)
         mvaddch(max_y - 1, x, ' ');
-    mvprintw(max_y - 1, 2, "%s",
-             i18n_get("menu.hint_bar"));
+
+    int x = 2;
+    for (int i = 0; i < item_count && x < max_x; i++) {
+        mvprintw(max_y - 1, x, "%s", items[i].label);
+        x += items[i].width + 2;
+    }
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
     refresh();
 
-    log_info("hint_bar", "rendered: row=%d len=%d", max_y - 1, max_x);
+    log_info("hint_bar", "rendered: row=%d len=%d", max_y - 1, x);
 }
 
 /* ============================================================
@@ -900,29 +953,59 @@ void rerender_active_view(void)
 }
 
 /* ============================================================
- * Function keys
+ * Global actions
  * ============================================================ */
 
-void handle_function_keys(int fkey)
+int execute_global_action(ActionId action)
 {
-    log_debug("menu_views", "Function key F%d pressed", fkey - KEY_F(0));
-    switch (fkey) {
-        case KEY_F(1): exit_current_view(); break;
-        case KEY_F(2): switch_to_view(VIEW_SETTINGS); break;
-        case KEY_F(3): switch_to_view(VIEW_HISTORY); break;
-        case KEY_F(4): switch_to_view(VIEW_PLAYLIST); break;
-        case KEY_F(5): switch_to_view(VIEW_FAVORITES); break;
-        case KEY_F(6): switch_to_view(VIEW_INFO); break;
-        case KEY_F(7): switch_to_view(VIEW_LANGUAGE); break;
-        case KEY_F(8): switch_to_view(VIEW_HELP); break;
-        case KEY_F(9):
+    switch (action) {
+        case ACTION_APP_QUIT:
             /* 与 'q' 走同一条正常退出路径（Task 4.3）：只置退出标志，交由主循环
              * break → main 的 player_shutdown/cleanup 顺序收尾。remote 下不能在此
              * 直接 cleanup()+exit(0)，否则会误停后台音乐、与 'q' 不一致。 */
             g_should_exit = 1;
-            break;
-        default: break;
+            return 1;
+        case ACTION_VIEW_MAIN:
+            exit_current_view();
+            return 1;
+        case ACTION_VIEW_SETTINGS:
+            switch_to_view(VIEW_SETTINGS);
+            return 1;
+        case ACTION_VIEW_HISTORY:
+            switch_to_view(VIEW_HISTORY);
+            return 1;
+        case ACTION_VIEW_PLAYLIST:
+            switch_to_view(VIEW_PLAYLIST);
+            return 1;
+        case ACTION_VIEW_FAVORITES:
+            switch_to_view(VIEW_FAVORITES);
+            return 1;
+        case ACTION_VIEW_INFO:
+            switch_to_view(VIEW_INFO);
+            return 1;
+        case ACTION_VIEW_LANGUAGE:
+            switch_to_view(VIEW_LANGUAGE);
+            return 1;
+        case ACTION_VIEW_HELP:
+            switch_to_view(VIEW_HELP);
+            return 1;
+        case ACTION_LIBRARY_TOGGLE:
+            if (g_current_view == VIEW_MAIN) {
+                library_browser_toggle();
+                render_playlist_content();
+                render_controls();
+                return 1;
+            }
+            return 0;
+        default:
+            return 0;
     }
+}
+
+void handle_function_keys(int fkey)
+{
+    log_debug("menu_views", "Function key F%d pressed", fkey - KEY_F(0));
+    execute_global_action(keymap_resolve(CTX_GLOBAL, fkey));
 }
 
 /* ============================================================
@@ -937,6 +1020,11 @@ void handle_menu_input(int ch)
     }
 
     if (ch == 27) {
+        /* 快捷键捕获模式优先：Esc 只取消捕获，不退出设置视图。 */
+        if (g_current_view == VIEW_SETTINGS && settings_hotkey_capture_active()) {
+            handle_settings_input(ch);
+            return;
+        }
         if (g_current_view == VIEW_PLAYLIST) {
             handle_playlist_input(ch);
             return;
@@ -945,19 +1033,18 @@ void handle_menu_input(int ch)
         return;
     }
 
-    if (ch >= KEY_F(1) && ch <= KEY_F(9)) {
-        handle_function_keys(ch);
-        return;
-    }
-
+    int handled = 0;
     switch (g_current_view) {
-        case VIEW_SETTINGS:  handle_settings_input(ch); break;
-        case VIEW_HISTORY:   handle_history_input(ch); break;
-        case VIEW_PLAYLIST:  handle_playlist_input(ch); break;
-        case VIEW_FAVORITES: handle_favorites_input(ch); break;
-        case VIEW_INFO:      handle_info_input(ch); break;
-        case VIEW_HELP:      handle_help_input(ch); break;
-        case VIEW_LANGUAGE:  handle_language_input(ch); break;
+        case VIEW_SETTINGS:  handled = handle_settings_input(ch); break;
+        case VIEW_HISTORY:   handled = handle_history_input(ch); break;
+        case VIEW_PLAYLIST:  handled = handle_playlist_input(ch); break;
+        case VIEW_FAVORITES: handled = handle_favorites_input(ch); break;
+        case VIEW_INFO:      handled = handle_info_input(ch); break;
+        case VIEW_HELP:      handled = handle_help_input(ch); break;
+        case VIEW_LANGUAGE:  handled = handle_language_input(ch); break;
         default: break;
     }
+    if (handled) return;
+
+    execute_global_action(keymap_resolve(CTX_GLOBAL, ch));
 }

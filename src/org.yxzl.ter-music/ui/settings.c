@@ -18,6 +18,7 @@
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include "ui/remote_view.h"
 #include "config/config.h"
 #include "logger/logger.h"
@@ -43,6 +44,12 @@
 static int g_settings_current_option = 0;
 static int g_settings_color_editing = 0;
 static int g_settings_color_which = 0;
+
+/* 快捷键编辑器（Task 5）：选中行、滚动偏移、捕获模式与提示消息。 */
+static int g_hotkey_selected = 0;      /* 0 .. actions_count()-1 */
+static int g_hotkey_offset = 0;
+static int g_hotkey_capturing = 0;
+static char g_hotkey_message[256];
 
 /* ============================================================
  * Selection menu state (uses sub-window + box())
@@ -314,7 +321,7 @@ static void rerender_settings_view(void);
 
 /* Forward declarations for EQ visual UI */
 static void render_eq_visual(void);
-static void handle_eq_input(int ch);
+static int handle_eq_action(ActionId action);
 
 /* Reset settings view state (called from menus.c on view switch) */
 void reset_settings_view(void)
@@ -322,6 +329,10 @@ void reset_settings_view(void)
     if (g_sel_active)
         close_sel_menu(0);
     g_settings_current_option = 0;
+    g_hotkey_selected = 0;
+    g_hotkey_offset = 0;
+    g_hotkey_capturing = 0;
+    g_hotkey_message[0] = '\0';
 }
 
 /* ============================================================
@@ -1797,15 +1808,18 @@ static int handle_sel_input(int ch)
 {
     if (!g_sel_active) return 0;
 
-    switch (ch) {
-        case KEY_UP:
+    /* Esc 是系统保留键；其余键位由 select_menu 上下文解析。 */
+    ActionId action = (ch == 27) ? ACTION_SELECT_CANCEL
+                                 : keymap_resolve(CTX_SELECT_MENU, ch);
+
+    switch (action) {
+        case ACTION_SELECT_UP:
             if (g_sel_idx > 0) { g_sel_idx--; draw_sel_menu(); refresh(); }
             return 1;
-        case KEY_DOWN:
+        case ACTION_SELECT_DOWN:
             if (g_sel_idx < g_sel_count - 1) { g_sel_idx++; draw_sel_menu(); refresh(); }
             return 1;
-        case 'a':
-        case 'A':
+        case ACTION_SELECT_ALL:
             if (g_sel_multiselect) {
                 g_sel_work_mask = INFO_FIELD_ALL;
                 draw_sel_menu();
@@ -1813,8 +1827,7 @@ static int handle_sel_input(int ch)
                 return 1;
             }
             return 0;
-        case 'n':
-        case 'N':
+        case ACTION_SELECT_NONE:
             if (g_sel_multiselect) {
                 g_sel_work_mask = 0;
                 draw_sel_menu();
@@ -1822,7 +1835,7 @@ static int handle_sel_input(int ch)
                 return 1;
             }
             return 0;
-        case ' ':
+        case ACTION_SELECT_TOGGLE:
             if (g_sel_multiselect) {
                 const InfoFieldDef *field = info_field_at(g_sel_idx);
                 if (field) {
@@ -1834,7 +1847,7 @@ static int handle_sel_input(int ch)
             }
             /* FALLTHROUGH：单选菜单中空格等同回车 */
             /* fall through */
-        case 10:
+        case ACTION_SELECT_ACCEPT:
             if (g_sel_multiselect) {
                 close_sel_menu(1);
                 rerender_settings_view();
@@ -1881,13 +1894,13 @@ static int handle_sel_input(int ch)
             close_sel_menu(1);
             rerender_settings_view();
             return 1;
-        case 27:
-        case KEY_LEFT:
+        case ACTION_SELECT_CANCEL:
             close_sel_menu(0);
             rerender_settings_view();
             return 1;
+        default:
+            return 0;
     }
-    return 0;
 }
 
 static void activate_settings_current_option(void)
@@ -1961,6 +1974,252 @@ static void activate_settings_current_option(void)
 
 
 /* ============================================================
+ * Hotkey editor (settings -> hotkeys)
+ * ============================================================ */
+
+int settings_hotkey_capture_active(void)
+{
+    return g_hotkey_capturing;
+}
+
+static int hotkey_editing_available(void)
+{
+    return g_app_config.config_version >= 9;
+}
+
+static ActionId hotkey_selected_action(void)
+{
+    int total = actions_bindable_count();
+    if (total <= 0) return ACTION_NONE;
+    if (g_hotkey_selected < 0) g_hotkey_selected = 0;
+    if (g_hotkey_selected >= total) g_hotkey_selected = total - 1;
+    ActionId id = ACTION_NONE;
+    if (!actions_bindable_at(g_hotkey_selected, &id)) {
+        return ACTION_NONE;
+    }
+    return id;
+}
+
+static void build_hotkey_keys_text(ActionId action, char *out, size_t out_size)
+{
+    char keys[4][KEYNAME_MAX_LEN];
+    int count = keymap_action_keys(action, keys, 4);
+
+    out[0] = '\0';
+    for (int i = 0; i < count; i++) {
+        char display[KEYNAME_MAX_LEN * 2];
+        const char *text = keys[i];
+        KeyStroke stroke;
+        if (keyname_parse(keys[i], &stroke) == 0 &&
+            keyname_format_display(stroke, display, sizeof(display)) == 0) {
+            text = display;
+        }
+        if (i > 0) {
+            strncat(out, " / ", out_size - strlen(out) - 1);
+        }
+        strncat(out, text, out_size - strlen(out) - 1);
+    }
+    if (out[0] == '\0') {
+        snprintf(out, out_size, "%s", i18n_get("general.none"));
+    }
+}
+
+static void render_hotkey_editor(int start_y, int content_start_x, int max_y)
+{
+    int total = actions_bindable_count();
+    int message_row = max_y - 3;
+    int list_top = start_y + 4;
+
+    mvprintw(start_y, content_start_x, "%s",
+             i18n_get("settings.hotkeys.editor_hint"));
+    mvprintw(start_y + 1, content_start_x, "%s",
+             i18n_get("settings.hotkeys.editor_hint2"));
+    mvprintw(start_y + 2, content_start_x, "%s",
+             i18n_get("settings.hotkeys.reserved_note"));
+
+    if (total <= 0 || message_row <= list_top) return;
+
+    if (g_hotkey_selected < 0) g_hotkey_selected = 0;
+    if (g_hotkey_selected >= total) g_hotkey_selected = total - 1;
+
+    int visible = message_row - 1 - list_top;
+    if (visible < 1) visible = 1;
+
+    if (g_hotkey_selected < g_hotkey_offset) {
+        g_hotkey_offset = g_hotkey_selected;
+    } else if (g_hotkey_selected >= g_hotkey_offset + visible) {
+        g_hotkey_offset = g_hotkey_selected - visible + 1;
+    }
+    if (g_hotkey_offset < 0) g_hotkey_offset = 0;
+
+    for (int row = 0; row < visible && g_hotkey_offset + row < total; row++) {
+        ActionId id = ACTION_NONE;
+        if (!actions_bindable_at(g_hotkey_offset + row, &id)) {
+            continue;
+        }
+        char keys_text[128];
+        char line[320];
+        const char *mark = keymap_action_has_override(id)
+            ? i18n_get("settings.hotkeys.override_mark")
+            : " ";
+
+        build_hotkey_keys_text(id, keys_text, sizeof(keys_text));
+        snprintf(line, sizeof(line), "%s %s  %s", mark,
+                 keymap_action_label(id), keys_text);
+
+        int y = list_top + row;
+        move(y, content_start_x);
+        if (g_hotkey_offset + row == g_hotkey_selected &&
+            g_focus_area == FOCUS_CONTENT) {
+            attron(A_REVERSE);
+            printw("%s", line);
+            clrtoeol();
+            attroff(A_REVERSE);
+        } else {
+            printw("%s", line);
+            clrtoeol();
+        }
+    }
+
+    const char *message = g_hotkey_message;
+    char capture_buf[256];
+    if (g_hotkey_capturing) {
+        snprintf(capture_buf, sizeof(capture_buf),
+                 i18n_get("settings.hotkeys.capturing"),
+                 keymap_action_label(hotkey_selected_action()));
+        message = capture_buf;
+    } else if (message[0] == '\0' && !hotkey_editing_available()) {
+        message = i18n_get("settings.hotkeys.core_too_old");
+    }
+    if (message[0] != '\0') {
+        mvprintw(message_row, content_start_x, "%s", message);
+    }
+}
+
+/* 处理快捷键页的编辑器动作；未处理返回 0，交由通用设置输入逻辑。 */
+static int handle_hotkey_editor_action(ActionId action)
+{
+    switch (action) {
+        case ACTION_SETTINGS_UP:
+            if (actions_bindable_count() > 0) {
+                if (g_hotkey_selected <= 0) {
+                    g_hotkey_selected = actions_bindable_count() - 1;
+                } else {
+                    g_hotkey_selected--;
+                }
+            }
+            g_hotkey_message[0] = '\0';
+            render_settings_content();
+            return 1;
+
+        case ACTION_SETTINGS_DOWN:
+            if (actions_bindable_count() > 0) {
+                if (g_hotkey_selected >= actions_bindable_count() - 1) {
+                    g_hotkey_selected = 0;
+                } else {
+                    g_hotkey_selected++;
+                }
+            }
+            g_hotkey_message[0] = '\0';
+            render_settings_content();
+            return 1;
+
+        case ACTION_SETTINGS_ACTIVATE:
+        case ACTION_SETTINGS_RIGHT:
+            if (!hotkey_editing_available()) {
+                snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                         i18n_get("settings.hotkeys.core_too_old"));
+            } else {
+                g_hotkey_capturing = 1;
+                g_hotkey_message[0] = '\0';
+            }
+            render_settings_content();
+            return 1;
+
+        case ACTION_SETTINGS_HOTKEY_RESET: {
+            if (!hotkey_editing_available()) {
+                snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                         i18n_get("settings.hotkeys.core_too_old"));
+            } else {
+                ActionId id = hotkey_selected_action();
+                keymap_remove_override(id);
+                snprintf(g_hotkey_message, sizeof(g_hotkey_message),
+                         i18n_get("settings.hotkeys.reset_one"),
+                         keymap_action_label(id));
+            }
+            render_settings_content();
+            return 1;
+        }
+
+        case ACTION_SETTINGS_HOTKEY_RESET_ALL:
+            if (!hotkey_editing_available()) {
+                snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                         i18n_get("settings.hotkeys.core_too_old"));
+            } else {
+                keymap_remove_all_bindable_overrides();
+                snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                         i18n_get("settings.hotkeys.reset_all"));
+            }
+            render_settings_content();
+            return 1;
+
+        default:
+            return 0;
+    }
+}
+
+/* 捕获模式：任何按键都不再走动作分发。 */
+static int handle_hotkey_capture(int ch)
+{
+    ActionId id = hotkey_selected_action();
+    g_hotkey_capturing = 0;
+
+    if (id == ACTION_NONE || !actions_is_bindable(id)) {
+        snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                 i18n_get("settings.hotkeys.locked_action"));
+        render_settings_content();
+        return 1;
+    }
+
+    if (ch == 27) {
+        snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                 i18n_get("settings.hotkeys.capture_cancelled"));
+        render_settings_content();
+        return 1;
+    }
+
+    char key_name[KEYNAME_MAX_LEN];
+    if (!hotkey_editing_available()) {
+        snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                 i18n_get("settings.hotkeys.core_too_old"));
+    } else if (keymap_keycode_to_name(ch, key_name, sizeof(key_name)) != 0 ||
+               keymap_is_reserved_keycode(ch)) {
+        snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s",
+                 i18n_get("settings.hotkeys.invalid_key"));
+    } else {
+        char err[256] = "";
+        if (keymap_set_override(id, key_name, err, sizeof(err)) == 0) {
+            char display[KEYNAME_MAX_LEN * 2];
+            KeyStroke stroke;
+            if (keyname_parse(key_name, &stroke) == 0 &&
+                keyname_format_display(stroke, display, sizeof(display)) == 0) {
+                /* display ready */
+            } else {
+                snprintf(display, sizeof(display), "%s", key_name);
+            }
+            snprintf(g_hotkey_message, sizeof(g_hotkey_message),
+                     i18n_get("settings.hotkeys.bound"),
+                     keymap_action_label(id), display);
+        } else {
+            snprintf(g_hotkey_message, sizeof(g_hotkey_message), "%s", err);
+        }
+    }
+
+    render_settings_content();
+    return 1;
+}
+
+/* ============================================================
  * Settings content rendering (public API)
  * ============================================================ */
 
@@ -2011,23 +2270,7 @@ void render_settings_content(void)
         start_y += 2;
         render_settings_option_group(start_y, content_start_x, max_y, spec);
     } else if (g_menu_selected_idx == 4) {  /* 快捷键 */
-        mvprintw(start_y, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.hint"));
-        start_y += 2;
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.f1_f9"));
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.o_i"));
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.c_l"));
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.ctrl_l"));
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.space_enter"));
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.volume"));
-        mvprintw(start_y++, content_start_x, "%s",
-                 i18n_get("settings.hotkeys.seek"));
+        render_hotkey_editor(start_y, content_start_x, max_y);
     } else if (g_menu_selected_idx == 5) {  /* 远程设备 */
         remote_view_render();
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
@@ -2256,10 +2499,10 @@ static void render_eq_visual(void)
 
 /* ── EQ visual input handler ─────────────────────────────── */
 
-static void handle_eq_input(int ch)
+static int handle_eq_action(ActionId action)
 {
-    switch (ch) {
-        case KEY_LEFT:
+    switch (action) {
+        case ACTION_EQ_BAND_PREV:
             if (g_focus_area == FOCUS_CONTENT) {
                 if (g_settings_current_option > SETTINGS_IDX_EQ_ENABLED &&
                     g_settings_current_option <= SETTINGS_IDX_EQ_BAND_9) {
@@ -2271,9 +2514,9 @@ static void handle_eq_input(int ch)
                     rerender_settings_view();
                 }
             }
-            break;
+            return 1;
 
-        case KEY_RIGHT:
+        case ACTION_EQ_BAND_NEXT:
             if (g_focus_area == FOCUS_CONTENT) {
                 if (g_settings_current_option >= SETTINGS_IDX_EQ_ENABLED &&
                     g_settings_current_option < SETTINGS_IDX_EQ_BAND_9) {
@@ -2284,77 +2527,92 @@ static void handle_eq_input(int ch)
                     rerender_settings_view();
                 }
             }
-            break;
+            return 1;
 
-        case KEY_UP:
+        case ACTION_EQ_GAIN_UP:
             if (g_focus_area == FOCUS_CONTENT) {
                 adjust_or_toggle_settings_option(g_settings_current_option, 1);
                 rerender_settings_view();
             }
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_EQ_GAIN_DOWN:
             if (g_focus_area == FOCUS_CONTENT) {
                 adjust_or_toggle_settings_option(g_settings_current_option, -1);
                 rerender_settings_view();
             }
-            break;
+            return 1;
 
-        case 9:   /* TAB — switch to sidebar */
+        case ACTION_EQ_BACK:
             g_focus_area = FOCUS_SIDEBAR;
             rerender_settings_view();
-            break;
+            return 1;
 
-        case 27:  /* ESC — back to sidebar */
-            g_focus_area = FOCUS_SIDEBAR;
-            rerender_settings_view();
-            break;
-
-        case 10:  /* ENTER */
-        case ' ':
+        case ACTION_EQ_ACTIVATE:
             if (g_focus_area == FOCUS_CONTENT) {
                 activate_settings_current_option();
                 rerender_settings_view();
             }
-            break;
+            return 1;
 
         default:
-            break;
+            return 0;
     }
 }
 
-void handle_settings_input(int ch)
+int handle_settings_input(int ch)
 {
     /* Selection menu active — handle menu input first */
     if (g_sel_active) {
         handle_sel_input(ch);
-        return;
+        return 1;
     }
 
-    /* EQ preset popup (P/p) */
-    if (g_menu_selected_idx == 6 && (ch == 'P' || ch == 'p')) {
-        if (!g_sel_active) {
-            open_sel_menu(SETTINGS_IDX_EQ_PRESET);
-            draw_sel_menu();
-            refresh();
-        }
-        return;
-    }
+    ActionId action;
 
-    /* Remote section handles its own input when content-focused */
-    if (g_menu_selected_idx == 5 && g_focus_area == FOCUS_CONTENT) {
-        remote_view_handle_input(ch);
-        return;
+    /* 快捷键页捕获模式优先：不解析任何动作。 */
+    if (g_menu_selected_idx == 4 && g_focus_area == FOCUS_CONTENT &&
+        g_hotkey_capturing) {
+        return handle_hotkey_capture(ch);
     }
 
     /* EQ section uses dedicated visual input handler */
     if (g_menu_selected_idx == 6 && g_focus_area == FOCUS_CONTENT) {
-        handle_eq_input(ch);
-        return;
+        action = keymap_resolve(CTX_SETTINGS_EQ, ch);
+        if (action != ACTION_NONE && actions_context(action) == CTX_SETTINGS_EQ) {
+            handle_eq_action(action);
+            return 1;
+        }
+        /* 旧行为：EQ 内容区吞掉非全局键；仅全局动作交给上层分发。 */
+        if (keymap_resolve(CTX_GLOBAL, ch) != ACTION_NONE) return 0;
+        return 1;
+    } else if (g_menu_selected_idx == 4 && g_focus_area == FOCUS_CONTENT) {
+        /* 快捷键编辑器：↑/↓ 移动选中行，ENTER 捕获，r/R 恢复。 */
+        action = keymap_resolve(CTX_SETTINGS, ch);
+        if (handle_hotkey_editor_action(action)) return 1;
+    } else {
+        /* Remote section handles its own input when content-focused */
+        if (g_menu_selected_idx == 5 && g_focus_area == FOCUS_CONTENT) {
+            if (remote_view_handle_input(ch)) return 1;
+            /* 旧行为：远程内容区吞掉非全局键；仅全局动作交给上层分发 */
+            if (keymap_resolve(CTX_GLOBAL, ch) != ACTION_NONE) return 0;
+            return 1;
+        }
+        action = keymap_resolve(CTX_SETTINGS, ch);
     }
 
-    switch (ch) {
-        case KEY_UP:
+    /* EQ preset popup（仅均衡器页） */
+    if (action == ACTION_SETTINGS_EQ_PRESETS) {
+        if (g_menu_selected_idx == 6) {
+            open_sel_menu(SETTINGS_IDX_EQ_PRESET);
+            draw_sel_menu();
+            refresh();
+        }
+        return 1;
+    }
+
+    switch (action) {
+        case ACTION_SETTINGS_UP:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx--;
                 if (g_menu_selected_idx < 0) g_menu_selected_idx = SETTINGS_ITEM_COUNT - 1;
@@ -2364,9 +2622,9 @@ void handle_settings_input(int ch)
                 move_settings_content_selection(-1);
                 render_settings_content();
             }
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_SETTINGS_DOWN:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx++;
                 if (g_menu_selected_idx >= SETTINGS_ITEM_COUNT) g_menu_selected_idx = 0;
@@ -2376,17 +2634,17 @@ void handle_settings_input(int ch)
                 move_settings_content_selection(1);
                 render_settings_content();
             }
-            break;
+            return 1;
 
-        case KEY_LEFT:
+        case ACTION_SETTINGS_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
                 g_focus_area = FOCUS_SIDEBAR;
                 render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
                 render_settings_content();
             }
-            break;
+            return 1;
 
-        case KEY_RIGHT:
+        case ACTION_SETTINGS_RIGHT:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == SETTINGS_ITEM_COUNT - 1) {
                     exit_current_view();
@@ -2401,9 +2659,9 @@ void handle_settings_input(int ch)
                 activate_settings_current_option();
                 rerender_settings_view();
             }
-            break;
+            return 1;
 
-        case 9:  /* TAB */
+        case ACTION_SETTINGS_TAB:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == SETTINGS_ITEM_COUNT - 1) {
                     exit_current_view();
@@ -2418,10 +2676,9 @@ void handle_settings_input(int ch)
                 render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
                 render_settings_content();
             }
-            break;
+            return 1;
 
-        case 10:
-        case ' ':
+        case ACTION_SETTINGS_ACTIVATE:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == SETTINGS_ITEM_COUNT - 1) {
                     exit_current_view();
@@ -2435,13 +2692,22 @@ void handle_settings_input(int ch)
                 activate_settings_current_option();
                 rerender_settings_view();
             }
-            break;
+            return 1;
 
-        case 's':
-        case 'S':
+        case ACTION_SETTINGS_SAVE:
+            log_debug("settings", "saving config (keybinding overrides=%d)",
+                      g_app_config.keybinding_override_count);
             player_config_persist();
             show_status_message(i18n_get("status.settings_saved"));
             rerender_settings_view();
-            break;
+            return 1;
+
+        case ACTION_SETTINGS_HOTKEY_RESET:
+        case ACTION_SETTINGS_HOTKEY_RESET_ALL:
+            /* 仅快捷键页内容区处理（见 handle_hotkey_editor_action）。 */
+            return 0;
+
+        default:
+            return 0;
     }
 }

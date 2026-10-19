@@ -284,12 +284,12 @@ wait_for_play() {   # $1 = 期望文件名, $2 = 超时秒 → 置 GLOBAL 实测
 # 起缺省 stop_core_on_exit=1，remote 前端正常退出（q/F9/Ctrl+C/SIGTERM）会发
 # Control.Quit 把核心进程终止。必须在 TUI 拉起核心之前把开关显式写成 0（前端
 # 退出时经 Config.GetAll 实时读的就是核心的这个值）。缺省态（=1）的行为由
-# lifecycle-e2e.sh 的 S8 段专门覆盖，这里不重复验证；version="8" 配置里属性 8
+# lifecycle-e2e.sh 的 S8 段专门覆盖，这里不重复验证；version="9" 配置里属性 9
 # 的显式值不会被迁移块回卷，夹具写一次即稳定生效。
 mkdir -p "$XDG_CONFIG_HOME/ter-music"
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="8">
+<ter-music-config version="9">
   <preferences>
     <stop_core_on_exit>0</stop_core_on_exit>
   </preferences>

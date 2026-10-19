@@ -13,6 +13,7 @@
 #include "config/config_fields.h"
 #include "util/json.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* 字段是否与另一份配置不同 */
@@ -55,6 +56,33 @@ static size_t append_field(char *out, size_t out_size, size_t pos, int *written,
     }
     (*written)++;
     return pos;
+}
+
+static int override_count(const AppConfig *cfg)
+{
+    int count = cfg->keybinding_override_count;
+    if (count < 0) return 0;
+    if (count > MAX_KEYBINDING_OVERRIDES) return MAX_KEYBINDING_OVERRIDES;
+    return count;
+}
+
+static const KeyBindingOverride *find_binding(const AppConfig *cfg, const char *action)
+{
+    int count = override_count(cfg);
+    for (int i = 0; i < count; i++) {
+        if (strncmp(cfg->keybinding_overrides[i].action, action,
+                    MAX_KEYBINDING_ACTION_LEN) == 0) {
+            return &cfg->keybinding_overrides[i];
+        }
+    }
+    return NULL;
+}
+
+static int compare_action_ptr(const void *lhs, const void *rhs)
+{
+    const char *a = *(const char *const *)lhs;
+    const char *b = *(const char *const *)rhs;
+    return strcmp(a, b);
 }
 
 size_t config_diff_json(const AppConfig *before, const AppConfig *after,
@@ -188,6 +216,95 @@ size_t config_diff_json(const AppConfig *before, const AppConfig *after,
                 }
                 pos = json_append_char(out, out_size, pos, ']');
                 written++;
+            }
+            pos = json_append_char(out, out_size, pos, '}');
+            sections_written++;
+        }
+    }
+
+    /* 键位覆盖：语义比较（不看数组顺序），只输出变化的 action */
+    {
+        int before_count = override_count(before);
+        int after_count = override_count(after);
+
+        int changed = 0;
+        for (int i = 0; i < after_count && !changed; i++) {
+            const KeyBindingOverride *entry = &after->keybinding_overrides[i];
+            if (entry->action[0] == '\0') continue;
+            const KeyBindingOverride *old = find_binding(before, entry->action);
+            if (!old ||
+                strncmp(old->key, entry->key, MAX_KEYBINDING_KEY_LEN) != 0) {
+                changed = 1;
+            }
+        }
+        for (int i = 0; i < before_count && !changed; i++) {
+            const KeyBindingOverride *entry = &before->keybinding_overrides[i];
+            if (entry->action[0] == '\0') continue;
+            if (!find_binding(after, entry->action)) {
+                changed = 1;
+            }
+        }
+
+        if (changed) {
+            const char *actions[2 * MAX_KEYBINDING_OVERRIDES];
+            int action_count = 0;
+
+            for (int i = 0; i < after_count; i++) {
+                const KeyBindingOverride *entry = &after->keybinding_overrides[i];
+                if (entry->action[0] == '\0') continue;
+                const KeyBindingOverride *old = find_binding(before, entry->action);
+                if (old &&
+                    strncmp(old->key, entry->key, MAX_KEYBINDING_KEY_LEN) == 0) {
+                    continue;
+                }
+                int duplicate = 0;
+                for (int k = 0; k < action_count; k++) {
+                    if (strcmp(actions[k], entry->action) == 0) {
+                        duplicate = 1;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    actions[action_count++] = entry->action;
+                }
+            }
+
+            for (int i = 0; i < before_count; i++) {
+                const KeyBindingOverride *entry = &before->keybinding_overrides[i];
+                if (entry->action[0] == '\0' || find_binding(after, entry->action)) {
+                    continue;
+                }
+                int duplicate = 0;
+                for (int k = 0; k < action_count; k++) {
+                    if (strcmp(actions[k], entry->action) == 0) {
+                        duplicate = 1;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    actions[action_count++] = entry->action;
+                }
+            }
+
+            qsort(actions, (size_t)action_count, sizeof(actions[0]),
+                  compare_action_ptr);
+
+            if (sections_written > 0) {
+                pos = json_append_raw(out, out_size, pos, ",");
+            }
+            pos = json_append_key(out, out_size, pos, "keybindings");
+            pos = json_append_char(out, out_size, pos, '{');
+            for (int i = 0; i < action_count; i++) {
+                if (i > 0) {
+                    pos = json_append_char(out, out_size, pos, ',');
+                }
+                pos = json_append_key(out, out_size, pos, actions[i]);
+                const KeyBindingOverride *entry = find_binding(after, actions[i]);
+                if (entry) {
+                    pos = json_append_escaped(out, out_size, pos, entry->key);
+                } else {
+                    pos = json_append_escaped(out, out_size, pos, "default");
+                }
             }
             pos = json_append_char(out, out_size, pos, '}');
             sections_written++;

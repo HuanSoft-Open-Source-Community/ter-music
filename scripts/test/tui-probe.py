@@ -8,7 +8,10 @@
 
 用法：
   tui-probe.py --bin ./build/ter-music --music DIR [--keys " jjn+-\\t"]
-               [--state-out FILE] [--wait SECONDS]
+               [--term TERM] [--state-out FILE] [--wait SECONDS]
+
+--keys 同时接受命名键（<up> <down> <enter> <tab> <f1>..<f12> 等），序列
+按 --term（默认 xterm-256color）的 terminfo 选取。
 
 --bin 会先规范成绝对路径并校验可执行：路径若是失效的（例如调用方先 cd 到了
 别处，相对路径在那一刻已经不存在），探针当场明确报错，而不是把子进程的
@@ -28,21 +31,47 @@ import subprocess
 import sys
 import time
 
+import terminfo_keys
 
-def parse_keys(text):
-    """把 " jjn+-\t" 解析成字节序列（\\t \\n \\e 支持转义）。"""
+
+_BYTE_ESCAPES = {"e": b"\x1b", "n": b"\n", "t": b"\t", "r": b"\r", "\\": b"\\"}
+
+
+def parse_keys(text, named=None):
+    """把 `" jjn+-\\t"` 或 `"<down><enter>"` 解析成待写入的字节序列。
+
+    保留既有的 `\\t \\n \\e` 转义写法；新增 `<enter> <tab> <space> <esc>
+    <up> <down> <left> <right> <f1>..<f12>` 等命名键（大小写不敏感），序列
+    按 `--term` 对应的 terminfo 取。每个元素一次 os.write，多字节序列不被
+    拆成单字节。
+    """
+    named = terminfo_keys.xterm_defaults() if named is None else named
     keys = []
-    for char in text:
-        if char == "\\":
-            continue
-        if char == "t":
-            keys.append(b"\t")
-        elif char == "n":
-            keys.append(b"\n")
-        elif char == "e":
-            keys.append(b"\x1b")
-        else:
-            keys.append(char.encode("utf-8"))
+    i = 0
+    length = len(text)
+    while i < length:
+        if text[i] == "<":
+            end = text.find(">", i)
+            token = text[i + 1:end].lower() if end != -1 else ""
+            if end != -1 and token in named:
+                keys.append(named[token])
+                i = end + 1
+                continue
+        if text[i] == "\\" and i + 1 < length:
+            nxt = text[i + 1]
+            if nxt == "x" and i + 3 < length:
+                try:
+                    keys.append(bytes([int(text[i + 2:i + 4], 16)]))
+                    i += 4
+                    continue
+                except ValueError:
+                    pass
+            if nxt in _BYTE_ESCAPES:
+                keys.append(_BYTE_ESCAPES[nxt])
+                i += 2
+                continue
+        keys.append(text[i].encode("utf-8"))
+        i += 1
     return keys
 
 
@@ -52,6 +81,8 @@ def main():
     parser.add_argument("--music", required=True, help="音乐目录（本次运行专用）")
     parser.add_argument("--home", help="HOME 目录，默认 <music>/../home")
     parser.add_argument("--keys", default=" jjn+-")
+    parser.add_argument("--term", default="xterm-256color",
+                        help="被测 TUI 使用的 TERM（默认 xterm-256color）")
     parser.add_argument("--state-out", help="把 D-Bus 状态快照写到该文件")
     parser.add_argument("--wait", type=float, default=2.0, help="启动等待秒数")
     parser.add_argument("--keep-window", action="store_true")
@@ -71,11 +102,15 @@ def main():
     home = args.home or os.path.join(os.path.dirname(os.path.abspath(args.music)), "home")
     os.makedirs(home, exist_ok=True)
 
+    named_keys_map, term_warning = terminfo_keys.named_keys(args.term)
+    if term_warning:
+        print("警告：%s" % term_warning)
+
     env = dict(os.environ)
     env.update({
         "HOME": home,
         "XDG_CONFIG_HOME": os.path.join(home, ".config"),
-        "TERM": "xterm-256color",
+        "TERM": args.term,
         "LC_ALL": "C.UTF-8",
         "COLUMNS": "100",
         "LINES": "30",
@@ -142,7 +177,7 @@ def main():
     print("PASS TUI 启动并渲染（%d 字节）" % len(banner))
 
     pressed = []
-    for key in parse_keys(args.keys):
+    for key in parse_keys(args.keys, named_keys_map):
         os.write(fd, key)
         pressed.append(key)
         time.sleep(0.45)

@@ -30,47 +30,28 @@ import signal
 import sys
 import time
 
+import terminfo_keys
 
-# 命名键 → 终端实际收到的字节序列。探针统一把 TERM 设成 xterm-256color
-# （见 cmd_drive），所以这里就是 xterm 家族的 terminfo 取值：
-#   kf1..kf4 = ESC O P/Q/R/S，kf5..kf12 = ESC [ 15/17/18/19/20/21/23/24 ~
-# F9 是 `\e[20~`（`\e[24~` 在 xterm 里是 F12，别混）。
-NAMED_KEYS = {
-    "<enter>": b"\n",
-    "<return>": b"\n",
-    "<tab>": b"\t",
-    "<space>": b" ",
-    "<esc>": b"\x1b",
-    "<up>": b"\x1b[A",
-    "<down>": b"\x1b[B",
-    "<right>": b"\x1b[C",
-    "<left>": b"\x1b[D",
-    "<f1>": b"\x1bOP",
-    "<f2>": b"\x1bOQ",
-    "<f3>": b"\x1bOR",
-    "<f4>": b"\x1bOS",
-    "<f5>": b"\x1b[15~",
-    "<f6>": b"\x1b[17~",
-    "<f7>": b"\x1b[18~",
-    "<f8>": b"\x1b[19~",
-    "<f9>": b"\x1b[20~",
-    "<f10>": b"\x1b[21~",
-    "<f11>": b"\x1b[23~",
-    "<f12>": b"\x1b[24~",
-}
+
+# 命名键 → 终端实际收到的字节序列。默认按 xterm-256color 的 terminfo；
+# `drive --term <TERM>` 会改用该 TERM 的 kcuu1/kcud1/.../kf1..kf12，
+# 使同一份脚本能在传统 tty（TERM=linux）与现代终端模拟器间复用。
+NAMED_KEYS = terminfo_keys.xterm_defaults()
 
 _BYTE_ESCAPES = {"e": b"\x1b", "n": b"\n", "t": b"\t", "r": b"\r", "\\": b"\\"}
 
 
-def decode_keyspec(text):
+def decode_keyspec(text, named=None):
     """把一行按键描述解码成要写进 pty 的字节。
 
-    支持：`<F9>`/`<Enter>` 这类命名键（大小写不敏感）、`\\e \\n \\t \\r \\\\`
-    与 `\\xHH`，其余字符按 UTF-8 原样发送。多字节序列必须**一次写入**：
-    ncurses 只有在一个读包里拿到 `ESC [ 2 0 ~` 才会把它当成 KEY_F(9)，
-    逐个字节分开写会被拆成 ESC 加一串字面字符（这是 `run` 按字符发键的
-    局限，也是本命令存在的另一个原因）。
+    支持：`<F9>`/`<Enter>` 这类命名键（大小写不敏感，序列取自当前 TERM
+    的 terminfo）、`\\e \\n \\t \\r \\\\` 与 `\\xHH`，其余字符按 UTF-8
+    原样发送。多字节序列必须**一次写入**：ncurses 只有在一个读包里拿到
+    `ESC [ 2 0 ~` 才会把它当成 KEY_F(9)，逐个字节分开写会被拆成 ESC 加
+    一串字面字符（这是 `run` 按字符发键的局限，也是本命令存在的另一个
+    原因）。
     """
+    named = NAMED_KEYS if named is None else named
     out = bytearray()
     i = 0
     length = len(text)
@@ -78,9 +59,9 @@ def decode_keyspec(text):
         char = text[i]
         if char == "<":
             end = text.find(">", i)
-            token = text[i:end + 1].lower() if end != -1 else ""
-            if end != -1 and token in NAMED_KEYS:
-                out += NAMED_KEYS[token]
+            name = text[i + 1:end].lower() if end != -1 else ""
+            if end != -1 and name in named:
+                out += named[name]
                 i = end + 1
                 continue
         if char == "\\":
@@ -204,6 +185,10 @@ def cmd_drive(argv):
         print("drive: 必须给 --ctl <指令文件>", file=sys.stderr)
         return 2
 
+    named_keys_map, term_warning = terminfo_keys.named_keys(term)
+    if term_warning:
+        print("drive: 警告：%s" % term_warning, file=sys.stderr)
+
     env = dict(os.environ)
     env.update({"TERM": term, "COLUMNS": str(cols), "LINES": str(rows),
                 "LC_ALL": env.get("LC_ALL", "C.UTF-8")})
@@ -275,7 +260,7 @@ def cmd_drive(argv):
             if poll_exit() is not None:
                 return False
             try:
-                os.write(fd, decode_keyspec(arg))
+                os.write(fd, decode_keyspec(arg, named_keys_map))
             except OSError:
                 return False
             spin(0.6, capture)

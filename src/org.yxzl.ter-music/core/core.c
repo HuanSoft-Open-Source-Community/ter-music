@@ -161,6 +161,11 @@ void core_config_apply(void)
     load_config();
     config_run_migrations();
 
+    /* 本进程内的核心已按当前契约解释配置；没有配置文件（首次启动）时
+     * load_config 不会写版本，这里显式置为当前版本，供界面判断“键位可编辑”。
+     * 远端模式下由 Config.GetAll 的 version 覆盖为对端核心的契约版本。 */
+    g_app_config.config_version = CONFIG_CURRENT_VERSION;
+
     /* 运行时应用：与 load_config() 分开，便于前端在启动时静默应用一次，
      * 而只在“重载”语义下才推送状态消息 */
     core_config_apply_runtime();

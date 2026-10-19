@@ -14,6 +14,7 @@
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include <stdio.h>
 #include <ncursesw/ncurses.h>
 
@@ -77,26 +78,30 @@ void render_info_content(void)
  * Info view input handling
  * ============================================================ */
 
-void handle_info_input(int ch)
+int handle_info_input(int ch)
 {
-    switch (ch) {
-        case KEY_UP:
+    ActionId action = keymap_resolve(CTX_INFO, ch);
+
+    switch (action) {
+        case ACTION_INFO_UP:
             g_menu_selected_idx--;
             if (g_menu_selected_idx < 0) g_menu_selected_idx = INFO_ITEM_COUNT - 1;
             render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_INFO_DOWN:
             g_menu_selected_idx++;
             if (g_menu_selected_idx >= INFO_ITEM_COUNT) g_menu_selected_idx = 0;
             render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
-            break;
+            return 1;
 
-        case 10:
-        case ' ':
+        case ACTION_INFO_ACTIVATE:
             if (g_menu_selected_idx == INFO_ITEM_COUNT - 1) {
                 exit_current_view();
             }
-            break;
+            return 1;
+
+        default:
+            return 0;
     }
 }

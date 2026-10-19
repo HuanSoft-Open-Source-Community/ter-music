@@ -107,7 +107,7 @@ tui_session() {   # $1 = keys, $2 = 秒
 mkdir -p "$XDG_CONFIG_HOME/ter-music"
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="8">
+<ter-music-config version="9">
   <preferences>
     <stop_core_on_exit>0</stop_core_on_exit>
   </preferences>
@@ -248,12 +248,12 @@ fi
 # ── core_exit_when_no_frontend ──────────────────────────────────
 info "A5 core_exit_when_no_frontend=true 时核心随最后前端退出"
 mkdir -p "$XDG_CONFIG_HOME/ter-music"
-# 属性 8 文件（v7 会让核心首启的 v7→v8 迁移块把 stop_core_on_exit 强制补成 1）；
+# 属性 9 文件（低版本会让核心首启的迁移块把 stop_core_on_exit 强制补成 1）；
 # stop_core_on_exit 显式写 0 是这一段成立的前提：若按缺省 1，前端 q 退出会直接
 # Control.Quit 带走核心，“宽限期内核心仍在 / 过宽限期自行退出”就无从验证。
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="8">
+<ter-music-config version="9">
   <preferences>
     <core_exit_when_no_frontend>1</core_exit_when_no_frontend>
     <stop_core_on_exit>0</stop_core_on_exit>
@@ -483,7 +483,7 @@ for _ in $(seq 1 20); do daemon_up || break; sleep 0.1; done
 
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="8">
+<ter-music-config version="9">
   <preferences>
     <stop_core_on_exit>1</stop_core_on_exit>
   </preferences>

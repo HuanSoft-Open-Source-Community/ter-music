@@ -20,7 +20,7 @@ void remote_view_shutdown(void);
 
 /* 设置页内容区渲染 / 输入（settings.c 按选中项分发） */
 void remote_view_render(void);
-void remote_view_handle_input(int ch);
+int remote_view_handle_input(int ch);
 
 /* UI 主循环每帧调用：取回后台线程的列目录结果与已下载曲目 */
 void remote_view_tick(void);

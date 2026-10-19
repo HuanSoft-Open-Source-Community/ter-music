@@ -139,6 +139,43 @@ ter-music 快速上手
       设为 0 才只退前端、音乐后台续播，见第 20 节）
   ESC + 1..9 与 F1..F9 等价；q / Q 与 F9 走同一条退出路径。
 
+7.1 自定义按键
+---------------
+  “设置 → 快捷键”现在是可编辑的动作列表：
+    ↑/↓            选择动作
+    Enter/空格     捕获新键（Esc 取消）
+    r              恢复当前动作的默认键
+    R              恢复全部默认键
+    s              保存（写入 config.xml；在此之前只改内存）
+    ←/Tab          返回菜单侧栏
+
+  除系统保留键外，其余动作都可以改绑：
+    - F1-F9：视图/退出功能键
+    - q / Q：退出
+    - Tab / Shift+Tab：文件/队列选项卡切换
+  这些保留动作不会出现在设置页编辑列表中；播放控制、列表/队列、曲库
+  浏览器、设置、远程设备以及其他视图动作仍可编辑。
+
+  键位语法（大小写敏感）：
+    x、A、7、/      单个 ASCII 可打印字符（空格必须写 space）
+    ctrl+a          Ctrl+字母；c/h/i/j/m/z 被终端占用，不可绑定
+    up down left right home end pgup pgdn ins del backspace tab btab enter space
+    f1 ... f12      命名特殊键
+    Esc 与 Ctrl+C 是系统保留键，不可绑定。
+
+  只有被修改的动作会写入 config.xml，例如：
+    <keybindings>
+      <binding action="track.next" key="]"/>
+      <binding action="track.prev" key="["/>
+    </keybindings>
+  动作 ID 就是 `ter-music keys list` 输出的稳定字符串。
+  系统保留动作的覆盖在运行时会被忽略，`ter-music keys check` 会给出警告；
+  Config.Set 会拒绝为它们设置新键。
+  同一上下文内的冲突会被拒绝：提示会说明原因，原有绑定保持不变。
+  改绑某个动作后，它的全部默认别名都会失效，只保留新键。
+  不支持：Alt 组合、多键序列（如 gg）、非 ASCII 键。改绑立即生效，
+  重启后仍然保持。
+
 8. 曲库浏览器（M）
 ---------------
   按 M 进入/退出曲库浏览器，数据来自前端曲库 library.db（无曲库时按 M 无效）。
@@ -233,7 +270,7 @@ ter-music 快速上手
 18. 配置与数据
 --------------
   配置：  ~/.config/ter-music/config.xml   由核心独占写盘（XML 根版本属性写配置
-          契约号，当前为 8；历史 "2.2" 文件仍可加载，升级首启迁移后改写为数字）。
+          契约号，当前为 9；历史 "2.2" 文件仍可加载，升级首启迁移后改写为数字）。
           前端只修改自己的配置镜像，再把差异经 Config.Set 交给核心落盘。
   内容：  ~/.config/ter-music/library.db   前端 SQLite 曲库，含曲目元数据、
           扫描根、播放历史、收藏、歌单与歌单曲目、目录历史、临时播放列表。

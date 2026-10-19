@@ -728,9 +728,12 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `stop_core_on_exit`：前端退时止核心之播弄——前端改发 `Control.Quit`，
   不复发 `Control.Detach`，且必其前端实已接入核心（握手既成、执 `Attach` 之凭符）乃发
   （0/1，默 1——惟置 0 乃「闭文墨之界而乐声续于后」）。此键因节度契约版 8 而有，
-  `config.xml` 根之 `version` 属性今即书此数（旧书 `2.2`）；退而就旧版者不以为咎，
-  然旧版不识此键，及其存节度也，复书属性为 `2.2` 并去此键，人所明定之值由是而失，
-  他日复升级，乃以默 `1` 补之
+  `config.xml` 根之 `version` 属性今书当前契约之数 `9`（旧书 `2.2`）；退而就旧版者
+  不以为咎，然旧版不识此键，及其存节度也，复书属性为 `2.2` 并去此键，人所明定之值
+  由是而失，他日复升级，乃以默 `1` 补之
+- 键位之覆，藏于可选之 `<keybindings>` 段（节度契约 v9）。惟覆者见存；无条目之事，
+  仍用其内置之键。其 XML 之例与键名之法则，见[十二 捷键速览](#十二-捷键速览)之
+  「自定键位」
 - 远程服器之连（SMB/SFTP/FTP/WebDAV/HTTP）**不**存于 `config.xml`：
   前端自藏于同目录之 `remote.xml`（服务器条目与密码密文，权为 0600），
   所下之曲藏于 `$XDG_CACHE_HOME/ter-music/remote/`
@@ -896,7 +899,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 ### 十二 捷键速览
 | 分曹 | 键符 | 所司之事 |
 | --- | --- | --- |
-| **全域** | `q` | 退其器 |
+| **全域** | `q`/`Q` | 退其器 |
 |  | `F1` | 归主界 |
 |  | `F2` | 节度之视 |
 |  | `F3` | 播弄往迹 |
@@ -932,10 +935,66 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 |  | `Space` | 启控件/开弹出菜单 |
 |  | `,` | 退五秒 |
 |  | `.` | 进五秒 |
+|  | `-`/`_` | 减音量 |
+|  | `=`/`+` | 增音量 |
+|  | `R` | 重启播弄之核心 |
 |  | `Ctrl+L` | 进入/退出歌词定位模式 |
 | **歌辞** | `Ctrl+L` | 进入/退出歌词定位模式 |
 |  | `↑`/`↓` | 择上/下一句 |
-|  | `Enter`/`Space` | 跳转至所选歌辞行 |
+
+#### 自定键位
+
+上表诸事，**除系统所守之键外**，皆可改其键。所守之键，不复列于节度之
+快捷键表中：
+
+- `F1`–`F9`：视图／退出之功能键
+- `q` / `Q`：退
+- `Tab` / `Shift+Tab`：文卷／队列选项卡之切换
+
+其余动作既改，其旧诸键尽废；`Esc` 仍可取消／返。
+
+**于节度之视改之**：按 `F2` 入 `节度 → 快捷键`，以 `↑`/`↓` 择事，按
+`Enter` 而后按新键；`Esc` 罢录。同境之中已有他用者，拒而不纳，旧键如故。
+`r` 复当前之项，`R` 复其全，`s` 存之（未存不落于文）。
+
+**config.xml**：惟覆者书之，以动作之 ID 为序：
+
+```xml
+<ter-music-config version="9">
+  <keybindings>
+    <binding action="track.next" key="]"/>
+    <binding action="track.prev" key="["/>
+  </keybindings>
+</ter-music-config>
+```
+
+系统所守动作之覆，行时则弃之（文件之条目仍存，`ter-music keys check` 记
+其告警）；`Config.Set` 拒为新键，惟许 `"default"` 以清旧覆。
+
+**键名之法则（v1）**：
+
+- 单可印 ASCII 之字，辨其大小写：`a`–`z`、`A`–`Z`、`0`–`9`、`!`–`~`；
+  空格必书 `space`。
+- `ctrl+a` … `ctrl+z`，然除有歧者：`ctrl+c`（SIGINT）、`ctrl+h`
+  （Backspace）、`ctrl+i`（Tab）、`ctrl+j`（LF）、`ctrl+m`（CR）、
+  `ctrl+z`（SIGTSTP）。
+- 命名之键：`up` `down` `left` `right` `home` `end` `pgup` `pgdn` `ins`
+  `del` `backspace` `tab` `btab`（显为 Shift+Tab）`enter` `space` 及
+  `f1`–`f12`。命名键与 `ctrl+` 之端皆用小写；可印之字仍存其大小写。
+- 所不许者：`alt+…`、多键之序（如 `gg`）、非 ASCII 之文、裸控制之字、
+  空名与过长之名。`Esc` 为系统所守，不可为绑定之值。
+
+**审计之令**：`ter-music keys list [--json]` 列诸动作之境、名、现行之键、
+默认之键、是否有覆及遮蔽之系；`ter-music keys check [--json]` 校节度之文，
+遇未知之动作、非法之键、相冲之键或无默认键之动作，则退出之码非 0。当前
+`$TERM` 偶缺 terminfo 之能，惟记告警而不为败，故一配置可适于诸端。
+
+**复其默认**：去该动作之 `<binding>`（段中无条目则并去其段），于节度之视按
+`r`/`R`，或以 `Config.Set` 发 `{"keybindings":{"动作ID":"default"}}`。
+
+**兼容之要**：节度契约 v9 以前之器不识 `<keybindings>`，仍可启；然其存节度
+也，键位之覆尽失。早于 v9 之前端亦不识 v9 核心 `Config.GetAll` 中之
+`keybindings`，故宜前后端并升。欲存改绑之果，须用今之版本，于 v9 之文书之。
 
 ### 十三 端闱修广之调
 本器通端闱窗牖修广之调，君改其大小时，器将自动重置局度，重绘文界。

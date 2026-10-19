@@ -24,6 +24,7 @@
 
 #include "audio/equalizer.h"
 #include "cli/cli.h"
+#include "config/config.h"
 #include "config/config_diff.h"
 #include "config/config_json.h"
 #include "core/core.h"
@@ -2054,6 +2055,9 @@ static void remote_config_mark_synced(void)
 /* 把前端对镜像的改动换算成最小补丁下发；无变化则不发任何消息 */
 int player_remote_config_persist(void)
 {
+    log_debug("player_remote", "config persist: connected=%d synced=%d overrides=%d",
+              g_remote.connected, g_remote.config_synced,
+              g_app_config.keybinding_override_count);
     if (!g_remote.connected) {
         return -1;
     }
@@ -2070,31 +2074,52 @@ int player_remote_config_persist(void)
         /* refresh 成功会顺带把 g_app_config 与 synced_config 都置为核心基线 */
         if (player_remote_config_refresh() != 0) {
             /* 取不到核心基线：标记为已同步并保留用户改动，下次再试，不吞改动 */
+            log_warn("player_remote", "config persist: refresh failed, keeping local change");
             remote_config_mark_synced();
             return 0;
         }
 
         g_app_config = desired;             /* 重新施加本次改动 */
-        char patch[4096];
-        size_t len = config_diff_json(&g_remote.synced_config, &g_app_config,
-                                      patch, sizeof(patch));
-        if (len > 2 && remote_config_patch(patch) != 0) {
-            log_warn("player_remote", "First config persist rejected: %.200s", patch);
+        log_debug("player_remote", "first persist: desired overrides=%d first='%s'->'%s'; synced overrides=%d",
+                  g_app_config.keybinding_override_count,
+                  g_app_config.keybinding_override_count > 0 ? g_app_config.keybinding_overrides[0].action : "",
+                  g_app_config.keybinding_override_count > 0 ? g_app_config.keybinding_overrides[0].key : "",
+                  g_remote.synced_config.keybinding_override_count);
+        char *patch = malloc(CONFIG_DIFF_BUFFER_SIZE);
+        if (!patch) {
             return -1;
         }
+        size_t len = config_diff_json(&g_remote.synced_config, &g_app_config,
+                                      patch, CONFIG_DIFF_BUFFER_SIZE);
+        log_debug("player_remote", "first config persist patch(len=%zu): %.300s", len, patch);
+        if (len > 2 && remote_config_patch(patch) != 0) {
+            log_warn("player_remote", "First config persist rejected: %.200s", patch);
+            free(patch);
+            return -1;
+        }
+        free(patch);
         remote_config_mark_synced();
         return 0;
     }
 
-    char patch[4096];
-    size_t len = config_diff_json(&g_remote.synced_config, &g_app_config, patch, sizeof(patch));
+    char *patch = malloc(CONFIG_DIFF_BUFFER_SIZE);
+    if (!patch) {
+        return -1;
+    }
+    size_t len = config_diff_json(&g_remote.synced_config, &g_app_config,
+                                  patch, CONFIG_DIFF_BUFFER_SIZE);
     if (len <= 2) {
+        log_debug("player_remote", "config persist: no diff (overrides=%d)",
+                  g_app_config.keybinding_override_count);
+        free(patch);
         return 0;   /* "{}"：没有变化 */
     }
     if (remote_config_patch(patch) != 0) {
         log_warn("player_remote", "Config persist rejected: %.200s", patch);
+        free(patch);
         return -1;
     }
+    free(patch);
     remote_config_mark_synced();
     return 0;
 }
@@ -2160,9 +2185,18 @@ int player_remote_config_refresh(void)
     if (rc != 0) {
         return -1;
     }
-    /* 回填镜像（GetAll 顶层带 version 键，config_apply_json 容忍它） */
+    /* 回填镜像（GetAll 顶层带 version 键，config_apply_json 容忍它）。
+     * keybindings 是覆盖表而不是标量：GetAll 里空对象代表“核心没有任何
+     * 覆盖”，必须先把本地覆盖清空再应用，否则旧覆盖会残留，随后
+     * remote_config_mark_synced() 会把它误记成“核心基线”，导致用户
+     * 刚改的键位在保存时 diff 为空。失败时恢复原镜像，保持原子性。 */
+    AppConfig saved = g_app_config;
+    g_app_config.keybinding_override_count = 0;
+    memset(g_app_config.keybinding_overrides, 0,
+           sizeof(g_app_config.keybinding_overrides));
     char reason[256];
     if (config_apply_json(json, reason, sizeof(reason)) != 0) {
+        g_app_config = saved;
         log_warn("player_remote", "Config mirror rejected the core payload: %s", reason);
         return -1;
     }

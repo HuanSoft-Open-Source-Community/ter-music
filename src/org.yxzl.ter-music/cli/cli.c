@@ -31,7 +31,7 @@ static char g_cli_bus[128] = "";
 static const char *const k_cli_commands[] = {
     "tui", "play", "pause", "resume", "toggle", "stop", "next", "prev",
     "seek", "volume", "speed", "mode", "show", "daemon",
-    "queue", "config", "lyrics", "track", "cover",
+    "queue", "config", "lyrics", "track", "cover", "keys",
     "version", "--version", "help", "--help", "-h",
     NULL
 };
@@ -113,6 +113,10 @@ static void cli_print_help(const char *program) {
     printf("                            注：核心不扫描目录，--open 只作提示，队列由 play 下发\n");
     printf("  daemon stop [--force] [--all] | restart | status [--json] | reload\n");
     printf("     --all  除主实例外，把 --force 起的次要实例也一并停止\n\n");
+
+    printf("键位审计（本地读取配置，不要求运行实例）：\n");
+    printf("  keys list [--json]        列出全部动作的上下文、名称、有效键、默认键与遮蔽关系\n");
+    printf("  keys check [--json]       严格审计配置；非法项/冲突/无默认键时退出码非 0\n\n");
 
     printf("其他：\n");
     printf("  version | --version        显示版本\n");
@@ -1164,6 +1168,9 @@ int cli_run(int argc, char **argv) {
     }
     if (strcmp(command, "cover") == 0) {
         return cli_cmd_cover(argc, argv);
+    }
+    if (strcmp(command, "keys") == 0) {
+        return cli_cmd_keys(argc, argv);
     }
 
     if (strcmp(command, "pause") == 0 || strcmp(command, "resume") == 0 ||

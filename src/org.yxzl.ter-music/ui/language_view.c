@@ -11,6 +11,7 @@
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include "ui/scrollbar.h"
 #include "config/config.h"
 #include "player/player.h"
@@ -196,17 +197,19 @@ void render_language_content(void)
 
 /* ── Input handling ──────────────────────────────────────────── */
 
-void handle_language_input(int ch)
+int handle_language_input(int ch)
 {
-    switch (ch) {
-        case KEY_UP:
+    ActionId action = keymap_resolve(CTX_LANGUAGE, ch);
+
+    switch (action) {
+        case ACTION_LANGUAGE_UP:
             if (g_lang_selected > 0)
                 g_lang_selected--;
             else
                 g_lang_selected = g_lang_count > 0 ? g_lang_count - 1 : 0;
             break;
 
-        case KEY_DOWN:
+        case ACTION_LANGUAGE_DOWN:
             if (g_lang_count > 0) {
                 g_lang_selected++;
                 if (g_lang_selected >= g_lang_count)
@@ -214,9 +217,7 @@ void handle_language_input(int ch)
             }
             break;
 
-        case '\n':
-        case ' ':
-        case KEY_ENTER: {
+        case ACTION_LANGUAGE_ACTIVATE: {
             if (g_lang_count == 0) break;
             const char *sel = g_langs[g_lang_selected].id;
             const char *cur = i18n_current_lang();
@@ -230,14 +231,13 @@ void handle_language_input(int ch)
                     help_free_lines();
                     show_status_message(i18n_get("lang_mgr.switched"));
                     rerender_active_view();
-                    return;
+                    return 1;
                 }
             }
             break;
         }
 
-        case 'a':
-        case 'A': {
+        case ACTION_LANGUAGE_ADD: {
             char path[MAX_PATH_LEN];
             if (lang_prompt_path(path, sizeof(path)) && path[0]) {
                 log_debug("lang_view", "Add language request: path=%s", path);
@@ -251,8 +251,7 @@ void handle_language_input(int ch)
             break;
         }
 
-        case 'd':
-        case 'D': {
+        case ACTION_LANGUAGE_DELETE: {
             if (g_lang_count == 0) break;
             const char *sel = g_langs[g_lang_selected].id;
             if (i18n_is_builtin(sel)) {
@@ -268,7 +267,7 @@ void handle_language_input(int ch)
                         lang_refresh_list();
                         show_status_message(i18n_get("lang_mgr.deleted"));
                         rerender_active_view();
-                        return;
+                        return 1;
                     }
                     lang_refresh_list();
                     show_status_message(i18n_get("lang_mgr.deleted"));
@@ -279,11 +278,14 @@ void handle_language_input(int ch)
             break;
         }
 
-        case 27:
-        case KEY_LEFT:
+        case ACTION_LANGUAGE_BACK:
             exit_current_view();
-            return;
+            return 1;
+
+        default:
+            return 0;
     }
 
     render_language_content();
+    return 1;
 }

@@ -35,6 +35,11 @@ void render_library_content(void);
  * Returns 1 if the input was consumed, 0 if it should fall through
  * to the main view input handler.
  */
+#include "keymap/actions.h"
+
+/** 按动作处理曲库浏览器输入；已处理返回 1。 */
+int handle_library_action(ActionId action);
+
 int handle_library_input(int ch);
 
 /**

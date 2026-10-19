@@ -57,6 +57,9 @@ int cli_is_command(const char *arg);
 /* 执行 CLI 子命令，返回进程退出码 */
 int cli_run(int argc, char **argv);
 
+/* `keys list|check [--json]`：本地键位审计，不要求运行实例、不走 D-Bus */
+int cli_cmd_keys(int argc, char **argv);
+
 /* ── daemon ─────────────────────────────────────────────────────── */
 
 /* 无界面前台运行。force=1 时即使已有主实例也继续（仅作次要实例）。

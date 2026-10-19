@@ -170,7 +170,19 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 8   /* 与 config/schema.h 保持同步 */
+#define CONFIG_CURRENT_VERSION 9   /* 与 config/schema.h 保持同步 */
+
+/* ── 可配置键位覆盖（config v9）────────────────────────────────────
+ * 只保存相对默认键位的覆盖项；action 为稳定动作 ID（见 keymap/actions.h），
+ * key 为规范键名（见 util/keyname.h）。 */
+#define MAX_KEYBINDING_OVERRIDES 160
+#define MAX_KEYBINDING_ACTION_LEN 48
+#define MAX_KEYBINDING_KEY_LEN 24
+
+typedef struct {
+    char action[MAX_KEYBINDING_ACTION_LEN];
+    char key[MAX_KEYBINDING_KEY_LEN];
+} KeyBindingOverride;
 
 /* ── CUE 文件编码偏好（配置项取值域；转换实现见 playlist/encoding.h） ── */
 #define CUE_ENCODING_AUTO      0  /* detect: UTF-8 → preferred → fallback chain */
@@ -329,6 +341,10 @@ typedef struct {
     int info_show_progress;      /* 0/1 进度行 */
     int info_progress_style;     /* 0=bar 1=time 2=percent 3=time+percent */
     int info_lyrics_lines;       /* 0=关 1=当前句 2=当前句+下一句 */
+
+    /* ── 键位覆盖（config v9，见 keymap/actions.h） ── */
+    KeyBindingOverride keybinding_overrides[MAX_KEYBINDING_OVERRIDES];
+    int keybinding_override_count;
 } AppConfig;
 
 typedef struct {

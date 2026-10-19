@@ -15,6 +15,7 @@
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include "playlist/playlist.h"
 #include <stdio.h>
 #include <string.h>
@@ -98,10 +99,12 @@ void render_favorites_content(void)
  * Favorites view input handling
  * ============================================================ */
 
-void handle_favorites_input(int ch)
+int handle_favorites_input(int ch)
 {
-    switch (ch) {
-        case KEY_UP:
+    ActionId action = keymap_resolve(CTX_FAVORITES, ch);
+
+    switch (action) {
+        case ACTION_FAVORITES_UP:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx--;
                 if (g_menu_selected_idx < 0) g_menu_selected_idx = FAVORITES_ITEM_COUNT - 1;
@@ -112,9 +115,9 @@ void handle_favorites_input(int ch)
                 if (g_content_selected_idx < 0) g_content_selected_idx = 0;
                 render_favorites_content();
             }
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_FAVORITES_DOWN:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx++;
                 if (g_menu_selected_idx >= FAVORITES_ITEM_COUNT) g_menu_selected_idx = 0;
@@ -124,28 +127,26 @@ void handle_favorites_input(int ch)
                 if (g_content_selected_idx >= g_favorites.count) g_content_selected_idx = 0;
                 render_favorites_content();
             }
-            break;
+            return 1;
 
-        case KEY_RIGHT:
-        case 9:
+        case ACTION_FAVORITES_RIGHT:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_focus_area = FOCUS_CONTENT;
                 g_content_selected_idx = 0;
                 render_menu_sidebar(g_menu_selected_idx, favorites_sidebar_items, FAVORITES_ITEM_COUNT);
                 render_favorites_content();
             }
-            break;
+            return 1;
 
-        case KEY_LEFT:
+        case ACTION_FAVORITES_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
                 g_focus_area = FOCUS_SIDEBAR;
                 render_menu_sidebar(g_menu_selected_idx, favorites_sidebar_items, FAVORITES_ITEM_COUNT);
                 render_favorites_content();
             }
-            break;
+            return 1;
 
-        case 10:
-        case ' ':
+        case ACTION_FAVORITES_ACTIVATE:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == 0) {
                     g_focus_area = FOCUS_CONTENT;
@@ -177,10 +178,9 @@ void handle_favorites_input(int ch)
                     }
                 }
             }
-            break;
+            return 1;
 
-        case 'd':
-        case 'D':
+        case ACTION_FAVORITES_REMOVE:
             if (g_focus_area == FOCUS_CONTENT && g_favorites.count > 0 &&
                 g_content_selected_idx >= 0 && g_content_selected_idx < g_favorites.count) {
 
@@ -191,6 +191,9 @@ void handle_favorites_input(int ch)
                 show_status_message(i18n_get("favorites.removed"));
                 render_favorites_content();
             }
-            break;
+            return 1;
+
+        default:
+            return 0;
     }
 }

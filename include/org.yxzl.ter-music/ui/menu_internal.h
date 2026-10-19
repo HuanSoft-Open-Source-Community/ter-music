@@ -115,13 +115,15 @@ int  remove_track_from_playlist(int playlist_idx, int track_idx);
  * View input handler declarations (defined in respective view .c)
  * ============================================================ */
 
-void handle_settings_input(int ch);
-void handle_history_input(int ch);
-void handle_playlist_input(int ch);
-void handle_favorites_input(int ch);
-void handle_info_input(int ch);
-void handle_help_input(int ch);
-void handle_language_input(int ch);
+int handle_settings_input(int ch);
+/* 快捷键页是否处于按键捕获模式（Esc 应交给设置页取消捕获）。 */
+int settings_hotkey_capture_active(void);
+int handle_history_input(int ch);
+int handle_playlist_input(int ch);
+int handle_favorites_input(int ch);
+int handle_info_input(int ch);
+int handle_help_input(int ch);
+int handle_language_input(int ch);
 
 /* ============================================================
  * View reset functions (called from menus.c switch_to_view)

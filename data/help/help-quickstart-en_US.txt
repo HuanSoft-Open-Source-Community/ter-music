@@ -152,6 +152,45 @@ ter-music Quick Start Guide
       section 20)
   ESC followed by 1..9 equals F1..F9; q / Q takes the same exit path as F9.
 
+7.1 Custom Keybindings
+-----------------------
+  Settings -> Hotkeys is an editable action list:
+    ↑/↓            Select an action
+    Enter/Space    Capture a new key (Esc cancels)
+    r              Restore the selected action's default key
+    R              Restore all defaults
+    s              Save (writes config.xml; changes stay in memory until then)
+    ←/Tab          Back to the menu sidebar
+
+  Every action except the system-reserved keys can be rebound:
+    - F1-F9: view/quit function keys
+    - q / Q: quit
+    - Tab / Shift+Tab: file/queue tab switch
+  The reserved actions are hidden from the settings editor. Playback, list/queue,
+  library browser, settings, remote devices and all other view actions are
+  editable.
+
+  Key syntax (case-sensitive):
+    x, A, 7, /        One ASCII printable character (space must be "space")
+    ctrl+a            Ctrl+letter; c/h/i/j/m/z are reserved by the terminal
+    up down left right home end pgup pgdn ins del backspace tab btab enter space
+    f1 ... f12        Named special keys
+    Esc and Ctrl+C are system keys and cannot be rebound.
+
+  Only changed actions are written to config.xml, for example:
+    <keybindings>
+      <binding action="track.next" key="]"/>
+      <binding action="track.prev" key="["/>
+    </keybindings>
+  The action IDs are the stable strings printed by `ter-music keys list`.
+  Overrides for reserved actions are ignored at runtime and reported as warnings
+  by `ter-music keys check`; Config.Set rejects new bindings for them.
+  A conflict inside the same context is rejected: the message explains why and
+  the previous binding stays. Rebinding an action drops all of its default
+  aliases, so only the new key remains.
+  Not supported: Alt combinations, multi-key sequences (such as gg) and
+  non-ASCII keys. Bindings apply immediately and survive a restart.
+
 8. Library Browser (M)
 ------------------------
   Press M to enter/leave the library browser. Its data is the front-end library
@@ -262,7 +301,7 @@ ter-music Quick Start Guide
 -------------------------
   Config:   ~/.config/ter-music/config.xml, written only by the core (the XML
             root version attribute carries the config contract number,
-            currently 8; legacy "2.2" files still load and are rewritten with
+            currently 9; legacy "2.2" files still load and are rewritten with
             the number by the migration on the first upgrade run).
             A front end changes its own mirror and sends the difference via
             Config.Set.

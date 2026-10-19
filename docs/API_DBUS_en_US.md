@@ -375,13 +375,14 @@ one of them.
 `GetAll` mirrors `config.xml`, using the same section and key names:
 
 ```json
-{ "version": 8,
+{ "version": 9,
   "paths": { "default_startup_path": "…", "last_opened_path": "…" },
   "theme": { "playlist_fg": 7, "playlist_bg": -1, "…": 0 },
   "preferences": { "volume_percent": 100, "default_playback_speed": 1.00,
                    "stop_core_on_exit": 1,
                    "info_preset": 0, "info_fields": 2047, "…": 0 },
-  "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] } }
+  "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] },
+  "keybindings": { "track.next": "]" } }
 ```
 
 Notes:
@@ -389,27 +390,40 @@ Notes:
 - Numeric values outside their range are clamped, not rejected
   (`volume_percent: 999` becomes `100`).
 - `GetAll`'s `version` is the configuration contract version
-  (`CONFIG_CURRENT_VERSION`, currently `8`). The `version` attribute of
-  `config.xml` is now written with that same number (`"8"`); it used to read
+  (`CONFIG_CURRENT_VERSION`, currently `9`). The `version` attribute of
+  `config.xml` is now written with that same number (`"9"`); it used to read
   `2.2`. Historical `2.2` files still load — the attribute parses as `2`, which
   is above the minimum supported version — and the first run after an upgrade
   migrates them and rewrites the attribute to the number. Sending `version`
   back inside a patch is accepted and ignored, so a front end can re-apply a
   full snapshot.
-  **Downgrade:** a build from before contract v8 reads the attribute with the
-  same integer parse, so `version="8"` loads without error and its own migration
-  blocks (`file_version < 4`, `< 7`) correctly stay inactive. But that build has
-  no `stop_core_on_exit` field at all — it ignores the key, exits by detaching
-  (the core keeps playing), and on its next save it writes the attribute back as
-  `2.2` and drops the v8 key from `<preferences>`. Downgrading therefore costs
-  the explicit value: after moving back to the current build, the one-shot v8
-  migration re-applies the default `1`.
+  **Downgrade:** a build from before contract v9 reads the attribute with the
+  same integer parse, so `version="9"` loads without error and its own migration
+  blocks (`file_version < 4`, `< 7`, `< 8`) correctly stay inactive. But that
+  build has no `<keybindings>` section — it ignores the overrides, and on its
+  next save it writes only its own keys (the explicit bindings are lost). Builds
+  from before contract v8 additionally lack `stop_core_on_exit`: they ignore
+  that key too, exit by detaching (the core keeps playing), and on their next
+  save write the attribute back as `2.2`. After moving back to the current build,
+  the one-shot migrations re-apply the defaults (`stop_core_on_exit` = `1`), and
+  the lost keybindings stay at their built-in defaults.
 - `preferences.stop_core_on_exit` is a boolean that defaults to `1`. Contract
   version 8 added it: existing files below v8 are migrated once and receive the
   default `1`, flipping the upgrade-time behaviour from "the core keeps playing
   when the front end exits" to "an attached front-end exit stops the core" (see
   the Control section for the exit branching and the attach precondition; the
   switch is also on the settings page).
+- `keybindings` is an object of **overrides only** (`{"action.id": "key"}`),
+  added by contract version 9. Actions that are not present use their built-in
+  defaults. In a `Set` patch, the value `"default"` removes that action's
+  override. Unknown action ids, invalid key names and intra-context conflicts
+  make the whole patch fail without changing anything; see the README for the
+  key-name grammar. System-reserved actions (`app.quit`, `view.main`…`view.help`,
+  `view.tab_switch`: F1–F9, q/Q and Tab/Shift+Tab) reject any new key with the
+  same whole-patch failure; only `"default"` is accepted for cleanup. Such
+  overrides found in an existing `config.xml` are kept in the file but ignored
+  at runtime and reported as warnings by `ter-music keys check`. Files below v9
+  are migrated once and start with an empty override table (all built-in keys).
 - A `Set` that touches volume, play mode or speed is visible immediately: after
   saving, the core re-applies those runtime fields straight from the in-memory
   mirror (`core_config_apply_runtime()`), so `Control.GetVolume`,
