@@ -1,3 +1,31 @@
+ter-music (2.4.0-1) unstable; urgency=medium
+
+  * Stop the playback core when a front end exits. New boolean config key
+    preferences.stop_core_on_exit (default 1, also on the settings page as
+    "Stop playback process on exit"): every remote/daemon front-end exit
+    path (q, F9, Ctrl+C, SIGTERM, a lost TTY) converges on the shutdown
+    routine and sends Control.Quit, so the core persists its session/resume
+    state, stops playback and exits; with the option off (0) the front end
+    sends Control.Detach instead and the core keeps playing in the
+    background as in 2.3.0. Both messages are sent only when that front end
+    really attached to the core (handshake completed, Attach token held); an
+    exit from a front end that never attached sends not a single bus message
+    and leaves somebody else's core running. The branch reads the front end's
+    own configuration mirror, loaded at start-up and pushed to the core by
+    the settings page, so the exit path no longer issues a synchronous read
+    of the core's value. With several front ends, an exit from an attached
+    front end stops the core unconditionally while the option is on; local
+    mode is unchanged. Control.Quit is best effort and stays out of the
+    required handshake methods. The configuration contract moves from version
+    7 to 8:
+    existing files are migrated once and receive the key at its default,
+    which flips the default exit behaviour from "keep playing" to "stop the
+    core" (breaking). The config.xml root version attribute is now written
+    with the contract number ("8") instead of the old "2.2" literal;
+    historical "2.2" files still load and are rewritten by the migration.
+
+ -- Yanxi Bamboo Forest <yxzl666xx@outlook.com>  Mon, 19 Oct 2026 09:55:42 +0800
+
 ter-music (2.3.0-1) unstable; urgency=medium
 
   * Split the player into a resident core plus front ends. The core owns the

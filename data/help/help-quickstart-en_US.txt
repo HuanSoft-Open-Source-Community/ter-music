@@ -147,7 +147,9 @@ ter-music Quick Start Guide
   F6  About (version and project info)
   F7  Language (language manager: ENTER switches, A adds a pack, D deletes)
   F8  Help (this page; / searches, ↑/↓ scroll)
-  F9  Quit the front end (the core keeps playing by default)
+  F9  Quit the front end (stop_core_on_exit = 1 is the default, so the core
+      stops too; only with 0 does playback continue in the background — see
+      section 20)
   ESC followed by 1..9 equals F1..F9; q / Q takes the same exit path as F9.
 
 8. Library Browser (M)
@@ -258,8 +260,10 @@ ter-music Quick Start Guide
 
 18. Configuration & Data
 -------------------------
-  Config:   ~/.config/ter-music/config.xml, written only by the core (XML version
-            attribute 2.2, internal config contract version 7).
+  Config:   ~/.config/ter-music/config.xml, written only by the core (the XML
+            root version attribute carries the config contract number,
+            currently 8; legacy "2.2" files still load and are rewritten with
+            the number by the migration on the first upgrade run).
             A front end changes its own mirror and sends the difference via
             Config.Set.
   Content:  ~/.config/ter-music/library.db, the front-end SQLite library: track
@@ -355,8 +359,21 @@ ter-music Quick Start Guide
   Settings -> Default Path now holds "Reload Config" and "Restore Defaults";
   ENTER runs them immediately and reports through the status line.
   The UI adapts automatically when the terminal is resized.
-  q / F9 / Ctrl+C only leave the front end and do not interrupt the core by
-  default; to stop the core as well run `ter-music daemon stop` (Control.Quit).
+  q / F9 / Ctrl+C, SIGTERM and a lost TTY all converge on the same shutdown
+  path, which branches on preferences.stop_core_on_exit in the front end's own
+  config mirror (read from disk at startup, and the settings page pushes every
+  change to the core at once, so the exit path asks the core nothing): 1
+  (enabled by default) sends Control.Quit and the core terminates — it persists
+  the session/resume state before stopping playback; 0 sends Control.Detach,
+  closing only the front end while the core keeps playing in the background.
+  Either message is sent only when this front end really attached to the core
+  (handshake done, Attach token held); a front end that never attached exits
+  without sending anything and leaves the core alone.
+  Toggle it via the settings switch "Stop playback process on exit" or with
+  `ter-music config set stop_core_on_exit 0`. With several front ends, an exit
+  from an attached front end stops the core unconditionally while the option is
+  1 (remaining front ends are not counted); local mode (in-process audio) is
+  unaffected. To stop a core on its own: `ter-music daemon stop`.
   To make the core exit once the last front end is gone, set
   <preferences><core_exit_when_no_frontend> to 1 in config.xml (this key is in
   neither the settings page nor the Config.Set/`config set` key table). When

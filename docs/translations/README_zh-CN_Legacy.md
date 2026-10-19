@@ -474,7 +474,7 @@ ter-music --attach-only   # 无核心在行，则以退去之码 3 终
 ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
 ```
 
-**退其前端。** 闭文墨之界**不**止播弄：核心仍行仍播，`ter-music show` ／ `ter-music next` 于任何端闱皆能御之。若欲最后一个前端既去而核心自退，则于 `config.xml` 中设 `core_exit_when_no_frontend` 为 `true`（或经 D-Bus `Config.Set` 设之）：前端尽去而后逾十秒之宽限，核心乃退；若核心自始未有前端接入，则终不退出。又：核心所执之会话总线既亡，亦自退——其时已无前端可联故也。
+**退其前端。** 闭文墨之界止不止播弄，决于前端自守之节度副本（镜像）里 `preferences.stop_core_on_exit`（`0`/`1`，默 `1`；可于设置页之开关易之，或于 `config.xml`、经 D-Bus `Config.Set`／`ter-music config set` 设之）。副本者，启器之时已取之于策，设置页一有改易亦即时下于核心，故退之际不暇复问核心。默既启，前端凡退之道（`q`、F9、Ctrl+C、SIGTERM、端闱之断）皆发 `Control.Quit`：核心先籍会话／resume 于策，乃止乐而退。置 `0` 则前端惟发 `Control.Detach`——核心仍行仍播，乐声不辍，`ter-music show` ／ `ter-music next` 于任何端闱皆能御之。然此二者，必其前端实已接入核心（握手既成，执 `Attach` 之凭符）乃发；未尝接入者，退时一札不传，绝不妄动他人所御之核心。别有所谓 `core_exit_when_no_frontend` 者：若欲最后一个前端既去而核心自退，则于 `config.xml` 中设为 `true`（或经 D-Bus `Config.Set` 设之）——前端尽去而后逾十秒之宽限，核心乃退；若核心自始未有前端接入，则终不退出。又：核心所执之会话总线既亡，亦自退——其时已无前端可联故也。
 
 **断而复续。** 核心亡时（崩溃、见 `kill`、会话注销），前端不退：入于断线之状，按指数退避而重试（1／2／4／8／15／30 秒），一有核心应答即复接入，并补推其内容之队列。于文墨之界中按 `R`，可即重启已亡之核心而重推其队列。
 
@@ -724,8 +724,13 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `sort_mode`：排序之式（0=默、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
 - `core_exit_when_no_frontend`：无前端接入时，令核心自退（0/1，默 0）。
-  默者，「闭文墨之界而乐声不绝」；置 1 者，最后一个前端既去、逾十秒之宽限，
-  核心乃退
+  置 1 者，最后一个前端既去、逾十秒之宽限，核心乃退
+- `stop_core_on_exit`：前端退时止核心之播弄——前端改发 `Control.Quit`，
+  不复发 `Control.Detach`，且必其前端实已接入核心（握手既成、执 `Attach` 之凭符）乃发
+  （0/1，默 1——惟置 0 乃「闭文墨之界而乐声续于后」）。此键因节度契约版 8 而有，
+  `config.xml` 根之 `version` 属性今即书此数（旧书 `2.2`）；退而就旧版者不以为咎，
+  然旧版不识此键，及其存节度也，复书属性为 `2.2` 并去此键，人所明定之值由是而失，
+  他日复升级，乃以默 `1` 补之
 - 远程服器之连（SMB/SFTP/FTP/WebDAV/HTTP）**不**存于 `config.xml`：
   前端自藏于同目录之 `remote.xml`（服务器条目与密码密文，权为 0600），
   所下之曲藏于 `$XDG_CACHE_HOME/ter-music/remote/`
@@ -941,7 +946,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 - 按`Ctrl+C`/`Ctrl+D`/`Ctrl+\`（器将正理而退，通SIGHUP/SIGTERM/SIGINT之号）
 - 于选项目录中择"Exit"（即`F9`键）
 
-退文墨之界而不止乐声：播弄在核心之中，当下之曲续播不辍，`ter-music show` ／ `ter-music next` 于任何端闱依然可用。欲明止之，请用 `ter-music daemon stop`；若欲核心自退，则设 `core_exit_when_no_frontend` 为 `true`（见 [二之三 前端与核心](#二之三-前端与核心)）。
+退文墨之界，默认乐声亦随之而止：前端自守之节度副本里 `preferences.stop_core_on_exit` 默启为 `1`，上列退法无论用哪一条皆发 `Control.Quit`（必先乎其前端实已接入核心——握手既成，执 `Attach` 之凭符；未尝接入者，一札不传）——核心先籍会话／resume 于策，乃止播而退。欲乐声之不辍者，置此于 `0`：前端惟发 `Control.Detach`，当下之曲续播不辍，`ter-music show` ／ `ter-music next` 于任何端闱依然可用。欲明止犹在之核心，请用 `ter-music daemon stop`；若欲最后一个前端既去、逾十秒而核心自退，则设 `core_exit_when_no_frontend` 为 `true`（见 [二之三 前端与核心](#二之三-前端与核心)）。
 
 ## 卷六 术法之架构
 
