@@ -96,6 +96,24 @@ except Exception:
     print("?")' "$2" 2>/dev/null
 }
 
+info "stop_core_on_exit=0 夹具：本脚本的续播场景以它为前提"
+# config v8 起缺省 stop_core_on_exit=1：remote 前端正常退出（q/F9/Ctrl+C/SIGTERM
+# 都收敛到 player_remote_shutdown）会发 Control.Quit 终止核心。“TUI 退出后 CLI
+# 仍然可用”依赖核心独立于前端存活，所以在核心被 TUI 拉起之前把开关写成 0
+# （前端退出时经 Config.GetAll 实时读的就是核心的这个值）。
+# “缺省 1 时任一前端退出即无条件终止核心”由 lifecycle-e2e.sh 的 S8 缺省态段
+# 专门覆盖，多前端场景不在此重复造。
+mkdir -p "$XDG_CONFIG_HOME/ter-music"
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="8">
+  <preferences>
+    <stop_core_on_exit>0</stop_core_on_exit>
+  </preferences>
+</ter-music-config>
+EOF
+ok "已写入 stop_core_on_exit=0 夹具（属性 8 文件，显式值不会被迁移块回卷）"
+
 info "TUI（前端 A）拉起核心并推入 4 条内容"
 # pty 输出落到 tui.out：歌词栏断言要看**界面实际画出来的字**。窗口尺寸显式
 # 设定，歌词面板的几何才与本地/CI 无关（TUI 只在终端里渲染，没有别的出口）。

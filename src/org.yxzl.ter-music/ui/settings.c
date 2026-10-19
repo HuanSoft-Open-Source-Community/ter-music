@@ -110,7 +110,8 @@ static const char *settings_options[] = {
     "settings.opt.info_progress_style",
     "settings.opt.info_lyrics",
     "settings.opt.reload_config",
-    "settings.opt.reset_config"
+    "settings.opt.reset_config",
+    "settings.opt.stop_core_on_exit"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -162,10 +163,12 @@ static const char *settings_options_ascii[] = {
     "Progress Style",
     "Lyric Lines",
     "Reload Config",
-    "Restore Defaults"
+    "Restore Defaults",
+    "Stop Playback Process On Exit"
 };
-/* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5）。 */
-#define SETTINGS_OPTION_COUNT 50
+/* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
+ * 另含尾部追加的 stop_core_on_exit）。 */
+#define SETTINGS_OPTION_COUNT 51
 
 enum {
     SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
@@ -221,7 +224,10 @@ enum {
     SETTINGS_IDX_INFO_LYRICS         = 47,
     /* ── 配置管理（Task 5.5：重新加载 / 恢复默认，动作项） ── */
     SETTINGS_IDX_RELOAD_CONFIG       = 48,
-    SETTINGS_IDX_RESET_CONFIG        = 49
+    SETTINGS_IDX_RESET_CONFIG        = 49,
+    /* ── 生命周期：退出时停止播放进程（尾部追加，不重排既有下标，
+     * 规避 196-197 行注释所述"删除死项整体前移"约束） ── */
+    SETTINGS_IDX_STOP_CORE_ON_EXIT   = 50
 };
 
 typedef struct {
@@ -256,6 +262,9 @@ static const int settings_playback_option_indices[] = {
     SETTINGS_IDX_AUTO_PLAY,
     SETTINGS_IDX_REMEMBER_PATH,
     SETTINGS_IDX_CLEAR_HISTORY,
+    /* 退出时停止播放进程：与 auto_play 等同属播放生命周期开关（resume_last_playback
+     * 仅有配置字段、未在此页暴露，故紧随启动/退出开关组之后）。 */
+    SETTINGS_IDX_STOP_CORE_ON_EXIT,
     SETTINGS_IDX_LATENCY,
     SETTINGS_IDX_SHOW_LYRICS,
     SETTINGS_IDX_SHOW_ALBUM_COVER,
@@ -602,6 +611,10 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.clear_history_on_startup));
+    } else if (option_index == SETTINGS_IDX_STOP_CORE_ON_EXIT) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 menu_bool_text(g_app_config.stop_core_on_exit));
     } else if (option_index == SETTINGS_IDX_LATENCY) {
         snprintf(line, line_size, "%s%s%d ms",
                  i18n_get(current_settings_options[option_index]), separator,
@@ -873,6 +886,10 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             break;
         case SETTINGS_IDX_CLEAR_HISTORY:
             g_app_config.clear_history_on_startup = !g_app_config.clear_history_on_startup;
+            player_config_persist();
+            break;
+        case SETTINGS_IDX_STOP_CORE_ON_EXIT:
+            g_app_config.stop_core_on_exit = !g_app_config.stop_core_on_exit;
             player_config_persist();
             break;
         case SETTINGS_IDX_LATENCY:
@@ -1900,6 +1917,7 @@ static void activate_settings_current_option(void)
     if (g_settings_current_option == SETTINGS_IDX_AUTO_PLAY ||
         g_settings_current_option == SETTINGS_IDX_REMEMBER_PATH ||
         g_settings_current_option == SETTINGS_IDX_CLEAR_HISTORY ||
+        g_settings_current_option == SETTINGS_IDX_STOP_CORE_ON_EXIT ||
         g_settings_current_option == SETTINGS_IDX_SHOW_LYRICS ||
         g_settings_current_option == SETTINGS_IDX_SHOW_ALBUM_COVER ||
         g_settings_current_option == SETTINGS_IDX_SEAMLESS_PRELOAD ||

@@ -5,9 +5,14 @@
 # 覆盖：
 #   A1  TUI 默认（--frontend=remote）自动确保核心在跑并把内容推过去；
 #       --attach-only 在没有核心时以退出码 3 明确失败。
-#   A5  前端 q 退出后核心继续播放；core_exit_when_no_frontend=true 时，
-#       最后一个前端离开并过宽限期后核心自行退出（无人接入过则不退）。
-#   A5′ 播放中按 F9 退出与 'q' 同路：前端没了，核心仍在总线、仍在播同一首。
+#   A5  前端 q 退出后核心继续播放（前提：stop_core_on_exit 显式置 0；config v8
+#       起缺省为 1，正常退出会发 Control.Quit 终止核心）；core_exit_when_no_frontend
+#       =true 时，最后一个前端离开并过宽限期后核心自行退出（无人接入过则不退）。
+#   A5′ 播放中按 F9 退出与 'q' 同路：前端没了，核心仍在总线、仍在播同一首
+#       （同样以 stop_core_on_exit=0 为前提，见 A1 前的夹具注释）。
+#   S8  stop_core_on_exit 缺省态（=1）：q 与 F9 正常退出后核心必须离线。
+#   S9  没能接入核心的前端（--bus 指向一个不在线的名字）退出：既不改动总线上既有核心
+#       的存活与曲目状态，也不留下新实例（详见 S9 段注释：本段不是接入门控的判别性测试）。
 #
 # 用法：scripts/test/lifecycle-e2e.sh [--bin <ter-music>] [--keep]
 # 环境：需要会话总线（未设置时用 dbus-run-session）；需要 ffmpeg 造素材。
@@ -22,7 +27,7 @@ KEEP=0
 WORK_DIR=""
 
 usage() {
-    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
@@ -93,6 +98,22 @@ tui_session() {   # $1 = keys, $2 = 秒
     timeout 60 python3 "$DRIVER" run "$TM_BIN" "$WORK_DIR/music" "${1:-q}" "${2:-6}" 2>/dev/null
 }
 
+# ── stop_core_on_exit=0 夹具：A5/A5′ 续播断言的前提 ────────────────────
+# config v8 起缺省 stop_core_on_exit=1：remote 前端正常退出（q/F9/Ctrl+C/SIGTERM
+# 收敛到 player_remote_shutdown）会发 Control.Quit 终止核心。A5/A5′ 要保留
+# “前端没了、核心继续”的原语义，就必须在核心启动前把该开关显式写成 0
+# （前端退出时经 Config.GetAll 实时读的就是它）。缺省态（=1）的对照断言
+# 在脚本末尾 S8 段。
+mkdir -p "$XDG_CONFIG_HOME/ter-music"
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="8">
+  <preferences>
+    <stop_core_on_exit>0</stop_core_on_exit>
+  </preferences>
+</ter-music-config>
+EOF
+
 # ── A1：默认远端前端自动确保核心 ─────────────────────────────────
 info "A1 默认前端（remote）自动确保核心在跑并接入"
 tui_session "j" 6 >/dev/null
@@ -122,7 +143,7 @@ else
     bad "期望核心为 daemon，实际 '$mode'"
 fi
 
-# ── A5：前端退出，核心继续 ───────────────────────────────────────
+# ── A5：前端退出，核心继续（夹具已置 stop_core_on_exit=0）────────
 info "A5 前端退出后核心继续播放"
 if daemon_up; then
     ok "TUI 退出后核心仍在运行"
@@ -227,11 +248,15 @@ fi
 # ── core_exit_when_no_frontend ──────────────────────────────────
 info "A5 core_exit_when_no_frontend=true 时核心随最后前端退出"
 mkdir -p "$XDG_CONFIG_HOME/ter-music"
+# 属性 8 文件（v7 会让核心首启的 v7→v8 迁移块把 stop_core_on_exit 强制补成 1）；
+# stop_core_on_exit 显式写 0 是这一段成立的前提：若按缺省 1，前端 q 退出会直接
+# Control.Quit 带走核心，“宽限期内核心仍在 / 过宽限期自行退出”就无从验证。
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="7">
+<ter-music-config version="8">
   <preferences>
     <core_exit_when_no_frontend>1</core_exit_when_no_frontend>
+    <stop_core_on_exit>0</stop_core_on_exit>
     <volume_percent>80</volume_percent>
   </preferences>
 </ter-music-config>
@@ -379,6 +404,167 @@ if [ "$no_instance_rc" -eq 3 ]; then
     ok "--all 之后确实没有实例在运行（退出码 3）"
 else
     bad "--all 之后仍有实例在运行（退出码 $no_instance_rc）"
+fi
+
+# ── S8：stop_core_on_exit 缺省态（=1），正常退出即终止核心 ──────────
+# 回到“没有 config.xml”的出厂缺省（缺省 1）。与 A5/A5′ 同构的操作序列，
+# 结论必须相反：前端没了，核心也随之离线（Control.Quit）。
+# F9 不是注入障碍——drive 会话把 `<F9>` 作为一个转义序列一次写进 pty（A5′ 已证）；
+# Ctrl+C / SIGTERM / TTY 断开与 q/F9 收敛到同一个 player_remote_shutdown()，
+# 通道等效性在实现里只分流一次，这里不再重复起进程验证。
+info "S8 缺省态（stop_core_on_exit=1）：前端正常退出后核心离线"
+
+exit_key_offlines_core() {   # $1 = 退出键（q 或 <F9>）
+    local key="$1"
+    local ctl="$WORK_DIR/s8.ctl" rc="$WORK_DIR/s8.rc" pid="$WORK_DIR/s8.pid"
+    rm -f "$XDG_CONFIG_HOME/ter-music/config.xml"   # 无文件 = 缺省 1
+    : > "$ctl"
+    python3 "$DRIVER" drive "$TM_BIN" "$WORK_DIR/music" "$WORK_DIR/s8.log" \
+        --ctl "$ctl" --rc-file "$rc" --pid-file "$pid" --max-runtime 60 >/dev/null 2>&1 &
+    local dpid=$!
+    for _ in $(seq 1 30); do   # 等前端把核心确保起来并推完内容
+        [ "$(snap_field 'doc["track"]["queue_count"]')" = "3" ] && break
+        sleep 0.5
+    done
+    printf 'key:j\n' >> "$ctl"
+    sleep 1
+    printf 'key:<Enter>\n' >> "$ctl"
+    sleep 2
+    printf 'key:%s\n' "$key" >> "$ctl"
+    for _ in $(seq 1 40); do
+        kill -0 "$dpid" 2>/dev/null || break
+        sleep 0.5
+    done
+    kill -9 "$dpid" 2>/dev/null
+    wait 2>/dev/null || true
+    local code
+    code="$(cat "$rc" 2>/dev/null)"
+    if [ "$code" != "0" ]; then
+        bad "S8：退出键 '$key' 的前端没有正常退出（rc='$code'），核心离线断言无从判起"
+        return
+    fi
+    for _ in $(seq 1 40); do
+        daemon_up || break
+        sleep 0.25
+    done
+    if daemon_up; then
+        bad "S8：缺省态 '$key' 退出后核心仍在总线（Control.Quit 没发出或没生效）"
+    else
+        ok "S8：缺省态 '$key' 退出后核心随即离线（daemon status 查不到）"
+    fi
+}
+exit_key_offlines_core q
+exit_key_offlines_core '<F9>'
+
+# ── S9：没能接入核心的前端，不动总线上的既有核心 ────────────────────
+# 用户可见契约：一个没能接入核心的前端进程，无论怎么退出，都不改变总线上既有核心的存活
+# 与曲目状态，也不留下新的实例。构造办法是把前端指向一个必然不在线的总线名（核心总线主名
+# 是 org.mpris.MediaPlayer2.ter_music，次要实例是 `<主名>.instance<pid>`；这里用的名字带
+# 非数字后缀，既不会被认成次要实例，也不可能有人持有）。
+#
+# 诚实交代覆盖范围：**本段不是 player_remote_shutdown() 接入门控的判别性测试**——拆掉门控
+# 本段照样是绿的。实测这条路径停在 cli_ensure_core_for_frontend()：主名已被本段的夹具占用
+# → daemon_start_background() 拒绝再起核心（退出码 5）→ main() 在 player_init() **之前**就
+# 返回，player_shutdown() 根本没执行。另一条"接上后掉线"的路径里 remote_close_connection()
+# 早把 connected/token/connection 一并清零，remote_quit_core() 开头的
+# `if (!g_remote.connection) return;` 与新的门控同时成立；而 init 失败那条路径同样不进
+# run_event_loop()。所以"未接入的前端把总线上的核心杀掉"这个竞态在当前代码里构造不出来，
+# 要构造只能造假夹具或赌 sleep 竞态——本段不那么写。门控的价值是把契约写成显式代码、
+# 防御后续改动；本段守的是这条契约**用户可见的那一面**。
+# 夹具把 stop_core_on_exit 显式写成 1（config v8 起的缺省态）：这样"S8 转红 / S9 不转红"
+# 的差别只可能来自"前端没接入成功"这一件事——哪天前端真的接上了主核心（--bus 被忽略、或
+# ensure 改成按请求的名字起核心），它退出必发 Control.Quit，本段立刻转红。
+info "S9 未接入核心的前端：不动总线上的既有核心、不留新实例"
+
+S9_BUS="org.mpris.MediaPlayer2.ter_music.instance-s9-none"
+
+"$TM_BIN" daemon stop --all >/dev/null 2>&1 || true      # 从干净总线起，避免前面段落的残留
+for _ in $(seq 1 20); do daemon_up || break; sleep 0.1; done
+
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="8">
+  <preferences>
+    <stop_core_on_exit>1</stop_core_on_exit>
+  </preferences>
+</ter-music-config>
+EOF
+
+"$TM_BIN" daemon start >/dev/null 2>&1
+for _ in $(seq 1 25); do daemon_up && break; sleep 0.2; done
+
+if ! daemon_up; then
+    bad "S9：夹具未能把核心起在总线上（本段其余判定无从判起）"
+else
+    # 让核心处于**可辨识且不会自己变**的状态：整份内容交给核心（queue_count=3）并把播放
+    # 模式设成 single_repeat——6 秒的测试音播完也回到同一首，"曲目没变"才不是和播完赛跑。
+    "$TM_BIN" play "$WORK_DIR/music" --mode single_repeat >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+        [ "$(snap_field 'doc["playback"]["state"]')" = "playing" ] && break
+        sleep 0.25
+    done
+    sleep 1
+
+    s9_pid="$(snap_field 'doc["instance"]["pid"]')"
+    s9_state="$(snap_field 'doc["playback"]["state"]')"
+    s9_track="$(snap_field 'doc["track"]["path"]')"
+    s9_queue="$(snap_field 'doc["track"]["queue_count"]')"
+
+    # 前端：pty 里起（main() 要求 stdout 是终端），--bus 指向那个不在线的名字，不发按键
+    : > "$WORK_DIR/s9.ctl"
+    TM_TUI_STDERR="$WORK_DIR/s9.stderr" timeout 60 python3 "$DRIVER" drive "$TM_BIN" \
+        "$WORK_DIR/music" "$WORK_DIR/s9.log" --ctl "$WORK_DIR/s9.ctl" \
+        --rc-file "$WORK_DIR/s9.rc" --pid-file "$WORK_DIR/s9.pid" --max-runtime 25 \
+        -- --bus "$S9_BUS" >/dev/null 2>&1
+    s9_rc="$(cat "$WORK_DIR/s9.rc" 2>/dev/null)"
+
+    case "$s9_rc" in
+        3|4|5) ok "S9：没接入核心的前端以语义化退出码结束（实测 rc=$s9_rc：3=无实例 / 4=总线不可用 / 5=实例拒绝）" ;;
+        *) bad "S9：没接入核心的前端本该以非 0 的语义化退出码结束，实测 rc='${s9_rc:-空}'（0 意味着它其实接上了主核心）" ;;
+    esac
+
+    if grep -qE "实例在运行|无法连接" "$WORK_DIR/s9.stderr" 2>/dev/null; then
+        ok "S9：前端把没接入的原因说清楚了（$(head -1 "$WORK_DIR/s9.stderr")）"
+    else
+        bad "S9：前端既没接入核心也没给出原因：stderr=$(head -1 "$WORK_DIR/s9.stderr" 2>/dev/null || echo 空)"
+    fi
+
+    s9_pid_after="$(snap_field 'doc["instance"]["pid"]')"
+    if daemon_up && [ "$s9_pid_after" = "$s9_pid" ]; then
+        ok "S9：主核心仍在线且是同一个实例（pid $s9_pid_after，跑前端前 $s9_pid）"
+    else
+        bad "S9：那个没接入核心的前端把主核心带走或换掉了（跑前 pid=$s9_pid，跑后 daemon_up=$(daemon_up && echo 1 || echo 0)，pid=${s9_pid_after:-?}）"
+    fi
+
+    s9_state_after="$(snap_field 'doc["playback"]["state"]')"
+    s9_track_after="$(snap_field 'doc["track"]["path"]')"
+    s9_queue_after="$(snap_field 'doc["track"]["queue_count"]')"
+    if [ "$s9_state_after" = "$s9_state" ] && [ "$s9_track_after" = "$s9_track" ] &&
+       [ "$s9_queue_after" = "$s9_queue" ]; then
+        ok "S9：主核心的曲目状态原样未动（state=$s9_state_after，track=${s9_track_after##*/}，queue_count=$s9_queue_after）"
+    else
+        bad "S9：主核心状态被那个没接入的前端改了（state $s9_state→$s9_state_after，track ${s9_track##*/}→${s9_track_after##*/}，queue_count $s9_queue→$s9_queue_after）"
+    fi
+
+    s9_status_err="$("$TM_BIN" daemon status 2>&1 >/dev/null || true)"
+    s9_status_pids="$("$TM_BIN" daemon status 2>/dev/null | grep -c "pid")"
+    if [ "$s9_status_pids" = "1" ] && ! printf '%s' "$s9_status_err" | grep -q "次要实例"; then
+        ok "S9：总线上没有多出实例（daemon status 仍 1 行 pid，也没有次要实例提示）"
+    else
+        bad "S9：那个没接入的前端留下了多余实例（pid 行数 $s9_status_pids，stderr：$(printf '%s' "$s9_status_err" | head -1)）"
+    fi
+
+    "$TM_BIN" daemon status --bus "$S9_BUS" >/dev/null 2>&1
+    s9_phantom_rc=$?
+    if [ "$s9_phantom_rc" = "3" ]; then
+        ok "S9：前端要的总线名 '$S9_BUS' 自始至终没有核心（daemon status --bus 退出码 3=无实例）"
+    else
+        bad "S9：'$S9_BUS' 上出现了本该不存在的东西（daemon status --bus 退出码 $s9_phantom_rc）"
+    fi
+
+    # 收尾：本段夹具起的核心不能留给 trap 去猜（--all 连可能出现的次要实例一起收）
+    "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do daemon_up || break; sleep 0.1; done
 fi
 
 info "结果"

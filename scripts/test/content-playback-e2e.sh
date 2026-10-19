@@ -11,6 +11,9 @@
 #   B 收藏：F5 收藏视图里 Enter 播放**未加载**的收藏曲目 → 核心队列出现该
 #     路径并在播（收藏直播兜底链路的回归）。
 #   D 搜索：'/' 输入曲名片段 → 结果里 Enter → 核心播该结果。
+#   收尾前提：'q' 退出前端后断言核心仍在总线上，以 stop_core_on_exit=0 夹具为
+#     前提（核心启动前写入，见"起会话"前的注释）；config v8 起缺省为 1，正常
+#     退出会 Control.Quit 终止核心，缺省态（=1）由 lifecycle-e2e.sh 的 S8 专门覆盖。
 #
 # 按键以**代码**为准（不读帮助文本）：
 #   ui.c      浏览器视图：'j'/'k' 移动光标，Enter(10)/空格 播放树里选中的文件；
@@ -38,7 +41,7 @@ WORK_DIR=""
 DRIVER_PID=""
 CTL_FILE=""
 
-usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
 ORIG_ARGS=("$@")
@@ -275,6 +278,23 @@ wait_for_play() {   # $1 = 期望文件名, $2 = 超时秒 → 置 GLOBAL 实测
     done
     return 1
 }
+
+# ── stop_core_on_exit=0 夹具：本脚本 'q' 收尾断言的前提 ────────────────
+# 末尾的“前端退出后核心仍在总线上”依赖 'q' 退出前端时不终止核心：config v8
+# 起缺省 stop_core_on_exit=1，remote 前端正常退出（q/F9/Ctrl+C/SIGTERM）会发
+# Control.Quit 把核心进程终止。必须在 TUI 拉起核心之前把开关显式写成 0（前端
+# 退出时经 Config.GetAll 实时读的就是核心的这个值）。缺省态（=1）的行为由
+# lifecycle-e2e.sh 的 S8 段专门覆盖，这里不重复验证；version="8" 配置里属性 8
+# 的显式值不会被迁移块回卷，夹具写一次即稳定生效。
+mkdir -p "$XDG_CONFIG_HOME/ter-music"
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="8">
+  <preferences>
+    <stop_core_on_exit>0</stop_core_on_exit>
+  </preferences>
+</ter-music-config>
+EOF
 
 # ── 起会话：TUI（remote 前端）拉起核心并装载 dir1 ────────────────
 info "起 TUI 会话（-o dir1），等它把内容下发给核心"

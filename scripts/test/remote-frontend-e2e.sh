@@ -12,6 +12,11 @@
 #   4. 断言：核心侧看到的曲目路径就是缓存里的本地路径（快照 path 落在缓存目录）；
 #   5. 断言：核心不发布 Remote 接口、core.methods 不含 Remote.*。
 #
+# 前提：探针以 'q' 收尾前端后，脚本还要对核心发 Config.GetAll 断言 persist
+#   到达；config v8 起缺省 stop_core_on_exit=1，正常退出会 Control.Quit 终止
+#   核心，故本脚本在核心启动前写入 stop_core_on_exit=0 夹具（缺省态 =1 由
+#   lifecycle-e2e.sh 的 S8 专门覆盖）。
+#
 # 用法：scripts/test/remote-frontend-e2e.sh [--bin <ter-music>] [--keep]
 
 set -uo pipefail
@@ -37,7 +42,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --bin) TM_BIN="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
-        -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "未知参数: $1" >&2; exit 2 ;;
     esac
 done
@@ -97,6 +102,24 @@ else
     KEEP=1
     exit 1
 fi
+
+# ── stop_core_on_exit=0 夹具：'q' 收尾后核心还能应答 Config.GetAll 的前提 ──
+# tui-probe.py 以 'q' 收尾前端：config v8 起缺省 stop_core_on_exit=1，remote
+# 前端正常退出（q/F9/Ctrl+C/SIGTERM）会发 Control.Quit 终止核心，随后脚本对
+# 核心发的 Config.GetAll 就无人应答，last_opened_path 归属断言无从落地。必须
+# 在 TUI 拉起核心之前（HOME/XDG_CONFIG_HOME 已就位）把开关显式写成 0——前端
+# 退出时经 Config.GetAll 实时读的就是核心的这个值。缺省态（=1）的行为由
+# lifecycle-e2e.sh 的 S8 段专门覆盖，这里不重复验证；version="8" 配置里属性 8
+# 的显式值不会被迁移块回卷，夹具写一次即稳定生效。
+mkdir -p "$XDG_CONFIG_HOME/ter-music"
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="8">
+  <preferences>
+    <stop_core_on_exit>0</stop_core_on_exit>
+  </preferences>
+</ter-music-config>
+EOF
 
 info "以远程 URL 启动 TUI（前端远程会话）"
 if ! python3 "$SCRIPT_DIR/tui-probe.py" --bin "$TM_BIN" \

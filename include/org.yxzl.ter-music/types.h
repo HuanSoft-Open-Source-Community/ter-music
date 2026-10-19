@@ -170,7 +170,7 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 7   /* 与 config/schema.h 保持同步 */
+#define CONFIG_CURRENT_VERSION 8   /* 与 config/schema.h 保持同步 */
 
 /* ── CUE 文件编码偏好（配置项取值域；转换实现见 playlist/encoding.h） ── */
 #define CUE_ENCODING_AUTO      0  /* detect: UTF-8 → preferred → fallback chain */
@@ -294,6 +294,10 @@ typedef struct {
     /* 核心生命周期：最后一个前端离开后是否随核心退出（默认否——
      * “关掉 TUI，音乐继续”是默认体验） */
     int core_exit_when_no_frontend;
+    /* 退出时停止播放进程：remote 前端退出时经 Control.Quit 终止核心进程
+     * （缺省 1）。与 core_exit_when_no_frontend（无前端 10s 看门狗自退）
+     * 语义独立，互不影响。 */
+    int stop_core_on_exit;
     int resume_last_playback;
     int last_played_position;
     char ui_language[32];   /* language ID, e.g. "zh_CN", "en_US" */

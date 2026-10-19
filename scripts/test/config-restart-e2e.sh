@@ -369,6 +369,46 @@ else
     diag "9.4-album"
 fi
 
+info "9.3 stop_core_on_exit 写 0 → 重启核心 → Config.GetAll 回读仍 0（不回卷）"
+# stop_core_on_exit 是 config v8 新增布尔（缺省 1，退出即终止核心）。按 9.3 的
+# 布尔样板验证持久化链路：Set 立即可见 → 落盘 → 核心重启后仍是显式的 0，
+# 不会被 v7→v8 迁移块或加载缺省卷回 1（文件已是属性 8，迁移块不触发）。
+so_set="$(call Config.Set 'json:{"preferences":{"stop_core_on_exit":0}}')"
+case "$so_set" in
+    true*) ok "Config.Set stop_core_on_exit=0 返回 true" ;;
+    *) bad "Config.Set stop_core_on_exit 失败：$so_set" ; diag "9.3-stop-core" ;;
+esac
+if [ "$(config_get preferences.stop_core_on_exit)" = "0" ]; then
+    ok "Set 后 Config.GetAll 实时回读 0"
+else
+    bad "Set 后 stop_core_on_exit=$(config_get preferences.stop_core_on_exit)（期望 0）"
+    diag "9.3-stop-core"
+fi
+
+call Control.Quit >/dev/null
+if wait_core_down; then
+    ok "Control.Quit 后核心退出（准备重启验证持久化）"
+else
+    bad "Control.Quit 之后核心仍在运行，重启断言无从判起"
+    diag "9.3-stop-core"
+fi
+sleep 1        # 总线名释放
+
+"$TM_BIN" daemon start >/dev/null 2>&1
+sleep 1.5
+if ! daemon_up; then
+    bad "重启 daemon 失败，stop_core_on_exit 持久化断言无从判起"
+    diag "9.3-stop-core"
+else
+    ok "同一配置目录下 daemon 重新上线"
+    if [ "$(config_get preferences.stop_core_on_exit)" = "0" ]; then
+        ok "Config.GetAll 的 stop_core_on_exit 跨重启仍为 0（不回卷到缺省 1）"
+    else
+        bad "重启后 stop_core_on_exit=$(config_get preferences.stop_core_on_exit)（期望 0，缺省回卷嫌疑）"
+        diag "9.3-stop-core"
+    fi
+fi
+
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then

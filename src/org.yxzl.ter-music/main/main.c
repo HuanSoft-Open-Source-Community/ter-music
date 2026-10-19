@@ -621,7 +621,10 @@ int main(int argc, char *argv[]) {
     run_event_loop();
 
     log_info("main", "Event loop exited, beginning shutdown");
-    /* 退出门面：远端模式在这里 Detach（核心继续跑，音乐不中断）；
+    /* 退出门面：远端模式在这里按**前端自己的配置镜像** stop_core_on_exit 分流——
+     * 1 发 Control.Quit 终止核心进程，0 只 Control.Detach（核心继续跑，音乐不中断）；
+     * 两条消息都以"该前端确实接入过核心（握手完成且持有 Attach 令牌）"为前提，
+     * 没接入过的收尾一条总线消息都不发，不会去终止别人的核心；
      * 本地模式才收尾进程内的播放栈与内容。 */
     player_shutdown();
 

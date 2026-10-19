@@ -175,6 +175,11 @@ int config_migrate_v1_to_v2(void)
     cfg.config_version = CONFIG_CURRENT_VERSION;
     cfg.config_file_version = 0;   /* v1 JSON 没有这个字段 */
 
+    /* stop_core_on_exit 为 config v8 新增项，JSON 时代不存在显式用户值：
+     * 按缺省 1 补写，与 config.c 的 v7→v8 迁移块缺省语义对齐（用户裁决）。
+     * 本路径保存即落属性 8，<8 的迁移块不会再触发，故须在此显式置值。 */
+    cfg.stop_core_on_exit = 1;
+
     /* Strings */
     extract_json_string(json, "default_startup_path", cfg.default_startup_path, MAX_PATH_LEN);
     extract_json_string(json, "last_opened_path", cfg.last_opened_path, MAX_PATH_LEN);

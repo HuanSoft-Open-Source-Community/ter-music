@@ -45,7 +45,7 @@ void init_default_config(void);        /* 全量默认值（不读文件） */
 void load_config(void);                /* 默认值 + XML 读取（不改运行时全局） */
 
 /* 版本迁移：把 config.xml 推进到 CONFIG_CURRENT_VERSION（含 v5→v6 的远程段
- * 移交、v6→v7 的新键落盘）。config.xml 归核心独占写，因此只有核心调用它。 */
+ * 移交、v6→v7 与 v7→v8 的新键落盘）。config.xml 归核心独占写，因此只有核心调用它。 */
 int config_run_migrations(void);
 void save_config(void);                /* 原子写入配置文件 */
 

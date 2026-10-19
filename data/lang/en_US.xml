@@ -192,6 +192,7 @@
   <string key="settings.opt.eq_preset">EQ Preset</string>
   <string key="settings.opt.reload_config">Reload Config</string>
   <string key="settings.opt.reset_config">Restore Defaults</string>
+  <string key="settings.opt.stop_core_on_exit">Stop playback process on exit</string>
   <string key="settings.separator">: </string>
 
   <!-- ===== Play modes ===== -->

@@ -192,6 +192,7 @@
   <string key="settings.opt.eq_preset">均衡器预设</string>
   <string key="settings.opt.reload_config">重新加载配置</string>
   <string key="settings.opt.reset_config">恢复默认设置</string>
+  <string key="settings.opt.stop_core_on_exit">退出时停止播放进程</string>
   <string key="settings.separator">: </string>
 
   <!-- ===== Play modes ===== -->

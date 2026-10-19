@@ -67,6 +67,7 @@ static const ConfigFieldEntry k_fields[] = {
     {"remember_last_path",       CFG_INT, OFF(remember_last_path), 0, 0, 1, "preferences"},
     {"clear_history_on_startup", CFG_INT, OFF(clear_history_on_startup), 0, 0, 1, "preferences"},
     {"resume_last_playback",     CFG_INT, OFF(resume_last_playback), 0, 0, 1, "preferences"},
+    {"stop_core_on_exit",        CFG_INT, OFF(stop_core_on_exit), 0, 0, 1, "preferences"},
     {"last_played_position",     CFG_INT, OFF(last_played_position), 0, 0, 0, "preferences"},
     {"ui_language",              CFG_STRING, OFF(ui_language), sizeof(((AppConfig *)0)->ui_language), 0, 0, "preferences"},
     {"volume_percent",           CFG_INT, OFF(volume_percent), 0, 0, 100, "preferences"},
