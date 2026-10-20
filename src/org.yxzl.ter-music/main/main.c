@@ -81,6 +81,7 @@ void crash_handler(int sig) {
     log_error("main", "Fatal signal %d received! Performing emergency shutdown", sig);
     logger_shutdown();
     endwin();
+    ui_restore_stdio(); /* 恢复被守卫改道的 fd2，随后的错误与 backtrace 才能到真实终端 */
     cleanup_temp_playlist();
     fprintf(stderr, "致命错误：收到信号 %d\n", sig);
     fprintf(stderr, "Backtrace:\n");
@@ -281,6 +282,11 @@ int main(int argc, char *argv[]) {
     init_ncurses();
     log_info("main", "ncurses initialized, terminal size: %dx%d", COLS, LINES);
 
+    /* FFmpeg 静音必须早于任何 avformat 使用：remote 前端此前从不调用
+     * init_ffmpeg()，启动扫描/封面探测的 [mp3 @ …] 日志会直写 stderr，
+     * 污染底部导航提示条。放在此处保证两种前端都在扫描前完成静音。 */
+    init_ffmpeg();
+
     init_menu_views();
 
     /* 两种前端模式都要：配置（远端模式下是给界面用的镜像）+ 主题，
@@ -309,9 +315,23 @@ int main(int argc, char *argv[]) {
     remote_view_init();
 
     if (frontend == PLAYER_BACKEND_LOCAL) {
-        init_ffmpeg();
+        /* init_ffmpeg() 已提前到 init_ncurses() 之后统一静音（幂等），此处不再重复调用 */
         g_active_backend = g_app_config.audio_backend; /* ui-purity-allow: local 分支=核心宿主初始化引擎全局（远端永不进此分支） */
         init_audio_device();                            /* ui-purity-allow: local 分支=核心宿主初始化音频设备 */
+        /* init_audio_device() 不再 printf 后端名（会污染 ncurses 屏幕）：
+         * local 模式下把后端信息送到界面状态行，用户仍能看到、但不写 stdout */
+        {
+            const char *backend_key = NULL;
+            switch (g_active_backend) { /* ui-purity-allow: local 分支=核心宿主读取引擎全局（远端永不进此分支） */
+                case AUDIO_BACKEND_PIPEWIRE: backend_key = "audio.backend.pipewire"; break;
+                case AUDIO_BACKEND_PULSE:    backend_key = "audio.backend.pulseaudio"; break;
+                case AUDIO_BACKEND_ALSA:     backend_key = "audio.backend.alsa"; break;
+                default: break;
+            }
+            if (backend_key) {
+                update_controls_status(i18n_get(backend_key));
+            }
+        }
         media_session_init();
         log_info("main", "Subsystems initialized (local front end)");
     } else {
@@ -563,22 +583,29 @@ int main(int argc, char *argv[]) {
         int rc = cli_ensure_core_for_frontend(bus_name[0] ? bus_name : NULL, attach_only);
         if (rc != 0) {
             cleanup();
+            /* cleanup() 已恢复被守卫改道的 fd2，此时补显累积的诊断信息才能到终端 */
+            cli_diag_flush();
             return rc;
         }
     }
 
     if (player_init(frontend, bus_name[0] ? bus_name : NULL) != 0) {
+        /* 先 cleanup() 恢复 ncurses 与 fd2，再写 stderr，错误才能被用户看到；
+         * 文案与返回值/退出码保持不变，同时补 log_error 便于事后追溯。 */
         if (frontend == PLAYER_BACKEND_REMOTE) {
+            cleanup();
+            log_error("main", "Cannot connect to the playback service (core), api_version=%d",
+                      TER_MUSIC_API_VERSION);
             fprintf(stderr, "错误：无法连接到播放服务（核心）。\n");
             fprintf(stderr, "      请确认核心版本不低于 %d，或先 `ter-music daemon start`。\n",
                     TER_MUSIC_API_VERSION);
-            cleanup();
             /* 语义化退出码：名字不在线=无实例(3)，名字在线却连不上=总线不可用(4) */
             return cli_client_primary_available(bus_name[0] ? bus_name : NULL)
                        ? CLI_EXIT_DBUS : CLI_EXIT_NO_INSTANCE;
         }
-        fprintf(stderr, "错误：无法初始化播放器门面。\n");
         cleanup();
+        log_error("main", "Cannot initialise the player facade");
+        fprintf(stderr, "错误：无法初始化播放器门面。\n");
         return 1;
     }
 

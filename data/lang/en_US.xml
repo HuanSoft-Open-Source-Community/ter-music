@@ -646,6 +646,7 @@
   <string key="settings.hotkeys.capture_cancelled">Key capture cancelled</string>
   <string key="settings.hotkeys.invalid_key">Unsupported key; nothing changed</string>
   <string key="settings.hotkeys.bound">Bound %s = %s</string>
+  <string key="settings.hotkeys.dropped_notice">%d keybinding override(s) ignored at startup (conflicting or invalid, see log)</string>
   <string key="settings.hotkeys.reset_one">Restored default for %s</string>
   <string key="settings.hotkeys.reset_all">All hotkeys restored to defaults</string>
   <string key="settings.hotkeys.core_too_old">Core version is too old; hotkey editing is unavailable</string>

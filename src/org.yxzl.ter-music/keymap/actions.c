@@ -434,6 +434,49 @@ static int effective_strokes(ActionId id, const KeyBindingOverride *ov, int coun
     return written;
 }
 
+/* ancestor 是否为 ctx 的严格祖先（沿父链上溯；CTX_TEXT_INPUT 不参与）。
+ * 用于判断"子上下文动作会先于父上下文动作解析"这一遮蔽关系。 */
+static int context_is_ancestor(KeyContext ancestor, KeyContext ctx)
+{
+    for (KeyContext c = actions_context_parent(ctx);
+         c != CTX_COUNT;
+         c = actions_context_parent(c)) {
+        if (c == CTX_TEXT_INPUT) {
+            continue;
+        }
+        if (c == ancestor) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 遮蔽检查用的有效键：与运行时 keymap 解析一致——锁定动作（app.quit 等）
+ * 的覆盖被忽略、其默认键在所有界面始终生效，故返回默认键；普通动作
+ * 同 effective_strokes（有覆盖用覆盖键，否则用默认键）。 */
+static int shadow_effective_strokes(ActionId id, const KeyBindingOverride *ov,
+                                    int count, KeyStroke out[4])
+{
+    const KeyActionDef *def = actions_def(id);
+    if (!def) {
+        return 0;
+    }
+    if (actions_is_bindable(id)) {
+        return effective_strokes(id, ov, count, out);
+    }
+    int written = 0;
+    for (int i = 0; i < 4; i++) {
+        if (!def->defaults[i]) {
+            break;
+        }
+        KeyStroke stroke;
+        if (keyname_parse(def->defaults[i], &stroke) == 0) {
+            out[written++] = stroke;
+        }
+    }
+    return written;
+}
+
 int actions_validate_overrides(const KeyBindingOverride *ov, int count,
                                char *err, size_t err_size)
 {
@@ -505,6 +548,58 @@ int actions_validate_overrides(const KeyBindingOverride *ov, int count,
                               "conflict in context '%s': '%s' and '%s' both use '%s'",
                               actions_context_id(def_a->context),
                               def_a->id, def_b->id, key_name);
+                    return -1;
+                }
+            }
+        }
+    }
+
+    /* 父子上下文遮蔽：子上下文动作先解析，父上下文动作的键一旦被子上下文
+     * 占用（覆盖键或子层覆盖抢走父层默认键），父动作在子界面下永远不生效。
+     * 至少一侧是覆盖才报错——默认键固有遮蔽（lyrics/search 等靠上下文条件
+     * 分发）属既有设计，不在此拦。 */
+    for (int a = ACTION_NONE + 1; a < ACTION_COUNT; a++) {
+        const KeyActionDef *def_parent = actions_def((ActionId)a);
+        /* 锁定动作的覆盖在运行时被忽略，不算"涉及覆盖"；但其默认键始终
+         * 生效，子层覆盖抢走即遮蔽（如 remote.save→q 抢走 app.quit 的 q）。 */
+        int parent_has_override = actions_is_bindable((ActionId)a) &&
+                                  find_override(ov, count, (ActionId)a) >= 0;
+        KeyStroke keys_parent[4];
+        int count_parent = shadow_effective_strokes((ActionId)a, ov, count,
+                                                    keys_parent);
+
+        for (int b = ACTION_NONE + 1; b < ACTION_COUNT; b++) {
+            if (a == b) {
+                continue;
+            }
+            const KeyActionDef *def_child = actions_def((ActionId)b);
+            if (!context_is_ancestor(def_parent->context, def_child->context)) {
+                continue;
+            }
+            int child_has_override = actions_is_bindable((ActionId)b) &&
+                                     find_override(ov, count, (ActionId)b) >= 0;
+            if (!parent_has_override && !child_has_override) {
+                continue;
+            }
+            KeyStroke keys_child[4];
+            int count_child = shadow_effective_strokes((ActionId)b, ov, count,
+                                                       keys_child);
+            for (int i = 0; i < count_parent; i++) {
+                for (int j = 0; j < count_child; j++) {
+                    if (!keyname_equal(keys_parent[i], keys_child[j])) {
+                        continue;
+                    }
+                    char key_name[KEYNAME_MAX_LEN];
+                    if (keyname_format(keys_parent[i], key_name,
+                                       sizeof(key_name)) != 0) {
+                        snprintf(key_name, sizeof(key_name), "?");
+                    }
+                    set_error(err, err_size,
+                              "shadowing conflict: '%s' in child context '%s' "
+                              "takes key '%s' from '%s', which would never fire there",
+                              def_child->id,
+                              actions_context_id(def_child->context),
+                              key_name, def_parent->id);
                     return -1;
                 }
             }

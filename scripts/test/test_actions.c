@@ -191,9 +191,53 @@ int main(void)
               strstr(err, "n") != NULL, "冲突错误包含 action 与键名");
     }
 
-    /* 不同上下文允许同键：control.left 用 q 不受 global 的 app.quit q 影响 */
+    /* 不同上下文允许同键（非祖先链）：history.delete 用 r，与兄弟上下文
+     * settings.hotkey_reset / playlist_view.rename 的默认 r 共存不冲突 */
+    make_override(&ov, "history.delete", "r");
+    CHECK(actions_validate_overrides(&ov, 1, NULL, 0) == 0, "非祖先上下文允许同键");
+
+    /* 对称方向连锁定动作的默认键也拦：control.left→q 抢走父层 app.quit
+     * 的 q（运行时控制界面下 q 永远无法退出程序）。 */
     make_override(&ov, "control.left", "q");
-    CHECK(actions_validate_overrides(&ov, 1, NULL, 0) == 0, "不同上下文允许同键");
+    {
+        char err[256] = "";
+        CHECK(actions_validate_overrides(&ov, 1, err, sizeof(err)) == -1,
+              "子层覆盖抢锁定父层默认键拒绝");
+        CHECK(strstr(err, "shadowing") != NULL && strstr(err, "app.quit") != NULL,
+              "锁定父层遮蔽错误包含 app.quit 与 shadowing");
+    }
+
+    /* ── 父子上下文遮蔽（跨层）── */
+    /* 父覆盖绑到子层默认键：volume.down→i 会被 main_list 的
+     * queue.insert_next 默认 i 遮蔽 → 拒绝（现实用户案例）。 */
+    make_override(&ov, "volume.down", "i");
+    {
+        char err[256] = "";
+        CHECK(actions_validate_overrides(&ov, 1, err, sizeof(err)) == -1,
+              "父层覆盖绑子层默认键拒绝");
+        CHECK(strstr(err, "shadowing") != NULL &&
+              strstr(err, "queue.insert_next") != NULL &&
+              strstr(err, "volume.down") != NULL,
+              "遮蔽错误包含父子动作与 shadowing 关键字");
+    }
+
+    /* 子覆盖抢走父层默认键：queue.append→+ 使 volume.up 的 + 在列表界面失效
+     * → 拒绝（对称方向）。 */
+    make_override(&ov, "queue.append", "+");
+    CHECK(actions_validate_overrides(&ov, 1, NULL, 0) == -1,
+          "子层覆盖抢父层默认键拒绝");
+
+    /* 默认键固有遮蔽（lyrics.prev↔list.up 等）不拦截合法覆盖：
+     * volume.up→t 不与任何子层键冲突 → 接受。 */
+    make_override(&ov, "volume.up", "t");
+    CHECK(actions_validate_overrides(&ov, 1, NULL, 0) == 0,
+          "无冲突覆盖不受默认固有遮蔽影响");
+
+    /* 遮蔽检查不影响"子层覆盖绑到父层已释放的旧默认键"：
+     * track.next 改走 x 后，父层无动作占用 x。 */
+    make_override(&ov, "track.next", "x");
+    CHECK(actions_validate_overrides(&ov, 1, NULL, 0) == 0,
+          "子层覆盖绑定空闲键接受");
 
     /* 系统保留动作的覆盖仍可被配置加载接受（运行时忽略） */
     make_override(&ov, "app.quit", "x");

@@ -646,6 +646,7 @@
   <string key="settings.hotkeys.capture_cancelled">已取消按键捕获</string>
   <string key="settings.hotkeys.invalid_key">不支持的按键，未做修改</string>
   <string key="settings.hotkeys.bound">已绑定 %s = %s</string>
+  <string key="settings.hotkeys.dropped_notice">本次启动有 %d 条改绑因键冲突或非法被忽略（详见日志）</string>
   <string key="settings.hotkeys.reset_one">已恢复 %s 的默认键位</string>
   <string key="settings.hotkeys.reset_all">已恢复全部默认键位</string>
   <string key="settings.hotkeys.core_too_old">核心版本过旧，键位编辑不可用</string>

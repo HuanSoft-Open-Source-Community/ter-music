@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <ncursesw/ncurses.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -232,6 +233,53 @@ void process_pending_ui_refresh(void)
  * ncurses initialization
  * ============================================================ */
 
+/* stderr 守卫状态：>=0 表示 fd2 已被改道，值为保存的真实 stderr fd */
+static int g_saved_stderr_fd = -1;
+
+/* TUI 期间的 stderr 守卫（只改道 fd2，**绝不改道 fd1**）。
+ *
+ * fd1 不可改道：ncurses 自身经 stdout 输出，实测 initscr() 之后把 fd1
+ * dup2 到 /dev/null 会让界面立即冻结，因此 stdout 侧的污染（audio.c 的
+ * 后端名 printf）走定向修复覆盖，不碰 fd1。
+ * fd2 改道用于拦截第三方库与遗留 stderr 写入：FFmpeg 扫描日志、libxml2
+ * 的 config.xml 缺失警告等在 initscr() 之后落到提示条行的输出。
+ * --debug 时改道到调试日志 fd（logger_output_fd()），否则丢进 /dev/null。
+ * 幂等：已守卫时直接返回；任何一步失败都收干净 dup 的 fd，保持未守卫状态。 */
+static void ui_guard_stdio(void)
+{
+    if (g_saved_stderr_fd >= 0) return;
+
+    int fd = dup(STDERR_FILENO);
+    if (fd < 0) return; /* dup 失败即放弃，不改道 */
+
+    int target = logger_output_fd();
+    int opened_fd = -1;
+    if (target < 0) {
+        opened_fd = open("/dev/null", O_WRONLY);
+        target = opened_fd;
+    }
+    if (target < 0 || dup2(target, STDERR_FILENO) < 0) {
+        /* 失败路径：把已持有的 fd 全部收干净，保持未守卫状态 */
+        if (opened_fd >= 0) close(opened_fd);
+        close(fd);
+        return;
+    }
+    if (opened_fd >= 0) close(opened_fd); /* dup2 已复制引用，临时 fd 可关 */
+    g_saved_stderr_fd = fd;
+}
+
+/* 恢复真实 stderr（幂等）：退出路径与崩溃处理器在打印错误前调用，
+ * 保证 fprintf(stderr, …) / backtrace_symbols_fd(…, STDERR_FILENO)
+ * 仍能输出到真实终端。 */
+void ui_restore_stdio(void)
+{
+    if (g_saved_stderr_fd < 0) return;
+    fflush(stderr);
+    dup2(g_saved_stderr_fd, STDERR_FILENO);
+    close(g_saved_stderr_fd);
+    g_saved_stderr_fd = -1;
+}
+
 void init_ncurses(void)
 {
     log_info("ui", "Initializing ncurses");
@@ -275,6 +323,7 @@ void init_ncurses(void)
     }
 
         bkgdset(' ' | COLOR_PAIR(0));  /* transparent bg via border pair */
+        ui_guard_stdio();  /* initscr 之后改道 fd2：拦截第三方库/遗留 stderr 输出污染提示条 */
         clear();
 }
 
@@ -1290,6 +1339,7 @@ void cleanup(void)
     if (win_lyrics)   { delwin(win_lyrics);   win_lyrics   = NULL; }
 
     endwin();
+    ui_restore_stdio();  /* 恢复真实 stderr，随后的退出错误才能显示在终端 */
     reset_album_cover_cache();
     info_release_cover_cache();
     remote_view_shutdown();

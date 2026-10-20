@@ -150,6 +150,21 @@ static void daemon_shutdown(void) {
 /* 前台核心主循环 + 收尾（定义见下方），供两个前台入口共用 */
 static int daemon_main_loop(void);
 
+/* init_audio_device() 不再直接 printf 后端名（那会污染 local 模式的
+ * ncurses 屏幕）；daemon 进程不进 curses，stdout 由启动脚本重定向到
+ * daemon.log，这里补印同样的后端提示，保持 daemon.log 内容不回退。 */
+static void daemon_print_audio_backend(void)
+{
+    const char *key = NULL;
+    switch (g_active_backend) {
+        case AUDIO_BACKEND_PIPEWIRE: key = "audio.backend.pipewire"; break;
+        case AUDIO_BACKEND_PULSE:    key = "audio.backend.pulseaudio"; break;
+        case AUDIO_BACKEND_ALSA:     key = "audio.backend.alsa"; break;
+        default: return;
+    }
+    printf("%s\n", i18n_get(key));
+}
+
 int daemon_run_foreground(const char *open_path, int debug, int force,
                           int no_autoplay) {
     /* no_autoplay 只影响前端（D-Bus 激活时不自动播放）；后端没有内容可
@@ -177,6 +192,7 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     init_ffmpeg();
     g_active_backend = g_app_config.audio_backend;
     init_audio_device();
+    daemon_print_audio_backend();
     media_session_init();
     bq_init();
 
@@ -268,6 +284,7 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
     init_ffmpeg();
     g_active_backend = g_app_config.audio_backend;
     init_audio_device();
+    daemon_print_audio_backend();
     media_session_init();
     bq_init();
 
@@ -367,9 +384,9 @@ int daemon_start_background(const char *open_path, int debug, int force,
         int pid = 0;
         cli_client_instance_mode(NULL, mode, sizeof(mode), &pid);
         if (!force) {
-            fprintf(stderr, "错误：已有 ter-music 实例在运行（%s，pid %d）。\n",
-                    mode[0] ? mode : "unknown", pid);
-            fprintf(stderr, "      用 `ter-music play <路径>` 直接控制它，或先 `ter-music daemon stop`。\n");
+            cli_diag("错误：已有 ter-music 实例在运行（%s，pid %d）。\n",
+                     mode[0] ? mode : "unknown", pid);
+            cli_diag("      用 `ter-music play <路径>` 直接控制它，或先 `ter-music daemon stop`。\n");
             return CLI_EXIT_REFUSED;
         }
         fprintf(stderr, "警告：已有实例在运行（pid %d），将以次要实例身份启动（--force）。\n", pid);
@@ -393,7 +410,7 @@ int daemon_start_background(const char *open_path, int debug, int force,
 
     pid_t pid = fork();
     if (pid < 0) {
-        fprintf(stderr, "错误：fork 失败：%s\n", strerror(errno));
+        cli_diag("错误：fork 失败：%s\n", strerror(errno));
         if (pid_pipe[0] >= 0) close(pid_pipe[0]);
         if (pid_pipe[1] >= 0) close(pid_pipe[1]);
         return CLI_EXIT_DBUS;
@@ -501,7 +518,7 @@ int daemon_start_background(const char *open_path, int debug, int force,
 
     int daemon_pid = 0;
     if (cli_client_wait_for_online(expect_name, DAEMON_START_TIMEOUT_MS, &daemon_pid) != CLI_EXIT_OK) {
-        fprintf(stderr, "错误：后台播放进程未在 %d 秒内就绪。\n", DAEMON_START_TIMEOUT_MS / 1000);
+        cli_diag("错误：后台播放进程未在 %d 秒内就绪。\n", DAEMON_START_TIMEOUT_MS / 1000);
         daemon_log_tail(log_path);
         return CLI_EXIT_DBUS;
     }

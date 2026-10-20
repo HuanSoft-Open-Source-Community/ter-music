@@ -54,6 +54,13 @@ int cli_ensure_core_for_frontend(const char *bus, int attach_only);
 /* argv[1] 是否为 CLI 子命令（用于 main() 前置分发） */
 int cli_is_command(const char *arg);
 
+/* ── TUI 会命中的诊断输出 ─────────────────────────────────────────
+ * 与 fprintf(stderr, …) 文案完全一致，但同时：写入累积缓冲并记入
+ * log_error（可追溯）。TUI 期间 fd2 可能被 UI 守卫改道，真实终端
+ * 上的补显由 cli_diag_flush() 在 fd2 恢复后一次性完成。 */
+void cli_diag(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void cli_diag_flush(void);
+
 /* 执行 CLI 子命令，返回进程退出码 */
 int cli_run(int argc, char **argv);
 

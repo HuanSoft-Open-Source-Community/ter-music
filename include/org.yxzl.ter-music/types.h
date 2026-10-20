@@ -345,6 +345,11 @@ typedef struct {
     /* ── 键位覆盖（config v9，见 keymap/actions.h） ── */
     KeyBindingOverride keybinding_overrides[MAX_KEYBINDING_OVERRIDES];
     int keybinding_override_count;
+    /* 本次加载因非法/冲突被剔除的改绑数（运行时提示用，不落盘） */
+    int keybinding_dropped_count;
+    /* 最近一次 keymap_reload 剔除的改绑数（每次 reload 重算，避免重复累计；
+     * 提示时与 keybinding_dropped_count 相加） */
+    int keybinding_reload_dropped_count;
 } AppConfig;
 
 typedef struct {
