@@ -249,23 +249,98 @@ else
     bad "无配置文件时 keys check --json 返回 $rc"
 fi
 
+# ── 跨上下文遮蔽：覆盖引入的遮蔽必须让 check 失败 ─────────────────
+info "跨上下文遮蔽：覆盖引入的遮蔽退出码非 0，默认固有遮蔽放行"
+
+write_config_one() {   # $1 = action, $2 = key
+    cat > "$CONFIG_FILE" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="9">
+  <keybindings>
+    <binding action="$1" key="$2"/>
+  </keybindings>
+</ter-music-config>
+EOF
+}
+
+# 父层覆盖绑到子层默认键：volume.down→i 被 main_list.queue.insert_next
+# 的默认 i 遮蔽（现实用户案例），check 必须失败且报 shadowing。
+write_config_one volume.down i
+"$TM_BIN" keys check --json >"$OUT_JSON" 2>"$ERR_LOG"
+rc=$?
+[ "$rc" -ne 0 ] && ok "父覆盖绑子层键 volume.down→i 时 keys check 非 0（rc=$rc）" \
+    || bad "volume.down→i 遮蔽配置 keys check 返回 0"
+if [ "$HAVE_PYTHON" -eq 1 ] && json_is_valid "$OUT_JSON"; then
+    [ "$(jget "$OUT_JSON" ok)" = "False" ] && ok "遮蔽配置 JSON ok=false" \
+        || bad "遮蔽配置 JSON ok 不是 false"
+    if grep -q 'shadowing' "$OUT_JSON"; then
+        ok "遮蔽错误信息含 shadowing 关键字"
+    else
+        bad "遮蔽错误信息缺少 shadowing：$(head -c 300 "$OUT_JSON")"
+    fi
+else
+    skip "遮蔽配置 JSON 断言（无 python3 或输出非法）"
+fi
+# 运行时该条被剔除，volume.down 回落到默认键 -/_
+[ "$(action_keys volume.down)" = "-/_" ] && ok "运行时剔除 volume.down→i 并回落默认 -/_" \
+    || bad "volume.down 运行时键位异常（实测 $(action_keys volume.down)）"
+
+# 对称方向：子层覆盖抢走父层默认键 queue.append→+ 抢 volume.up 的 +
+write_config_one queue.append +
+"$TM_BIN" keys check --json >"$OUT_JSON" 2>"$ERR_LOG"
+rc=$?
+[ "$rc" -ne 0 ] && ok "子覆盖抢父层默认键 queue.append→+ 时 keys check 非 0（rc=$rc）" \
+    || bad "queue.append→+ 遮蔽配置 keys check 返回 0"
+if [ "$HAVE_PYTHON" -eq 1 ] && json_is_valid "$OUT_JSON"; then
+    grep -q 'shadowing' "$OUT_JSON" && ok "对称遮蔽错误信息含 shadowing" \
+        || bad "对称遮蔽错误信息缺少 shadowing"
+fi
+
+# 默认键固有遮蔽（lyrics/search 的 up/down 等）不拦截合法覆盖：volume.up→t 通过
+write_config_one volume.up t
+"$TM_BIN" keys check --json >"$OUT_JSON" 2>"$ERR_LOG"
+rc=$?
+[ "$rc" -eq 0 ] && ok "无冲突覆盖 volume.up→t 时 keys check 返回 0" \
+    || bad "volume.up→t keys check 返回 $rc（期望 0）：$(head -c 300 "$OUT_JSON")"
+if [ "$HAVE_PYTHON" -eq 1 ] && json_is_valid "$OUT_JSON"; then
+    [ "$(jget "$OUT_JSON" ok)" = "True" ] && ok "volume.up→t JSON ok=true" \
+        || bad "volume.up→t JSON ok 不是 true"
+    [ "$(jget "$OUT_JSON" override_shadows)" = "0" ] && ok "合法覆盖 override_shadows=0" \
+        || bad "合法覆盖 override_shadows=$(jget "$OUT_JSON" override_shadows)（期望 0）"
+fi
+
 # ── 最大覆盖量：每条可绑定动作一条覆盖，验证无截断/无冲突 ─────────
 if [ "$HAVE_PYTHON" -eq 1 ]; then
     info "最大覆盖量：118 条可绑定动作覆盖的 XML 读写与审计"
     "$TM_BIN" keys list --json >"$WORK_DIR/defaults.json" 2>"$ERR_LOG"
     python3 - "$WORK_DIR/defaults.json" "$CONFIG_FILE" <<'PY'
-import json, sys, collections
+import json, sys
 actions = [a for a in json.load(open(sys.argv[1], encoding="utf-8"))["actions"]
            if a.get("bindable")]
-pool = [chr(c) for c in range(0x21, 0x7f) if chr(c) not in '&<>"\'\\ ']
-used = collections.defaultdict(int)
+pool = [chr(c) for c in range(0x21, 0x7f)
+        if chr(c) not in '&<>"\'\\ ' and chr(c) not in 'qQ']
+# q/Q 排除：锁定动作 app.quit 的默认键在所有界面始终生效，任何上下文的
+# 覆盖占用都构成遮蔽（validate 会拒绝）。
+# 跨上下文遮蔽规则：沿父链互为祖先的上下文之间键位必须互斥（至少一侧
+# 是覆盖即报错，本用例全部是覆盖）。链内 global→main→{main_list→
+# main_lyric/main_search, main_control} 共用一个计数器保证全链唯一；
+# 其余上下文仅以 global 为祖先（彼此是兄弟），从 global 占用之后的
+# 键位起分配，兄弟之间允许复用。
+CHAIN = {"global", "main", "main_list", "main_control", "main_lyric", "main_search"}
+g_count = sum(1 for a in actions if a.get("context") == "global")
+chain = [a for a in actions if a.get("context") in CHAIN]
+others = [a for a in actions if a.get("context") not in CHAIN]
+chain.sort(key=lambda a: a.get("context") != "global")   # global 先占键
 lines = ['<?xml version="1.0" encoding="UTF-8"?>',
          '<ter-music-config version="9">', '  <keybindings>']
-for item in actions:
-    ctx = item["context"]
-    key = pool[used[ctx]]
-    used[ctx] += 1
-    lines.append('    <binding action="%s" key="%s"/>' % (item["id"], key))
+n = 0
+for item in chain:
+    lines.append('    <binding action="%s" key="%s"/>' % (item["id"], pool[n]))
+    n += 1
+m = g_count   # 跳过 global 已占用的键位
+for item in others:
+    lines.append('    <binding action="%s" key="%s"/>' % (item["id"], pool[m]))
+    m += 1
 lines += ['  </keybindings>', '</ter-music-config>']
 open(sys.argv[2], "w", encoding="utf-8").write("\n".join(lines) + "\n")
 PY
@@ -282,6 +357,8 @@ PY
         || bad "JSON overrides=$(jget "$OUT_JSON" overrides)（期望 118）"
     [ "$(jget "$OUT_JSON" conflicts)" = "0" ] && ok "118 条覆盖 conflicts=0" \
         || bad "118 条覆盖 conflicts=$(jget "$OUT_JSON" conflicts)"
+    [ "$(jget "$OUT_JSON" override_shadows)" = "0" ] && ok "118 条覆盖 override_shadows=0（无覆盖引入遮蔽）" \
+        || bad "118 条覆盖 override_shadows=$(jget "$OUT_JSON" override_shadows)（期望 0）"
     "$TM_BIN" keys list --json >"$OUT_JSON" 2>"$ERR_LOG"
     if json_is_valid "$OUT_JSON"; then
         ok "118 条覆盖时 keys list --json 仍合法"

@@ -486,6 +486,32 @@ else
     else
         ok "F：冲突键位的 Set 整体失败"
     fi
+    # 跨上下文遮蔽：父层覆盖绑子层默认键、子层覆盖抢父层默认键均须整体拒绝。
+    if python3 "${RPC[@]}" call org.yxzl.ter_music.Config.Set \
+        'json:{"keybindings":{"volume.down":"i"}}' >/dev/null 2>&1; then
+        bad "F：遮蔽键位 volume.down→i（被 queue.insert_next 遮蔽）的 Set 未被拒绝"
+    else
+        ok "F：遮蔽键位 volume.down→i 的 Set 整体失败"
+    fi
+    if python3 "${RPC[@]}" call org.yxzl.ter_music.Config.Set \
+        'json:{"keybindings":{"queue.append":"+"}}' >/dev/null 2>&1; then
+        bad "F：子层抢父层键 queue.append→+（抢 volume.up 的 +）的 Set 未被拒绝"
+    else
+        ok "F：子层抢父层键 queue.append→+ 的 Set 整体失败"
+    fi
+    # 无冲突覆盖（默认键固有遮蔽不拦截）应被接受，随后清理。
+    if python3 "${RPC[@]}" call org.yxzl.ter_music.Config.Set \
+        'json:{"keybindings":{"volume.up":"t"}}' >/dev/null 2>&1; then
+        ok "F：无冲突覆盖 volume.up→t 的 Set 生效"
+        if python3 "${RPC[@]}" call org.yxzl.ter_music.Config.Set \
+            'json:{"keybindings":{"volume.up":"default"}}' >/dev/null 2>&1; then
+            ok "F：volume.up 的 default 清理成功"
+        else
+            bad "F：volume.up 的 default 清理被拒"
+        fi
+    else
+        bad "F：无冲突覆盖 volume.up→t 的 Set 被误拒"
+    fi
     if python3 "${RPC[@]}" call org.yxzl.ter_music.Config.Set \
         'json:{"keybindings":{"app.quit":"x"}}' >/dev/null 2>&1; then
         bad "F：锁定动作 app.quit 的 Set 未被拒绝"

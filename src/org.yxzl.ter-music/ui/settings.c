@@ -2037,6 +2037,19 @@ static void render_hotkey_editor(int start_y, int content_start_x, int max_y)
     mvprintw(start_y + 2, content_start_x, "%s",
              i18n_get("settings.hotkeys.reserved_note"));
 
+    /* 加载时被剔除的改绑（键冲突/非法/锁定）一次性提示，防止旧配置被静默
+     * 剥离。加载层与 keymap_reload 层互斥计数（加载剔除的条目不会进入
+     * reload），相加即本次启动真正未生效的改绑总数。 */
+    int dropped_total = g_app_config.keybinding_dropped_count +
+                        g_app_config.keybinding_reload_dropped_count;
+    move(start_y + 3, content_start_x);
+    clrtoeol();
+    if (dropped_total > 0) {
+        attron(A_BOLD);
+        printw(i18n_get("settings.hotkeys.dropped_notice"), dropped_total);
+        attroff(A_BOLD);
+    }
+
     if (total <= 0 || message_row <= list_top) return;
 
     if (g_hotkey_selected < 0) g_hotkey_selected = 0;

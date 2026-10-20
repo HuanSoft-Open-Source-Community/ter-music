@@ -110,6 +110,7 @@ void keymap_reload(void)
 {
     g_runtime_count = 0;
     g_loaded = 1;
+    int dropped = 0;   /* 本次重载剔除的覆盖数，结束时一次性导出 */
 
     int stored = g_app_config.keybinding_override_count;
     if (stored < 0) {
@@ -131,10 +132,12 @@ void keymap_reload(void)
         ActionId id = actions_from_id(action);
         if (id == ACTION_NONE) {
             log_warn("keymap", "Ignoring override for unknown action '%s'", action);
+            dropped++;
             continue;
         }
         if (!actions_is_bindable(id)) {
             log_warn("keymap", "Ignoring override for locked action '%s'", action);
+            dropped++;
             continue;
         }
 
@@ -142,6 +145,7 @@ void keymap_reload(void)
         if (keyname_parse(key, &stroke) != 0 || !keyname_is_bindable(stroke)) {
             log_warn("keymap", "Ignoring invalid key '%s' for action '%s'",
                      key, action);
+            dropped++;
             continue;
         }
 
@@ -154,6 +158,7 @@ void keymap_reload(void)
         }
         if (duplicate) {
             log_warn("keymap", "Ignoring duplicate override for action '%s'", action);
+            dropped++;
             continue;
         }
 
@@ -169,12 +174,17 @@ void keymap_reload(void)
                                        err, sizeof(err)) != 0) {
             log_warn("keymap", "Ignoring override '%s' -> '%s': %s",
                      action, key, err);
+            dropped++;
             continue;
         }
 
         g_runtime[g_runtime_count] = candidate[g_runtime_count];
         g_runtime_count++;
     }
+
+    /* 每次 reload 重算而非累加：同一条被剔除覆盖会在多次 reload 中反复
+     * 出现，累加会让提示数字虚增；配置加载层的剔除另有独立计数，不会重复。 */
+    g_app_config.keybinding_reload_dropped_count = dropped;
 }
 
 void keymap_ensure_loaded(void)

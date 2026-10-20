@@ -252,6 +252,8 @@ void init_default_config(void)
     g_app_config.config_version        = 0;
     g_app_config.config_file_version   = 0;
     g_app_config.keybinding_override_count = 0;
+    g_app_config.keybinding_dropped_count  = 0;
+    g_app_config.keybinding_reload_dropped_count = 0;
 }
 
 void load_config(void)
@@ -891,6 +893,7 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
                 xmlChar *key_attr = xmlGetProp(child, (const xmlChar *)XML_ATTR_KEY);
                 if (!action_attr || !key_attr) {
                     log_warn("config_xml", "Skipping <binding> without action/key");
+                    cfg->keybinding_dropped_count++;
                     xmlFree(action_attr);
                     xmlFree(key_attr);
                     continue;
@@ -899,6 +902,7 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
                     xmlStrlen(key_attr) >= MAX_KEYBINDING_KEY_LEN) {
                     log_warn("config_xml", "Skipping over-long <binding> (action='%s')",
                              (const char *)action_attr);
+                    cfg->keybinding_dropped_count++;
                     xmlFree(action_attr);
                     xmlFree(key_attr);
                     continue;
@@ -919,6 +923,7 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
                                                err, sizeof(err)) != 0) {
                     log_warn("config_xml", "Skipping binding '%s' -> '%s': %s",
                              (const char *)action_attr, (const char *)key_attr, err);
+                    cfg->keybinding_dropped_count++;
                     xmlFree(action_attr);
                     xmlFree(key_attr);
                     continue;
@@ -1106,6 +1111,7 @@ static void clamp_keybindings(AppConfig *cfg)
     for (int i = 0; i < stored; i++) {
         const KeyBindingOverride *entry = &cfg->keybinding_overrides[i];
         if (!keybinding_entry_valid(entry)) {
+            cfg->keybinding_dropped_count++;
             continue;
         }
 
@@ -1113,6 +1119,7 @@ static void clamp_keybindings(AppConfig *cfg)
         char err[256];
         if (actions_validate_overrides(cfg->keybinding_overrides, accepted + 1,
                                        err, sizeof(err)) != 0) {
+            cfg->keybinding_dropped_count++;
             continue;
         }
         accepted++;

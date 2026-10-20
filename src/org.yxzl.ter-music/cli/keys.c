@@ -42,6 +42,7 @@ typedef struct {
     ActionId child;
     ActionId parent;
     char key[KEYNAME_MAX_LEN];
+    int via_override;   /* 1 = 至少一侧键来自用户覆盖（应为 0，否则是错误） */
 } KeyShadow;
 
 typedef struct {
@@ -77,7 +78,7 @@ static void shadows_free(KeyShadowList *list)
 }
 
 static int shadows_add(KeyShadowList *list, ActionId child, ActionId parent,
-                       const char *key)
+                       const char *key, int via_override)
 {
     if (!list || !key) {
         return -1;
@@ -94,6 +95,7 @@ static int shadows_add(KeyShadowList *list, ActionId child, ActionId parent,
     KeyShadow *item = &list->items[list->count++];
     item->child = child;
     item->parent = parent;
+    item->via_override = via_override;
     snprintf(item->key, sizeof(item->key), "%s", key);
     return 0;
 }
@@ -262,8 +264,11 @@ static int collect_shadows(KeyShadowList *out)
                         if (strcmp(child_keys[i], parent_keys[j]) != 0) {
                             continue;
                         }
+                        int via_override =
+                            keymap_action_has_override(id_child) ||
+                            keymap_action_has_override(id_parent);
                         if (shadows_add(out, id_child, id_parent,
-                                        child_keys[i]) != 0) {
+                                        child_keys[i], via_override) != 0) {
                             return -1;
                         }
                     }
@@ -431,6 +436,8 @@ static int keys_list_json(const KeyShadowList *shadows)
         pos = json_append_escaped(buffer, cap, pos, parent->id);
         pos = json_append_raw(buffer, cap, pos, ",\"key\":");
         pos = json_append_escaped(buffer, cap, pos, shadow->key);
+        pos = json_append_raw(buffer, cap, pos, ",\"via_override\":");
+        pos = json_append_bool(buffer, cap, pos, shadow->via_override);
         pos = json_append_char(buffer, cap, pos, '}');
     }
     pos = json_append_raw(buffer, cap, pos, "]}");
@@ -502,7 +509,8 @@ static int keys_list_human(const KeyShadowList *shadows)
             if (!child || !parent) {
                 continue;
             }
-            printf("  %s 遮蔽 %s（%s）\n", child->id, parent->id, shadow->key);
+            printf("  %s 遮蔽 %s（%s）%s\n", child->id, parent->id, shadow->key,
+                   shadow->via_override ? "［覆盖引入-应修复］" : "");
         }
     }
     return CLI_EXIT_OK;
@@ -528,6 +536,7 @@ static int keys_cmd_list(int want_json)
 static int keys_check_json(int ok, int actions, int overrides,
                            int locked_overrides, int invalid,
                            int conflicts, int missing_defaults, int shadows,
+                           int override_shadows,
                            const KeyAuditMessages *errors,
                            const KeyAuditMessages *warnings)
 {
@@ -555,6 +564,8 @@ static int keys_check_json(int ok, int actions, int overrides,
     pos = json_append_int(buffer, cap, pos, missing_defaults);
     pos = json_append_raw(buffer, cap, pos, ",\"shadows\":");
     pos = json_append_int(buffer, cap, pos, shadows);
+    pos = json_append_raw(buffer, cap, pos, ",\"override_shadows\":");
+    pos = json_append_int(buffer, cap, pos, override_shadows);
 
     pos = json_append_raw(buffer, cap, pos, ",\"errors\":[");
     for (int i = 0; i < errors->count; i++) {
@@ -586,6 +597,7 @@ static int keys_check_json(int ok, int actions, int overrides,
 static int keys_check_human(int ok, int actions, int overrides,
                             int locked_overrides, int invalid,
                             int conflicts, int missing_defaults, int shadows,
+                            int override_shadows,
                             const char *config_path,
                             const KeyAuditMessages *errors,
                             const KeyAuditMessages *warnings)
@@ -598,7 +610,8 @@ static int keys_check_human(int ok, int actions, int overrides,
     printf("  非法项：%d\n", invalid);
     printf("  冲突：%d\n", conflicts);
     printf("  无默认键动作：%d\n", missing_defaults);
-    printf("  遮蔽数：%d\n", shadows);
+    printf("  遮蔽数：%d（覆盖引入：%d，须为 0）\n", shadows,
+           override_shadows);
 
     if (warnings->count > 0) {
         printf("警告：\n");
@@ -727,18 +740,26 @@ static int keys_cmd_check(int want_json)
 
     audit_terminfo(&g_key_warnings);
 
+    int override_shadows = 0;
+    for (int i = 0; i < shadows.count; i++) {
+        if (shadows.items[i].via_override) {
+            override_shadows++;
+        }
+    }
+
     int ok = !failed && invalid == 0 && conflicts == 0 &&
-             missing_defaults == 0;
+             missing_defaults == 0 && override_shadows == 0;
 
     int rc;
     if (want_json) {
         rc = keys_check_json(ok, actions_count(), raw_count, locked_overrides,
                              invalid, conflicts, missing_defaults, shadows.count,
+                             override_shadows,
                              &g_key_errors, &g_key_warnings);
     } else {
         rc = keys_check_human(ok, actions_count(), raw_count, locked_overrides,
                               invalid, conflicts, missing_defaults,
-                              shadows.count, config_path,
+                              shadows.count, override_shadows, config_path,
                               &g_key_errors, &g_key_warnings);
     }
 

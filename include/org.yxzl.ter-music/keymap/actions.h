@@ -257,7 +257,9 @@ KeyContext actions_context_parent(KeyContext ctx);
 int actions_default_keys(ActionId id, char out[][KEYNAME_MAX_LEN], int max);
 
 /**
- * 校验覆盖表：未知动作、非法/不可绑定键、重复 action、同上下文冲突均失败。
+ * 校验覆盖表：未知动作、非法/不可绑定键、重复 action、同上下文冲突、
+ * 跨上下文遮蔽（子上下文有效键抢走父上下文动作的键，或父上下文覆盖键被
+ * 子上下文有效键占用；至少一侧是覆盖才判错，默认键固有遮蔽不拦）均失败。
  * count == 0 返回 0。失败返回 -1 并在 err 写具体原因（err 可为 NULL）。
  */
 int actions_validate_overrides(const KeyBindingOverride *ov, int count,
