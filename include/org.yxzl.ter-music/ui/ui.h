@@ -50,6 +50,9 @@ enum {
 /* ── Function prototypes ── */
 void init_ncurses(void);
 void cleanup(void);
+/* 恢复被 init_ncurses() 守卫改道的 stderr（幂等）；
+ * 退出路径与崩溃处理器在向真实终端打印错误前调用。 */
+void ui_restore_stdio(void);
 void run_event_loop(void);
 
 void create_layout(void);
