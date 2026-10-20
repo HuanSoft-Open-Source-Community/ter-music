@@ -235,6 +235,12 @@ jobs:
       - name: Build
         run: cmake --build build -j2
 
+      - name: PipeWire ABI consistency
+        run: scripts/test/pipewire-abi-check.sh
+
+      - name: PipeWire backend playback
+        run: scripts/test/pipewire-backend-e2e.sh --bin ./build/ter-music
+
       - name: D-Bus RPC surface
         run: scripts/test/dbus-rpc-check.sh --bin ./build/ter-music
 
