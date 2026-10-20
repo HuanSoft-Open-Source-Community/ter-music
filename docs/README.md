@@ -365,6 +365,7 @@ Options:
                        or local (in-process playback, kept as a regression baseline)
   --attach-only        Never start a core automatically: exit with code 3 when none runs
   --bus <name>         Address a specific core/instance bus name (default: the primary one)
+  --lang <lang-id>     Use this language for this run (e.g. zh_CN, en_US); not saved to config
   -h, --help           Show help information
   -v, --version        Show version information
   tui [path]           Explicitly start the TUI
@@ -401,15 +402,21 @@ path in its own process and delivers the resulting queue to the core.
 
 | Command | Description |
 | ------- | ----------- |
-| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | Scan the path, deliver the queue to the core and play; starts the core when none is running |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon] [--foreground] [--quiet]` | Scan the path, deliver the queue to the core and play; starts the core when none is running (`--foreground` runs as the foreground core, `--quiet` is kept for compatibility) |
 | `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | Basic transport control |
 | `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | Relative, absolute or percentage seek |
 | `volume [0-100\|+N\|-N]` | Query or set volume |
 | `speed [0.5-3.0]` | Query or set playback speed |
 | `mode [NAME\|0-16]` | Query or set the play mode (stable names such as `list_repeat`, `folder_shuffle_repeat`) |
 | `show [OPTIONS]` | Print the current info block (basic info / text cover / progress / two lyric lines) |
+| `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | Inspect or edit the live queue held by the core |
+| `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | Read or change the core configuration (keys are `config.xml` names; `reset` requires `--yes`) |
+| `lyrics [--lines N]` | Current lyric line context, or up to N timestamped lines |
+| `track` | Human-readable metadata of the current track |
+| `cover [--width N] [--height N] [--charset braille\|ascii\|half]` | Text cover of the current track |
+| `keys list\|check [--json]` | Read-only key-binding audit; does not need a running core |
 | `daemon start\|foreground\|stop\|restart\|status\|reload` | Playback core management (`daemon stop --all` also stops `--force` secondary instances) |
-| `version` / `help` | Version / usage |
+| `version` / `help` | Version / help (`help all` prints the complete help) |
 
 `show` options (all of them override the stored TUI settings for that call):
 
@@ -426,8 +433,33 @@ path in its own process and delivers the resulting queue to the core.
 | `--width N` | Output width (defaults to the terminal width) |
 | `--bus NAME` | Target a specific instance bus name (defaults to the primary instance) |
 
-**Exit codes:** `0` success; `1` usage error; `3` no running instance;
-`4` D-Bus unavailable; `5` rejected by the instance.
+**Exit codes:** `0` success; `1` usage error (including an unknown help
+target); `3` no running instance; `4` D-Bus unavailable; `5` rejected by the
+instance.
+
+**Help and paging:** `ter-music help`, `--help` and `-h` print a short
+overview. `ter-music help <command>` — or `<command> --help` for the commands
+that parse options (`play`, `show`, `daemon`, `queue`, `config`, `lyrics`,
+`track`, `cover`, `keys`) — prints first-level details;
+`ter-music help <command> <subcommand>` and `<command> <subcommand> --help`
+print second-level details; `ter-music help all` prints the complete help. An
+unknown help target exits with code `1`.
+
+Help output wraps to the terminal width. When stdin and stdout are both TTYs
+and the text is taller than the screen, a built-in pager is used:
+`Space`/`PageDown` next page, `b`/`PageUp` previous page, `j`/`k` scroll one
+line, `g`/`G` jump to the first/last line, `q` quits. Non-TTY output,
+`TERM=dumb` and `TER_MUSIC_NO_PAGER=1` print the whole text directly, with no
+ANSI escape sequences.
+
+**CLI language:** local help, errors, tables and hints follow `--lang` >
+`TER_MUSIC_CLI_LANG` > the configured `ui_language` > `LC_ALL` >
+`LC_MESSAGES` > `LANG` > `zh_CN` (see §5.9.1). `--lang` and
+`TER_MUSIC_CLI_LANG` may appear anywhere on the command line; `C`, `POSIX` and
+an empty locale mean "no preference" and continue with the configuration. An
+uninstalled `--lang` ID warns and falls back to `zh_CN`. The bodies printed by
+`show`, `track`, `lyrics` and `cover` are rendered by the core's
+`ui_language`; `--lang` only changes the CLI's own text.
 
 **Examples:**
 
@@ -520,8 +552,8 @@ commands when activation is unavailable. Three supported ways exist:
 Notes:
 
 - `systemctl --user` is not reachable from inside the container, so the service
-  must be enabled from the host shell; `ter-music help` prints the same hints
-  when it detects the sandbox.
+  must be enabled from the host shell; `play` and `daemon` print the same hints
+  when they detect the sandbox.
 - `ter-music daemon stop` works as usual and stops the instance; the container
   is reclaimed afterwards, so `ll-cli ps` no longer lists the application.
 - `ll-cli run` maps every failure exit code to `255`; host-side scripts should
@@ -897,7 +929,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `clear_history_on_startup`: Clear playback history on startup (0/1)
 - `resume_last_playback`: Resume playback from last position (0/1)
 - `seamless_preload`: Pre-decode next track at end of current for gapless playback (0/1)
-- `ui_language`: Interface language (string ID: "zh_CN", "en_US", etc. Set via F7 language view)
+- `ui_language`: Interface language ID. Built-in packs are `zh_CN` and `en_US`; any third-party ID installed through the F7 language view is also valid (e.g. `ja_JP`). An invalid ID falls back to `zh_CN`.
 - `volume_percent`: Default volume percentage (0-100)
 - `audio_latency_ms`: Output latency in milliseconds
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire)
@@ -953,6 +985,34 @@ Ter-Music uses an XML-based internationalization (i18n) system. Built-in languag
 6. Source tree `data/lang/<id>.xml`
 
 To add a new language, create an `<id>.xml` file following the format above and place it in one of the search paths (user override at `~/.config/ter-music/lang/` is recommended). The language will appear in the F7 language selection view automatically.
+
+`ui_language` is not restricted to the built-in `zh_CN`/`en_US` packs: selecting
+a third-party language in F7 stores its ID, and the configuration validator
+accepts any ID that is safe as a file name. An ID that is not installed, or one
+that fails validation, falls back to `zh_CN`.
+
+**CLI language selection.** CLI-local text (help, errors, tables and prompts)
+uses this priority, highest first:
+
+1. `--lang <id>`
+2. `TER_MUSIC_CLI_LANG`
+3. `ui_language` from `config.xml` (the F7 choice)
+4. `LC_ALL`
+5. `LC_MESSAGES`
+6. `LANG`
+7. `zh_CN`
+
+`--lang` and `TER_MUSIC_CLI_LANG` may appear anywhere on the command line
+(including before the subcommand) and are normalized like locale names
+(`en_US.UTF-8` → `en_US`, `zh-*` → `zh_CN`). `C`, `POSIX` and an empty locale
+value mean "no preference" and continue down the chain, so a configured
+`ui_language` still wins over them. An explicit language that is not installed
+prints a warning and falls back to `zh_CN`.
+
+`--lang` only affects the CLI's own strings. The payload printed by `show`,
+`track`, `lyrics` and `cover` is rendered by the core with its
+`ui_language`, so those bodies stay in the TUI language unless the core
+configuration is changed.
 
 #### 5.9.2 tar.gz Language Pack Distribution
 

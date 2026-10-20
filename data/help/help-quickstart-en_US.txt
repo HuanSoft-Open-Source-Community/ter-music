@@ -16,6 +16,8 @@ ter-music Quick Start Guide
                        (the default is remote — playback is left to the core)
     --attach-only      Only attach to an already running core; fail if there is none
     --bus <name>       Target instance bus name (default: the primary instance)
+    --lang <lang-id>   Use this language for this run (e.g. zh_CN, en_US),
+                       without saving it to config.xml
 
   Process model: the default is "resident core + front end". The TUI is only a
   front end; the audio comes from the core process. When no core runs, the front
@@ -326,12 +328,38 @@ ter-music Quick Start Guide
 
 19. Command Line (CLI)
 ----------------------
-  `ter-music help` prints the full usage. Every subcommand is a pure D-Bus
-  client that talks to the primary instance (daemon or TUI); use
-  `--bus <name>` after the subcommand to address a secondary instance.
+  `ter-music help` prints a short overview; help has several levels:
+    help | --help | -h              short overview
+    help <command>                  first-level details
+    help <command> <subcommand>     second-level details
+    help all                        complete help
+    <command> --help                first-level details (commands that parse
+                                    options: play, show, daemon, queue,
+                                    config, lyrics, track, cover, keys)
+    <command> <subcommand> --help   second-level details
+  An unknown help target exits with code 1.
+
+  Help wraps to the terminal width. When stdin and stdout are TTYs and the
+  text is taller than the screen, a built-in pager is used: Space/PageDown
+  next page, b/PageUp previous page, j/k scroll one line, g/G first/last
+  line, q quits. Non-TTY output, TERM=dumb and TER_MUSIC_NO_PAGER=1 print
+  the whole text directly, without ANSI escape sequences.
+
+  CLI-local help, errors, tables and hints use this language priority:
+    --lang > TER_MUSIC_CLI_LANG > config ui_language > LC_ALL >
+    LC_MESSAGES > LANG > zh_CN
+  --lang and TER_MUSIC_CLI_LANG may appear anywhere on the command line.
+  C, POSIX and an empty locale mean "no preference" and continue with the
+  configured ui_language. An uninstalled --lang ID warns and falls back to
+  zh_CN. The bodies printed by show/track/lyrics/cover are rendered by the
+  core's ui_language; --lang changes only the CLI's own text.
+
+  Every subcommand is a pure D-Bus client that talks to the primary instance
+  (daemon or TUI); put `--bus <name>` after the subcommand to address a
+  secondary instance.
 
   Playback control:
-    play <path> [--index N] [--mode MODE] [--foreground] [--quiet]
+    play <path> [--index N] [--mode MODE] [--no-daemon] [--foreground] [--quiet]
       · With a path: this process scans it and delivers the local path queue in
         chunks, then plays. Paths accept ~ and relative forms; pointing at a
         single audio file plays exactly that file.
@@ -368,7 +396,8 @@ ter-music Quick Start Guide
 
   Information output:
     show [--json|--watch[=ms]|--one-line|--full|--compact|--preset|--fields
-          --cover|--no-cover|--cover-size|--charset|--progress|--lyrics|--width]
+          --cover|--no-cover|--cover-size|--charset|--progress|--no-progress
+          --lyrics|--width] [--bus <name>]
                                   Current playback info (as configured in
                                   Settings -> Info Display)
     track                         Human-readable info about the current track
@@ -377,14 +406,19 @@ ter-music Quick Start Guide
     lyrics [--lines N]            Current lyric line context, or the whole timed
                                   document with --lines N
 
+  Key bindings (read-only, no running core required):
+    keys list [--json]            Effective keys per action and context
+    keys check [--json]           Audit the overrides in config.xml
+
   Background player:
     daemon start [--open PATH] [--debug] [--force]
-    daemon foreground [--debug] [--force]
+    daemon foreground [--open PATH] [--debug] [--force] [--no-autoplay]
         Note: the core scans nothing, --open is only informational; use `play`
         to deliver a queue.
-    daemon stop [--force] [--all] | restart | status [--json] | reload
+    daemon stop [--force] [--all] | status [--json] | reload
+    daemon restart [--open PATH] [--debug] [--force]
 
-  Other: version | --version | help | --help | tui
+  Other: version | --version | help | help all | --help | tui
 
   Exit codes: 0 success; 1 usage error; 3 no running instance; 4 D-Bus not
   available; 5 the instance refused or the operation failed.
