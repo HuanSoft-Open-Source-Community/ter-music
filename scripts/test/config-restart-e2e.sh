@@ -372,7 +372,7 @@ fi
 info "9.3 stop_core_on_exit 写 0 → 重启核心 → Config.GetAll 回读仍 0（不回卷）"
 # stop_core_on_exit 是 config v8 新增布尔（缺省 1，退出即终止核心）。按 9.3 的
 # 布尔样板验证持久化链路：Set 立即可见 → 落盘 → 核心重启后仍是显式的 0，
-# 不会被 v7→v8 迁移块或加载缺省卷回 1（文件已是属性 8，迁移块不触发）。
+# 不会被 v7→v8 迁移块或加载缺省卷回 1（文件已是当前属性 9，迁移块不触发）。
 so_set="$(call Config.Set 'json:{"preferences":{"stop_core_on_exit":0}}')"
 case "$so_set" in
     true*) ok "Config.Set stop_core_on_exit=0 返回 true" ;;

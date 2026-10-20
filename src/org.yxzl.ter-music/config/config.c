@@ -27,6 +27,8 @@
 #include "logger/logger.h"
 #include "audio/equalizer.h"
 #include "i18n/i18n.h"
+#include "keymap/actions.h"
+#include "util/keyname.h"
 
 /* v5 → v6：把旧配置里的 <remote_connections> 交给前端（定义见文件后半部分） */
 static int legacy_connections_export(const char *config_path);
@@ -100,6 +102,9 @@ const char *app_cache_dir(int ensure)
 /* ── Forward declarations of internal helpers ─────────────────────── */
 
 static void   clamp_config_values(AppConfig *cfg);
+static void   clamp_keybindings(AppConfig *cfg);
+static int    keybinding_entry_valid(const KeyBindingOverride *entry);
+static int    compare_binding_ptr(const void *lhs, const void *rhs);
 static int    xml_get_int(const xmlNode *parent, const char *name, int def);
 static float  xml_get_float(const xmlNode *parent, const char *name, float def);
 static void   xml_get_string(const xmlNode *parent, const char *name,
@@ -161,6 +166,11 @@ void ensure_config_dir_exists(void)
 const char *get_config_dir(void)
 {
     return config_dir[0] ? config_dir : NULL;
+}
+
+const char *get_config_file_path(void)
+{
+    return config_file[0] ? config_file : NULL;
 }
 
 void init_default_config(void)
@@ -241,6 +251,9 @@ void init_default_config(void)
     g_app_config.info_lyrics_lines     = 2;       /* 当前句+下一句 */
     g_app_config.config_version        = 0;
     g_app_config.config_file_version   = 0;
+    g_app_config.keybinding_override_count = 0;
+    g_app_config.keybinding_dropped_count  = 0;
+    g_app_config.keybinding_reload_dropped_count = 0;
 }
 
 void load_config(void)
@@ -332,6 +345,16 @@ int config_run_migrations(void)
         save_config();
     }
 
+    /* v8 → v9：新增 <keybindings>。空覆盖表即默认键位，无需补写字段，
+     * 只把版本推进并落盘一次；写出的版本为 9，后续启动不会再命中本分支。
+     * 不在这里清空覆盖表：若用户已手工写入 v9 段，加载阶段已经校验并保留。 */
+    if (loaded && file_version < 9) {
+        log_info("menu_views", "Migrating config v%d → v9: keybindings default to built-in keys",
+                 file_version);
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+
     return 0;
 }
 
@@ -388,6 +411,34 @@ int config_validate_xml(const char *path)
     xmlFree(ver);
     xmlFreeDoc(doc);
     return valid;
+}
+
+/* 覆盖项是否可安全落盘：action 存在、key 可解析且可绑定。 */
+static int keybinding_entry_valid(const KeyBindingOverride *entry)
+{
+    if (!entry || entry->action[0] == '\0' || entry->key[0] == '\0') {
+        return 0;
+    }
+    if (!memchr(entry->action, '\0', sizeof(entry->action)) ||
+        !memchr(entry->key, '\0', sizeof(entry->key))) {
+        return 0;
+    }
+    if (actions_from_id(entry->action) == ACTION_NONE) {
+        return 0;
+    }
+    KeyStroke stroke;
+    if (keyname_parse(entry->key, &stroke) != 0 ||
+        !keyname_is_bindable(stroke)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int compare_binding_ptr(const void *lhs, const void *rhs)
+{
+    const KeyBindingOverride *a = *(const KeyBindingOverride *const *)lhs;
+    const KeyBindingOverride *b = *(const KeyBindingOverride *const *)rhs;
+    return strcmp(a->action, b->action);
 }
 
 int config_save_to_xml(const char *path, const AppConfig *cfg)
@@ -507,6 +558,53 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
                                            (const xmlChar *)gain_str);
             xmlSetProp(band, (const xmlChar *)XML_ATTR_BAND_FREQUENCY,
                        (const xmlChar *)freq_str);
+        }
+    }
+
+    /* ── <keybindings>（config v9，仅写覆盖项） ─────────────────── */
+    if (cfg->keybinding_override_count > 0) {
+        int stored = cfg->keybinding_override_count;
+        if (stored > MAX_KEYBINDING_OVERRIDES) {
+            stored = MAX_KEYBINDING_OVERRIDES;
+        }
+
+        const KeyBindingOverride *valid[MAX_KEYBINDING_OVERRIDES];
+        int valid_count = 0;
+        for (int i = 0; i < stored; i++) {
+            const KeyBindingOverride *entry = &cfg->keybinding_overrides[i];
+            if (!keybinding_entry_valid(entry)) {
+                log_warn("config_xml", "Skipping invalid keybinding override (action='%s')",
+                         entry->action);
+                continue;
+            }
+            int duplicate = 0;
+            for (int j = 0; j < valid_count; j++) {
+                if (strcmp(valid[j]->action, entry->action) == 0) {
+                    duplicate = 1;
+                    break;
+                }
+            }
+            if (duplicate) {
+                log_warn("config_xml", "Skipping duplicate keybinding override for '%s'",
+                         entry->action);
+                continue;
+            }
+            valid[valid_count++] = entry;
+        }
+
+        if (valid_count > 0) {
+            qsort(valid, (size_t)valid_count, sizeof(valid[0]), compare_binding_ptr);
+            xmlNodePtr bindings = xmlNewChild(root, NULL,
+                                              (const xmlChar *)XML_SECTION_KEYBINDINGS,
+                                              NULL);
+            for (int i = 0; i < valid_count; i++) {
+                xmlNodePtr binding = xmlNewChild(bindings, NULL,
+                                                 (const xmlChar *)XML_BINDING, NULL);
+                xmlSetProp(binding, (const xmlChar *)XML_ATTR_ACTION,
+                           (const xmlChar *)valid[i]->action);
+                xmlSetProp(binding, (const xmlChar *)XML_ATTR_KEY,
+                           (const xmlChar *)valid[i]->key);
+            }
         }
     }
 
@@ -637,8 +735,12 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         return -1;
     }
 
-    /* ── Start from defaults, then overlay XML values ─────────────── */
-    memset(cfg, 0, sizeof(*cfg));
+    /* ── Start from defaults, then overlay XML values ───────────────
+     * 用 init_default_config() 的全量默认值作为基线，而不是 memset：
+     * 手写/精简配置可能缺少整个 <preferences> 或某些元素，memset 会把
+     * 缺失项变成 0（例如 stop_core_on_exit=0），与本程序的默认语义不符。 */
+    init_default_config();
+    *cfg = g_app_config;
     cfg->config_version = CONFIG_CURRENT_VERSION;
 
     /* 记下**文件里**的版本：迁移判定必须用它，不能用 cfg->config_version
@@ -770,12 +872,156 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         }
     }
 
+    /* ── <keybindings>（config v9）─────────────────────────────────
+     * 逐项接受：非法/冲突/重复 action/超限项告警并跳过，合法项保留。
+     * 配置层不依赖 UI keymap，直接用动作表校验。 */
+    {
+        xmlNodePtr bindings = xml_find_child(root, XML_SECTION_KEYBINDINGS);
+        if (bindings) {
+            int accepted = 0;
+            for (xmlNodePtr child = bindings->children; child; child = child->next) {
+                if (child->type != XML_ELEMENT_NODE ||
+                    xmlStrcmp(child->name, (const xmlChar *)XML_BINDING) != 0) {
+                    continue;
+                }
+                if (accepted >= MAX_KEYBINDING_OVERRIDES) {
+                    log_warn("config_xml", "Too many <binding> entries, ignoring the rest");
+                    break;
+                }
+
+                xmlChar *action_attr = xmlGetProp(child, (const xmlChar *)XML_ATTR_ACTION);
+                xmlChar *key_attr = xmlGetProp(child, (const xmlChar *)XML_ATTR_KEY);
+                if (!action_attr || !key_attr) {
+                    log_warn("config_xml", "Skipping <binding> without action/key");
+                    cfg->keybinding_dropped_count++;
+                    xmlFree(action_attr);
+                    xmlFree(key_attr);
+                    continue;
+                }
+                if (xmlStrlen(action_attr) >= MAX_KEYBINDING_ACTION_LEN ||
+                    xmlStrlen(key_attr) >= MAX_KEYBINDING_KEY_LEN) {
+                    log_warn("config_xml", "Skipping over-long <binding> (action='%s')",
+                             (const char *)action_attr);
+                    cfg->keybinding_dropped_count++;
+                    xmlFree(action_attr);
+                    xmlFree(key_attr);
+                    continue;
+                }
+
+                KeyBindingOverride candidate[MAX_KEYBINDING_OVERRIDES];
+                memcpy(candidate, cfg->keybinding_overrides,
+                       (size_t)accepted * sizeof(candidate[0]));
+                snprintf(candidate[accepted].action,
+                         sizeof(candidate[accepted].action), "%s",
+                         (const char *)action_attr);
+                snprintf(candidate[accepted].key,
+                         sizeof(candidate[accepted].key), "%s",
+                         (const char *)key_attr);
+
+                char err[256];
+                if (actions_validate_overrides(candidate, accepted + 1,
+                                               err, sizeof(err)) != 0) {
+                    log_warn("config_xml", "Skipping binding '%s' -> '%s': %s",
+                             (const char *)action_attr, (const char *)key_attr, err);
+                    cfg->keybinding_dropped_count++;
+                    xmlFree(action_attr);
+                    xmlFree(key_attr);
+                    continue;
+                }
+
+                cfg->keybinding_overrides[accepted] = candidate[accepted];
+                accepted++;
+                xmlFree(action_attr);
+                xmlFree(key_attr);
+            }
+            cfg->keybinding_override_count = accepted;
+        }
+    }
+
     xmlFreeDoc(doc);
 
     /* Apply clamping / validation */
     clamp_config_values(cfg);
 
     log_info("config_xml", "Loaded config from '%s'", path);
+    return 0;
+}
+
+/* 只读审计：按文件顺序原样读取 <keybindings> 条目，不做任何校验/降级。
+ * 仅由 `ter-music keys check` 使用；不触发迁移、不写盘。 */
+int config_load_raw_keybindings(const char *path, KeyBindingOverride *out, int max,
+                                int *count_out, char *err, size_t err_size)
+{
+    if (err && err_size > 0) {
+        err[0] = '\0';
+    }
+    if (count_out) {
+        *count_out = 0;
+    }
+    if (!path || !count_out || max < 0 || (max > 0 && !out)) {
+        if (err && err_size > 0) {
+            snprintf(err, err_size, "invalid arguments");
+        }
+        return -1;
+    }
+
+    /* 文件不存在是正常情况（未生成配置 = 全部默认键位）。 */
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        return 0;
+    }
+
+    xmlDocPtr doc = xmlParseFile(path);
+    if (!doc) {
+        if (err && err_size > 0) {
+            snprintf(err, err_size, "failed to parse '%s'", path);
+        }
+        return -1;
+    }
+
+    xmlNodePtr root = xmlDocGetRootElement(doc);
+    if (!root || xmlStrcmp(root->name, (const xmlChar *)XML_ROOT) != 0) {
+        if (err && err_size > 0) {
+            snprintf(err, err_size, "invalid root element in '%s'", path);
+        }
+        xmlFreeDoc(doc);
+        return -1;
+    }
+
+    xmlNodePtr bindings = xml_find_child(root, XML_SECTION_KEYBINDINGS);
+    if (!bindings) {
+        xmlFreeDoc(doc);
+        return 0;
+    }
+
+    int count = 0;
+    for (xmlNodePtr child = bindings->children; child; child = child->next) {
+        if (child->type != XML_ELEMENT_NODE ||
+            xmlStrcmp(child->name, (const xmlChar *)XML_BINDING) != 0) {
+            continue;
+        }
+        if (count >= max) {
+            if (err && err_size > 0) {
+                snprintf(err, err_size,
+                         "too many <binding> entries (max %d)", max);
+            }
+            xmlFreeDoc(doc);
+            return -1;
+        }
+
+        xmlChar *action_attr = xmlGetProp(child, (const xmlChar *)XML_ATTR_ACTION);
+        xmlChar *key_attr = xmlGetProp(child, (const xmlChar *)XML_ATTR_KEY);
+        snprintf(out[count].action, sizeof(out[count].action), "%s",
+                 action_attr ? (const char *)action_attr : "");
+        snprintf(out[count].key, sizeof(out[count].key), "%s",
+                 key_attr ? (const char *)key_attr : "");
+        xmlFree(action_attr);
+        xmlFree(key_attr);
+        count++;
+    }
+
+    *count_out = count;
+    xmlFreeDoc(doc);
     return 0;
 }
 
@@ -851,6 +1097,40 @@ static void xml_get_string(const xmlNode *parent, const char *name,
     out[0] = '\0';
 }
 
+static void clamp_keybindings(AppConfig *cfg)
+{
+    int stored = cfg->keybinding_override_count;
+    if (stored < 0) {
+        stored = 0;
+    }
+    if (stored > MAX_KEYBINDING_OVERRIDES) {
+        stored = MAX_KEYBINDING_OVERRIDES;
+    }
+
+    int accepted = 0;
+    for (int i = 0; i < stored; i++) {
+        const KeyBindingOverride *entry = &cfg->keybinding_overrides[i];
+        if (!keybinding_entry_valid(entry)) {
+            cfg->keybinding_dropped_count++;
+            continue;
+        }
+
+        cfg->keybinding_overrides[accepted] = *entry;
+        char err[256];
+        if (actions_validate_overrides(cfg->keybinding_overrides, accepted + 1,
+                                       err, sizeof(err)) != 0) {
+            cfg->keybinding_dropped_count++;
+            continue;
+        }
+        accepted++;
+    }
+
+    memset(cfg->keybinding_overrides + accepted, 0,
+           (size_t)(MAX_KEYBINDING_OVERRIDES - accepted) *
+           sizeof(cfg->keybinding_overrides[0]));
+    cfg->keybinding_override_count = accepted;
+}
+
 static void clamp_config_values(AppConfig *cfg)
 {
     /* Boolean-normalize */
@@ -908,4 +1188,6 @@ static void clamp_config_values(AppConfig *cfg)
         if (cfg->eq_band_gains[i] < EQ_GAIN_MIN) cfg->eq_band_gains[i] = EQ_GAIN_MIN;
         if (cfg->eq_band_gains[i] > EQ_GAIN_MAX) cfg->eq_band_gains[i] = EQ_GAIN_MAX;
     }
+
+    clamp_keybindings(cfg);
 }

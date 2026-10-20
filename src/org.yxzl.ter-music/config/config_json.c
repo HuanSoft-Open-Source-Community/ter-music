@@ -26,8 +26,10 @@
 
 #include "config/config_fields.h"
 #include "config/schema.h"
+#include "keymap/actions.h"
 #include "logger/logger.h"
 #include "util/json.h"
+#include "util/keyname.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -36,8 +38,30 @@
 
 
 static const char *const k_sections[] = {
-    "paths", "theme", "preferences", "equalizer", NULL
+    "paths", "theme", "preferences", "equalizer", "keybindings", NULL
 };
+
+static int compare_override_ptr(const void *lhs, const void *rhs)
+{
+    const KeyBindingOverride *a = *(const KeyBindingOverride *const *)lhs;
+    const KeyBindingOverride *b = *(const KeyBindingOverride *const *)rhs;
+    return strcmp(a->action, b->action);
+}
+
+static void copy_bounded(char *dst, size_t dst_size, const char *src)
+{
+    if (!dst || dst_size == 0) {
+        return;
+    }
+    size_t len = src ? strlen(src) : 0;
+    if (len >= dst_size) {
+        len = dst_size - 1;
+    }
+    if (len > 0) {
+        memcpy(dst, src, len);
+    }
+    dst[len] = '\0';
+}
 
 static int field_clamp(const ConfigFieldDef *def, int value)
 {
@@ -82,6 +106,42 @@ int config_render_json(const AppConfig *cfg, char *out, size_t out_size)
                 pos = json_append_int(out, out_size, pos, cfg->eq_band_gains[i]);
             }
             pos = json_append_char(out, out_size, pos, ']');
+            pos = json_append_char(out, out_size, pos, '}');
+            continue;
+        }
+
+        if (strcmp(section, "keybindings") == 0) {
+            pos = json_append_char(out, out_size, pos, '{');
+
+            int stored = cfg->keybinding_override_count;
+            if (stored < 0) stored = 0;
+            if (stored > MAX_KEYBINDING_OVERRIDES) stored = MAX_KEYBINDING_OVERRIDES;
+
+            const KeyBindingOverride *list[MAX_KEYBINDING_OVERRIDES];
+            int count = 0;
+            for (int i = 0; i < stored; i++) {
+                const KeyBindingOverride *entry = &cfg->keybinding_overrides[i];
+                if (entry->action[0] == '\0' || entry->key[0] == '\0') {
+                    continue;
+                }
+                int duplicate = 0;
+                for (int j = 0; j < count; j++) {
+                    if (strcmp(list[j]->action, entry->action) == 0) {
+                        duplicate = 1;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    list[count++] = entry;
+                }
+            }
+            qsort(list, (size_t)count, sizeof(list[0]), compare_override_ptr);
+
+            for (int i = 0; i < count; i++) {
+                if (i > 0) pos = json_append_char(out, out_size, pos, ',');
+                pos = json_append_key(out, out_size, pos, list[i]->action);
+                pos = json_append_escaped(out, out_size, pos, list[i]->key);
+            }
             pos = json_append_char(out, out_size, pos, '}');
             continue;
         }
@@ -161,7 +221,8 @@ static int apply_eq_bands(AppConfig *cfg, const JsonValue *value)
     return 0;
 }
 
-int config_apply_json(const char *patch_json, char *error_out, size_t error_size)
+static int apply_json_impl(const char *patch_json, char *error_out,
+                           size_t error_size, int reject_locked)
 {
     if (error_out && error_size) {
         error_out[0] = '\0';
@@ -178,6 +239,12 @@ int config_apply_json(const char *patch_json, char *error_out, size_t error_size
         return -1;
     }
     memcpy(draft, &g_app_config, sizeof(AppConfig));
+    if (draft->keybinding_override_count < 0) {
+        draft->keybinding_override_count = 0;
+    }
+    if (draft->keybinding_override_count > MAX_KEYBINDING_OVERRIDES) {
+        draft->keybinding_override_count = MAX_KEYBINDING_OVERRIDES;
+    }
 
     JsonReader reader;
     json_reader_init(&reader, patch_json, strlen(patch_json));
@@ -255,10 +322,137 @@ int config_apply_json(const char *patch_json, char *error_out, size_t error_size
                             break;
                         }
                     } else {
-                        snprintf(error_out, error_size, "unknown equalizer key '%s'", key);
+                        if (error_out && error_size) {
+                            snprintf(error_out, error_size, "unknown equalizer key '%s'", key);
+                        }
                         failed = 1;
                         break;
                     }
+                }
+            }
+            continue;
+        }
+
+        if (strcmp(section, "keybindings") == 0) {
+            JsonValue bindings;
+            if (json_get_path(&reader, "keybindings", &bindings) != 0) {
+                continue;   /* 补丁未包含 keybindings */
+            }
+            if (bindings.type != JSON_VALUE_OBJECT) {
+                if (error_out && error_size) {
+                    snprintf(error_out, error_size, "'keybindings' must be an object");
+                }
+                failed = 1;
+                break;
+            }
+
+            JsonReader bindings_reader = reader;
+            if (json_reader_enter(&bindings_reader, &bindings) != 0) {
+                failed = 1;
+                break;
+            }
+
+            char action[MAX_KEYBINDING_ACTION_LEN * 2];
+            JsonValue value;
+            while (json_object_next(&bindings_reader, action, sizeof(action), &value) == 1) {
+                ActionId id = actions_from_id(action);
+                if (id == ACTION_NONE) {
+                    if (error_out && error_size) {
+                        snprintf(error_out, error_size, "unknown keybinding action '%s'", action);
+                    }
+                    failed = 1;
+                    break;
+                }
+                if (value.type != JSON_VALUE_STRING) {
+                    if (error_out && error_size) {
+                        snprintf(error_out, error_size,
+                                 "keybinding '%s' must be a string", action);
+                    }
+                    failed = 1;
+                    break;
+                }
+
+                char key[MAX_KEYBINDING_KEY_LEN * 2];
+                json_value_string(&value, key, sizeof(key));
+
+                if (strcmp(key, "default") == 0) {
+                    int out = 0;
+                    for (int i = 0; i < draft->keybinding_override_count; i++) {
+                        if (strcmp(draft->keybinding_overrides[i].action, action) == 0) {
+                            continue;
+                        }
+                        if (out != i) {
+                            draft->keybinding_overrides[out] =
+                                draft->keybinding_overrides[i];
+                        }
+                        out++;
+                    }
+                    draft->keybinding_override_count = out;
+                    continue;
+                }
+
+                /* Config.Set 严格模式：系统保留动作不允许改绑，
+                 * 但允许用 "default" 清理旧覆盖（上一分支已处理）。 */
+                if (reject_locked && !actions_is_bindable(id)) {
+                    if (error_out && error_size) {
+                        snprintf(error_out, error_size,
+                                 "action '%s' is locked and cannot be rebound", action);
+                    }
+                    failed = 1;
+                    break;
+                }
+
+                KeyStroke stroke;
+                if (keyname_parse(key, &stroke) != 0 || !keyname_is_bindable(stroke)) {
+                    if (error_out && error_size) {
+                        snprintf(error_out, error_size,
+                                 "invalid key '%s' for action '%s'", key, action);
+                    }
+                    failed = 1;
+                    break;
+                }
+
+                int index = -1;
+                for (int i = 0; i < draft->keybinding_override_count; i++) {
+                    if (strcmp(draft->keybinding_overrides[i].action, action) == 0) {
+                        index = i;
+                        break;
+                    }
+                }
+                if (index < 0) {
+                    if (draft->keybinding_override_count >= MAX_KEYBINDING_OVERRIDES) {
+                        if (error_out && error_size) {
+                            snprintf(error_out, error_size,
+                                     "too many keybinding overrides");
+                        }
+                        failed = 1;
+                        break;
+                    }
+                    index = draft->keybinding_override_count++;
+                }
+                copy_bounded(draft->keybinding_overrides[index].action,
+                             sizeof(draft->keybinding_overrides[index].action),
+                             action);
+                copy_bounded(draft->keybinding_overrides[index].key,
+                             sizeof(draft->keybinding_overrides[index].key),
+                             key);
+            }
+
+            if (!failed && !json_reader_ok(&bindings_reader)) {
+                if (error_out && error_size) {
+                    snprintf(error_out, error_size, "malformed keybindings object");
+                }
+                failed = 1;
+            }
+            if (!failed) {
+                char err[256];
+                if (actions_validate_overrides(draft->keybinding_overrides,
+                                               draft->keybinding_override_count,
+                                               err, sizeof(err)) != 0) {
+                    if (error_out && error_size) {
+                        snprintf(error_out, error_size, "%s", err);
+                    }
+                    failed = 1;
                 }
             }
             continue;
@@ -352,4 +546,17 @@ int config_apply_json(const char *patch_json, char *error_out, size_t error_size
     memcpy(&g_app_config, draft, sizeof(AppConfig));
     free(draft);
     return 0;
+}
+
+int config_apply_json(const char *patch_json, char *error_out, size_t error_size)
+{
+    /* 宽松模式：用于 Config.GetAll 回填镜像，允许读入旧配置里的锁定覆盖；
+     * 运行时 keymap 会忽略它们。 */
+    return apply_json_impl(patch_json, error_out, error_size, 0);
+}
+
+int config_apply_json_set(const char *patch_json, char *error_out, size_t error_size)
+{
+    /* 严格模式：用户/前端写入路径，系统保留动作只接受 "default"。 */
+    return apply_json_impl(patch_json, error_out, error_size, 1);
 }

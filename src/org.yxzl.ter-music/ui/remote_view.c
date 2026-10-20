@@ -26,6 +26,7 @@
 #include "remote/remote_cache.h"
 #include "remote/remote_store.h"
 #include "ui/dialog.h"
+#include "ui/keymap.h"
 #include "ui/menu_internal.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
@@ -50,7 +51,7 @@ static int g_remote_form_editing_idx = -1;
 
 /* Forward declarations for remote helpers */
 void remote_view_render(void);
-void remote_view_handle_input(int ch);
+int remote_view_handle_input(int ch);
 void remote_enter_list_mode(void);  /* non-static: declared in menu_internal.h */
 static void remote_start_add(void);
 static void remote_start_edit(int conn_idx);
@@ -775,24 +776,33 @@ void remote_view_render(void)
  * Remote device — input handling
  * ============================================================ */
 
-void remote_view_handle_input(int ch)
+int remote_view_handle_input(int ch)
 {
     int conn_count = remote_store_count();
+    ActionId action = keymap_resolve(CTX_REMOTE, ch);
+
+    /* Esc 是系统保留键：沿用各模式的返回语义 */
+    if (ch == 27) {
+        if (g_remote_mode == 2)
+            remote_form_cancel();
+        else
+            remote_go_back();
+        return 1;
+    }
 
     if (g_remote_mode == 0) {
-        switch (ch) {
-            case KEY_UP:
+        switch (action) {
+            case ACTION_REMOTE_UP:
                 g_remote_selected--;
                 if (g_remote_selected < 0) g_remote_selected = conn_count;
                 render_settings_content();
                 break;
-            case KEY_DOWN:
+            case ACTION_REMOTE_DOWN:
                 g_remote_selected++;
                 if (g_remote_selected > conn_count) g_remote_selected = 0;
                 render_settings_content();
                 break;
-            case 10:
-            case ' ':
+            case ACTION_REMOTE_ACTIVATE:
                 if (g_remote_selected >= 0 && g_remote_selected < conn_count) {
                     g_remote_selected_conn = g_remote_selected;
                     g_remote_mode = 1;
@@ -802,25 +812,25 @@ void remote_view_handle_input(int ch)
                     remote_start_add();
                 }
                 break;
-            case KEY_LEFT:
-            case 27:
+            case ACTION_REMOTE_LEFT:
                 remote_go_back();
+                break;
+            default:
                 break;
         }
     } else if (g_remote_mode == 1) {
-        switch (ch) {
-            case KEY_UP:
+        switch (action) {
+            case ACTION_REMOTE_UP:
                 g_remote_selected--;
                 if (g_remote_selected < 0) g_remote_selected = 4;
                 render_settings_content();
                 break;
-            case KEY_DOWN:
+            case ACTION_REMOTE_DOWN:
                 g_remote_selected++;
                 if (g_remote_selected > 4) g_remote_selected = 0;
                 render_settings_content();
                 break;
-            case 10:
-            case ' ':
+            case ACTION_REMOTE_ACTIVATE:
                 if (g_remote_selected == 0) {
                     remote_start_browse(g_remote_selected_conn);
                 } else if (g_remote_selected == 1) {
@@ -838,31 +848,30 @@ void remote_view_handle_input(int ch)
                     remote_delete_connection(g_remote_selected_conn);
                 }
                 break;
-            case KEY_LEFT:
-            case 27:
+            case ACTION_REMOTE_LEFT:
                 remote_go_back();
+                break;
+            default:
                 break;
         }
     } else if (g_remote_mode == 2) {
         int field_count = remote_form_field_count();
-        switch (ch) {
-            case KEY_UP:
+        switch (action) {
+            case ACTION_REMOTE_UP:
                 g_remote_selected--;
                 if (g_remote_selected < 0) g_remote_selected = field_count - 1;
                 render_settings_content();
                 break;
-            case KEY_DOWN:
+            case ACTION_REMOTE_DOWN:
                 g_remote_selected++;
                 if (g_remote_selected >= field_count) g_remote_selected = 0;
                 render_settings_content();
                 break;
-            case 10:
-            case ' ':
+            case ACTION_REMOTE_ACTIVATE:
                 remote_form_edit_field(g_remote_selected);
                 render_settings_content();
                 break;
-            case '+':
-            case '=':
+            case ACTION_REMOTE_ADJUST_UP:
                 if (g_remote_selected == 1) {
                     g_remote_form_config.protocol = (g_remote_form_config.protocol + 1) % 5;
                     if (g_remote_selected >= remote_form_field_count())
@@ -870,8 +879,7 @@ void remote_view_handle_input(int ch)
                     render_settings_content();
                 }
                 break;
-            case '-':
-            case '_':
+            case ACTION_REMOTE_ADJUST_DOWN:
                 if (g_remote_selected == 1) {
                     g_remote_form_config.protocol = (g_remote_form_config.protocol + 4) % 5;
                     if (g_remote_selected >= remote_form_field_count())
@@ -879,30 +887,30 @@ void remote_view_handle_input(int ch)
                     render_settings_content();
                 }
                 break;
-            case 's':
-            case 'S':
+            case ACTION_REMOTE_SAVE:
                 remote_form_save();
                 break;
-            case KEY_LEFT:
-            case 27:
+            case ACTION_REMOTE_LEFT:
                 remote_form_cancel();
+                break;
+            default:
                 break;
         }
     } else if (g_remote_mode == 3) {
         int total_items = 1 + g_remote_entry_count;
 
-        switch (ch) {
-            case KEY_UP:
+        switch (action) {
+            case ACTION_REMOTE_UP:
                 g_remote_selected--;
                 if (g_remote_selected < 0) g_remote_selected = total_items - 1;
                 render_settings_content();
                 break;
-            case KEY_DOWN:
+            case ACTION_REMOTE_DOWN:
                 g_remote_selected++;
                 if (g_remote_selected >= total_items) g_remote_selected = 0;
                 render_settings_content();
                 break;
-            case KEY_RIGHT:
+            case ACTION_REMOTE_RIGHT:
                 if (g_remote_selected > 0) {
                     int entry_idx = g_remote_selected - 1;
                     if (entry_idx >= 0 && entry_idx < g_remote_entry_count &&
@@ -921,8 +929,7 @@ void remote_view_handle_input(int ch)
                     }
                 }
                 break;
-            case 10:
-            case ' ':
+            case ACTION_REMOTE_ACTIVATE:
                 if (g_remote_selected == 0) {
                     remote_open_directory();
                 } else {
@@ -946,14 +953,19 @@ void remote_view_handle_input(int ch)
                     }
                 }
                 break;
-            case KEY_LEFT:
+            case ACTION_REMOTE_LEFT:
                 remote_go_back();
                 break;
-            case 27:
-                remote_go_back();
+            default:
                 break;
         }
+    } else {
+        return 0;
     }
+
+    /* 本上下文的动作即使当前模式无对应操作也视为已消费（与旧行为一致），
+     * 其他上下文的动作（含 global 回退）交回上层分发。 */
+    return (action != ACTION_NONE && actions_context(action) == CTX_REMOTE) ? 1 : 0;
 }
 
 /* ── 生命周期（main.c 启动 / ui.c 退出） ───────────────────────────── */

@@ -16,6 +16,7 @@
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include "config/config.h"
 #include "playlist/playlist.h"
 #include "library/library.h"
@@ -102,10 +103,12 @@ void render_history_content(void)
  * History view input handling
  * ============================================================ */
 
-void handle_history_input(int ch)
+int handle_history_input(int ch)
 {
-    switch (ch) {
-        case KEY_UP:
+    ActionId action = keymap_resolve(CTX_HISTORY, ch);
+
+    switch (action) {
+        case ACTION_HISTORY_UP:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx--;
                 if (g_menu_selected_idx < 0) g_menu_selected_idx = HISTORY_ITEM_COUNT - 1;
@@ -117,9 +120,9 @@ void handle_history_input(int ch)
                 if (g_content_selected_idx < 0) g_content_selected_idx = 0;
                 render_history_content();
             }
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_HISTORY_DOWN:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx++;
                 if (g_menu_selected_idx >= HISTORY_ITEM_COUNT) g_menu_selected_idx = 0;
@@ -130,28 +133,26 @@ void handle_history_input(int ch)
                 if (g_content_selected_idx >= g_dir_history.count) g_content_selected_idx = 0;
                 render_history_content();
             }
-            break;
+            return 1;
 
-        case KEY_RIGHT:
-        case 9:
+        case ACTION_HISTORY_RIGHT:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_focus_area = FOCUS_CONTENT;
                 g_content_selected_idx = 0;
                 render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
                 render_history_content();
             }
-            break;
+            return 1;
 
-        case KEY_LEFT:
+        case ACTION_HISTORY_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
                 g_focus_area = FOCUS_SIDEBAR;
                 render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
                 render_history_content();
             }
-            break;
+            return 1;
 
-        case 10:
-        case ' ':
+        case ACTION_HISTORY_ACTIVATE:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == 0) {
                     g_focus_area = FOCUS_CONTENT;
@@ -192,10 +193,9 @@ void handle_history_input(int ch)
                     }
                 }
             }
-            break;
+            return 1;
 
-        case 'a':
-        case 'A':
+        case ACTION_HISTORY_QUEUE_APPEND:
             if (g_focus_area == FOCUS_CONTENT &&
                 g_dir_history.count > 0 &&
                 g_content_selected_idx >= 0 &&
@@ -224,10 +224,9 @@ void handle_history_input(int ch)
                     render_history_content();
                 }
             }
-            break;
+            return 1;
 
-        case 'd':
-        case 'D':
+        case ACTION_HISTORY_DELETE:
             if (g_focus_area == FOCUS_CONTENT && g_dir_history.count > 0 &&
                 g_content_selected_idx >= 0 && g_content_selected_idx < g_dir_history.count) {
 
@@ -250,22 +249,18 @@ void handle_history_input(int ch)
                 show_status_message(i18n_get("history.entry_removed"));
                 render_history_content();
             }
-            break;
+            return 1;
 
-        case 'c':
-        case 'C':
+        case ACTION_HISTORY_CLEAR:
             if (g_focus_area == FOCUS_CONTENT) {
                 clear_dir_history();
                 g_content_selected_idx = 0;
                 show_status_message(i18n_get("history.cleared"));
                 render_history_content();
             }
-            break;
+            return 1;
 
-        case 'r':
-        case 'R':
-            /* NOTE: 'R' for rename is handled in playlist context only.
-             * This case is defined but does nothing for history. */
-            break;
+        default:
+            return 0;
     }
 }

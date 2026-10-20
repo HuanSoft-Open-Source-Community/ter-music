@@ -18,6 +18,9 @@ extern "C" {
 /* ── Extern globals ── */
 extern AppConfig g_app_config;
 
+/* 配置差异 JSON 补丁的推荐缓冲大小：需容纳全部键位覆盖 + 其他分区。 */
+#define CONFIG_DIFF_BUFFER_SIZE 65536
+
 /* ── 应用目录解析（遵循 XDG，兼容容器/沙箱重定向） ─────────────────
  *
  * 解析顺序（与 XDG Base Directory 规范及 Linyaps 打包契约一致）：
@@ -41,8 +44,28 @@ const char *app_cache_dir(int ensure);
  * 才能读写配置，形成“核心反向依赖界面”。 */
 void ensure_config_dir_exists(void);   /* 解析并缓存配置路径（遵循 XDG） */
 const char *get_config_dir(void);      /* 已解析的配置目录，未初始化时返回 NULL */
+const char *get_config_file_path(void);/* 已解析的 config.xml 完整路径，未初始化时返回 NULL */
 void init_default_config(void);        /* 全量默认值（不读文件） */
 void load_config(void);                /* 默认值 + XML 读取（不改运行时全局） */
+
+/**
+ * 只读解析 XML 中的 <keybindings><binding action="..." key="..."/></keybindings>。
+ *
+ * 严格按文件顺序原样拷贝：不校验 action/key、不去重、不做冲突降级，
+ * 供 `ter-music keys check` 发现被运行时加载降级掉的非法项。
+ * 不触发版本迁移，也不写盘。
+ *
+ * @param path       config.xml 路径（可为 get_config_file_path()）
+ * @param out        输出数组（max 条）
+ * @param max        输出容量（通常为 MAX_KEYBINDING_OVERRIDES）
+ * @param count_out  实际读取条数（成功时写入）
+ * @param err        失败原因（可为 NULL）
+ * @param err_size   err 缓冲大小
+ * @return 0 成功（含文件不存在/无该段，此时 count_out=0）；
+ *         -1 解析失败、条目超过 max 或参数非法
+ */
+int config_load_raw_keybindings(const char *path, KeyBindingOverride *out, int max,
+                                int *count_out, char *err, size_t err_size);
 
 /* 版本迁移：把 config.xml 推进到 CONFIG_CURRENT_VERSION（含 v5→v6 的远程段
  * 移交、v6→v7 与 v7→v8 的新键落盘）。config.xml 归核心独占写，因此只有核心调用它。 */

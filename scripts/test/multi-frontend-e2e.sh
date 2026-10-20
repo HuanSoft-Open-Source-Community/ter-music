@@ -106,13 +106,13 @@ info "stop_core_on_exit=0 夹具：本脚本的续播场景以它为前提"
 mkdir -p "$XDG_CONFIG_HOME/ter-music"
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="8">
+<ter-music-config version="9">
   <preferences>
     <stop_core_on_exit>0</stop_core_on_exit>
   </preferences>
 </ter-music-config>
 EOF
-ok "已写入 stop_core_on_exit=0 夹具（属性 8 文件，显式值不会被迁移块回卷）"
+ok "已写入 stop_core_on_exit=0 夹具（属性 9 文件，显式值不会被迁移块回卷）"
 
 info "TUI（前端 A）拉起核心并推入 4 条内容"
 # pty 输出落到 tui.out：歌词栏断言要看**界面实际画出来的字**。窗口尺寸显式

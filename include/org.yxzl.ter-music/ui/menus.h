@@ -13,6 +13,20 @@
 #define MENU_VIEWS_H
 
 #include "types.h"
+#include "keymap/actions.h"
+
+/* 底部提示条单项：动作、`显示键:名称` 文本与终端显示宽度。 */
+typedef struct {
+    ActionId action;
+    char label[96];
+    int width;
+} MenuHintItem;
+
+/* 按当前有效键位构建固定 9 项提示；返回写入条数。 */
+int build_menu_hint_items(MenuHintItem *items, int max);
+
+/* 执行全局动作（退出、视图切换、曲库开关）；已处理返回 1。 */
+int execute_global_action(ActionId action);
 
 void init_menu_views(void);
 void render_menu_frame(const char *title);

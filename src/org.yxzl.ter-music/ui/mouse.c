@@ -232,24 +232,21 @@ int get_lyric_index_from_window_row(int window_y, int *lyric_index, double *time
 }
 
 /* ============================================================
- * Menu hint bar click (F-key from bottom bar)
+ * Menu hint bar click (column -> action)
  * ============================================================ */
 
-int get_menu_hint_fkey_from_column(int screen_x)
+int get_menu_hint_action_from_column(int screen_x, ActionId *action)
 {
-    const char *labels[] = {
-        i18n_get("hotkey.f1"), i18n_get("hotkey.f2"), i18n_get("hotkey.f3"),
-        i18n_get("hotkey.f4"), i18n_get("hotkey.f5"), i18n_get("hotkey.f6"),
-        i18n_get("hotkey.f7"), i18n_get("hotkey.f8"), i18n_get("hotkey.f9")
-    };
-
+    MenuHintItem items[9];
+    int count = build_menu_hint_items(items, 9);
     int col = 2;
 
-    for (int i = 0; i < 9; i++) {
-        int width = utf8_str_width(labels[i]);
-        if (screen_x >= col && screen_x < col + width)
-            return KEY_F(i + 1);
-        col += width + 2;
+    for (int i = 0; i < count; i++) {
+        if (screen_x >= col && screen_x < col + items[i].width) {
+            if (action) *action = items[i].action;
+            return 1;
+        }
+        col += items[i].width + 2;
     }
     return 0;
 }
@@ -263,9 +260,9 @@ int handle_menu_hint_bar_click(const MEVENT *event)
     (void)max_x;
 
     if (event->y == max_y - 1) {
-        int fkey = get_menu_hint_fkey_from_column(event->x);
-        if (fkey != 0) {
-            handle_function_keys(fkey);
+        ActionId action = ACTION_NONE;
+        if (get_menu_hint_action_from_column(event->x, &action)) {
+            execute_global_action(action);
             return 1;
         }
     }

@@ -904,7 +904,8 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `cue_encoding`: CUE file character encoding (0=Auto, 1=UTF-8, 2=GB18030, 3=GBK, 4=BIG5, 5=Shift-JIS)
 - `core_exit_when_no_frontend`: let the core exit by itself once no front end has been attached for 10 s (0/1, default 0)
-- `stop_core_on_exit`: stop the playback core when a front end exits — the front end sends `Control.Quit` instead of `Control.Detach`, and only when it really attached to that core (handshake done, `Attach` token held) (0/1, default 1 — with 0, closing the TUI keeps the music playing in the background). The key arrived with configuration contract version 8, whose number the `version` attribute of `config.xml` now carries instead of the old `2.2`; downgrading to an older build does not fail, but that build ignores the key and writes `2.2` back on its next save, so the explicit value is lost and the upgrade re-applies the default
+- `stop_core_on_exit`: stop the playback core when a front end exits — the front end sends `Control.Quit` instead of `Control.Detach`, and only when it really attached to that core (handshake done, `Attach` token held) (0/1, default 1 — with 0, closing the TUI keeps the music playing in the background). The key arrived with configuration contract version 8; the `version` attribute of `config.xml` now carries the current contract number (9) instead of the old `2.2`; downgrading to an older build does not fail, but that build ignores the key and writes `2.2` back on its next save, so the explicit value is lost and the upgrade re-applies the default
+- Keybinding overrides live in the optional `<keybindings>` section (contract v9). Only overrides are stored; actions without an entry use their built-in keys. See [5.12 Shortcut Cheat Sheet](#512-shortcut-cheat-sheet) for the XML example and the key-name grammar
 - Remote server connections (SMB/SFTP/FTP/WebDAV/HTTP) are **not** stored in
   `config.xml`: the front end keeps them in its own `remote.xml` next to it
   (server entries plus password ciphertext, file mode 0600), and caches
@@ -1087,7 +1088,7 @@ last 10 tracks and removed when the player exits.
 
 | Group | Keys | Function |
 | ------ | ------------------- | -------- |
-| **Global** | `q` | Exit program |
+| **Global** | `q`/`Q` | Exit program |
 | <br /> | `F1` | Return to main |
 | <br /> | `F2` | Settings |
 | <br /> | `F3` | Playback history |
@@ -1126,9 +1127,75 @@ last 10 tracks and removed when the player exits.
 | <br /> | `Ctrl+L` | Toggle lyric seek mode |
 | <br /> | `-`/`_` | Decrease volume |
 | <br /> | `=`/`+` | Increase volume |
+| <br /> | `R` | Restart the playback core |
 | **Lyrics** | `Ctrl+L` | Toggle lyric seek mode |
 | <br /> | `↑`/`↓` | Select prev/next line (in seek mode) |
-| <br /> | `Enter`/`Space` | Jump to selected line (in seek mode) |
+
+#### Custom Keybindings
+
+Every non-text action above **except the system-reserved keys** can be rebound.
+The reserved keys are fixed and do not appear in the settings editor:
+
+- `F1`–`F9`: view/quit function keys
+- `q` / `Q`: quit
+- `Tab` / `Shift+Tab`: file/queue tab switch
+
+For all other actions, the built-in keys are defaults; after an action is
+rebound, **all** of its old default aliases stop working. `Esc` still
+cancels/returns.
+
+**Editing on the settings page:** open `F2` → `Settings → Shortcuts`. Use
+`↑`/`↓` to select an action, press `Enter` and then the new key. `Esc` cancels
+capture. A key already used by another action in the same context is rejected
+with a message and the old key is kept. `r` restores the selected action,
+`R` restores all actions, and `s` saves (nothing is written before saving).
+
+**config.xml:** only overrides are written, sorted by action id:
+
+```xml
+<ter-music-config version="9">
+  <keybindings>
+    <binding action="track.next" key="]"/>
+    <binding action="track.prev" key="["/>
+  </keybindings>
+</ter-music-config>
+```
+
+Overrides for system-reserved actions are ignored at runtime (the file entry is
+kept and `ter-music keys check` reports a warning); `Config.Set` rejects new
+bindings for them, while the value `"default"` is accepted for cleanup.
+
+**Key-name grammar (v1):**
+
+- Single printable ASCII character, case-sensitive: `a`–`z`, `A`–`Z`, `0`–`9`,
+  `!`–`~`. A space must be written as `space`.
+- `ctrl+a` … `ctrl+z`, except the ambiguous `ctrl+c` (SIGINT), `ctrl+h`
+  (Backspace), `ctrl+i` (Tab), `ctrl+j` (LF), `ctrl+m` (CR) and `ctrl+z`
+  (SIGTSTP).
+- Named keys: `up` `down` `left` `right` `home` `end` `pgup` `pgdn` `ins`
+  `del` `backspace` `tab` `btab` (Shift+Tab) `enter` `space` and `f1`–`f12`.
+  Named keys and the `ctrl+` prefix are lowercase; printable characters keep
+  their case.
+- Not supported: `alt+…`, multi-key sequences such as `gg`, non-ASCII
+  characters, bare control characters and empty/over-long names. `Esc` is
+  reserved and cannot be used as a binding value.
+
+**Auditing:** `ter-music keys list [--json]` prints every action with its
+context, label, effective keys, defaults, override flag and shadowing relations.
+`ter-music keys check [--json]` validates the configured file and exits non-zero
+on unknown actions, invalid keys, conflicts or actions without defaults.
+Missing terminfo capabilities for the current `$TERM` are reported as warnings
+only, so the same configuration stays portable across terminals.
+
+**Restoring defaults:** delete the action's `<binding>` from `<keybindings>`
+(remove the section when it becomes empty), use `r`/`R` on the settings page, or
+send `Config.Set` with `{"keybindings":{"action.id":"default"}}`.
+
+**Compatibility:** builds from before contract v9 ignore `<keybindings>` and
+still start, but saving from such a build drops the overrides. A front end older
+than v9 also does not recognize the `keybindings` object in `Config.GetAll`
+from a v9 core, so upgrade the front end and the core together. Keeping the
+file on v9 and using a current build preserves the overrides.
 
 ### 5.13 Terminal Resizing
 

@@ -153,6 +153,11 @@ static void ffmpeg_log_callback(void *ptr, int level, const char *fmt, va_list v
 
 void init_ffmpeg(void)
 {
+    /* 幂等：daemon 与前端（local/remote）都会调到这里，静音只需生效一次；
+     * 早于任何 avformat 使用才是关键（见 main.c 中的调用时机）。 */
+    static int done;
+    if (done) return;
+    done = 1;
     log_info("audio", "Initializing FFmpeg");
     avformat_network_init();
     av_log_set_level(AV_LOG_QUIET);
@@ -202,7 +207,9 @@ void init_audio_device(void)
             if (pw_probe_backend() == 0) {
                 g_active_backend = AUDIO_BACKEND_PIPEWIRE;
                 log_info("audio", "PipeWire backend selected");
-                printf("%s\n", i18n_get("audio.backend.pipewire"));
+                /* 后端名提示不再 printf(stdout)：local 模式下它在 initscr()
+                 * 之后执行、会污染 ncurses 屏幕；由调用方定向展示
+                 * （daemon 写 daemon.log，TUI 进状态行）。 */
                 return;
             }
             pipewire_unload(); pipewire_loaded = 0;
@@ -231,7 +238,7 @@ void init_audio_device(void)
             pa_connected = 1;
             g_active_backend = AUDIO_BACKEND_PULSE;
             log_info("audio", "PulseAudio connected successfully");
-            printf("%s\n", i18n_get("audio.backend.pulseaudio"));
+            /* 同上：后端名提示改由调用方定向展示，不写 stdout（详见 PipeWire 分支注释） */
             return;
 
 pulse_failed:
@@ -249,7 +256,7 @@ pulse_failed:
             alsa_ready = 1;
             g_active_backend = AUDIO_BACKEND_ALSA;
             log_info("audio", "ALSA backend ready, device='default'");
-            printf("%s\n", i18n_get("audio.backend.alsa"));
+            /* 同上：后端名提示改由调用方定向展示，不写 stdout（详见 PipeWire 分支注释） */
             return;
         } else if (g_active_backend == AUDIO_BACKEND_ALSA) {
             log_error("audio", "ALSA library could not be loaded");

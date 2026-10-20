@@ -54,6 +54,15 @@ static int count_substring(const char *haystack, const char *needle)
     return count;
 }
 
+static void set_binding(AppConfig *cfg, const char *action, const char *key)
+{
+    int index = cfg->keybinding_override_count++;
+    snprintf(cfg->keybinding_overrides[index].action,
+             sizeof(cfg->keybinding_overrides[index].action), "%s", action);
+    snprintf(cfg->keybinding_overrides[index].key,
+             sizeof(cfg->keybinding_overrides[index].key), "%s", key);
+}
+
 int main(void)
 {
     char buf[4096];
@@ -119,6 +128,76 @@ int main(void)
     /* 8. 输出始终 NUL 结尾且长度合理 */
     size_t written = config_diff_json(&before, &m, buf, sizeof(buf));
     CHECK(written > 2 && written < sizeof(buf) && buf[written] == '\0', "返回值即写入长度");
+
+    /* 9. 新增键位覆盖 */
+    AppConfig kb = before;
+    set_binding(&kb, "track.prev", "x");
+    diff_of(&before, &kb, buf, sizeof(buf));
+    CHECK(strstr(buf, "\"keybindings\":{\"track.prev\":\"x\"}") != NULL,
+          "新增覆盖输出 action:key");
+
+    /* 10. 数组顺序不同但语义相同 → 无 keybindings 分区 */
+    AppConfig kb_a = before;
+    set_binding(&kb_a, "track.prev", "x");
+    set_binding(&kb_a, "track.next", "]");
+    AppConfig kb_b = before;
+    set_binding(&kb_b, "track.next", "]");
+    set_binding(&kb_b, "track.prev", "x");
+    CHECK(strcmp(diff_of(&kb_a, &kb_b, buf, sizeof(buf)), "{}") == 0,
+          "覆盖数组顺序不影响差异");
+
+    /* 11. 删除覆盖 → default */
+    diff_of(&kb, &before, buf, sizeof(buf));
+    CHECK(strstr(buf, "\"keybindings\":{\"track.prev\":\"default\"}") != NULL,
+          "删除覆盖输出 default");
+
+    /* 12. 改值 */
+    AppConfig kb_c = before;
+    set_binding(&kb_c, "track.prev", "ctrl+q");
+    diff_of(&kb, &kb_c, buf, sizeof(buf));
+    CHECK(strstr(buf, "\"keybindings\":{\"track.prev\":\"ctrl+q\"}") != NULL,
+          "覆盖改值输出新键");
+
+    /* 13. 多个 action 按字典序稳定输出 */
+    AppConfig kb_many = before;
+    set_binding(&kb_many, "track.prev", "x");
+    set_binding(&kb_many, "track.next", "]");
+    set_binding(&kb_many, "list.up", "w");
+    diff_of(&before, &kb_many, buf, sizeof(buf));
+    {
+        const char *prev = strstr(buf, "\"track.prev\"");
+        const char *list = strstr(buf, "\"list.up\"");
+        const char *track = strstr(buf, "\"track.next\"");
+        CHECK(prev && list && track && list < track && track < prev,
+              "keybindings 按 action 字典序输出");
+    }
+
+    /* 14. 删除多项与新增混合时都出现 */
+    diff_of(&kb_a, &kb_c, buf, sizeof(buf));
+    CHECK(strstr(buf, "\"track.prev\":\"ctrl+q\"") != NULL,
+          "混合差异包含改值项");
+    CHECK(strstr(buf, "\"track.next\":\"default\"") != NULL,
+          "混合差异包含删除项");
+
+    /* 15. 最大覆盖量：128 条长 action/key 不得截断 */
+    {
+        AppConfig many = before;
+        many.keybinding_override_count = 128;
+        for (int i = 0; i < 128; i++) {
+            snprintf(many.keybinding_overrides[i].action,
+                     sizeof(many.keybinding_overrides[i].action),
+                     "action.%03d.abcdefghijklmnopqrstuvwxyz012345", i);
+            snprintf(many.keybinding_overrides[i].key,
+                     sizeof(many.keybinding_overrides[i].key),
+                     "ctrl+%c", 'a' + (i % 20));
+        }
+        char big[65536];
+        memset(big, 0, sizeof(big));
+        size_t n = config_diff_json(&before, &many, big, sizeof(big));
+        CHECK(n > 2 && n < sizeof(big) && big[n] == '\0', "最大覆盖量 diff 未截断");
+        CHECK(strstr(big, "\"action.127.") != NULL, "最大覆盖量 diff 含最后一条");
+        CHECK(big[n - 1] == '}', "最大覆盖量 diff 以 } 收尾");
+    }
 
     printf("%d checks, %d failures\n", checks, failures);
     if (failures == 0) {

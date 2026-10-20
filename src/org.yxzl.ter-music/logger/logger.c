@@ -83,6 +83,16 @@ int logger_is_enabled(void) {
     return enabled;
 }
 
+int logger_output_fd(void) {
+    int fd = -1;
+    pthread_mutex_lock(&g_log_mutex);
+    if (g_log_file && g_log_enabled) {
+        fd = fileno(g_log_file);
+    }
+    pthread_mutex_unlock(&g_log_mutex);
+    return fd;
+}
+
 static void log_write(LogLevel level, const char *module, const char *fmt, va_list args) {
     if (!fmt || !module) return;
 

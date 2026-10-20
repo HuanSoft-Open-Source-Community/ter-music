@@ -26,6 +26,11 @@ int config_render_json(const AppConfig *cfg, char *out, size_t out_size);
  * error_out 收到失败原因（可为 NULL）。返回 0 成功，-1 失败。 */
 int config_apply_json(const char *patch_json, char *error_out, size_t error_size);
 
+/* 严格应用（Config.Set / 用户写入路径）：在 config_apply_json 的基础上，
+ * 拒绝为系统保留动作设置新键；值 "default" 仍允许用于清理旧覆盖。
+ * 原子性相同。 */
+int config_apply_json_set(const char *patch_json, char *error_out, size_t error_size);
+
 #ifdef __cplusplus
 }
 #endif

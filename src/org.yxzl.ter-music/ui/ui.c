@@ -26,6 +26,7 @@
 #include "config/config.h"
 #include "media/session.h"
 #include "ui/lyrics.h"
+#include "ui/keymap.h"
 #include "ui/menus.h"
 #include "library/library.h"
 #include "library/browser/browser.h"
@@ -40,6 +41,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <ncursesw/ncurses.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -54,6 +56,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <stdint.h>
+#include <termios.h>
 
 /* ── Forward declarations from split modules ── */
 extern void render_playlist_content(void);
@@ -230,6 +233,53 @@ void process_pending_ui_refresh(void)
  * ncurses initialization
  * ============================================================ */
 
+/* stderr 守卫状态：>=0 表示 fd2 已被改道，值为保存的真实 stderr fd */
+static int g_saved_stderr_fd = -1;
+
+/* TUI 期间的 stderr 守卫（只改道 fd2，**绝不改道 fd1**）。
+ *
+ * fd1 不可改道：ncurses 自身经 stdout 输出，实测 initscr() 之后把 fd1
+ * dup2 到 /dev/null 会让界面立即冻结，因此 stdout 侧的污染（audio.c 的
+ * 后端名 printf）走定向修复覆盖，不碰 fd1。
+ * fd2 改道用于拦截第三方库与遗留 stderr 写入：FFmpeg 扫描日志、libxml2
+ * 的 config.xml 缺失警告等在 initscr() 之后落到提示条行的输出。
+ * --debug 时改道到调试日志 fd（logger_output_fd()），否则丢进 /dev/null。
+ * 幂等：已守卫时直接返回；任何一步失败都收干净 dup 的 fd，保持未守卫状态。 */
+static void ui_guard_stdio(void)
+{
+    if (g_saved_stderr_fd >= 0) return;
+
+    int fd = dup(STDERR_FILENO);
+    if (fd < 0) return; /* dup 失败即放弃，不改道 */
+
+    int target = logger_output_fd();
+    int opened_fd = -1;
+    if (target < 0) {
+        opened_fd = open("/dev/null", O_WRONLY);
+        target = opened_fd;
+    }
+    if (target < 0 || dup2(target, STDERR_FILENO) < 0) {
+        /* 失败路径：把已持有的 fd 全部收干净，保持未守卫状态 */
+        if (opened_fd >= 0) close(opened_fd);
+        close(fd);
+        return;
+    }
+    if (opened_fd >= 0) close(opened_fd); /* dup2 已复制引用，临时 fd 可关 */
+    g_saved_stderr_fd = fd;
+}
+
+/* 恢复真实 stderr（幂等）：退出路径与崩溃处理器在打印错误前调用，
+ * 保证 fprintf(stderr, …) / backtrace_symbols_fd(…, STDERR_FILENO)
+ * 仍能输出到真实终端。 */
+void ui_restore_stdio(void)
+{
+    if (g_saved_stderr_fd < 0) return;
+    fflush(stderr);
+    dup2(g_saved_stderr_fd, STDERR_FILENO);
+    close(g_saved_stderr_fd);
+    g_saved_stderr_fd = -1;
+}
+
 void init_ncurses(void)
 {
     log_info("ui", "Initializing ncurses");
@@ -244,6 +294,16 @@ void init_ncurses(void)
 
     initscr();
     cbreak();
+    /* cbreak() 不清 IXON：终端的软件流控会吞掉 Ctrl+Q/Ctrl+S，使这两个
+     * 合法键名（keyname 允许 ctrl+q / ctrl+s）永远收不到。全屏 TUI 不需要
+     * XON/XOFF，关掉它们；ISIG 保持开启，Ctrl+C 仍按信号退出。 */
+    {
+        struct termios tio;
+        if (tcgetattr(STDIN_FILENO, &tio) == 0) {
+            tio.c_iflag &= ~(IXON | IXOFF);
+            tcsetattr(STDIN_FILENO, TCSANOW, &tio);
+        }
+    }
     noecho();
     keypad(stdscr, TRUE);
     mousemask(BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED | BUTTON1_TRIPLE_CLICKED | BUTTON1_RELEASED, NULL);
@@ -263,6 +323,7 @@ void init_ncurses(void)
     }
 
         bkgdset(' ' | COLOR_PAIR(0));  /* transparent bg via border pair */
+        ui_guard_stdio();  /* initscr 之后改道 fd2：拦截第三方库/遗留 stderr 输出污染提示条 */
         clear();
 }
 
@@ -414,9 +475,11 @@ static void sync_player_revisions(void)
  * 与“状态消息”监听同构，均由核心在重载路径回调。 */
 static void ui_on_config_reloaded(void)
 {
-    log_info("ui", "Applying UI-side config reload (theme + panel refresh)");
+    log_info("ui", "Applying UI-side config reload (theme + keymap + panel refresh)");
+    keymap_reload();
     apply_color_theme();
     request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    rerender_active_view();
 }
 
 void run_event_loop(void)
@@ -424,6 +487,9 @@ void run_event_loop(void)
     extern volatile sig_atomic_t g_should_exit;
     int ch;
     log_info("ui", "Event loop started");
+
+    /* 键位表按配置重建一次；此后所有输入都走上下文 → 动作分发。 */
+    keymap_ensure_loaded();
 
     render_playlist_content();
     render_controls();
@@ -492,15 +558,29 @@ void run_event_loop(void)
             continue;
         }
 
-        /* M 曲库浏览器激活时，按键优先交给 handle_library_input（方向键/
-         * Enter/空格/s/S/r/R/a/A/ESC 等全部语义见 browser.c 各视图处理器）。
-         * 保留给主循环的键：'M' 走下方统一 toggle 退出浏览器；q/Q 全局退出；
-         * KEY_RESIZE/KEY_MOUSE 走既有终端与鼠标路径。ESC 必须在这里直达
-         * 浏览器（返回上层/退出），不能再进 esc_pending 功能键链。 */
+        /* 曲库浏览器激活时优先按浏览器上下文解析：浏览器动作 →
+         * handle_library_action；全局动作 → execute_global_action；其余不处理。
+         * KEY_RESIZE/KEY_MOUSE 仍走既有终端与鼠标路径。ESC 是系统保留键，
+         * 必须直达浏览器（返回上层/退出），不能进 esc_pending 功能键链。 */
         if (g_library_state.active && g_current_view == VIEW_MAIN &&
-            ch != 'M' && ch != 'q' && ch != 'Q' &&
             ch != KEY_RESIZE && ch != KEY_MOUSE) {
-            handle_library_input(ch);
+            if (ch == 27) {
+                handle_library_input(ch);
+                continue;
+            }
+            ActionId library_action = keymap_resolve(CTX_BROWSER, ch);
+            if (actions_context(library_action) == CTX_BROWSER) {
+                handle_library_action(library_action);
+                request_ui_refresh(UI_DIRTY_PLAYLIST);
+                continue;
+            }
+            if (actions_context(library_action) == CTX_GLOBAL) {
+                if (library_action == ACTION_APP_QUIT) {
+                    log_info("ui", "Event loop exiting on quit action");
+                    break;
+                }
+                execute_global_action(library_action);
+            }
             continue;
         }
 
@@ -510,7 +590,12 @@ void run_event_loop(void)
             if (now - esc_pending_time > ESC_TIMEOUT_MS) {
                 esc_pending = 0;
             } else if (ch >= '1' && ch <= '9') {
-                handle_function_keys(KEY_F(1 + (ch - '1')));
+                /* 旧 ESC+1..9 链合成逻辑 F1..F9，按当前键位触发全局动作。 */
+                ActionId fkey_action =
+                    keymap_resolve(CTX_GLOBAL, KEY_F(1 + (ch - '1')));
+                if (fkey_action != ACTION_NONE) {
+                    execute_global_action(fkey_action);
+                }
                 esc_pending = 0;
                 continue;
             }
@@ -530,7 +615,7 @@ void run_event_loop(void)
             if (g_current_view == VIEW_MAIN) {
                 /* When a popup is active, ESC must dismiss it immediately.
                  * Do NOT enter the esc_pending chain so the byte falls through
-                 * to handle_popup_input() at line ~461. */
+                 * to the popup cancel action below. */
                 if (g_popup.active && g_control_focus == 1) {
                     /* fall through — popup handler will catch the ESC */
                 } else {
@@ -553,29 +638,6 @@ void run_event_loop(void)
             continue;
         }
 
-        if (ch >= KEY_F(1) && ch <= KEY_F(9)) {
-            handle_function_keys(ch);
-            continue;
-        }
-
-        if (ch == 'q' || ch == 'Q') {
-            log_info("ui", "Event loop exiting on 'q' key");
-            break;
-        }
-
-        if (g_current_view == VIEW_MAIN) {
-            if (ch == '+' || ch == '=') {
-                player_adjust_volume(VOLUME_STEP_PERCENT);
-                render_controls();
-                continue;
-            }
-            if (ch == '-' || ch == '_') {
-                player_adjust_volume(-VOLUME_STEP_PERCENT);
-                render_controls();
-                continue;
-            }
-        }
-
         if (ch == KEY_RESIZE) {
             delwin(win_playlist);
             delwin(win_controls);
@@ -591,532 +653,593 @@ void run_event_loop(void)
         }
 
         if (g_current_view != VIEW_MAIN) {
+            /* 退出是全局动作，必须在视图分发之前生效（原 q/Q 分支位置）。 */
+            if (keymap_resolve(CTX_GLOBAL, ch) == ACTION_APP_QUIT) {
+                log_info("ui", "Event loop exiting on quit action");
+                break;
+            }
             handle_menu_input(ch);
             continue;
         }
 
-        // Main view input handling
-        if (!playlist_is_loaded() && g_control_focus == 0) {
-            if (ch == 'O' || ch == 'o') { prompt_open_folder(); render_playlist_content(); continue; }
-            if (ch == 'I' || ch == 'i') { prompt_append_folder(); render_playlist_content(); continue; }
-        }
-
-        if (ch == 'C') {
-            g_control_focus = 1;
-            g_current_control_idx = 1;
-            render_playlist_content();
-            render_controls();
-            continue;
-        }
-
-        if (ch == 'L') {
-            g_control_focus = 0;
-            render_controls();
-            render_playlist_content();
-            continue;
-        }
-
-        /* 断线时 R = 一键重启核心（状态机在门面里，界面不阻塞） */
-        if ((ch == 'R') && player_is_offline()) {
-            if (player_restart_core() == 0) {
-                update_controls_status(i18n_get("core.restart.done"));
-            } else {
-                update_controls_status(i18n_get("core.restart.failed"));
-            }
-            render_controls();
-            continue;
-        }
-
-        if (ch == 'M') {
-            library_browser_toggle();
-            render_playlist_content();
-            render_controls();
-            continue;
-        }
-
-        if (ch == 12 && g_current_view == VIEW_MAIN) {  /* Ctrl+L */
-            int highlight = -1;
-            int has_lyrics = player_lyrics_highlight(&highlight, NULL, NULL);
-            if (has_lyrics && highlight >= 0) {
-                g_lyric_cursor_mode = !g_lyric_cursor_mode;
-                if (g_lyric_cursor_mode) {
-                    g_lyric_cursor_index = highlight;   /* 光标是界面私有状态 */
-                    update_controls_status(i18n_get("lyrics.seek_enabled"));
-                } else {
-                    update_controls_status(i18n_get("lyrics.seek_disabled"));
+        /* ── 主视图：先解析上下文（popup → 控件 / 歌词 → 列表），再按动作分发 ── */
+        ActionId action;
+        if (g_control_focus == 1) {
+            /* 弹窗激活时 popup 动作优先；其余按键回退到控件上下文。 */
+            if (g_popup.active) {
+                if (ch == 27) {
+                    handle_popup_action(ACTION_POPUP_CANCEL);
+                    continue;
                 }
+                ActionId popup_action = keymap_resolve(CTX_POPUP, ch);
+                if (actions_context(popup_action) == CTX_POPUP) {
+                    handle_popup_action(popup_action);
+                    continue;
+                }
+            }
+            action = keymap_resolve(CTX_MAIN_CONTROL, ch);
+        } else {
+            KeyContext list_context = CTX_MAIN_LIST;
+            if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
+                list_context = CTX_MAIN_LYRIC;
+            } else if (g_search_state.active || g_search_state.in_progress) {
+                list_context = CTX_MAIN_SEARCH;
+            }
+            action = keymap_resolve(list_context, ch);
+        }
+
+        /* 全局/主视图动作：不受列表是否加载影响（与原代码顺序一致）。 */
+        int quit_loop = 0;
+        switch (action) {
+            case ACTION_APP_QUIT:
+                log_info("ui", "Event loop exiting on quit action");
+                quit_loop = 1;
+                break;
+            case ACTION_VIEW_MAIN:
+            case ACTION_VIEW_SETTINGS:
+            case ACTION_VIEW_HISTORY:
+            case ACTION_VIEW_PLAYLIST:
+            case ACTION_VIEW_FAVORITES:
+            case ACTION_VIEW_INFO:
+            case ACTION_VIEW_LANGUAGE:
+            case ACTION_VIEW_HELP:
+            case ACTION_LIBRARY_TOGGLE:
+                execute_global_action(action);
+                continue;
+            case ACTION_VOLUME_UP:
+                player_adjust_volume(VOLUME_STEP_PERCENT);
                 render_controls();
-                render_lyrics();
+                continue;
+            case ACTION_VOLUME_DOWN:
+                player_adjust_volume(-VOLUME_STEP_PERCENT);
+                render_controls();
+                continue;
+            case ACTION_CORE_RESTART:
+                /* 断线时 R = 一键重启核心（状态机在门面里，界面不阻塞） */
+                if (player_is_offline()) {
+                    if (player_restart_core() == 0) {
+                        update_controls_status(i18n_get("core.restart.done"));
+                    } else {
+                        update_controls_status(i18n_get("core.restart.failed"));
+                    }
+                    render_controls();
+                }
+                continue;
+            case ACTION_FOCUS_CONTROLS:
+                g_control_focus = 1;
+                g_current_control_idx = 1;
+                render_playlist_content();
+                render_controls();
+                continue;
+            case ACTION_FOCUS_LIST:
+                g_control_focus = 0;
+                render_controls();
+                render_playlist_content();
+                continue;
+            case ACTION_LYRICS_SEEK_MODE: {
+                int highlight = -1;
+                int has_lyrics = player_lyrics_highlight(&highlight, NULL, NULL);
+                if (has_lyrics && highlight >= 0) {
+                    g_lyric_cursor_mode = !g_lyric_cursor_mode;
+                    if (g_lyric_cursor_mode) {
+                        g_lyric_cursor_index = highlight;   /* 光标是界面私有状态 */
+                        update_controls_status(i18n_get("lyrics.seek_enabled"));
+                    } else {
+                        update_controls_status(i18n_get("lyrics.seek_disabled"));
+                    }
+                    render_controls();
+                    render_lyrics();
+                    continue;
+                }
+                if (!has_lyrics) {
+                    update_controls_status(i18n_get("lyrics.no_position"));
+                }
                 continue;
             }
-            if (!has_lyrics) {
-                update_controls_status(i18n_get("lyrics.no_position"));
-            }
-            continue;
+            default:
+                break;
         }
+        if (quit_loop) break;
 
         // Control focus mode
         if (g_control_focus == 1) {
-            /* Intercept popup input first */
-            if (g_popup.active && handle_popup_input(ch))
-                continue;
-
-            switch (ch) {
-                case KEY_UP:
+            switch (action) {
+                case ACTION_CONTROL_UP:
                     if (g_current_control_idx == CONTROL_IDX_VOLUME) {
                         player_adjust_volume(VOLUME_STEP_PERCENT);
                         render_controls();
                     }
                     break;
-                case KEY_DOWN:
+                case ACTION_CONTROL_DOWN:
                     if (g_current_control_idx == CONTROL_IDX_VOLUME) {
                         player_adjust_volume(-VOLUME_STEP_PERCENT);
                         render_controls();
                     }
                     break;
-                case KEY_LEFT:
+                case ACTION_CONTROL_LEFT:
                     g_current_control_idx--;
                     if (g_current_control_idx < 0) g_current_control_idx = CONTROL_COUNT - 2;
                     render_controls();
                     break;
-                case KEY_RIGHT:
+                case ACTION_CONTROL_RIGHT:
                     g_current_control_idx++;
                     if (g_current_control_idx >= CONTROL_COUNT - 1) g_current_control_idx = 0;
                     render_controls();
                     break;
-                case ',': seek_relative_seconds(-SEEK_STEP_SECONDS); break;
-                case '.': seek_relative_seconds(SEEK_STEP_SECONDS); break;
-                case ' ':
+                case ACTION_SEEK_BACK: seek_relative_seconds(-SEEK_STEP_SECONDS); break;
+                case ACTION_SEEK_FORWARD: seek_relative_seconds(SEEK_STEP_SECONDS); break;
+                case ACTION_CONTROL_ACTIVATE:
                     activate_current_control();
                     render_playlist_content();
                     render_controls();
                     break;
+                default:
+                    break;
             }
-        } else {
-            // List focus mode
-            if (!playlist_is_loaded()) continue;
-
-            switch (ch) {
-                case KEY_UP:
-                    if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
-                        lyric_cursor_step(-1);
-                    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                        if (g_queue_selected_index > 0) { g_queue_selected_index--; render_playlist_content(); }
-                    } else if (g_search_state.active || g_search_state.in_progress) {
-                        if (g_search_state.selected_index > 0) {
-                            g_search_state.selected_index--;
-                            render_playlist_content();
-                        }
-                    } else {
-                        if (g_selected_index > 0) { g_selected_index--; render_playlist_content(); }
-                    }
-                    break;
-                case KEY_DOWN:
-                    if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
-                        lyric_cursor_step(1);
-                    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                        if (g_queue_selected_index < player_queue_count() - 1) { g_queue_selected_index++; render_playlist_content(); }
-                    } else if (g_search_state.active || g_search_state.in_progress) {
-                        if (g_search_state.selected_index < g_search_state.result_count - 1) {
-                            g_search_state.selected_index++;
-                            render_playlist_content();
-                        }
-                    } else {
-                        int max_count = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
-                        if (g_selected_index < max_count - 1) {
-                            g_selected_index++;
-                            render_playlist_content();
-                        }
-                    }
-                    break;
-                case 'j':
-                    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                        if (g_queue_selected_index < player_queue_count() - 1)
-                            g_queue_selected_index++;
-                        render_playlist_content();
-                    } else if (!g_lyric_cursor_mode) {
-                        int max_count = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
-                        if (g_selected_index < max_count - 1)
-                            g_selected_index++;
-                        render_playlist_content();
-                    }
-                    break;
-                case 'k':
-                    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                        if (g_queue_selected_index > 0)
-                            g_queue_selected_index--;
-                        render_playlist_content();
-                    } else if (!g_lyric_cursor_mode) {
-                        if (g_selected_index > 0)
-                            g_selected_index--;
-                        render_playlist_content();
-                    }
-                    break;
-                case ' ':
-                case 10:
-                    if (g_search_state.in_progress) {
-                        update_controls_status(i18n_get("status.search_wait"));
-                        break;
-                    }
-                    if (g_search_state.active && g_search_state.result_count > 0) {
-                        int original_index = g_search_state.result_indices[g_search_state.selected_index];
-                        ui_play_track_index(original_index);
-                        g_search_state.active = 0;
-                        g_selected_index = g_sort_state.active ? 0 : original_index;
-                        render_playlist_content();
-                    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && player_queue_count() > 0) {
-                        int queue_pos = g_queue_selected_index >= 0 && g_queue_selected_index < player_queue_count()
-                            ? g_queue_selected_index : 0;
-                        player_queue_play(queue_pos);
-                        int play_idx = player_queue_index_at(queue_pos);
-                        if (play_idx >= 0) {
-                            g_selected_index = play_idx;
-                        }
-                    } else {
-                        /* Tree mode: toggle directory expand, or play file */
-                        if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
-                            && !g_search_state.active) {
-                            int node_type = get_visible_node_type(g_selected_index);
-                            if (node_type == TREE_NODE_DIRECTORY) {
-                                int tree_idx = get_visible_node_tree_index(g_selected_index);
-                                playlist_toggle_directory_expand(tree_idx);
-                                if (g_selected_index >= playlist_visible_count())
-                                    g_selected_index = playlist_visible_count() - 1;
-                                if (g_selected_index < 0) g_selected_index = 0;
-                                render_playlist_content();
-                                break;
-                            }
-                            /* File node: get real track index */
-                            int real_idx = get_visible_node_track_index(g_selected_index);
-                            if (real_idx >= 0)
-                                ui_play_track_index(real_idx);
-                            break;
-                        }
-                        int play_idx = g_selected_index;
-                        if (g_sort_state.active) play_idx = g_sort_state.sorted_indices[g_selected_index];
-                        ui_play_track_index(play_idx);
-                    }
-                    break;
-                case 'O': case 'o': prompt_open_folder(); render_playlist_content(); break;
-                case 'i':
-                    if (player_queue_count() > 0 && player_track_index() >= 0) {
-                        int track_idx = g_selected_index;
-                        if (g_search_state.active)
-                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                        else if (g_sort_state.active)
-                            track_idx = g_sort_state.sorted_indices[g_selected_index];
-                        else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-                            track_idx = get_visible_node_track_index(g_selected_index);
-                            if (track_idx < 0) break;
-                        }
-                        player_queue_insert_after(track_idx);
-                        update_controls_status(i18n_get("status.inserted_next"));
-                    }
-                    break;
-                case 'I': prompt_append_folder(); render_playlist_content(); break;
-                case 'f': case 'F':
-                    if (playlist_count() > 0) {
-                        Track t;
-                        int track_idx = g_selected_index;
-                        if (g_search_state.active) {
-                            pthread_mutex_lock(&g_search_mutex);
-                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                            pthread_mutex_unlock(&g_search_mutex);
-                        } else if (g_sort_state.active) {
-                            track_idx = g_sort_state.sorted_indices[g_selected_index];
-                        } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-                            track_idx = get_visible_node_track_index(g_selected_index);
-                            if (track_idx < 0) break;
-                        }
-                        get_track_metadata(track_idx, &t);
-                        int result = add_to_favorites(&t);
-                        update_controls_status(result == 0
-                            ? i18n_get("favorites.added")
-                            : i18n_get("favorites.exists_or_full"));
-                    }
-                    break;
-                case '/':
-                case 'S':
-                    if (g_current_view == VIEW_MAIN) {
-                        search_prompt();
-                        continue;
-                    }
-                    break;
-                case 27:
-                    if (g_search_state.active || g_search_state.in_progress) {
-                        search_async_cancel();
-                        pthread_mutex_lock(&g_search_mutex);
-                        g_search_state.active = 0;
-                        g_search_state.in_progress = 0;
-                        pthread_mutex_unlock(&g_search_mutex);
-                        render_playlist_content();
-                        update_controls_status(i18n_get("status.search_cancelled"));
-                        continue;
-                    }
-                    break;
-                case 9:   /* Tab */
-                case KEY_BTAB:  /* Shift+Tab (KEY_BTAB = 353) */
-                    /* ── Lyric cursor mode: toggle between embedded / external lyrics ── */
-                    if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
-                        int new_source = (player_lyrics_source() == LYRICS_SOURCE_EMBEDDED)
-                            ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
-                        if (player_lyrics_reload_source(new_source) == 0 &&
-                            player_backend() == PLAYER_BACKEND_REMOTE) {
-                            /* 来源偏好是前端的**内容**（按曲目记在曲库里）。本地模式
-                             * 下核心与本前端同进程，由核心经 lyrics_set_source_hook
-                             * 回调落库；远端模式下核心是另一个进程、也没有内容库，
-                             * 只能由发起这次切换的前端自己落库。 */
-                            const InfoTrack *track = player_track();
-                            if (track && track->path[0] != '\0') {
-                                library_set_lyrics_source(track->path, new_source);
-                            }
-                        }
-                        update_controls_status(
-                            new_source == LYRICS_SOURCE_EMBEDDED
-                                ? i18n_get("lyrics.source_embedded")
-                                : i18n_get("lyrics.source_external"));
-                        continue;
-                    }
-
-                    if (playlist_is_loaded()) {
-                        /* Save browser cursor position before switching to queue */
-                        if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER)
-                            g_saved_browser_index = g_selected_index;
-
-                        g_playlist_tab_mode = !g_playlist_tab_mode;
-
-                        /* Restore browser cursor when switching back from queue */
-                        if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-                            if (g_saved_browser_index >= 0)
-                                g_selected_index = g_saved_browser_index;
-                            g_saved_browser_index = -1;
-                        }
-
-                        /* 队列内容由内容列表下发产生（playlist_queue_sync）：切到
-                         * 队列视图时只把光标对到当前曲目，不再自行“填队列”。 */
-                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
-                            player_queue_count() > 0) {
-                            int anchor = player_track_index() >= 0 ? player_track_index() : 0;
-                            g_queue_selected_index = 0;
-                            for (int i = 0; i < player_queue_count(); i++) {
-                                if (player_queue_index_at(i) == anchor) {
-                                    g_queue_selected_index = i;
-                                    break;
-                                }
-                            }
-                        }
-                        render_playlist_content();
-                        render_controls();
-                        update_controls_status(
-                            g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE
-                                ? i18n_get("status.switched_queue")
-                                : i18n_get("status.switched_browser"));
-                    }
-                    break;
-                case 'a':
-                    if (playlist_count() > 0) {
-                        int track_idx = g_selected_index;
-                        if (g_search_state.active) {
-                            pthread_mutex_lock(&g_search_mutex);
-                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                            pthread_mutex_unlock(&g_search_mutex);
-                        } else if (g_sort_state.active) {
-                            track_idx = g_sort_state.sorted_indices[g_selected_index];
-                        } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-                            track_idx = get_visible_node_track_index(g_selected_index);
-                            if (track_idx < 0) break;
-                        }
-                        player_queue_append(track_idx);
-                        update_controls_status(i18n_get("status.added_to_queue"));
-                    }
-                    break;
-                case 'A':
-                    if (playlist_count() > 0 && g_playlist_manager.count > 0) {
-                        Track t;
-                        int track_idx = g_selected_index;
-                        if (g_search_state.active) {
-                            pthread_mutex_lock(&g_search_mutex);
-                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                            pthread_mutex_unlock(&g_search_mutex);
-                        } else if (g_sort_state.active) {
-                            track_idx = g_sort_state.sorted_indices[g_selected_index];
-                        } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
-                            track_idx = get_visible_node_track_index(g_selected_index);
-                            if (track_idx < 0) break;
-                        }
-                        get_track_metadata(track_idx, &t);
-
-                        int max_y, max_x;
-                        getmaxyx(stdscr, max_y, max_x);
-                        WINDOW *win_win = newwin(max_y - 4, max_x - 4, 2, 2);
-                        rounded_box(win_win);
-                        mvwprintw(win_win, 0, 2, "%s", i18n_get("playlist_mgr.select_playlist"));
-                        wbkgd(win_win, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-
-                        int start_y = 2;
-                        int visible_lines = max_y - 8;
-                        int selected = 0, offset = 0;
-
-                        while (1) {
-                            for (int i = 0; i < visible_lines && (offset + i) < g_playlist_manager.count; i++) {
-                                int idx = offset + i;
-                                UserPlaylist *pl = &g_playlist_manager.playlists[idx];
-                                char playlist_name[MAX_PLAYLIST_NAME_LEN + 8];
-                                format_display_text(playlist_name, sizeof(playlist_name), pl->name, 30, 1);
-                                if (idx == selected) {
-                                    wattron(win_win, A_REVERSE);
-                                    mvwprintw(win_win, start_y + i, 2,
-                                              i18n_get("playlist_mgr.track_count_fmt"),
-                                              playlist_name, pl->track_count);
-                                    wattroff(win_win, A_REVERSE);
-                                } else {
-                                    mvwprintw(win_win, start_y + i, 2,
-                                              i18n_get("playlist_mgr.track_count_fmt"),
-                                              playlist_name, pl->track_count);
-                                }
-                            }
-
-                            mvwprintw(win_win, max_y - 6, 2, "%s",
-                                      ui_text("↑/↓: 选择 | ENTER: 确认 | ESC: 取消",
-                                              "Up/Down: Select | Enter: OK | Esc: Cancel"));
-                            wrefresh(win_win);
-                            wtimeout(win_win, UI_INPUT_TIMEOUT_MS);
-                            int c = wgetch(win_win);
-                            if (c == ERR) { media_session_tick(); continue; }
-                            if (c == 27) break;
-                            if (c == KEY_UP && selected > 0) {
-                                selected--;
-                                if (selected < offset) offset = selected;
-                            }
-                            if (c == KEY_DOWN && selected < g_playlist_manager.count - 1) {
-                                selected++;
-                                if (selected >= offset + visible_lines) offset = selected - visible_lines + 1;
-                            }
-                            if (c == 10 || c == ' ') {
-                                int r = add_track_to_playlist(selected, &t);
-                                if (r == 0)       update_controls_status(i18n_get("playlist_mgr.added_to_playlist"));
-                                else if (r == -3) update_controls_status(i18n_get("playlist_mgr.playlist_full"));
-                                else              update_controls_status(i18n_get("playlist_mgr.already_in_playlist"));
-                                break;
-                            }
-                        }
-                        delwin(win_win);
-                        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
-                    } else if (g_playlist_manager.count == 0) {
-                        update_controls_status(ui_text("还没有歌单，请先到 F4 新建",
-                                                       "No playlist yet. Create one in F4"));
-                    }
-                    break;
-                case 'd':
-                    if (player_queue_count() > 0) {
-                        int target_pos;
-                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                            target_pos = g_queue_selected_index;
-                        } else {
-                            int track_idx = g_selected_index;
-                            if (g_search_state.active) {
-                                pthread_mutex_lock(&g_search_mutex);
-                                track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                                pthread_mutex_unlock(&g_search_mutex);
-                            } else if (g_sort_state.active) {
-                                track_idx = g_sort_state.sorted_indices[g_selected_index];
-                            }
-                            target_pos = -1;
-                            for (int i = 0; i < player_queue_count(); i++) {
-                                if (player_queue_index_at(i) == track_idx) { target_pos = i; break; }
-                            }
-                        }
-                        if (target_pos >= 0) {
-                            player_queue_remove_at(target_pos);
-                            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                                if (g_queue_selected_index >= player_queue_count())
-                                    g_queue_selected_index = player_queue_count() > 0 ? player_queue_count() - 1 : 0;
-                            }
-                            render_playlist_content();
-                        }
-                    }
-                    break;
-                case 'D':
-                    if (player_queue_count() > 0) {
-                        player_queue_clear();
-                        g_queue_selected_index = 0;
-                        render_playlist_content();
-                        update_controls_status(i18n_get("status.queue_cleared"));
-                    }
-                    break;
-                case 'J':
-                    if (player_queue_count() > 1) {
-                        int target_pos;
-                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                            target_pos = g_queue_selected_index;
-                        } else {
-                            int track_idx = g_selected_index;
-                            if (g_search_state.active) {
-                                pthread_mutex_lock(&g_search_mutex);
-                                track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                                pthread_mutex_unlock(&g_search_mutex);
-                            } else if (g_sort_state.active) {
-                                track_idx = g_sort_state.sorted_indices[g_selected_index];
-                            }
-                            target_pos = -1;
-                            for (int i = 0; i < player_queue_count(); i++) {
-                                if (player_queue_index_at(i) == track_idx) { target_pos = i; break; }
-                            }
-                        }
-                        if (target_pos >= 0 && target_pos < player_queue_count() - 1) {
-                            player_queue_move_down(target_pos);
-                            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
-                                g_queue_selected_index++;
-                            render_playlist_content();
-                        }
-                    }
-                    break;
-                case 'K':
-                    if (player_queue_count() > 1) {
-                        int target_pos;
-                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                            target_pos = g_queue_selected_index;
-                        } else {
-                            int track_idx = g_selected_index;
-                            if (g_search_state.active) {
-                                pthread_mutex_lock(&g_search_mutex);
-                                track_idx = g_search_state.result_indices[g_search_state.selected_index];
-                                pthread_mutex_unlock(&g_search_mutex);
-                            } else if (g_sort_state.active) {
-                                track_idx = g_sort_state.sorted_indices[g_selected_index];
-                            }
-                            target_pos = -1;
-                            for (int i = 0; i < player_queue_count(); i++) {
-                                if (player_queue_index_at(i) == track_idx) { target_pos = i; break; }
-                            }
-                        }
-                        if (target_pos > 0) {
-                            player_queue_move_up(target_pos);
-                            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
-                                g_queue_selected_index--;
-                            render_playlist_content();
-                        }
-                    }
-                    break;
-                case '1': player_set_play_mode(PLAY_MODE_SEQUENTIAL); render_controls(); break;
-                case '2': player_set_play_mode(PLAY_MODE_SINGLE_REPEAT); render_controls(); break;
-                case '3': player_set_play_mode(PLAY_MODE_LIST_REPEAT); render_controls(); break;
-                case '4': player_set_play_mode(PLAY_MODE_SHUFFLE_REPEAT); render_controls(); break;
-                case '5': player_set_play_mode(PLAY_MODE_FOLDER_SEQUENTIAL); render_controls(); break;
-            }
+            continue;
         }
 
-        /* Global list-mode keys that don't need switch */
-        if (g_current_view == VIEW_MAIN && g_control_focus == 0 && g_lyric_cursor_mode == 0) {
-            if (ch == 'n') {
-                player_next();
-                continue;
+        // List focus mode
+        if (!playlist_is_loaded()) {
+            /* 未加载播放列表时仍允许“打开/追加目录”，其余列表动作 no-op。 */
+            switch (action) {
+                case ACTION_FOLDER_OPEN:
+                    prompt_open_folder();
+                    render_playlist_content();
+                    break;
+                case ACTION_QUEUE_INSERT_NEXT:
+                case ACTION_FOLDER_APPEND:
+                    prompt_append_folder();
+                    render_playlist_content();
+                    break;
+                default:
+                    break;
             }
-            if (ch == 'p') {
-                player_prev();
-                continue;
-            }
-            if (ch == 'h' && g_play_history.count > 0) {
+            continue;
+        }
+
+        switch (action) {
+            case ACTION_LIST_UP:
+                /* 歌词定位模式（有歌词）下 j/k（回退解析为 list.up/down）不移动列表。 */
+                if (g_lyric_cursor_mode && player_lyrics_total() > 0) break;
+                if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+                    if (g_queue_selected_index > 0) { g_queue_selected_index--; render_playlist_content(); }
+                } else {
+                    if (g_selected_index > 0) { g_selected_index--; render_playlist_content(); }
+                }
+                break;
+            case ACTION_LIST_DOWN:
+                if (g_lyric_cursor_mode && player_lyrics_total() > 0) break;
+                if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+                    if (g_queue_selected_index < player_queue_count() - 1) { g_queue_selected_index++; render_playlist_content(); }
+                } else {
+                    int max_count = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
+                    if (g_selected_index < max_count - 1) {
+                        g_selected_index++;
+                        render_playlist_content();
+                    }
+                }
+                break;
+            case ACTION_SEARCH_UP:
+                if (g_search_state.selected_index > 0) {
+                    g_search_state.selected_index--;
+                    render_playlist_content();
+                }
+                break;
+            case ACTION_SEARCH_DOWN:
+                if (g_search_state.selected_index < g_search_state.result_count - 1) {
+                    g_search_state.selected_index++;
+                    render_playlist_content();
+                }
+                break;
+            case ACTION_LIST_ACTIVATE:
+                if (g_search_state.in_progress) {
+                    update_controls_status(i18n_get("status.search_wait"));
+                    break;
+                }
+                if (g_search_state.active && g_search_state.result_count > 0) {
+                    int original_index = g_search_state.result_indices[g_search_state.selected_index];
+                    ui_play_track_index(original_index);
+                    g_search_state.active = 0;
+                    g_selected_index = g_sort_state.active ? 0 : original_index;
+                    render_playlist_content();
+                } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && player_queue_count() > 0) {
+                    int queue_pos = g_queue_selected_index >= 0 && g_queue_selected_index < player_queue_count()
+                        ? g_queue_selected_index : 0;
+                    player_queue_play(queue_pos);
+                    int play_idx = player_queue_index_at(queue_pos);
+                    if (play_idx >= 0) {
+                        g_selected_index = play_idx;
+                    }
+                } else {
+                    /* Tree mode: toggle directory expand, or play file */
+                    if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER
+                        && !g_search_state.active) {
+                        int node_type = get_visible_node_type(g_selected_index);
+                        if (node_type == TREE_NODE_DIRECTORY) {
+                            int tree_idx = get_visible_node_tree_index(g_selected_index);
+                            playlist_toggle_directory_expand(tree_idx);
+                            if (g_selected_index >= playlist_visible_count())
+                                g_selected_index = playlist_visible_count() - 1;
+                            if (g_selected_index < 0) g_selected_index = 0;
+                            render_playlist_content();
+                            break;
+                        }
+                        /* File node: get real track index */
+                        int real_idx = get_visible_node_track_index(g_selected_index);
+                        if (real_idx >= 0)
+                            ui_play_track_index(real_idx);
+                        break;
+                    }
+                    int play_idx = g_selected_index;
+                    if (g_sort_state.active) play_idx = g_sort_state.sorted_indices[g_selected_index];
+                    ui_play_track_index(play_idx);
+                }
+                break;
+            case ACTION_FOLDER_OPEN:
+                prompt_open_folder();
+                render_playlist_content();
+                break;
+            case ACTION_QUEUE_INSERT_NEXT:
+                if (player_queue_count() > 0 && player_track_index() >= 0) {
+                    int track_idx = g_selected_index;
+                    if (g_search_state.active)
+                        track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                    else if (g_sort_state.active)
+                        track_idx = g_sort_state.sorted_indices[g_selected_index];
+                    else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                        track_idx = get_visible_node_track_index(g_selected_index);
+                        if (track_idx < 0) break;
+                    }
+                    player_queue_insert_after(track_idx);
+                    update_controls_status(i18n_get("status.inserted_next"));
+                }
+                break;
+            case ACTION_QUEUE_APPEND:
+                if (playlist_count() > 0) {
+                    int track_idx = g_selected_index;
+                    if (g_search_state.active) {
+                        pthread_mutex_lock(&g_search_mutex);
+                        track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                        pthread_mutex_unlock(&g_search_mutex);
+                    } else if (g_sort_state.active) {
+                        track_idx = g_sort_state.sorted_indices[g_selected_index];
+                    } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                        track_idx = get_visible_node_track_index(g_selected_index);
+                        if (track_idx < 0) break;
+                    }
+                    player_queue_append(track_idx);
+                    update_controls_status(i18n_get("status.added_to_queue"));
+                }
+                break;
+            case ACTION_FOLDER_APPEND:
+                prompt_append_folder();
+                render_playlist_content();
+                break;
+            case ACTION_FAVORITE_TOGGLE:
+                if (playlist_count() > 0) {
+                    Track t;
+                    int track_idx = g_selected_index;
+                    if (g_search_state.active) {
+                        pthread_mutex_lock(&g_search_mutex);
+                        track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                        pthread_mutex_unlock(&g_search_mutex);
+                    } else if (g_sort_state.active) {
+                        track_idx = g_sort_state.sorted_indices[g_selected_index];
+                    } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                        track_idx = get_visible_node_track_index(g_selected_index);
+                        if (track_idx < 0) break;
+                    }
+                    get_track_metadata(track_idx, &t);
+                    int result = add_to_favorites(&t);
+                    update_controls_status(result == 0
+                        ? i18n_get("favorites.added")
+                        : i18n_get("favorites.exists_or_full"));
+                }
+                break;
+            case ACTION_SEARCH_OPEN:
+                if (g_current_view == VIEW_MAIN) {
+                    search_prompt();
+                    continue;
+                }
+                break;
+            case ACTION_VIEW_TAB_SWITCH:
+                /* ── Lyric cursor mode: toggle between embedded / external lyrics ── */
+                if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
+                    int new_source = (player_lyrics_source() == LYRICS_SOURCE_EMBEDDED)
+                        ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
+                    if (player_lyrics_reload_source(new_source) == 0 &&
+                        player_backend() == PLAYER_BACKEND_REMOTE) {
+                        /* 来源偏好是前端的**内容**（按曲目记在曲库里）。本地模式
+                         * 下核心与本前端同进程，由核心经 lyrics_set_source_hook
+                         * 回调落库；远端模式下核心是另一个进程、也没有内容库，
+                         * 只能由发起这次切换的前端自己落库。 */
+                        const InfoTrack *track = player_track();
+                        if (track && track->path[0] != '\0') {
+                            library_set_lyrics_source(track->path, new_source);
+                        }
+                    }
+                    update_controls_status(
+                        new_source == LYRICS_SOURCE_EMBEDDED
+                            ? i18n_get("lyrics.source_embedded")
+                            : i18n_get("lyrics.source_external"));
+                    continue;
+                }
+
+                if (playlist_is_loaded()) {
+                    /* Save browser cursor position before switching to queue */
+                    if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER)
+                        g_saved_browser_index = g_selected_index;
+
+                    g_playlist_tab_mode = !g_playlist_tab_mode;
+
+                    /* Restore browser cursor when switching back from queue */
+                    if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                        if (g_saved_browser_index >= 0)
+                            g_selected_index = g_saved_browser_index;
+                        g_saved_browser_index = -1;
+                    }
+
+                    /* 队列内容由内容列表下发产生（playlist_queue_sync）：切到
+                     * 队列视图时只把光标对到当前曲目，不再自行“填队列”。 */
+                    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
+                        player_queue_count() > 0) {
+                        int anchor = player_track_index() >= 0 ? player_track_index() : 0;
+                        g_queue_selected_index = 0;
+                        for (int i = 0; i < player_queue_count(); i++) {
+                            if (player_queue_index_at(i) == anchor) {
+                                g_queue_selected_index = i;
+                                break;
+                            }
+                        }
+                    }
+                    render_playlist_content();
+                    render_controls();
+                    update_controls_status(
+                        g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE
+                            ? i18n_get("status.switched_queue")
+                            : i18n_get("status.switched_browser"));
+                }
+                break;
+            case ACTION_PLAYLIST_ADD:
+                if (playlist_count() > 0 && g_playlist_manager.count > 0) {
+                    Track t;
+                    int track_idx = g_selected_index;
+                    if (g_search_state.active) {
+                        pthread_mutex_lock(&g_search_mutex);
+                        track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                        pthread_mutex_unlock(&g_search_mutex);
+                    } else if (g_sort_state.active) {
+                        track_idx = g_sort_state.sorted_indices[g_selected_index];
+                    } else if (playlist_tree_is_active() && g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+                        track_idx = get_visible_node_track_index(g_selected_index);
+                        if (track_idx < 0) break;
+                    }
+                    get_track_metadata(track_idx, &t);
+
+                    int max_y, max_x;
+                    getmaxyx(stdscr, max_y, max_x);
+                    WINDOW *win_win = newwin(max_y - 4, max_x - 4, 2, 2);
+                    rounded_box(win_win);
+                    mvwprintw(win_win, 0, 2, "%s", i18n_get("playlist_mgr.select_playlist"));
+                    wbkgd(win_win, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+
+                    int start_y = 2;
+                    int visible_lines = max_y - 8;
+                    int selected = 0, offset = 0;
+
+                    while (1) {
+                        for (int i = 0; i < visible_lines && (offset + i) < g_playlist_manager.count; i++) {
+                            int idx = offset + i;
+                            UserPlaylist *pl = &g_playlist_manager.playlists[idx];
+                            char playlist_name[MAX_PLAYLIST_NAME_LEN + 8];
+                            format_display_text(playlist_name, sizeof(playlist_name), pl->name, 30, 1);
+                            if (idx == selected) {
+                                wattron(win_win, A_REVERSE);
+                                mvwprintw(win_win, start_y + i, 2,
+                                          i18n_get("playlist_mgr.track_count_fmt"),
+                                          playlist_name, pl->track_count);
+                                wattroff(win_win, A_REVERSE);
+                            } else {
+                                mvwprintw(win_win, start_y + i, 2,
+                                          i18n_get("playlist_mgr.track_count_fmt"),
+                                          playlist_name, pl->track_count);
+                            }
+                        }
+
+                        mvwprintw(win_win, max_y - 6, 2, "%s",
+                                  ui_text("↑/↓: 选择 | ENTER: 确认 | ESC: 取消",
+                                          "Up/Down: Select | Enter: OK | Esc: Cancel"));
+                        wrefresh(win_win);
+                        wtimeout(win_win, UI_INPUT_TIMEOUT_MS);
+                        int c = wgetch(win_win);
+                        if (c == ERR) { media_session_tick(); continue; }
+                        /* Esc 为系统保留键；其余按弹窗上下文解析。 */
+                        ActionId popup_action = (c == 27)
+                            ? ACTION_POPUP_CANCEL
+                            : keymap_resolve(CTX_POPUP, c);
+                        if (popup_action == ACTION_POPUP_CANCEL) break;
+                        if (popup_action == ACTION_POPUP_UP && selected > 0) {
+                            selected--;
+                            if (selected < offset) offset = selected;
+                        }
+                        if (popup_action == ACTION_POPUP_DOWN && selected < g_playlist_manager.count - 1) {
+                            selected++;
+                            if (selected >= offset + visible_lines) offset = selected - visible_lines + 1;
+                        }
+                        if (popup_action == ACTION_POPUP_ACCEPT) {
+                            int r = add_track_to_playlist(selected, &t);
+                            if (r == 0)       update_controls_status(i18n_get("playlist_mgr.added_to_playlist"));
+                            else if (r == -3) update_controls_status(i18n_get("playlist_mgr.playlist_full"));
+                            else              update_controls_status(i18n_get("playlist_mgr.already_in_playlist"));
+                            break;
+                        }
+                    }
+                    delwin(win_win);
+                    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+                } else if (g_playlist_manager.count == 0) {
+                    update_controls_status(ui_text("还没有歌单，请先到 F4 新建",
+                                                   "No playlist yet. Create one in F4"));
+                }
+                break;
+            case ACTION_QUEUE_REMOVE:
+                if (player_queue_count() > 0) {
+                    int target_pos;
+                    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+                        target_pos = g_queue_selected_index;
+                    } else {
+                        int track_idx = g_selected_index;
+                        if (g_search_state.active) {
+                            pthread_mutex_lock(&g_search_mutex);
+                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                            pthread_mutex_unlock(&g_search_mutex);
+                        } else if (g_sort_state.active) {
+                            track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        }
+                        target_pos = -1;
+                        for (int i = 0; i < player_queue_count(); i++) {
+                            if (player_queue_index_at(i) == track_idx) { target_pos = i; break; }
+                        }
+                    }
+                    if (target_pos >= 0) {
+                        player_queue_remove_at(target_pos);
+                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+                            if (g_queue_selected_index >= player_queue_count())
+                                g_queue_selected_index = player_queue_count() > 0 ? player_queue_count() - 1 : 0;
+                        }
+                        render_playlist_content();
+                    }
+                }
+                break;
+            case ACTION_QUEUE_CLEAR:
+                if (player_queue_count() > 0) {
+                    player_queue_clear();
+                    g_queue_selected_index = 0;
+                    render_playlist_content();
+                    update_controls_status(i18n_get("status.queue_cleared"));
+                }
+                break;
+            case ACTION_QUEUE_MOVE_DOWN:
+                if (player_queue_count() > 1) {
+                    int target_pos;
+                    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+                        target_pos = g_queue_selected_index;
+                    } else {
+                        int track_idx = g_selected_index;
+                        if (g_search_state.active) {
+                            pthread_mutex_lock(&g_search_mutex);
+                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                            pthread_mutex_unlock(&g_search_mutex);
+                        } else if (g_sort_state.active) {
+                            track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        }
+                        target_pos = -1;
+                        for (int i = 0; i < player_queue_count(); i++) {
+                            if (player_queue_index_at(i) == track_idx) { target_pos = i; break; }
+                        }
+                    }
+                    if (target_pos >= 0 && target_pos < player_queue_count() - 1) {
+                        player_queue_move_down(target_pos);
+                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
+                            g_queue_selected_index++;
+                        render_playlist_content();
+                    }
+                }
+                break;
+            case ACTION_QUEUE_MOVE_UP:
+                if (player_queue_count() > 1) {
+                    int target_pos;
+                    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+                        target_pos = g_queue_selected_index;
+                    } else {
+                        int track_idx = g_selected_index;
+                        if (g_search_state.active) {
+                            pthread_mutex_lock(&g_search_mutex);
+                            track_idx = g_search_state.result_indices[g_search_state.selected_index];
+                            pthread_mutex_unlock(&g_search_mutex);
+                        } else if (g_sort_state.active) {
+                            track_idx = g_sort_state.sorted_indices[g_selected_index];
+                        }
+                        target_pos = -1;
+                        for (int i = 0; i < player_queue_count(); i++) {
+                            if (player_queue_index_at(i) == track_idx) { target_pos = i; break; }
+                        }
+                    }
+                    if (target_pos > 0) {
+                        player_queue_move_up(target_pos);
+                        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
+                            g_queue_selected_index--;
+                        render_playlist_content();
+                    }
+                }
+                break;
+            case ACTION_PLAYMODE_SEQUENTIAL: player_set_play_mode(PLAY_MODE_SEQUENTIAL); render_controls(); break;
+            case ACTION_PLAYMODE_SINGLE: player_set_play_mode(PLAY_MODE_SINGLE_REPEAT); render_controls(); break;
+            case ACTION_PLAYMODE_LIST: player_set_play_mode(PLAY_MODE_LIST_REPEAT); render_controls(); break;
+            case ACTION_PLAYMODE_SHUFFLE: player_set_play_mode(PLAY_MODE_SHUFFLE_REPEAT); render_controls(); break;
+            case ACTION_PLAYMODE_FOLDER: player_set_play_mode(PLAY_MODE_FOLDER_SEQUENTIAL); render_controls(); break;
+            case ACTION_LYRICS_PREV:
+                if (player_lyrics_total() > 0) {
+                    lyric_cursor_step(-1);
+                }
+                break;
+            case ACTION_LYRICS_NEXT:
+                if (player_lyrics_total() > 0) {
+                    lyric_cursor_step(1);
+                }
+                break;
+            case ACTION_LYRICS_SOURCE_SWITCH:
+                if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
+                    int new_source = (player_lyrics_source() == LYRICS_SOURCE_EMBEDDED)
+                        ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
+                    if (player_lyrics_reload_source(new_source) == 0 &&
+                        player_backend() == PLAYER_BACKEND_REMOTE) {
+                        const InfoTrack *track = player_track();
+                        if (track && track->path[0] != '\0') {
+                            library_set_lyrics_source(track->path, new_source);
+                        }
+                    }
+                    update_controls_status(
+                        new_source == LYRICS_SOURCE_EMBEDDED
+                            ? i18n_get("lyrics.source_embedded")
+                            : i18n_get("lyrics.source_external"));
+                }
+                break;
+            case ACTION_TRACK_NEXT:
+                if (!g_lyric_cursor_mode) {
+                    player_next();
+                    continue;
+                }
+                break;
+            case ACTION_TRACK_PREV:
+                if (!g_lyric_cursor_mode) {
+                    player_prev();
+                    continue;
+                }
+                break;
+            case ACTION_HISTORY_SHOW:
+                if (g_lyric_cursor_mode || g_play_history.count == 0) break;
+                {
                 /* Simple inline history: show last 10 entries as a popup window */
                 int my, mx;
                 getmaxyx(stdscr, my, mx);
@@ -1150,10 +1273,13 @@ void run_event_loop(void)
                     wtimeout(w, UI_INPUT_TIMEOUT_MS);
                     int c = wgetch(w);
                     if (c == ERR) { media_session_tick(); continue; }
-                    if (c == 27) break;
-                    if (c == KEY_UP && sel > 0) sel--;
-                    if (c == KEY_DOWN && sel < g_play_history.count - 1) sel++;
-                    if (c == 10 || c == ' ') {
+                    ActionId popup_action = (c == 27)
+                        ? ACTION_POPUP_CANCEL
+                        : keymap_resolve(CTX_POPUP, c);
+                    if (popup_action == ACTION_POPUP_CANCEL) break;
+                    if (popup_action == ACTION_POPUP_UP && sel > 0) sel--;
+                    if (popup_action == ACTION_POPUP_DOWN && sel < g_play_history.count - 1) sel++;
+                    if (popup_action == ACTION_POPUP_ACCEPT) {
                         const char *hpath = g_play_history.entries[sel].path;
                         int found = playlist_find_track_index_by_path(hpath);
                         /* 历史里的曲目可能不在当前列表：追加到内容列表尾部后播放
@@ -1213,6 +1339,7 @@ void cleanup(void)
     if (win_lyrics)   { delwin(win_lyrics);   win_lyrics   = NULL; }
 
     endwin();
+    ui_restore_stdio();  /* 恢复真实 stderr，随后的退出错误才能显示在终端 */
     reset_album_cover_cache();
     info_release_cover_cache();
     remote_view_shutdown();

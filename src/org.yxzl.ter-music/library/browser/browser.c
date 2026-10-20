@@ -22,6 +22,7 @@
 #include "playlist/playlist.h"
 #include "ui/ui.h"
 #include "ui/dialog.h"
+#include "ui/keymap.h"
 #include "logger/logger.h"
 #include <ncursesw/ncurses.h>
 #include <string.h>
@@ -39,11 +40,11 @@ static void render_genre_list(WINDOW *win, int content_h, int content_w);
 static void render_track_list(WINDOW *win, int content_h, int content_w,
                                const int *rowids, int count, const char *title);
 
-static void handle_home_input(int ch);
-static void handle_artist_input(int ch);
-static void handle_album_input(int ch);
-static void handle_genre_input(int ch);
-static void handle_track_list_input(int ch, const int *rowids, int count);
+static int  handle_home_input(ActionId action);
+static int  handle_artist_input(ActionId action);
+static int  handle_album_input(ActionId action);
+static int  handle_genre_input(ActionId action);
+static int  handle_track_list_input(ActionId action, const int *rowids, int count);
 
 static int  ensure_scroll_visible(int selected, int offset, int visible);
 static void truncate_text(char *buf, size_t buf_size, const char *text, int max_cols);
@@ -372,25 +373,19 @@ static void render_track_list(WINDOW *win, int content_h, int content_w,
 
 /* ── Input handling dispatch ─────────────────────────────────────── */
 
-int handle_library_input(int ch) {
+int handle_library_action(ActionId action) {
     if (!g_library_state.active) return 0;
 
     switch (g_library_state.view) {
     case LIBRARY_HOME:
-        handle_home_input(ch);
-        break;
+        return handle_home_input(action);
     case LIBRARY_ARTISTS:
-        handle_artist_input(ch);
-        break;
+        return handle_artist_input(action);
     case LIBRARY_ARTIST_ALBUMS:
-        handle_album_input(ch);
-        break;
     case LIBRARY_ALBUMS:
-        handle_album_input(ch);
-        break;
+        return handle_album_input(action);
     case LIBRARY_GENRES:
-        handle_genre_input(ch);
-        break;
+        return handle_genre_input(action);
     case LIBRARY_ALL_TRACKS:
     case LIBRARY_ALBUM_TRACKS:
     case LIBRARY_GENRE_TRACKS:
@@ -414,13 +409,83 @@ int handle_library_input(int ch) {
             default:
                 break;
             }
-            handle_track_list_input(ch, rowids, count);
+            return handle_track_list_input(action, rowids, count);
         }
+    case LIBRARY_SEARCH_RESULTS:
+        return 0;
+    }
+
+    return 0;
+}
+
+/** ESC 是系统保留键：按当前子页面返回到上一层。 */
+static void handle_library_back(void) {
+    switch (g_library_state.view) {
+    case LIBRARY_HOME:
+        library_browser_exit();
+        break;
+    case LIBRARY_ARTISTS:
+        g_library_state.view = LIBRARY_HOME;
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
+        g_library_state.item_count = 4;
+        break;
+    case LIBRARY_ARTIST_ALBUMS:
+        g_library_state.view = LIBRARY_ARTISTS;
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
+        g_library_state.filter_artist[0] = '\0';
+        g_library_state.filter_album[0] = '\0';
+        break;
+    case LIBRARY_ALBUMS:
+        g_library_state.view = LIBRARY_HOME;
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
+        g_library_state.filter_artist[0] = '\0';
+        g_library_state.filter_album[0] = '\0';
+        break;
+    case LIBRARY_GENRES:
+        g_library_state.view = LIBRARY_HOME;
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
+        g_library_state.item_count = 4;
+        break;
+    case LIBRARY_GENRE_TRACKS:
+        g_library_state.view = LIBRARY_GENRES;
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
+        break;
+    case LIBRARY_ALBUM_TRACKS:
+        if (g_library_state.filter_artist[0]) {
+            g_library_state.view = LIBRARY_ARTIST_ALBUMS;
+        } else {
+            g_library_state.view = LIBRARY_ALBUMS;
+        }
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
         break;
     case LIBRARY_SEARCH_RESULTS:
         break;
+    case LIBRARY_ALL_TRACKS:
+    default:
+        g_library_state.view = LIBRARY_HOME;
+        g_library_state.selected_index = 0;
+        g_library_state.scroll_offset = 0;
+        g_library_state.item_count = 4;
+        break;
+    }
+}
+
+int handle_library_input(int ch) {
+    if (!g_library_state.active) return 0;
+
+    if (ch == 27) {
+        handle_library_back();
+        request_ui_refresh(UI_DIRTY_PLAYLIST);
+        return 1;
     }
 
+    handle_library_action(keymap_resolve(CTX_BROWSER, ch));
     request_ui_refresh(UI_DIRTY_PLAYLIST);
     return 1;
 }
@@ -457,30 +522,27 @@ static void navigate_to_subview(LibraryViewMode view) {
     }
 }
 
-static void handle_home_input(int ch) {
+static int handle_home_input(ActionId action) {
     int max_items = 4;
 
-    switch (ch) {
-    case KEY_UP:
+    switch (action) {
+    case ACTION_BROWSER_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
-        break;
-    case KEY_DOWN:
+        return 1;
+    case ACTION_BROWSER_DOWN:
         if (g_library_state.selected_index < max_items - 1)
             g_library_state.selected_index++;
-        break;
-    case '\n':
-    case ' ':
-    case KEY_ENTER:
+        return 1;
+    case ACTION_BROWSER_ACTIVATE:
         switch (g_library_state.selected_index) {
         case 0: navigate_to_subview(LIBRARY_ARTISTS); break;
         case 1: navigate_to_subview(LIBRARY_ALBUMS);  break;
         case 2: navigate_to_subview(LIBRARY_GENRES);  break;
         case 3: navigate_to_subview(LIBRARY_ALL_TRACKS); break;
         }
-        break;
-    case 's':
-    case 'S': {
+        return 1;
+    case ACTION_BROWSER_SCAN: {
         char scan_path[MAX_PATH_LEN] = ".";
         prompt_text_input(stdscr, LINES - 2, 2,
                           "Scan directory: ", scan_path, sizeof(scan_path), 0, 0, 0);
@@ -488,38 +550,34 @@ static void handle_home_input(int ch) {
             library_scan_directory(scan_path);
         }
         request_ui_refresh(UI_DIRTY_PLAYLIST);
-        break;
+        return 1;
     }
-    case 'r':
-    case 'R':
+    case ACTION_BROWSER_RESCAN:
         library_scan_all_roots();
         request_ui_refresh(UI_DIRTY_PLAYLIST);
-        break;
-    case 27:  /* ESC */
-        library_browser_exit();
-        break;
+        return 1;
+    default:
+        return 0;
     }
 }
 
 /* ── Artist list input ───────────────────────────────────────────── */
 
-static void handle_artist_input(int ch) {
-    switch (ch) {
-    case KEY_UP:
+static int handle_artist_input(ActionId action) {
+    switch (action) {
+    case ACTION_BROWSER_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case KEY_DOWN:
+        return 1;
+    case ACTION_BROWSER_DOWN:
         if (g_library_state.selected_index < g_library_state.item_count - 1)
             g_library_state.selected_index++;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case '\n':
-    case ' ':
-    case KEY_ENTER: {
+        return 1;
+    case ACTION_BROWSER_ACTIVATE: {
         char **artists = library_get_artists(&g_library_state.item_count);
         if (g_library_state.selected_index < g_library_state.item_count && artists) {
             strncpy(g_library_state.filter_artist,
@@ -535,36 +593,30 @@ static void handle_artist_input(int ch) {
             library_free_albums(albums, g_library_state.item_count);
         }
         library_free_artists(artists, g_library_state.item_count);
-        break;
+        return 1;
     }
-    case 27:  /* ESC */
-        g_library_state.view = LIBRARY_HOME;
-        g_library_state.selected_index = 0;
-        g_library_state.scroll_offset = 0;
-        g_library_state.item_count = 4;
-        break;
+    default:
+        return 0;
     }
 }
 
 /* ── Album list input (shared: albums view + artist→albums) ───────── */
 
-static void handle_album_input(int ch) {
-    switch (ch) {
-    case KEY_UP:
+static int handle_album_input(ActionId action) {
+    switch (action) {
+    case ACTION_BROWSER_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case KEY_DOWN:
+        return 1;
+    case ACTION_BROWSER_DOWN:
         if (g_library_state.selected_index < g_library_state.item_count - 1)
             g_library_state.selected_index++;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case '\n':
-    case ' ':
-    case KEY_ENTER: {
+        return 1;
+    case ACTION_BROWSER_ACTIVATE: {
         LibraryAlbum *albums = library_get_albums(
             (g_library_state.view == LIBRARY_ARTIST_ALBUMS)
                 ? g_library_state.filter_artist : NULL,
@@ -584,41 +636,30 @@ static void handle_album_input(int ch) {
                 g_library_state.filter_album, NULL, 0);
         }
         library_free_albums(albums, g_library_state.item_count);
-        break;
+        return 1;
     }
-    case 27:  /* ESC */
-        if (g_library_state.view == LIBRARY_ARTIST_ALBUMS) {
-            g_library_state.view = LIBRARY_ARTISTS;
-        } else {
-            g_library_state.view = LIBRARY_HOME;
-        }
-        g_library_state.selected_index = 0;
-        g_library_state.scroll_offset = 0;
-        g_library_state.filter_artist[0] = '\0';
-        g_library_state.filter_album[0] = '\0';
-        break;
+    default:
+        return 0;
     }
 }
 
 /* ── Genre list input ────────────────────────────────────────────── */
 
-static void handle_genre_input(int ch) {
-    switch (ch) {
-    case KEY_UP:
+static int handle_genre_input(ActionId action) {
+    switch (action) {
+    case ACTION_BROWSER_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case KEY_DOWN:
+        return 1;
+    case ACTION_BROWSER_DOWN:
         if (g_library_state.selected_index < g_library_state.item_count - 1)
             g_library_state.selected_index++;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case '\n':
-    case ' ':
-    case KEY_ENTER: {
+        return 1;
+    case ACTION_BROWSER_ACTIVATE: {
         char **genres = library_get_genres(&g_library_state.item_count);
         if (g_library_state.selected_index < g_library_state.item_count && genres) {
             strncpy(g_library_state.filter_genre,
@@ -632,36 +673,30 @@ static void handle_genre_input(int ch) {
                 g_library_state.filter_genre, NULL, 0);
         }
         library_free_genres(genres, g_library_state.item_count);
-        break;
+        return 1;
     }
-    case 27:  /* ESC */
-        g_library_state.view = LIBRARY_HOME;
-        g_library_state.selected_index = 0;
-        g_library_state.scroll_offset = 0;
-        g_library_state.item_count = 4;
-        break;
+    default:
+        return 0;
     }
 }
 
 /* ── Track list input ────────────────────────────────────────────── */
 
-static void handle_track_list_input(int ch, const int *rowids, int count) {
-    switch (ch) {
-    case KEY_UP:
+static int handle_track_list_input(ActionId action, const int *rowids, int count) {
+    switch (action) {
+    case ACTION_BROWSER_UP:
         if (g_library_state.selected_index > 0)
             g_library_state.selected_index--;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case KEY_DOWN:
+        return 1;
+    case ACTION_BROWSER_DOWN:
         if (g_library_state.selected_index < count - 1)
             g_library_state.selected_index++;
         g_library_state.scroll_offset = ensure_scroll_visible(
             g_library_state.selected_index, g_library_state.scroll_offset, 25);
-        break;
-    case '\n':
-    case ' ':
-    case KEY_ENTER: {
+        return 1;
+    case ACTION_BROWSER_ACTIVATE: {
         /* Play the selected track through the front-end play path
          * (ui_play_track_index → player facade). The old code called
          * play_audio() directly, which starts a local playback thread in
@@ -685,40 +720,16 @@ static void handle_track_list_input(int ch, const int *rowids, int count) {
                 }
             }
         }
-        break;
+        return 1;
     }
-    case 'a':
-    case 'A':
+    case ACTION_BROWSER_QUEUE_APPEND:
         /* Append to current playlist */
         if (g_library_state.selected_index < count) {
             library_load_into_playlist(&rowids[g_library_state.selected_index], 1, 1);
         }
-        break;
-    case 27:  /* ESC */
-        /* Go back to previous view */
-        switch (g_library_state.view) {
-        case LIBRARY_ALL_TRACKS:
-            g_library_state.view = LIBRARY_HOME;
-            g_library_state.item_count = 4;
-            break;
-        case LIBRARY_ALBUM_TRACKS:
-            if (g_library_state.filter_artist[0]) {
-                g_library_state.view = LIBRARY_ARTIST_ALBUMS;
-            } else {
-                g_library_state.view = LIBRARY_ALBUMS;
-            }
-            break;
-        case LIBRARY_GENRE_TRACKS:
-            g_library_state.view = LIBRARY_GENRES;
-            break;
-        default:
-            g_library_state.view = LIBRARY_HOME;
-            g_library_state.item_count = 4;
-            break;
-        }
-        g_library_state.selected_index = 0;
-        g_library_state.scroll_offset = 0;
-        break;
+        return 1;
+    default:
+        return 0;
     }
 }
 

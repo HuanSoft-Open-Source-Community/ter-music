@@ -11,13 +11,15 @@
 #   2. 启动核心（daemon），让它完成迁移；
 #   3. 断言 config.xml 变成 v6 且无该段、remote.xml 存在且条目与密文逐字节一致；
 #   4. 断言前端能读入该文件（以 TUI 探针的日志为准）；
-#   5. 断言 v7 → v8：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 8；
-#      属性 8 显式 0 的文件连续启停不回卷；JSON v1 → XML 的迁移产出同样
-#      含 stop_core_on_exit=1（该键在 JSON 时代不存在显式值，按缺省补写）。
-#   6. 断言属性 8 文件（含 theme playlist_bg=0）连续启停不触发 file_version<4
-#      的主题迁移块：版本属性数字化后，bg 0→-1 只对老文件（<4）一次性生效；
+#   5. 断言 v7 → v9：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 9
+#      （经 v7→v8→v9 迁移链）；属性 8 显式 0 的文件连续启停不回卷；
+#      JSON v1 → XML 的迁移产出同样含 stop_core_on_exit=1（该键在 JSON
+#      时代不存在显式值，按缺省补写）。
+#   6. 断言属性 8 夹具文件（含 theme playlist_bg=0）连续启停不触发
+#      file_version<4 的主题迁移块：版本属性数字化后，bg 0→-1 只对老文件
+#      （<4）一次性生效；首启同时完成 v8→v9 迁移；
 #   7. 断言历史字面量 version="2.2" 的完整文件仍可加载，且首启迁移一次
-#      （属性升 8、补 stop_core_on_exit=1、playlist_bg 0→-1、显式值保留）
+#      （属性升 9、补 stop_core_on_exit=1、playlist_bg 0→-1、显式值保留）
 #      之后再启停不重跑迁移块。
 #
 # 用法：scripts/test/config-migration-check.sh [--bin <ter-music>] [--keep]
@@ -45,7 +47,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --bin) TM_BIN="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
-        -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "未知参数: $1" >&2; exit 2 ;;
     esac
 done
@@ -161,10 +163,10 @@ sleep 1
 info "断言：config.xml 升级到当前版本且不再含远程段"
 cfg_version="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Config.GetAll 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", "?"))' 2>/dev/null || echo "?")"
-if [ "$cfg_version" = "8" ]; then
-    ok "核心配置版本为 8（Config.GetAll version=$cfg_version）"
+if [ "$cfg_version" = "9" ]; then
+    ok "核心配置版本为 9（Config.GetAll version=$cfg_version）"
 else
-    bad "核心配置版本应为 8，实际 '$cfg_version'"
+    bad "核心配置版本应为 9，实际 '$cfg_version'"
 fi
 if grep -q "remote_connections" "$CONFIG"; then
     bad "config.xml 仍含 <remote_connections>"
@@ -245,7 +247,7 @@ else
     printf '  skip 缺少 tui-probe.py\n'
 fi
 
-# ── v7→v8 / v8 显式值 / JSON v1 的 stop_core_on_exit 断言 ──────────
+# ── v7→v9 / v8 显式值 / JSON v1 的 stop_core_on_exit 断言 ──────────
 core_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
 wait_core_down() {
     for _ in $(seq 1 40); do core_up || return 0; sleep 0.25; done
@@ -256,7 +258,7 @@ stop_live() {   # 核心现在内存镜像里的 stop_core_on_exit（经 Config.
         python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"].get("stop_core_on_exit","?"))' 2>/dev/null || echo "?"
 }
 
-info "v7 → v8：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 8"
+info "v7 → v9：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 9"
 "$TM_BIN" daemon stop >/dev/null 2>&1 || true
 wait_core_down || bad "daemon stop 后核心没有下线，夹具断言不可信"
 cat > "$CONFIG" <<'EOF'
@@ -272,10 +274,10 @@ EOF
 sleep 2
 DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
 if [ -n "$DAEMON_PID" ]; then ok "v7 夹具下核心已启动（pid $DAEMON_PID）"; else bad "核心启动失败"; fi
-if grep -q 'version="8"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
-    ok "属性 7 文件首启后被补写：版本升 8 且含 <stop_core_on_exit>1</stop_core_on_exit>"
+if grep -q 'version="9"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
+    ok "属性 7 文件首启后被补写：版本升 9 且含 <stop_core_on_exit>1</stop_core_on_exit>"
 else
-    bad "v7→v8 补写缺失（文件根属性 $(grep -o 'version="[^"]*"' "$CONFIG" | head -1)，stop 值 '$(sed -n 's|.*<stop_core_on_exit>\([0-9]*\)</stop_core_on_exit>.*|\1|p' "$CONFIG" | head -1)'）"
+    bad "v7→v9 补写缺失（文件根属性 $(grep -o 'version="[^"]*"' "$CONFIG" | head -1)，stop 值 '$(sed -n 's|.*<stop_core_on_exit>\([0-9]*\)</stop_core_on_exit>.*|\1|p' "$CONFIG" | head -1)'）"
 fi
 if grep -q "<volume_percent>77</volume_percent>" "$CONFIG"; then
     ok "迁移补写不误伤显式值（volume_percent=77 原样保留）"
@@ -314,7 +316,7 @@ else
     bad "多轮启停后 stop_core_on_exit=$(stop_live)（期望 0，存在被缺省 1 回卷的迁移块/加载路径）"
 fi
 if grep -q "<stop_core_on_exit>0</stop_core_on_exit>" "$CONFIG"; then
-    ok "落盘文件保持 <stop_core_on_exit>0</stop_core_on_exit>（属性 8 不再触发 <8 迁移块）"
+    ok "落盘文件保持 <stop_core_on_exit>0</stop_core_on_exit>（v8→v9 迁移后不再触发 <8 迁移块）"
 else
     bad "落盘文件的 stop_core_on_exit 被回卷：$(grep -o '<stop_core_on_exit>[0-9]*</stop_core_on_exit>' "$CONFIG" | head -1)"
 fi
@@ -326,10 +328,11 @@ fi
 
 # ── 版本属性数字化后的新契约：file_version<4 主题块只对老文件一次性生效 ──
 # 守的点：config_save_to_xml() 从落 "2.2" 字面量改为落数字契约版后，
-# 属性 8 的文件 atoi 后 file_version=8，`< 4` 迁移块（bg==0 → -1）不再命中；
-# 用户显式选择的 0（C_BLACK）底色必须能跨启停存活——数字化之前 "2.2" 恒被
-# atoi 成 2，每次启动重跑该块、把 0 反复抹成 -1，正是本次改动要根除的回归。
-info "属性 8 文件（含 theme playlist_bg=0）：连续启停不触发 <4 主题迁移块"
+# 属性 8 的夹具经首启 v8→v9 迁移后 file_version=9，`< 4` 迁移块（bg==0 → -1）
+# 不再命中；用户显式选择的 0（C_BLACK）底色必须能跨启停存活——数字化之前
+# "2.2" 恒被 atoi 成 2，每次启动重跑该块、把 0 反复抹成 -1，正是本次改动要
+# 根除的回归。
+info "属性 8 夹具（含 theme playlist_bg=0）：连续启停不触发 <4 主题迁移块"
 "$TM_BIN" daemon stop >/dev/null 2>&1 || true
 wait_core_down || bad "核心未下线即写夹具，本轮断言不可信"
 cat > "$CONFIG" <<'EOF'
@@ -354,12 +357,12 @@ DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).
 # 先证明文件确实被核心重写过（含夹具没有、但保存必写的 <equalizer> 段），
 # 否则下面"值没变"只是没人动过文件，断言会空转成假绿。
 if grep -q "<equalizer>" "$CONFIG"; then
-    ok "属性 8 文件已被核心重写（落盘含夹具没有的 <equalizer> 段）"
+    ok "属性 8 夹具已被核心重写（落盘含夹具没有的 <equalizer> 段）"
 else
-    bad "核心未重写属性 8 文件，本轮断言空转（值未变不能证明迁移块没跑）"
+    bad "核心未重写属性 8 夹具文件，本轮断言空转（值未变不能证明迁移块没跑）"
 fi
 if grep -q "<playlist_bg>0</playlist_bg>" "$CONFIG"; then
-    ok "两轮启停后落盘仍为 <playlist_bg>0</playlist_bg>（<4 主题块未对属性 8 文件重跑）"
+    ok "两轮启停后落盘仍为 <playlist_bg>0</playlist_bg>（<4 主题块未对迁移后的文件重跑）"
 else
     bad "playlist_bg 被 <4 主题块改写：$(grep -o '<playlist_bg>[0-9-]*</playlist_bg>' "$CONFIG" | head -1)（期望 0）"
 fi
@@ -388,11 +391,11 @@ sleep 2
 DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
 if [ -n "$DAEMON_PID" ]; then ok "\"2.2\" 夹具下核心已启动（历史文件仍可加载，pid $DAEMON_PID）"; else bad "核心启动失败（\"2.2\" 文件没有被加载？）"; fi
 # atoi("2.2")==2：>= CONFIG_MIN_SUPPORTED_VER(2) 可加载；file_version=2 让
-# <4 / <7 / <8 三个块在首启各跑一次，随后保存落属性 8，之后再启停永不命中。
-if grep -q 'version="8"' "$CONFIG"; then
-    ok "\"2.2\" 文件首启后根属性升为 8（数字化契约生效）"
+# <4 / <7 / <8 / <9 四个块在首启各跑一次，随后保存落属性 9，之后再启停永不命中。
+if grep -q 'version="9"' "$CONFIG"; then
+    ok "\"2.2\" 文件首启后根属性升为 9（数字化契约生效）"
 else
-    bad "\"2.2\" 文件首启后属性未升 8（实际 $(grep -o '<ter-music-config version="[^"]*"' "$CONFIG" | head -1)）"
+    bad "\"2.2\" 文件首启后属性未升 9（实际 $(grep -o '<ter-music-config version="[^"]*"' "$CONFIG" | head -1)）"
 fi
 if grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
     ok "\"2.2\" 文件首启补写 <stop_core_on_exit>1</stop_core_on_exit>（<8 块一次性生效）"
@@ -414,9 +417,9 @@ wait_core_down || bad "daemon stop 后核心未下线，第二轮断言不可信
 "$TM_BIN" daemon start >/dev/null 2>&1
 sleep 1.5
 DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
-if grep -q 'version="8"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG" &&
+if grep -q 'version="9"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG" &&
    grep -q "<playlist_bg>-1</playlist_bg>" "$CONFIG" && grep -q "<volume_percent>55</volume_percent>" "$CONFIG"; then
-    ok "第二轮启停后四项迁移产出全部不变（属性 8 起跳，迁移块不再重跑）"
+    ok "第二轮启停后四项迁移产出全部不变（属性 9 起跳，迁移块不再重跑）"
 else
     bad "第二轮启停把迁移产出改写了（实际：$(grep -o '<ter-music-config version="[^"]*"' "$CONFIG" | head -1)，$(grep -o '<playlist_bg>[0-9-]*</playlist_bg>' "$CONFIG" | head -1)，$(grep -o '<stop_core_on_exit>[0-9]*</stop_core_on_exit>' "$CONFIG" | head -1)）"
 fi
@@ -439,10 +442,10 @@ if [ -f "$XDG_CONFIG_HOME/ter-music/config.json.bak" ]; then
 else
     bad "config.json 未被迁移（迁移入口没有走到）"
 fi
-if [ -f "$CONFIG" ] && grep -q 'version="8"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
-    ok "JSON→XML 产出为属性 8 且显式含 <stop_core_on_exit>1</stop_core_on_exit>"
+if [ -f "$CONFIG" ] && grep -q 'version="9"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
+    ok "JSON→XML 产出为属性 9 且显式含 <stop_core_on_exit>1</stop_core_on_exit>"
 else
-    bad "JSON→XML 产出不含 stop_core_on_exit=1 / 版本不是 8（本路径保存即落 8，<8 迁移块不触发，缺值即 migration.c 未补写）"
+    bad "JSON→XML 产出不含 stop_core_on_exit=1 / 版本不是 9（本路径保存即落 9，<8 迁移块不触发，缺值即 migration.c 未补写）"
 fi
 if [ "$(stop_live)" = "1" ]; then
     ok "迁移后 Config.GetAll 的 stop_core_on_exit=1"

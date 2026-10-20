@@ -85,7 +85,7 @@ DBusMessage *rpc_config_handle(DBusMessage *message)
         dbus_error_free(&error);
 
         char reason[256];
-        if (config_apply_json(patch, reason, sizeof(reason)) != 0) {
+        if (config_apply_json_set(patch, reason, sizeof(reason)) != 0) {
             /* 未知键/类型错误：整体不生效（config_apply_json 保证原子性） */
             return rpc_error(message, RPC_ERROR_UNSUPPORTED,
                              reason[0] ? reason : "invalid configuration patch");

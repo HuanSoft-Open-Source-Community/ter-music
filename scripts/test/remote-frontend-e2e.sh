@@ -109,12 +109,12 @@ fi
 # 核心发的 Config.GetAll 就无人应答，last_opened_path 归属断言无从落地。必须
 # 在 TUI 拉起核心之前（HOME/XDG_CONFIG_HOME 已就位）把开关显式写成 0——前端
 # 退出时经 Config.GetAll 实时读的就是核心的这个值。缺省态（=1）的行为由
-# lifecycle-e2e.sh 的 S8 段专门覆盖，这里不重复验证；version="8" 配置里属性 8
+# lifecycle-e2e.sh 的 S8 段专门覆盖，这里不重复验证；version="9" 配置里属性 9
 # 的显式值不会被迁移块回卷，夹具写一次即稳定生效。
 mkdir -p "$XDG_CONFIG_HOME/ter-music"
 cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<ter-music-config version="8">
+<ter-music-config version="9">
   <preferences>
     <stop_core_on_exit>0</stop_core_on_exit>
   </preferences>

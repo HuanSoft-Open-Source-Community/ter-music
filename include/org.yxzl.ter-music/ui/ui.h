@@ -2,6 +2,7 @@
 #define UI_H
 
 #include "types.h"
+#include "keymap/actions.h"
 #include "util/utf8.h"
 #include <ncursesw/ncurses.h>
 
@@ -49,6 +50,9 @@ enum {
 /* ── Function prototypes ── */
 void init_ncurses(void);
 void cleanup(void);
+/* 恢复被 init_ncurses() 守卫改道的 stderr（幂等）；
+ * 退出路径与崩溃处理器在向真实终端打印错误前调用。 */
+void ui_restore_stdio(void);
 void run_event_loop(void);
 
 void create_layout(void);
@@ -92,12 +96,14 @@ void seek_relative_seconds(int delta_seconds);
 
 int  handle_main_view_mouse_event(const MEVENT *event);
 int  handle_menu_hint_bar_click(const MEVENT *event);
+int  handle_popup_action(ActionId action);
+int  handle_popup_input(int ch);
 int  is_primary_mouse_click(const MEVENT *event);
 int  translate_screen_to_window(WINDOW *win, int screen_y, int screen_x, int *window_y, int *window_x);
 int  get_playlist_index_from_window_row(int window_y, int *display_index, int *actual_index);
 int  get_control_index_from_window_point(int window_y, int window_x);
 int  get_lyric_index_from_window_row(int window_y, int *lyric_index, double *timestamp);
-int  get_menu_hint_fkey_from_column(int screen_x);
+int  get_menu_hint_action_from_column(int screen_x, ActionId *action);
 
 /* ── UTF-8 utility functions (declared in util/utf8.h, defined in util/utf8.c) ── */
 

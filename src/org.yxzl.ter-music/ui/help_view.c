@@ -13,6 +13,7 @@
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/keymap.h"
 #include "ui/scrollbar.h"
 #include "search/search.h"
 #include <stdio.h>
@@ -348,20 +349,20 @@ void render_help_content(void)
  * Help view input handling
  * ============================================================ */
 
-void handle_help_input(int ch)
+int handle_help_input(int ch)
 {
-    switch (ch) {
-        case KEY_LEFT:
+    ActionId action = keymap_resolve(CTX_HELP, ch);
+
+    switch (action) {
+        case ACTION_HELP_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
                 g_focus_area = FOCUS_SIDEBAR;
                 render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
                 render_help_content();
             }
-            break;
+            return 1;
 
-        case KEY_RIGHT:
-        case '\n':
-        case KEY_ENTER:
+        case ACTION_HELP_RIGHT:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx == HELP_ITEM_COUNT - 1) {
                     exit_current_view();
@@ -371,9 +372,9 @@ void handle_help_input(int ch)
                     render_help_content();
                 }
             }
-            break;
+            return 1;
 
-        case KEY_UP:
+        case ACTION_HELP_UP:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 if (g_menu_selected_idx > 0)
                     g_menu_selected_idx--;
@@ -390,9 +391,9 @@ void handle_help_input(int ch)
                 if (g_help_scroll_offset < 0) g_help_scroll_offset = 0;
             }
             render_help_content();
-            break;
+            return 1;
 
-        case KEY_DOWN:
+        case ACTION_HELP_DOWN:
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx++;
                 if (g_menu_selected_idx >= HELP_ITEM_COUNT)
@@ -406,20 +407,22 @@ void handle_help_input(int ch)
                 g_help_scroll_offset += 3;
             }
             render_help_content();
-            break;
+            return 1;
 
-        case '/':
+        case ACTION_HELP_SEARCH:
             help_search_prompt();
-            break;
+            return 1;
 
-        case 'n':
-        case 'N':
+        case ACTION_HELP_NEXT_MATCH:
             if (g_help_search_active && g_help_search_count > 0) {
                 g_help_search_selected++;
                 if (g_help_search_selected >= g_help_search_count)
                     g_help_search_selected = 0;
                 render_help_content();
             }
-            break;
+            return 1;
+
+        default:
+            return 0;
     }
 }

@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -31,7 +32,7 @@ static char g_cli_bus[128] = "";
 static const char *const k_cli_commands[] = {
     "tui", "play", "pause", "resume", "toggle", "stop", "next", "prev",
     "seek", "volume", "speed", "mode", "show", "daemon",
-    "queue", "config", "lyrics", "track", "cover",
+    "queue", "config", "lyrics", "track", "cover", "keys",
     "version", "--version", "help", "--help", "-h",
     NULL
 };
@@ -114,6 +115,10 @@ static void cli_print_help(const char *program) {
     printf("  daemon stop [--force] [--all] | restart | status [--json] | reload\n");
     printf("     --all  除主实例外，把 --force 起的次要实例也一并停止\n\n");
 
+    printf("键位审计（本地读取配置，不要求运行实例）：\n");
+    printf("  keys list [--json]        列出全部动作的上下文、名称、有效键、默认键与遮蔽关系\n");
+    printf("  keys check [--json]       严格审计配置；非法项/冲突/无默认键时退出码非 0\n\n");
+
     printf("其他：\n");
     printf("  version | --version        显示版本\n");
     printf("  help | --help              显示本帮助\n");
@@ -160,6 +165,37 @@ static const char *cli_bus(void) {
     return g_cli_bus[0] ? g_cli_bus : NULL;
 }
 
+/* ── TUI 会命中的诊断输出（语义见 cli.h） ─────────────────────── */
+static char g_cli_diag_buf[1024];
+static size_t g_cli_diag_len = 0;
+
+void cli_diag(const char *fmt, ...) {
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    fputs(buf, stderr);
+
+    /* 累积缓冲：放不下就不再追加（截断安全，内容已进日志） */
+    size_t len = strlen(buf);
+    if (len < sizeof(g_cli_diag_buf) - g_cli_diag_len) {
+        memcpy(g_cli_diag_buf + g_cli_diag_len, buf, len);
+        g_cli_diag_len += len;
+        g_cli_diag_buf[g_cli_diag_len] = '\0';
+    }
+
+    log_error("cli", "%s", buf);
+}
+
+void cli_diag_flush(void) {
+    if (g_cli_diag_len == 0) return;
+    fputs(g_cli_diag_buf, stderr);
+    g_cli_diag_len = 0;
+    g_cli_diag_buf[0] = '\0';
+}
+
 int cli_in_sandbox(void) {
     /* 显式覆盖优先（测试与特殊部署） */
     const char *override = getenv("TER_MUSIC_SANDBOX");
@@ -174,12 +210,12 @@ int cli_in_sandbox(void) {
  * 沙箱不允许脱离进程（容器随命令退出而回收），后台播放必须由
  * D-Bus 激活或宿主侧 systemd 用户服务承担。 */
 static void cli_print_sandbox_guidance(const char *reason) {
-    fprintf(stderr, "错误：%s\n",
-            reason ? reason : "Linyaps 打包环境下无法自行分叉后台进程。");
-    fprintf(stderr, "请改用下列方式之一（均在宿主机执行）：\n");
-    fprintf(stderr, "  · 常驻服务（推荐）：systemctl --user enable --now org.yxzl.ter-music\n");
-    fprintf(stderr, "  · 前台运行：ll-cli run org.yxzl.ter-music -- ter-music daemon foreground\n");
-    fprintf(stderr, "  · 直接播放：ll-cli run org.yxzl.ter-music -- ter-music play <路径> --foreground\n");
+    cli_diag("错误：%s\n",
+             reason ? reason : "Linyaps 打包环境下无法自行分叉后台进程。");
+    cli_diag("请改用下列方式之一（均在宿主机执行）：\n");
+    cli_diag("  · 常驻服务（推荐）：systemctl --user enable --now org.yxzl.ter-music\n");
+    cli_diag("  · 前台运行：ll-cli run org.yxzl.ter-music -- ter-music daemon foreground\n");
+    cli_diag("  · 直接播放：ll-cli run org.yxzl.ter-music -- ter-music play <路径> --foreground\n");
 }
 
 static unsigned long long cli_now_ms(void) {
@@ -218,7 +254,7 @@ static int cli_ensure_core_instance(void) {
             if (cli_client_wait_for_online(cli_bus(), 10000, &pid) == CLI_EXIT_OK) {
                 return CLI_EXIT_OK;
             }
-            fprintf(stderr, "错误：已请求启动后台播放，但实例未在 10 秒内就绪。\n");
+            cli_diag("错误：已请求启动后台播放，但实例未在 10 秒内就绪。\n");
             return CLI_EXIT_DBUS;
         }
         cli_print_sandbox_guidance(
@@ -242,8 +278,8 @@ int cli_ensure_core_for_frontend(const char *bus, int attach_only)
     }
 
     if (attach_only) {
-        fprintf(stderr, "错误：没有正在运行的播放服务（已指定 --attach-only，不自动启动）。\n");
-        fprintf(stderr, "      先运行 `ter-music daemon start`，或去掉 --attach-only。\n");
+        cli_diag("错误：没有正在运行的播放服务（已指定 --attach-only，不自动启动）。\n");
+        cli_diag("      先运行 `ter-music daemon start`，或去掉 --attach-only。\n");
         return CLI_EXIT_NO_INSTANCE;
     }
 
@@ -254,7 +290,7 @@ int cli_ensure_core_for_frontend(const char *bus, int attach_only)
         }
         int pid = 0;
         if (cli_client_wait_for_online(bus, 10000, &pid) != CLI_EXIT_OK) {
-            fprintf(stderr, "错误：已请求启动播放服务，但未在 10 秒内就绪。\n");
+            cli_diag("错误：已请求启动播放服务，但未在 10 秒内就绪。\n");
             return CLI_EXIT_DBUS;
         }
         return CLI_EXIT_OK;
@@ -1164,6 +1200,9 @@ int cli_run(int argc, char **argv) {
     }
     if (strcmp(command, "cover") == 0) {
         return cli_cmd_cover(argc, argv);
+    }
+    if (strcmp(command, "keys") == 0) {
+        return cli_cmd_keys(argc, argv);
     }
 
     if (strcmp(command, "pause") == 0 || strcmp(command, "resume") == 0 ||
