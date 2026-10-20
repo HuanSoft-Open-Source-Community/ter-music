@@ -150,6 +150,12 @@ static void remote_refresh_entries(void)
     refresh();
 }
 
+/* 远程设备页当前是否可见（设置页 + 侧栏“远程设备”项，下标 5） */
+static int remote_view_is_active(void)
+{
+    return g_current_view == VIEW_SETTINGS && g_menu_selected_idx == 5;
+}
+
 /* UI 线程取回列目录结果（后台线程不碰 UI） */
 static void remote_drain_listing(void)
 {
@@ -190,14 +196,18 @@ static void remote_drain_listing(void)
         snprintf(buf, sizeof(buf), "%s %d %s",
                  i18n_get("remote.connection_ok"), count, i18n_get("remote.entries"));
         show_status_message(buf);
-        render_settings_content();
+        if (remote_view_is_active()) {
+            render_settings_content();
+        }
         return;
     }
 
     g_remote_entries = entries;
     g_remote_entry_count = count;
     g_remote_entry_offset = 0;
-    rerender_remote_view();
+    if (remote_view_is_active()) {
+        rerender_remote_view();
+    }
 }
 
 
@@ -626,54 +636,58 @@ static void remote_delete_connection(int conn_idx)
 
 void remote_view_render(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
-    int content_start_x = (max_x / 4) + 2;
+    MenuContentArea area;
+    menu_content_area(&area);
+    int max_y = area.max_y;
     int y = 2;
 
     attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
-    for (int row = 2; row < max_y - 2; row++) {
-        move(row, content_start_x);
-        clrtoeol();
-    }
+    menu_content_clear_rows(&area, 2, max_y - 3);
 
     if (g_remote_mode == 0) {
-        mvprintw(y++, content_start_x, "%s",
-                 i18n_get("remote.hint_manage"));
+        menu_content_puts(&area, y++, i18n_get("remote.hint_manage"));
         y++;
 
         int count = remote_store_count();
         char header[64];
         snprintf(header, sizeof(header), "%s (%d)",
                  i18n_get("remote.saved_connections"), count);
-        mvprintw(y++, content_start_x, "%s", header);
+        menu_content_puts(&area, y++, header);
         y++;
 
         for (int i = 0; i < count && y < max_y - 3; i++) {
             const RemoteConnectionConfig *rc = remote_store_get(i);
-            if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
-            mvprintw(y++, content_start_x, "  %-20s [%s] %s",
+            char line[512];
+            snprintf(line, sizeof(line), "  %-20s [%s] %s",
                      rc->name, remote_protocol_name(rc->protocol), rc->host);
+            if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
+            menu_content_puts(&area, y++, line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attroff(A_REVERSE);
         }
 
         y++;
-        if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attron(A_REVERSE);
-        mvprintw(y++, content_start_x, "  %s", i18n_get("remote.add_new"));
-        if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attroff(A_REVERSE);
+        if (y <= max_y - 3) {
+            char add_line[512];
+            snprintf(add_line, sizeof(add_line), "  %s", i18n_get("remote.add_new"));
+            if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attron(A_REVERSE);
+            menu_content_puts(&area, y, add_line);
+            if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attroff(A_REVERSE);
+        }
 
     } else if (g_remote_mode == 1) {
         int conn_idx = g_remote_selected_conn;
         if (conn_idx < 0 || conn_idx >= remote_store_count()) {
-            mvprintw(y++, content_start_x, "%s", i18n_get("general.no_connection"));
+            menu_content_puts(&area, y++, i18n_get("general.no_connection"));
             attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
             return;
         }
         const RemoteConnectionConfig *rc = remote_store_get(conn_idx);
 
-        mvprintw(y++, content_start_x, "%s: %s [%s]",
+        char title[512];
+        snprintf(title, sizeof(title), "%s: %s [%s]",
                  i18n_get("remote.connection"), rc->name, remote_protocol_name(rc->protocol));
+        menu_content_puts(&area, y++, title);
         y++;
 
         const char *actions[] = {
@@ -685,9 +699,11 @@ void remote_view_render(void)
         };
         int action_count = 5;
 
-        for (int i = 0; i < action_count; i++) {
+        for (int i = 0; i < action_count && y <= max_y - 3; i++) {
+            char action_line[512];
+            snprintf(action_line, sizeof(action_line), "  %s", actions[i]);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
-            mvprintw(y++, content_start_x, "  %s", actions[i]);
+            menu_content_puts(&area, y++, action_line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attroff(A_REVERSE);
         }
 
@@ -696,45 +712,44 @@ void remote_view_render(void)
         const char *title_fmt = g_remote_form_editing_idx >= 0
             ? i18n_get("remote.edit_hint")
             : i18n_get("remote.add_hint");
-        mvprintw(y++, content_start_x, "%s", title_fmt);
+        menu_content_puts(&area, y++, title_fmt);
         y++;
 
         char label[32], value[256];
         for (int i = 0; i < field_count && y < max_y - 2; i++) {
             remote_form_field_label(i, label, sizeof(label));
             remote_form_value_text(i, value, sizeof(value));
-            move(y, content_start_x);
+            char line[512];
+            snprintf(line, sizeof(line), "  %-14s %s", label, value);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
-            printw("  %-14s %s", label, value);
-            clrtoeol();
+            menu_content_puts(&area, y, line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attroff(A_REVERSE);
             y++;
         }
 
         if (y < max_y - 2) {
-            mvprintw(y, content_start_x, "%s",
-                     i18n_get("remote.edit_keys"));
+            menu_content_puts(&area, y, i18n_get("remote.edit_keys"));
         }
 
     } else if (g_remote_mode == 3) {
         if (g_remote_selected_conn < 0) {
-            mvprintw(y++, content_start_x, "%s", i18n_get("general.no_connection"));
+            menu_content_puts(&area, y++, i18n_get("general.no_connection"));
             attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
             return;
         }
         const RemoteConnectionConfig *conn = remote_store_get(g_remote_selected_conn);
 
-        char header[256];
+        char header[1024];
         snprintf(header, sizeof(header), "%s: %s > %s",
                  i18n_get("remote.browse_short"), conn->name,
                  g_remote_current_path[0] ? g_remote_current_path : "/");
-        mvprintw(y++, content_start_x, "%s", header);
+        menu_content_puts(&area, y++, header);
         y++;
 
         if (!g_remote_entries) {
-            mvprintw(y++, content_start_x, "%s", i18n_get("general.loading"));
+            menu_content_puts(&area, y++, i18n_get("general.loading"));
         } else if (g_remote_entry_count == 0) {
-            mvprintw(y++, content_start_x, "%s", i18n_get("general.empty_dir"));
+            menu_content_puts(&area, y++, i18n_get("general.empty_dir"));
         } else {
             int display_count = g_remote_entry_count;
             int max_display = max_y - y - 3;
@@ -743,28 +758,30 @@ void remote_view_render(void)
                 g_remote_entry_offset = g_remote_entry_count - display_count;
             if (g_remote_entry_offset < 0) g_remote_entry_offset = 0;
 
+            char load_hint[512];
+            snprintf(load_hint, sizeof(load_hint), "  %s", i18n_get("remote.load_hint"));
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attron(A_REVERSE);
-            mvprintw(y++, content_start_x, "  %s",
-                     i18n_get("remote.load_hint"));
+            menu_content_puts(&area, y++, load_hint);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attroff(A_REVERSE);
 
             for (int i = g_remote_entry_offset; i < g_remote_entry_count && y < max_y - 3; i++) {
                 const RemoteDirEntry *e = &g_remote_entries[i];
                 int is_sel = (g_focus_area == FOCUS_CONTENT && g_remote_selected == i + 1);
-                if (is_sel) attron(A_REVERSE);
+                char line[512];
                 if (e->is_dir) {
-                    mvprintw(y++, content_start_x, "  [%s] %s",
+                    snprintf(line, sizeof(line), "  [%s] %s",
                              i18n_get("remote.dir"), e->name);
                 } else {
-                    mvprintw(y++, content_start_x, "  %s", e->name);
+                    snprintf(line, sizeof(line), "  %s", e->name);
                 }
+                if (is_sel) attron(A_REVERSE);
+                menu_content_puts(&area, y++, line);
                 if (is_sel) attroff(A_REVERSE);
             }
         }
 
         if (y < max_y - 2) {
-            mvprintw(y, content_start_x, "%s",
-                     i18n_get("remote.browse_hint"));
+            menu_content_puts(&area, y, i18n_get("remote.browse_hint"));
         }
     }
 

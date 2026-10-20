@@ -42,70 +42,71 @@ int g_playlist_track_offset = 0;
 
 void render_playlist_manager_content(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
-
-    int menu_width = max_x / 4;
-    int content_start_x = menu_width + 2;
+    MenuContentArea area;
+    menu_content_area(&area);
+    int max_y = area.max_y;
+    int max_x = area.max_x;
+    int menu_width = area.menu_width;
     int start_y = 2;
 
     attron(COLOR_PAIR(COLOR_PAIR_LYRICS));
 
     if (g_playlist_view_mode == 0) {
-        mvprintw(start_y, content_start_x,
-                 i18n_get("playlist_mgr.playlists_fmt"),
+        menu_content_clear_rows(&area, 2, max_y - 3);
+
+        char header[256];
+        snprintf(header, sizeof(header), i18n_get("playlist_mgr.playlists_fmt"),
                  g_playlist_manager.count);
-        mvprintw(start_y + 1, content_start_x, "----------------------------------------");
+        menu_content_puts(&area, start_y, header);
+        menu_content_puts(&area, start_y + 1, "----------------------------------------");
         start_y += 3;
 
         if (g_playlist_manager.count == 0) {
-            mvprintw(start_y, content_start_x, "%s",
-                     i18n_get("playlist_mgr.no_playlists"));
-            mvprintw(start_y + 1, content_start_x, "%s",
-                     i18n_get("playlist_mgr.create_hint"));
+            menu_content_puts(&area, start_y, i18n_get("playlist_mgr.no_playlists"));
+            menu_content_puts(&area, start_y + 1, i18n_get("playlist_mgr.create_hint"));
         } else {
-            int visible_lines = max_y - start_y - 2;
+            int visible_lines = max_y - start_y - 3;
 
             for (int i = 0; i < visible_lines && i < g_playlist_manager.count; i++) {
                 UserPlaylist *pl = &g_playlist_manager.playlists[i];
                 char display_name[MAX_PLAYLIST_NAME_LEN + 8];
                 utf8_str_pad(display_name, sizeof(display_name), pl->name, 30);
 
+                char line[MAX_PLAYLIST_NAME_LEN + 128];
+                snprintf(line, sizeof(line), i18n_get("playlist_mgr.track_count_fmt"),
+                         display_name, pl->track_count);
+
                 if (i == g_content_selected_idx && g_focus_area == FOCUS_CONTENT) {
                     attron(A_REVERSE);
-                    mvprintw(start_y + i, content_start_x,
-                             i18n_get("playlist_mgr.track_count_fmt"),
-                             display_name, pl->track_count);
+                    menu_content_puts(&area, start_y + i, line);
                     attroff(A_REVERSE);
                 } else {
-                    mvprintw(start_y + i, content_start_x,
-                             i18n_get("playlist_mgr.track_count_fmt"),
-                             display_name, pl->track_count);
+                    menu_content_puts(&area, start_y + i, line);
                 }
             }
 
             int bottom_y = max_y - 3;
-            mvprintw(bottom_y, content_start_x, "%s",
-                     i18n_get("playlist_mgr.hint_manage"));
+            menu_content_puts(&area, bottom_y, i18n_get("playlist_mgr.hint_manage"));
         }
     } else {
         if (g_playlist_selected_playlist >= 0 &&
             g_playlist_selected_playlist < g_playlist_manager.count) {
             UserPlaylist *pl = &g_playlist_manager.playlists[g_playlist_selected_playlist];
 
-            mvprintw(start_y, content_start_x,
-                     i18n_get("playlist_mgr.playlist_tracks_fmt"),
+            menu_content_clear_rows(&area, 2, max_y - 3);
+
+            char header[256];
+            snprintf(header, sizeof(header), i18n_get("playlist_mgr.playlist_tracks_fmt"),
                      pl->name, pl->track_count);
-            mvprintw(start_y + 1, content_start_x, "----------------------------------------");
+            menu_content_puts(&area, start_y, header);
+            menu_content_puts(&area, start_y + 1, "----------------------------------------");
             start_y += 3;
 
             if (pl->track_count == 0) {
-                mvprintw(start_y, content_start_x, "%s",
-                         i18n_get("playlist_mgr.playlist_empty"));
-                mvprintw(start_y + 1, content_start_x, "%s",
-                         i18n_get("playlist_mgr.add_hint"));
+                menu_content_puts(&area, start_y, i18n_get("playlist_mgr.playlist_empty"));
+                menu_content_puts(&area, start_y + 1, i18n_get("playlist_mgr.add_hint"));
             } else {
-                int visible_lines = max_y - start_y - 2;
+                int visible_lines = max_y - start_y - 3;
 
                 if (g_content_selected_idx >= pl->track_count) {
                     g_content_selected_idx = pl->track_count - 1;
@@ -131,20 +132,20 @@ void render_playlist_manager_content(void)
                     utf8_str_pad(display_title, sizeof(display_title),
                                  truncated_title, title_width > 0 ? title_width : 30);
 
+                    char line[MAX_META_LEN * 2 + 64];
+                    snprintf(line, sizeof(line), " %s - %s", display_title, t->artist);
+
                     if (idx == g_content_selected_idx && g_focus_area == FOCUS_CONTENT) {
                         attron(A_REVERSE);
-                        mvprintw(start_y + i, content_start_x, " %s - %s",
-                                 display_title, t->artist);
+                        menu_content_puts(&area, start_y + i, line);
                         attroff(A_REVERSE);
                     } else {
-                        mvprintw(start_y + i, content_start_x, " %s - %s",
-                                 display_title, t->artist);
+                        menu_content_puts(&area, start_y + i, line);
                     }
                 }
 
                 int bottom_y = max_y - 3;
-                mvprintw(bottom_y, content_start_x, "%s",
-                         i18n_get("playlist_mgr.hint_tracks"));
+                menu_content_puts(&area, bottom_y, i18n_get("playlist_mgr.hint_tracks"));
             }
         }
     }
@@ -281,6 +282,7 @@ int handle_playlist_input(int ch)
                     render_menu_frame(i18n_get("menu.playlists"));
                     render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
                     render_playlist_manager_content();
+                    render_menu_hint_bar();
                 } else if (g_menu_selected_idx == PLAYLIST_ITEM_COUNT - 1) {
                     exit_current_view();
                 }
@@ -379,6 +381,7 @@ int handle_playlist_input(int ch)
                     render_menu_frame(i18n_get("menu.playlists"));
                     render_menu_sidebar(g_menu_selected_idx, playlist_sidebar_items, PLAYLIST_ITEM_COUNT);
                     render_playlist_manager_content();
+                    render_menu_hint_bar();
                 }
             }
             return 1;

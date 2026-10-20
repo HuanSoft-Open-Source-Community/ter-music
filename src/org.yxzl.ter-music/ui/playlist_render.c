@@ -31,8 +31,6 @@
 #include <pthread.h>
 
 extern WINDOW *win_playlist;
-extern char g_braille_art_buffer[8192];
-extern int g_album_cover_size;
 
 /* ── 主视图播放列表标签模式（文件浏览 vs 播放队列） ── */
 int g_playlist_tab_mode = PLAYLIST_MODE_FILE_BROWSER;
@@ -564,12 +562,12 @@ void render_playlist_content(void)
                 cover_lines = cover_size;
 
                 if (w - cover_char_width - 4 >= min_info_width) {
-                    if (g_album_cover_size != cover_size || g_braille_art_buffer[0] == '\0') {
-                        g_album_cover_size = cover_size;
+                    if (!braille_art_cache_matches(cover_path, cover_size)) {
+                        braille_art_cache_begin(cover_path, cover_size);
                         if (generate_braille_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
                                                           cover_char_width, cover_size,
                                                           g_braille_art_buffer, sizeof(g_braille_art_buffer)) != 0) {
-                            g_braille_art_buffer[0] = '\0';
+                            braille_art_cache_fail();
                         }
                     }
                     if (g_braille_art_buffer[0] != '\0') {

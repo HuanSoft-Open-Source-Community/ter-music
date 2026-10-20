@@ -37,6 +37,12 @@
 #include <stdbool.h>
 #include <time.h>
 
+/* 1/未知(-1) 都视为可选；只有明确不可用(0)才过滤。 */
+static int backend_option_selectable(int backend)
+{
+    return player_audio_backend_available(backend) != 0;
+}
+
 /* ============================================================
  * Settings internal state
  * ============================================================ */
@@ -762,21 +768,22 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
  * Settings option group rendering
  * ============================================================ */
 
-static void render_settings_option_group(int start_y, int content_start_x, int max_y, SettingsSectionSpec spec)
+static void render_settings_option_group(int start_y, int max_y, SettingsSectionSpec spec)
 {
+    MenuContentArea area;
+    menu_content_area(&area);
+
     for (int i = 0; i < spec.count && start_y + i < max_y - 2; i++) {
         int option_index = spec.indices[i];
         char line[256];
         format_settings_option_line(option_index, line, sizeof(line));
-        move(start_y + i, content_start_x);
+        menu_content_clear_row(&area, start_y + i);
         if (option_index == g_settings_current_option && g_focus_area == FOCUS_CONTENT) {
             attron(A_REVERSE);
-            printw("%s", line);
-            clrtoeol();
+            menu_content_puts(&area, start_y + i, line);
             attroff(A_REVERSE);
         } else {
-            printw("%s", line);
-            clrtoeol();
+            menu_content_puts(&area, start_y + i, line);
         }
     }
 }
@@ -1043,9 +1050,9 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             int options[] = {AUDIO_BACKEND_AUTO, AUDIO_BACKEND_PIPEWIRE,
                              AUDIO_BACKEND_PULSE, AUDIO_BACKEND_ALSA};
             int count = 4;
-            int has_pw    = audio_backend_is_available(AUDIO_BACKEND_PIPEWIRE);
-            int has_pulse = audio_backend_is_available(AUDIO_BACKEND_PULSE);
-            int has_alsa  = audio_backend_is_available(AUDIO_BACKEND_ALSA);
+            int has_pw    = backend_option_selectable(AUDIO_BACKEND_PIPEWIRE);
+            int has_pulse = backend_option_selectable(AUDIO_BACKEND_PULSE);
+            int has_alsa  = backend_option_selectable(AUDIO_BACKEND_ALSA);
             int current = 0;
             for (int i = 0; i < count; i++) {
                 if (g_app_config.audio_backend == options[i]) { current = i; break; }
@@ -1184,7 +1191,7 @@ static void close_sel_menu(int apply)
                 int idx = 0;
                 for (int j = 0; j < 4; j++) {
                     if (j > 0 && backend_opts[j] != AUDIO_BACKEND_AUTO
-                        && !audio_backend_is_available(backend_opts[j]))
+                        && !backend_option_selectable(backend_opts[j]))
                         continue;
                     if (idx == g_sel_idx) {
                         g_app_config.audio_backend = backend_opts[j];
@@ -1349,7 +1356,7 @@ static void open_sel_menu(int option_index)
             count = 0;
             for (int j = 0; j < 4; j++) {
                 if (j > 0 && backend_opts[j] != AUDIO_BACKEND_AUTO
-                    && !audio_backend_is_available(backend_opts[j]))
+                    && !backend_option_selectable(backend_opts[j]))
                     continue;
                 if (g_app_config.audio_backend == backend_opts[j])
                     cur = count;
@@ -1488,7 +1495,7 @@ static void create_sel_window(void)
                             AUDIO_BACKEND_PULSE,AUDIO_BACKEND_ALSA};
                 int idx = 0;
                 for (int j = 0; j < 4; j++) {
-                    if (j>0 && be[j]!=AUDIO_BACKEND_AUTO && !audio_backend_is_available(be[j]))
+                    if (j>0 && be[j]!=AUDIO_BACKEND_AUTO && !backend_option_selectable(be[j]))
                         continue;
                     if (idx == i) {
                         switch (be[j]) {
@@ -1582,13 +1589,16 @@ static void create_sel_window(void)
                 }
                 break;
         }
-        int l = (int)strlen(opts[i]);
+        int l = utf8_str_width(opts[i]);
         if (l > max_w) max_w = l;
     }
 
     int box_w = max_w + 4;   /* 1 space + text + 1 space + border */
     if (box_w < 20) box_w = 20;
     if (box_w > 50) box_w = 50;
+    int max_box_w = max_x - (max_x / 4 + 2) - 2;
+    if (max_box_w < 20) max_box_w = 20;
+    if (box_w > max_box_w) box_w = max_box_w;
     int box_h = n + 2;
     if (box_h > 20) box_h = 20;
 
@@ -1605,6 +1615,10 @@ static void create_sel_window(void)
     if (row < 2) row = 2;
 
     g_sel_win = newwin(box_h, box_w, row, col);
+    if (!g_sel_win) {
+        g_sel_win = NULL;
+        g_sel_active = 0;
+    }
 }
 
 static void draw_sel_menu(void)
@@ -1636,7 +1650,7 @@ static void draw_sel_menu(void)
                             AUDIO_BACKEND_PULSE,AUDIO_BACKEND_ALSA};
                 int idx = 0;
                 for (int j = 0; j < 4; j++) {
-                    if (j>0 && be[j]!=AUDIO_BACKEND_AUTO && !audio_backend_is_available(be[j]))
+                    if (j>0 && be[j]!=AUDIO_BACKEND_AUTO && !backend_option_selectable(be[j]))
                         continue;
                     if (idx == i) {
                         switch (be[j]) {
@@ -1787,7 +1801,9 @@ static void draw_sel_menu(void)
             wattrset(g_sel_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT) | A_REVERSE);
         else
             wattrset(g_sel_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
-        mvwprintw(g_sel_win, i + 1, 1, " %-*s ", box_w - 4, opts[opt_idx]);
+        char clipped[256];
+        utf8_str_truncate(clipped, opts[opt_idx], box_w - 4);
+        mvwprintw(g_sel_win, i + 1, 1, " %s ", clipped);
     }
 
     /* Scroll indicators (use wattrset to avoid any A_REVERSE residual) */
@@ -2024,29 +2040,34 @@ static void build_hotkey_keys_text(ActionId action, char *out, size_t out_size)
     }
 }
 
-static void render_hotkey_editor(int start_y, int content_start_x, int max_y)
+static void render_hotkey_editor(int start_y, int max_y)
 {
+    MenuContentArea area;
+    menu_content_area(&area);
+
     int total = actions_bindable_count();
     int message_row = max_y - 3;
     int list_top = start_y + 4;
+    char buf[512];
 
-    mvprintw(start_y, content_start_x, "%s",
-             i18n_get("settings.hotkeys.editor_hint"));
-    mvprintw(start_y + 1, content_start_x, "%s",
-             i18n_get("settings.hotkeys.editor_hint2"));
-    mvprintw(start_y + 2, content_start_x, "%s",
-             i18n_get("settings.hotkeys.reserved_note"));
+    snprintf(buf, sizeof(buf), "%s", i18n_get("settings.hotkeys.editor_hint"));
+    menu_content_puts(&area, start_y, buf);
+    snprintf(buf, sizeof(buf), "%s", i18n_get("settings.hotkeys.editor_hint2"));
+    menu_content_puts(&area, start_y + 1, buf);
+    snprintf(buf, sizeof(buf), "%s", i18n_get("settings.hotkeys.reserved_note"));
+    menu_content_puts(&area, start_y + 2, buf);
 
     /* 加载时被剔除的改绑（键冲突/非法/锁定）一次性提示，防止旧配置被静默
      * 剥离。加载层与 keymap_reload 层互斥计数（加载剔除的条目不会进入
      * reload），相加即本次启动真正未生效的改绑总数。 */
     int dropped_total = g_app_config.keybinding_dropped_count +
                         g_app_config.keybinding_reload_dropped_count;
-    move(start_y + 3, content_start_x);
-    clrtoeol();
+    menu_content_clear_row(&area, start_y + 3);
     if (dropped_total > 0) {
+        snprintf(buf, sizeof(buf),
+                 i18n_get("settings.hotkeys.dropped_notice"), dropped_total);
         attron(A_BOLD);
-        printw(i18n_get("settings.hotkeys.dropped_notice"), dropped_total);
+        menu_content_puts(&area, start_y + 3, buf);
         attroff(A_BOLD);
     }
 
@@ -2081,16 +2102,14 @@ static void render_hotkey_editor(int start_y, int content_start_x, int max_y)
                  keymap_action_label(id), keys_text);
 
         int y = list_top + row;
-        move(y, content_start_x);
+        menu_content_clear_row(&area, y);
         if (g_hotkey_offset + row == g_hotkey_selected &&
             g_focus_area == FOCUS_CONTENT) {
             attron(A_REVERSE);
-            printw("%s", line);
-            clrtoeol();
+            menu_content_puts(&area, y, line);
             attroff(A_REVERSE);
         } else {
-            printw("%s", line);
-            clrtoeol();
+            menu_content_puts(&area, y, line);
         }
     }
 
@@ -2105,7 +2124,8 @@ static void render_hotkey_editor(int start_y, int content_start_x, int max_y)
         message = i18n_get("settings.hotkeys.core_too_old");
     }
     if (message[0] != '\0') {
-        mvprintw(message_row, content_start_x, "%s", message);
+        if (message_row > area.max_y - 3) message_row = area.max_y - 3;
+        menu_content_puts(&area, message_row, message);
     }
 }
 
@@ -2238,68 +2258,74 @@ static int handle_hotkey_capture(int ch)
 
 void render_settings_content(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
+    MenuContentArea area;
+    menu_content_area(&area);
 
-    int menu_width = max_x / 4;
-    int content_start_x = menu_width + 2;
     int start_y = 2;
     SettingsSectionSpec spec = get_active_settings_section_spec();
+    char hint_buf[512];
 
     attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
-    for (int y = 2; y < max_y - 2; y++) {
-        move(y, content_start_x);
-        clrtoeol();
-    }
+    menu_content_clear_rows(&area, 2, area.max_y - 3);
 
     if (g_menu_selected_idx == 0) {  /* 颜色主题 */
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.color.select_hint"));
+        menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, content_start_x, max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec);
         start_y += spec.count + 1;
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.color.auto_avoid_same"));
+        menu_content_puts(&area, start_y, hint_buf);
     } else if (g_menu_selected_idx == 1) {  /* 默认路径 */
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.hint"));
+        menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, content_start_x, max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec);
         start_y += spec.count + 1;
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.tilde_hint"));
+        menu_content_puts(&area, start_y, hint_buf);
     } else if (g_menu_selected_idx == 2) {  /* 播放设置 */
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.playback.hint"));
+        menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, content_start_x, max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec);
         start_y += spec.count + 1;
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.playback.language"));
+        menu_content_puts(&area, start_y, hint_buf);
     } else if (g_menu_selected_idx == 3) {  /* 播放模式 */
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.play_mode.hint"));
+        menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, content_start_x, max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec);
     } else if (g_menu_selected_idx == 4) {  /* 快捷键 */
-        render_hotkey_editor(start_y, content_start_x, max_y);
+        render_hotkey_editor(start_y, area.max_y);
     } else if (g_menu_selected_idx == 5) {  /* 远程设备 */
         remote_view_render();
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
         render_eq_visual();
         attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
     } else if (g_menu_selected_idx == 7) {  /* 信息显示（CLI / D-Bus） */
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.info.hint"));
+        menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, content_start_x, max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec);
         start_y += spec.count + 1;
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.info.fields_hint"));
+        menu_content_puts(&area, start_y, hint_buf);
     } else {
-        mvprintw(start_y, content_start_x, "%s",
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.hotkeys.enter_return"));
+        menu_content_puts(&area, start_y, hint_buf);
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
@@ -2331,10 +2357,8 @@ static void rerender_settings_view(void)
 
 static void render_eq_visual(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
-    int menu_width = max_x / 4;
-    int cx = menu_width + 2;
+    MenuContentArea area;
+    menu_content_area(&area);
     int start_y = 2;
 
     /* Status header */
@@ -2344,17 +2368,13 @@ static void render_eq_visual(void)
         : i18n_get("eq.title_disabled");
 
     /* Clear content area */
-    for (int y = start_y; y < max_y - 2; y++) {
-        move(y, cx);
-        clrtoeol();
-    }
+    menu_content_clear_rows(&area, start_y, area.max_y - 3);
 
-    mvprintw(start_y, cx, "%s", status);
+    menu_content_puts(&area, start_y, status);
     start_y++;
 
     /* Help row (include pre-amp and enable toggle hint) */
-    mvprintw(start_y, cx, "%s",
-             i18n_get("eq.hint"));
+    menu_content_puts(&area, start_y, i18n_get("eq.hint"));
     start_y++;
 
     /* Pre-amp display */
@@ -2366,7 +2386,7 @@ static void render_eq_visual(void)
                  i18n_get("eq.preampl"), g_app_config.eq_preamp);
         if (pre_selected)
             attron(A_REVERSE);
-        mvprintw(start_y, cx, "%s", buf);
+        menu_content_puts(&area, start_y, buf);
         if (pre_selected)
             attroff(A_REVERSE);
     }
@@ -2381,16 +2401,20 @@ static void render_eq_visual(void)
                  g_app_config.eq_enabled
                      ? i18n_get("general.on")
                      : i18n_get("general.off"));
-        if (en_selected)
-            attron(A_REVERSE);
-        mvprintw(start_y, cx + 20, "%s", buf);
-        if (en_selected)
-            attroff(A_REVERSE);
+        if (area.content_width > 20) {
+            char clipped[64];
+            utf8_str_truncate(clipped, buf, area.content_width - 20);
+            if (en_selected)
+                attron(A_REVERSE);
+            mvaddstr(start_y, area.content_x + 20, clipped);
+            if (en_selected)
+                attroff(A_REVERSE);
+        }
     }
     start_y++;
 
     /* Separator */
-    mvprintw(start_y, cx, "─────────────────────────────────────────────────────");
+    menu_content_puts(&area, start_y, "─────────────────────────────────────────────────────");
     start_y++;
 
     /* Compute bar fill levels */
@@ -2401,6 +2425,10 @@ static void render_eq_visual(void)
 
     /* Each band gets 5 columns: "  ██ " filled or "     " empty */
 #define EQ_COL_W 5
+
+    int max_bands = area.content_width / EQ_COL_W;
+    if (max_bands > EQ_BAND_COUNT) max_bands = EQ_BAND_COUNT;
+    if (max_bands < 0) max_bands = 0;
 
     int above[EQ_BAND_COUNT], below[EQ_BAND_COUNT];
     for (int i = 0; i < EQ_BAND_COUNT; i++) {
@@ -2418,19 +2446,18 @@ static void render_eq_visual(void)
 
     /* Draw boost bars (row 0 = top = +12dB) */
     for (int row = 3; row >= 0; row--) {
-        move(start_y, cx);
-        for (int b = 0; b < EQ_BAND_COUNT; b++) {
+        for (int b = 0; b < max_bands; b++) {
             int col = b * EQ_COL_W;
             if (above[b] > row) {
                 if (g_focus_area == FOCUS_CONTENT && b == selected_band) {
                     attron(A_REVERSE);
-                    mvprintw(start_y, cx + col, "  ██ ");
+                    mvaddstr(start_y, area.content_x + col, "  ██ ");
                     attroff(A_REVERSE);
                 } else {
-                    mvprintw(start_y, cx + col, "  ██ ");
+                    mvaddstr(start_y, area.content_x + col, "  ██ ");
                 }
             } else {
-                mvprintw(start_y, cx + col, "     ");
+                mvaddstr(start_y, area.content_x + col, "     ");
             }
         }
         start_y++;
@@ -2438,40 +2465,43 @@ static void render_eq_visual(void)
 
     /* 0dB line */
     {
-        mvprintw(start_y, cx,
-                 "─────────────────────┬─────────────────────────");
-        mvprintw(start_y, cx + 22, "0dB");
+        menu_content_puts(&area, start_y,
+                          "─────────────────────┬─────────────────────────");
+        if (area.content_width >= 25) {
+            char zero[8];
+            utf8_str_truncate(zero, "0dB", area.content_width - 22);
+            mvaddstr(start_y, area.content_x + 22, zero);
+        }
         start_y++;
     }
 
     /* Draw cut bars (row 0 = top of cut = -3dB, row 3 = -12dB) */
     for (int row = 0; row < 4; row++) {
-        move(start_y, cx);
-        for (int b = 0; b < EQ_BAND_COUNT; b++) {
+        for (int b = 0; b < max_bands; b++) {
             int col = b * EQ_COL_W;
             if (below[b] > row) {
                 if (g_focus_area == FOCUS_CONTENT && b == selected_band) {
                     attron(A_REVERSE);
-                    mvprintw(start_y, cx + col, "  ░░ ");
+                    mvaddstr(start_y, area.content_x + col, "  ░░ ");
                     attroff(A_REVERSE);
                 } else {
-                    mvprintw(start_y, cx + col, "  ░░ ");
+                    mvaddstr(start_y, area.content_x + col, "  ░░ ");
                 }
             } else {
-                mvprintw(start_y, cx + col, "     ");
+                mvaddstr(start_y, area.content_x + col, "     ");
             }
         }
         start_y++;
     }
 
     /* Separator */
-    mvprintw(start_y, cx, "─────────────────────────────────────────────────────");
+    menu_content_puts(&area, start_y, "─────────────────────────────────────────────────────");
     start_y++;
 
     /* Frequency labels */
-    move(start_y, cx);
-    for (int b = 0; b < EQ_BAND_COUNT; b++) {
+    for (int b = 0; b < max_bands; b++) {
         char label[8];
+        char cell[16];
         int f = eq_band_frequencies[b];
         if (f >= 1000)
             snprintf(label, sizeof(label), " %dk ", f / 1000);
@@ -2481,25 +2511,29 @@ static void render_eq_visual(void)
             snprintf(label, sizeof(label), "%d", f);
         /* Center-pad to EQ_COL_W */
         int pad = EQ_COL_W - (int)strlen(label);
-        if (pad > 0) printw("%*s%s%*s", pad/2, "", label, (pad+1)/2, "");
-        else         printw("%-*s", EQ_COL_W, label);
+        if (pad > 0)
+            snprintf(cell, sizeof(cell), "%*s%s%*s", pad / 2, "", label, (pad + 1) / 2, "");
+        else
+            snprintf(cell, sizeof(cell), "%-*s", EQ_COL_W, label);
+        mvaddstr(start_y, area.content_x + b * EQ_COL_W, cell);
     }
     start_y++;
 
     /* Gain values */
-    move(start_y, cx);
-    for (int b = 0; b < EQ_BAND_COUNT; b++) {
+    for (int b = 0; b < max_bands; b++) {
         int g = g_app_config.eq_band_gains[b];
         char gbuf[8];
+        char cell[16];
         if (g > 0)      snprintf(gbuf, sizeof(gbuf), "+%d", g);
         else if (g == 0) snprintf(gbuf, sizeof(gbuf), " 0");
         else             snprintf(gbuf, sizeof(gbuf), "%d", g);
+        snprintf(cell, sizeof(cell), "%-*s", EQ_COL_W, gbuf);
         if (g_focus_area == FOCUS_CONTENT && b == selected_band) {
             attron(A_REVERSE);
-            printw("%-*s", EQ_COL_W, gbuf);
+            mvaddstr(start_y, area.content_x + b * EQ_COL_W, cell);
             attroff(A_REVERSE);
         } else {
-            printw("%-*s", EQ_COL_W, gbuf);
+            mvaddstr(start_y, area.content_x + b * EQ_COL_W, cell);
         }
     }
     start_y++;

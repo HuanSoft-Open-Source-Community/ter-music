@@ -689,16 +689,12 @@ void render_menu_frame(const char *title)
     clear();
 
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
-    rounded_box(stdscr);
+    rounded_box_open_bottom(stdscr);
     mvprintw(0, 2, " %s ", resolve_menu_title(title));
 
     int menu_width = max_x / 4;
-    int vline_len = max_y - 3;
-    if (vline_len < 1) vline_len = 1;
-    for (int i = 0; i < vline_len; i++)
-        mvaddstr(1 + i, menu_width, "\xe2\x94\x82"); /* │ */
-    mvaddstr(1, menu_width, "\xe2\x94\xac");          /* ┬ U+252C */
-    mvaddstr(max_y - 3, menu_width, "\xe2\x94\xb4");  /* ┴ U+2534 */
+    for (int y = 1; y <= max_y - 2; y++)
+        mvaddstr(y, menu_width, "\xe2\x94\x82"); /* │ */
 
     if (strlen(get_status_message()) > 0 && (time(NULL) - get_status_message_time()) < 3) {
         attron(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
@@ -724,14 +720,22 @@ void render_menu_sidebar(int selected_idx, const char **items, int item_count)
     }
 
     /* draw sidebar text items with color pair */
+    int text_cols = menu_width - 3; /* col 2 .. menu_width-2 */
+    if (text_cols <= 0) {
+        refresh();
+        return;
+    }
+    char buf[(size_t)text_cols * 4 + 4];
+
     attron(COLOR_PAIR(COLOR_PAIR_SIDEBAR));
     for (int i = 0; i < item_count && (start_y + i) < max_y - 2; i++) {
+        utf8_str_truncate(buf, items[i], text_cols);
         if (i == selected_idx && g_focus_area == FOCUS_SIDEBAR) {
             attron(A_REVERSE);
-            mvprintw(start_y + i, 2, "%s", items[i]);
+            mvprintw(start_y + i, 2, "%s", buf);
             attroff(A_REVERSE);
         } else {
-            mvprintw(start_y + i, 2, "%s", items[i]);
+            mvprintw(start_y + i, 2, "%s", buf);
         }
     }
     attroff(COLOR_PAIR(COLOR_PAIR_SIDEBAR));
@@ -801,8 +805,12 @@ void render_menu_hint_bar(void)
         mvaddch(max_y - 1, x, ' ');
 
     int x = 2;
+    char buf[(size_t)(max_x > 0 ? max_x : 1) * 4 + 4];
     for (int i = 0; i < item_count && x < max_x; i++) {
-        mvprintw(max_y - 1, x, "%s", items[i].label);
+        int remaining = max_x - x;
+        if (remaining <= 0) break;
+        utf8_str_truncate(buf, items[i].label, remaining);
+        mvprintw(max_y - 1, x, "%s", buf);
         x += items[i].width + 2;
     }
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
