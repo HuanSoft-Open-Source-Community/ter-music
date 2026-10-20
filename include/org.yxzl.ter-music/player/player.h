@@ -225,6 +225,9 @@ int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_siz
  * @return 0 有封面；-1 无当前曲目或无封面 */
 int player_cover_path(char *out, size_t out_size);
 
+/* 音频后端可用性：1 = 可用，0 = 不可用，-1 = 未知（remote 前端无法探测核心） */
+int player_audio_backend_available(int backend);
+
 /* 可视化：levels/peaks 各 max_levels 个（0-255）。
  * 远端后端按需经 Info.GetVisualizer 取数并带节流缓存（本期不订阅帧信号）；
  * player_set_visualizer_active(0) 可停止拉取（离开可视化面板时调用）。 */
