@@ -32,28 +32,29 @@
 
 void render_history_content(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
-
-    int menu_width = max_x / 4;
-    int content_start_x = menu_width + 2;
+    MenuContentArea area;
+    menu_content_area(&area);
+    int max_y = area.max_y;
+    int max_x = area.max_x;
+    int menu_width = area.menu_width;
     int start_y = 2;
+
+    menu_content_clear_rows(&area, 2, max_y - 2);
 
     attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
-    mvprintw(start_y, content_start_x,
-             i18n_get("history.title_fmt"),
+    char header[256];
+    snprintf(header, sizeof(header), i18n_get("history.title_fmt"),
              g_dir_history.count);
-    mvprintw(start_y + 1, content_start_x, "----------------------------------------");
+    menu_content_puts(&area, start_y, header);
+    menu_content_puts(&area, start_y + 1, "----------------------------------------");
     start_y += 3;
 
     if (g_dir_history.count == 0) {
-        mvprintw(start_y, content_start_x, "%s",
-                 i18n_get("history.empty"));
-        mvprintw(start_y + 1, content_start_x, "%s",
-                 i18n_get("history.auto_record"));
+        menu_content_puts(&area, start_y, i18n_get("history.empty"));
+        menu_content_puts(&area, start_y + 1, i18n_get("history.auto_record"));
     } else {
-        int visible_lines = max_y - start_y - 2;
+        int visible_lines = max_y - start_y - 3;
 
         if (g_content_selected_idx >= g_dir_history.count) {
             g_content_selected_idx = g_dir_history.count - 1;
@@ -79,20 +80,21 @@ void render_history_content(void)
             if (path_width > MAX_PATH_LEN - 1) path_width = MAX_PATH_LEN - 1;
             utf8_str_truncate(display_path, entry->path, path_width);
 
+            char line[MAX_PATH_LEN + 96];
+            snprintf(line, sizeof(line), " %s [%s]", display_path, time_str);
+
             if (idx == g_content_selected_idx && g_focus_area == FOCUS_CONTENT) {
                 attron(A_REVERSE);
-                mvprintw(start_y + i, content_start_x, " %s [%s]", display_path, time_str);
+                menu_content_puts(&area, start_y + i, line);
                 attroff(A_REVERSE);
             } else {
-                mvprintw(start_y + i, content_start_x, " %s [%s]", display_path, time_str);
+                menu_content_puts(&area, start_y + i, line);
             }
         }
 
         int bottom_y = max_y - 3;
-        mvprintw(bottom_y, content_start_x, "%s",
-                 i18n_get("history.hint_manage"));
-        mvprintw(bottom_y + 1, content_start_x, "%s",
-                 i18n_get("history.hint_delete"));
+        menu_content_puts(&area, bottom_y, i18n_get("history.hint_manage"));
+        menu_content_puts(&area, bottom_y + 1, i18n_get("history.hint_delete"));
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
@@ -166,6 +168,7 @@ int handle_history_input(int ch)
                     render_menu_frame(i18n_get("menu.history"));
                     render_menu_sidebar(g_menu_selected_idx, history_sidebar_items, HISTORY_ITEM_COUNT);
                     render_history_content();
+                    render_menu_hint_bar();
                 } else if (g_menu_selected_idx == HISTORY_ITEM_COUNT - 1) {
                     exit_current_view();
                 }

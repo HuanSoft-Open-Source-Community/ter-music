@@ -1,17 +1,19 @@
 /**
  * @file cli.c
- * @brief CLI 子命令分发、参数解析与用法文本
+ * @brief CLI 子命令分发、参数解析与多级帮助
  *
- * 注意：CLI 客户端的 usage / 错误信息沿用 main.c 既有的中文风格
- * （与 `ter-music --help` 现状一致），不引入新的 i18n 键；
- * `ter-music show` 的正文由持有配置的实例经 i18n 渲染。
+ * 所有用户可见文案经 i18n_get("cli...") 渲染；帮助内容由 cli/help.c
+ * 的统一帮助模型输出（概览 / 命令详情 / 子命令详情 / 全量）。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
 #include "cli/cli.h"
+#include "cli/help.h"
+#include "cli/lang.h"
 
 #include "config/config.h"
+#include "i18n/i18n.h"
 #include "playlist/playlist_queue.h"
 #include "queue/backend_queue.h"
 #include "info/info.h"
@@ -49,96 +51,42 @@ int cli_is_command(const char *arg) {
     return 0;
 }
 
-static void cli_print_help(const char *program) {
-    printf("用法：%s [命令] [选项]\n\n", program ? program : "ter-music");
-    printf("不带命令时进入 TUI 界面（与旧版行为一致）：\n");
-    printf("  %s [路径]                 打开目录/音频文件并进入 TUI\n", program);
-    printf("  %s -o <路径>              同上（-o / --open）\n", program);
-    printf("  %s -d, --debug            启用调试日志\n", program);
-    printf("  %s tui [路径]             显式进入 TUI\n\n", program);
+/* 用户可见输出的 i18n 包装：格式串来自语言包，末尾统一补换行。
+ * 语言包未就绪时 i18n_get() 返回键名本身，不会崩溃。 */
+static void cli_out(const char *key, ...)
+{
+    va_list args;
+    va_start(args, key);
+    vfprintf(stdout, i18n_get(key), args);
+    va_end(args);
+    fputc('\n', stdout);
+}
 
-    printf("播放控制（作用于当前主实例：daemon 或 TUI）：\n");
-    printf("  play [路径] [--index N] [--mode 模式] [--foreground] [--quiet]\n");
-    printf("                            有路径：本进程扫描后把队列分块下发并播放；\n");
-    printf("                            无路径无 --index：继续播放当前队列（Control.Play）；\n");
-    printf("                            无路径有 --index：装载默认音乐目录后 PlayAt(N)。\n");
-    printf("     --index N             指定起始曲目（0 基，指装载内容里的序号）\n");
-    printf("     --mode 模式            下发完成后设置播放模式（shuffle 等会就地重排）\n");
-    printf("     --foreground          前台运行核心并播放，不创建后台实例\n");
-    printf("     --quiet               成功时不向 stdout 输出（本就是默认，兼容保留）\n");
-    printf("  pause | resume | toggle | stop | next | prev\n");
-    printf("  seek <+秒|-秒|mm:ss|N%%>   跳转（相对/绝对/百分比）\n");
-    printf("  volume [0-100|+N|-N]      查询或设置音量\n");
-    printf("  speed  [0.5-3.0]          查询或设置倍速\n");
-    printf("  mode   [名称|0-16]        查询或设置播放模式\n\n");
+static void cli_err(const char *key, ...)
+{
+    va_list args;
+    va_start(args, key);
+    vfprintf(stderr, i18n_get(key), args);
+    va_end(args);
+    fputc('\n', stderr);
+}
 
-    printf("队列编辑（直接作用于核心的播放队列）：\n");
-    printf("  queue list [--offset N] [--count N]\n");
-    printf("                            分页列出队列（序号/标题/艺术家/路径，当前行以 > 标记）；\n");
-    printf("                            count 0=默认 200 行，上限 1000\n");
-    printf("  queue clear               清空队列\n");
-    printf("  queue shuffle             打乱队列（当前曲置首、其余乱序）\n");
-    printf("  queue remove <pos>        删除指定位置曲目（0 基）\n");
-    printf("  queue append <路径>[,<路径>...]  追加本地文件到队尾\n");
-    printf("  queue insert <pos> <路径>  在指定位置之后插入本地文件\n\n");
+/* 沙箱引导行：与 cli_diag 一样写入累积缓冲并记入日志。 */
+static void cli_diag_key(const char *key)
+{
+    cli_diag("%s\n", i18n_get(key));
+}
 
-    printf("配置读写（复用核心 Config 接口，键名同 config.xml）：\n");
-    printf("  config get [key]          输出完整配置 JSON，或按键提取单值\n");
-    printf("  config set <key> <value>  写单个标量配置（按 schema 类型转换/钳制）\n");
-    printf("  config reload             通知核心重载配置文件\n");
-    printf("  config reset --yes        恢复全部默认配置（必须显式 --yes）\n\n");
-
-    printf("信息显示：\n");
-    printf("  show [选项]               输出当前播放信息（内容由 TUI「设置 → 信息显示」决定）\n");
-    printf("     --json                 输出 JSON 快照（等价于 Info.GetInfo）\n");
-    printf("     --watch[=毫秒]         实时刷新（默认 500ms，Ctrl+C 退出）\n");
-    printf("     --one-line             单行输出\n");
-    printf("     --full | --compact     使用全量 / 精简预设\n");
-    printf("     --preset full|compact|custom\n");
-    printf("     --fields a,b,c         基本信息字段：state,mode,index,queue,title,artist,\n");
-    printf("                            album,format,path,volume,speed\n");
-    printf("     --cover | --no-cover   字符封面开关\n");
-    printf("     --cover-size WxH       封面尺寸（列 4-40，行 2-20）\n");
-    printf("     --charset braille|ascii 封面字符集\n");
-    printf("     --progress bar|time|percent|time+percent\n");
-    printf("     --lyrics 0|1|2         歌词行数（0 关 / 1 当前句 / 2 当前句+下一句）\n");
-    printf("     --width N              输出宽度（默认终端宽度）\n\n");
-    printf("  track                     当前曲目人读信息（标题/艺术家/专辑/编号/队列位/路径）\n");
-    printf("  cover [--width --height --charset braille|ascii|half]\n");
-    printf("                            输出当前曲目盲文/ASCII 字符封面（尺寸缺省沿用配置）\n");
-    printf("  lyrics [--lines N]        默认输出当前歌词行上下文；--lines N 拉全量带时间戳\n\n");
-
-    printf("后台播放进程：\n");
-    printf("  daemon start [--open 路径] [--debug] [--force]\n");
-    printf("  daemon foreground [--debug] [--force]\n");
-    printf("                            注：核心不扫描目录，--open 只作提示，队列由 play 下发\n");
-    printf("  daemon stop [--force] [--all] | restart | status [--json] | reload\n");
-    printf("     --all  除主实例外，把 --force 起的次要实例也一并停止\n\n");
-
-    printf("键位审计（本地读取配置，不要求运行实例）：\n");
-    printf("  keys list [--json]        列出全部动作的上下文、名称、有效键、默认键与遮蔽关系\n");
-    printf("  keys check [--json]       严格审计配置；非法项/冲突/无默认键时退出码非 0\n\n");
-
-    printf("其他：\n");
-    printf("  version | --version        显示版本\n");
-    printf("  help | --help              显示本帮助\n");
-    printf("  --bus <名称>               指定目标实例的总线名（默认主实例；写在子命令之后）\n\n");
-
-    printf("退出码：0 成功；1 参数错误；3 无运行实例；4 D-Bus 不可用；5 实例拒绝或操作失败\n");
-
-    if (cli_in_sandbox()) {
-        printf("\nLinyaps（如意玲珑）打包环境：请在宿主机使用\n");
-        printf("  ll-cli run org.yxzl.ter-music -- ter-music <命令>\n");
-        printf("后台播放：systemctl --user enable --now org.yxzl.ter-music\n");
-        printf("          （或 ll-cli run org.yxzl.ter-music -- ter-music daemon foreground）\n");
-        printf("容器已在运行时读取信息（run 的输出会接到该容器，终端看不到）：\n");
-        printf("  ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show\n");
+/* 子命令参数预扫描：位置 i 是独立的 --help/-h 参数时视为帮助请求。
+ * 必须在解析自身参数之前处理，避免未知选项先行报错。 */
+static int cli_help_requested(int argc, char **argv, int start_index)
+{
+    for (int i = start_index; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            return 1;
+        }
     }
-    printf("\n示例：\n");
-    printf("  %s play ~/Music            后台播放整个目录\n", program);
-    printf("  %s show                    查看当前曲目信息（含盲文封面、进度、两句歌词）\n", program);
-    printf("  %s show --one-line         单行状态，适合放进状态栏\n", program);
-    printf("  %s next && %s volume +5    下一首并调高音量\n", program, program);
+    return 0;
 }
 
 /* 预扫描并移除全局选项 --bus NAME / --bus=NAME */
@@ -206,16 +154,15 @@ int cli_in_sandbox(void) {
     return access("/run/linglong/container-init", F_OK) == 0 ? 1 : 0;
 }
 
-/* 沙箱内的引导（reason 为具体原因行）
+/* 沙箱内的引导（reason_key 为具体原因对应的 i18n 键）
  * 沙箱不允许脱离进程（容器随命令退出而回收），后台播放必须由
  * D-Bus 激活或宿主侧 systemd 用户服务承担。 */
-static void cli_print_sandbox_guidance(const char *reason) {
-    cli_diag("错误：%s\n",
-             reason ? reason : "Linyaps 打包环境下无法自行分叉后台进程。");
-    cli_diag("请改用下列方式之一（均在宿主机执行）：\n");
-    cli_diag("  · 常驻服务（推荐）：systemctl --user enable --now org.yxzl.ter-music\n");
-    cli_diag("  · 前台运行：ll-cli run org.yxzl.ter-music -- ter-music daemon foreground\n");
-    cli_diag("  · 直接播放：ll-cli run org.yxzl.ter-music -- ter-music play <路径> --foreground\n");
+static void cli_print_sandbox_guidance(const char *reason_key) {
+    cli_diag_key(reason_key ? reason_key : "cli.err.sandbox.fork_default");
+    cli_diag_key("cli.msg.sandbox.guidance_title");
+    cli_diag_key("cli.msg.sandbox.guidance_service");
+    cli_diag_key("cli.msg.sandbox.guidance_foreground");
+    cli_diag_key("cli.msg.sandbox.guidance_play");
 }
 
 static unsigned long long cli_now_ms(void) {
@@ -254,11 +201,10 @@ static int cli_ensure_core_instance(void) {
             if (cli_client_wait_for_online(cli_bus(), 10000, &pid) == CLI_EXIT_OK) {
                 return CLI_EXIT_OK;
             }
-            cli_diag("错误：已请求启动后台播放，但实例未在 10 秒内就绪。\n");
+            cli_diag_key("cli.err.daemon.not_ready_10s");
             return CLI_EXIT_DBUS;
         }
-        cli_print_sandbox_guidance(
-            "Linyaps 打包环境下无法自行分叉后台进程（脱离的进程会随容器退出而被回收）。");
+        cli_print_sandbox_guidance("cli.err.sandbox.fork_detached");
         return CLI_EXIT_REFUSED;
     }
     {
@@ -278,19 +224,19 @@ int cli_ensure_core_for_frontend(const char *bus, int attach_only)
     }
 
     if (attach_only) {
-        cli_diag("错误：没有正在运行的播放服务（已指定 --attach-only，不自动启动）。\n");
-        cli_diag("      先运行 `ter-music daemon start`，或去掉 --attach-only。\n");
+        cli_diag_key("cli.err.attach_only.no_service");
+        cli_diag_key("cli.err.attach_only.hint");
         return CLI_EXIT_NO_INSTANCE;
     }
 
     if (cli_in_sandbox()) {
         if (cli_client_activate_instance(bus) != CLI_EXIT_OK) {
-            cli_print_sandbox_guidance("容器内无法自行分叉后台进程。");
+            cli_print_sandbox_guidance("cli.err.sandbox.fork_container");
             return CLI_EXIT_REFUSED;
         }
         int pid = 0;
         if (cli_client_wait_for_online(bus, 10000, &pid) != CLI_EXIT_OK) {
-            cli_diag("错误：已请求启动播放服务，但未在 10 秒内就绪。\n");
+            cli_diag_key("cli.err.core.not_ready_10s");
             return CLI_EXIT_DBUS;
         }
         return CLI_EXIT_OK;
@@ -310,11 +256,11 @@ static int cli_require_instance(void) {
         return CLI_EXIT_OK;
     }
     if (cli_in_sandbox()) {
-        cli_print_sandbox_guidance("当前没有正在运行的 ter-music 实例。");
+        cli_print_sandbox_guidance("cli.err.sandbox.no_instance");
         return CLI_EXIT_REFUSED;
     }
-    fprintf(stderr, "错误：没有正在运行的 ter-music 实例。\n");
-    fprintf(stderr, "      用 `ter-music play <路径>` 启动后台播放，或用 `ter-music` 打开 TUI 界面。\n");
+    cli_err("cli.err.no_instance");
+    cli_err("cli.err.no_instance.hint");
     return CLI_EXIT_NO_INSTANCE;
 }
 
@@ -371,13 +317,18 @@ static int cli_cmd_play(int argc, char **argv) {
     int allow_daemon = 1;
     int foreground = 0;
 
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "play", NULL);
+        return CLI_EXIT_OK;
+    }
+
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) {
             index = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
             mode = info_play_mode_from_id(argv[++i]);
             if (mode < 0) {
-                fprintf(stderr, "错误：未知播放模式。\n");
+                cli_err("cli.err.unknown_play_mode");
                 return CLI_EXIT_USAGE;
             }
         } else if (strcmp(argv[i], "--no-daemon") == 0) {
@@ -390,19 +341,19 @@ static int cli_cmd_play(int argc, char **argv) {
             /* 兼容保留：play 的成功路径本就不向 stdout 输出（错误只走 stderr），
              * 因此该参数默认即已满足“安静”，保留仅为脚本兼容。 */
         } else if (argv[i][0] == '-') {
-            fprintf(stderr, "错误：未知选项 '%s'。\n", argv[i]);
+            cli_err("cli.err.unknown_option", argv[i]);
             return CLI_EXIT_USAGE;
         } else if (!path) {
             path = argv[i];
         } else {
-            fprintf(stderr, "错误：play 只接受一个路径参数。\n");
+            cli_err("cli.err.play.too_many_paths");
             return CLI_EXIT_USAGE;
         }
     }
 
     if (path && !bq_path_is_local(path)) {
-        fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：\n");
-        fprintf(stderr, "      请在 TUI 中打开远程目录，前端会把曲目下载到本地缓存后再交给核心播放。\n");
+        cli_err("cli.err.remote_not_supported");
+        cli_err("cli.err.remote_hint");
         return CLI_EXIT_USAGE;
     }
 
@@ -410,8 +361,8 @@ static int cli_cmd_play(int argc, char **argv) {
      * 已有主实例时拒绝：两个核心会抢同一个主总线名。否则在前台装载内容并播放。 */
     if (foreground) {
         if (cli_client_primary_available(cli_bus())) {
-            fprintf(stderr, "错误：已有 ter-music 实例在运行，--foreground 无法再起前台核心。\n");
-            fprintf(stderr, "      请先 `ter-music daemon stop`，或去掉 --foreground 控制现有实例。\n");
+            cli_err("cli.err.play.foreground_running");
+            cli_err("cli.err.play.foreground_hint");
             return CLI_EXIT_REFUSED;
         }
 
@@ -427,7 +378,7 @@ static int cli_cmd_play(int argc, char **argv) {
                          g_app_config.last_opened_path);
             }
             if (!default_path[0]) {
-                fprintf(stderr, "错误：未指定路径且未配置默认音乐目录（default_startup_path）。\n");
+                cli_err("cli.err.play.no_default_path");
                 return CLI_EXIT_REFUSED;
             }
             load_path = default_path;
@@ -437,7 +388,7 @@ static int cli_cmd_play(int argc, char **argv) {
         if (load_path) {
             int selected = -1;
             if (cli_client_load_local_content(load_path, &selected) < 0) {
-                fprintf(stderr, "错误：无法打开 '%s'（路径不存在或没有可播放的音频）。\n", load_path);
+                cli_err("cli.err.play.cannot_open", load_path);
                 return CLI_EXIT_REFUSED;
             }
             if (start_index < 0) {
@@ -448,7 +399,7 @@ static int cli_cmd_play(int argc, char **argv) {
          * nchunks=0，由前台核心自己报"没有可播放的曲目"并拒绝起播）。 */
         CliForegroundChunks chunks = {0};
         if (playlist_queue_foreach_chunk(cli_foreground_collect_chunk, &chunks) < 0) {
-            fprintf(stderr, "错误：装载的内容下发失败（队列为空或载荷被拒）。\n");
+            cli_err("cli.err.play.dispatch_failed");
             cli_foreground_chunks_free(&chunks);
             return CLI_EXIT_REFUSED;
         }
@@ -505,15 +456,17 @@ static void warn_about_secondary_instances(const char *base, int primary_running
         return;
     }
 
-    fprintf(stderr, primary_running
-        ? "警告：另有 %d 个次要实例在运行（普通 CLI 命令只发给主实例）：\n"
-        : "警告：主实例未在运行，但仍有 %d 个次要实例在运行：\n", count);
+    if (primary_running) {
+        cli_err("cli.warn.secondary.running", count);
+    } else {
+        cli_err("cli.warn.secondary.not_running", count);
+    }
     for (int i = 0; i < count && i < 8; i++) {
         fprintf(stderr, "  pid %d  %s  %s\n", secondaries[i].pid, secondaries[i].mode,
                 secondaries[i].bus);
     }
-    fprintf(stderr, "  控制单个：ter-music daemon stop --bus <名称>（--bus 写在子命令之后）\n");
-    fprintf(stderr, "  全部停止：ter-music daemon stop --all\n");
+    cli_err("cli.warn.secondary.control_one");
+    cli_err("cli.warn.secondary.stop_all");
 }
 
 /* 停掉所有次要实例（主实例已由调用方处理）。
@@ -527,7 +480,7 @@ static int stop_secondary_instances(const char *primary_bus, int *out_failed) {
     CliInstanceInfo secondaries[8];
     int count = list_secondary_instances(primary_bus, secondaries, 8);
     if (count < 0) {
-        fprintf(stderr, "错误：无法枚举实例（会话总线不可用）。\n");
+        cli_err("cli.err.list_instances");
         return -1;
     }
 
@@ -536,18 +489,16 @@ static int stop_secondary_instances(const char *primary_bus, int *out_failed) {
     for (int i = 0; i < count && i < 8; i++) {
         const char *bus = secondaries[i].bus;
         if (cli_client_quit(bus) != CLI_EXIT_OK) {
-            fprintf(stderr, "警告：次要实例 %s（pid %d）拒绝退出。\n",
-                    bus, secondaries[i].pid);
+            cli_err("cli.warn.secondary.refused", bus, secondaries[i].pid);
             failed++;
             continue;
         }
         if (!cli_wait_until_offline(bus, 5000)) {
-            fprintf(stderr, "警告：次要实例 %s（pid %d）未在 5 秒内释放总线名。\n",
-                    bus, secondaries[i].pid);
+            cli_err("cli.warn.secondary.bus_not_released", bus, secondaries[i].pid);
             failed++;
             continue;
         }
-        printf("已停止次要实例（pid %d，%s）。\n", secondaries[i].pid, bus);
+        cli_out("cli.msg.secondary.stopped", secondaries[i].pid, bus);
         stopped++;
     }
 
@@ -558,8 +509,19 @@ static int stop_secondary_instances(const char *primary_bus, int *out_failed) {
 }
 
 static int cli_cmd_daemon(int argc, char **argv) {
+    /* `daemon <sub> --help` → 二级详情；其余 `--help` → 一级详情。
+     * 未知子命令的二级帮助失败时退回一级，不吞掉帮助请求。 */
+    if (argc >= 4 && argv[2][0] != '-' && cli_help_requested(argc, argv, 3) &&
+        cli_help_print_command(argv[0], "daemon", argv[2]) == 0) {
+        return CLI_EXIT_OK;
+    }
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "daemon", NULL);
+        return CLI_EXIT_OK;
+    }
+
     if (argc < 3) {
-        fprintf(stderr, "错误：daemon 需要子命令：start | foreground | stop | restart | status | reload\n");
+        cli_err("cli.err.daemon.missing_subcommand");
         return CLI_EXIT_USAGE;
     }
 
@@ -585,14 +547,14 @@ static int cli_cmd_daemon(int argc, char **argv) {
         } else if (strcmp(argv[i], "--json") == 0) {
             want_json = 1;
         } else {
-            fprintf(stderr, "错误：未知选项 '%s'。\n", argv[i]);
+            cli_err("cli.err.unknown_option", argv[i]);
             return CLI_EXIT_USAGE;
         }
     }
 
     if (open_path && !bq_path_is_local(open_path)) {
-        fprintf(stderr, "错误：核心只播放本地文件；远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）由前端负责：\n");
-        fprintf(stderr, "      请在 TUI 中打开远程目录，前端会把曲目下载到本地缓存后再交给核心播放。\n");
+        cli_err("cli.err.remote_not_supported");
+        cli_err("cli.err.remote_hint");
         return CLI_EXIT_USAGE;
     }
 
@@ -613,10 +575,10 @@ static int cli_cmd_daemon(int argc, char **argv) {
             int pid = 0;
             int mrc = cli_client_instance_mode(cli_bus(), mode, sizeof(mode), &pid);
             if (mrc == CLI_EXIT_OK) {
-                printf("后台播放已在运行（%s，pid %d）。\n", mode[0] ? mode : "instance", pid);
+                cli_out("cli.msg.daemon.already_running", mode[0] ? mode : "instance", pid);
             } else {
                 /* 名字虽已上线，但 InstanceInfo 没拿到 mode/pid：不打印误导文本 */
-                printf("后台播放已请求启动。\n");
+                cli_out("cli.msg.daemon.requested");
             }
             return CLI_EXIT_OK;
         }
@@ -635,10 +597,10 @@ static int cli_cmd_daemon(int argc, char **argv) {
         char pid_text[32] = "";
         int rc = daemon_start_background(NULL, debug, force, pid_text, sizeof(pid_text));
         if (rc == CLI_EXIT_OK) {
-            printf("后台播放已启动（pid %s）。队列由前端下发：\n", pid_text[0] ? pid_text : "?");
-            printf("  ter-music play <路径>   扫描目录并交给核心播放\n");
-            printf("  ter-music show          查看信息\n");
-            printf("  ter-music daemon stop   停止\n");
+            cli_out("cli.msg.daemon.started", pid_text[0] ? pid_text : "?");
+            cli_out("cli.msg.daemon.hint_play");
+            cli_out("cli.msg.daemon.hint_show");
+            cli_out("cli.msg.daemon.hint_stop");
         }
         return rc;
     }
@@ -655,12 +617,12 @@ static int cli_cmd_daemon(int argc, char **argv) {
         warn_about_secondary_instances(cli_bus(), primary_online);
 
         if (rc == CLI_EXIT_NO_INSTANCE) {
-            fprintf(stderr, "ter-music 未在运行。\n");
+            cli_err("cli.err.not_running");
             return rc;
         }
         if (rc != CLI_EXIT_OK) {
             /* 名字在线但 InstanceInfo 失败：如实说明，不要谎报“未运行” */
-            fprintf(stderr, "警告：检测到 ter-music 主实例的名字在线，但 InstanceInfo 查询失败（rc=%d）。\n", rc);
+            cli_err("cli.warn.instance_info_failed", rc);
             return rc;
         }
 
@@ -669,7 +631,7 @@ static int cli_cmd_daemon(int argc, char **argv) {
             return cli_client_show(cli_bus(), NULL, 1, 0);
         }
 
-        printf("实例：%s（pid %d）\n", mode, pid);
+        cli_out("cli.msg.daemon.instance", mode, pid);
         return cli_client_show(cli_bus(), "one_line=1", 0, 0);
     }
 
@@ -680,7 +642,7 @@ static int cli_cmd_daemon(int argc, char **argv) {
 
         if (rc == CLI_EXIT_OK) {
             if (strcmp(mode, "tui") == 0 && !force) {
-                fprintf(stderr, "错误：当前主实例是 TUI（pid %d）。如需一并退出 TUI 请加 --force。\n", pid);
+                cli_err("cli.err.daemon.tui_requires_force", pid);
                 return CLI_EXIT_REFUSED;
             }
 
@@ -690,14 +652,13 @@ static int cli_cmd_daemon(int argc, char **argv) {
             }
 
             if (!cli_wait_until_offline(cli_bus(), 5000)) {
-                fprintf(stderr, "警告：实例 %d 已收到退出请求，但总线名仍未释放（可能正在等待音频线程收尾）。\n",
-                        pid);
+                cli_err("cli.warn.bus_not_released", pid);
                 return CLI_EXIT_REFUSED;
             }
-            printf("已停止（pid %d）。\n", pid);
+            cli_out("cli.msg.daemon.stopped", pid);
         } else if (!all) {
             if (rc == CLI_EXIT_NO_INSTANCE) {
-                fprintf(stderr, "ter-music 未在运行。\n");
+                cli_err("cli.err.not_running");
             }
             return rc;
         }
@@ -714,11 +675,11 @@ static int cli_cmd_daemon(int argc, char **argv) {
             return CLI_EXIT_DBUS;
         }
         if (rc != CLI_EXIT_OK && stopped_secondaries == 0 && failed_secondaries == 0) {
-            fprintf(stderr, "ter-music 未在运行。\n");
+            cli_err("cli.err.not_running");
             return CLI_EXIT_NO_INSTANCE;
         }
         if (stopped_secondaries > 0) {
-            printf("已停止 %d 个次要实例。\n", stopped_secondaries);
+            cli_out("cli.msg.secondary.stopped_count", stopped_secondaries);
         }
         return failed_secondaries > 0 ? CLI_EXIT_REFUSED : CLI_EXIT_OK;
     }
@@ -732,14 +693,14 @@ static int cli_cmd_daemon(int argc, char **argv) {
             int rc = cli_client_instance_mode(cli_bus(), mode, sizeof(mode), &pid);
             if (rc == CLI_EXIT_OK) {
                 if (strcmp(mode, "tui") == 0 && !force) {
-                    fprintf(stderr, "错误：当前主实例是 TUI（pid %d）。如需一并退出 TUI 请加 --force。\n", pid);
+                    cli_err("cli.err.daemon.tui_requires_force", pid);
                     return CLI_EXIT_REFUSED;
                 }
                 if (cli_client_quit(cli_bus()) != CLI_EXIT_OK) {
                     return CLI_EXIT_REFUSED;
                 }
                 if (!cli_wait_until_offline(cli_bus(), 10000)) {
-                    fprintf(stderr, "错误：旧实例 %d 仍在退出中（等待 10 秒未能释放总线名），请稍后重试。\n", pid);
+                    cli_err("cli.err.daemon.old_instance_exiting", pid);
                     return CLI_EXIT_REFUSED;
                 }
             }
@@ -747,26 +708,25 @@ static int cli_cmd_daemon(int argc, char **argv) {
             if (rc != CLI_EXIT_OK) {
                 return rc;
             }
-            printf("后台播放已重启。\n");
+            cli_out("cli.msg.daemon.restarted");
             return CLI_EXIT_OK;
         }
 
         if (cli_client_instance_mode(cli_bus(), mode, sizeof(mode), &pid) == CLI_EXIT_OK) {
             if (strcmp(mode, "tui") == 0 && !force) {
-                fprintf(stderr, "错误：当前主实例是 TUI（pid %d）。如需一并退出 TUI 请加 --force。\n", pid);
+                cli_err("cli.err.daemon.tui_requires_force", pid);
                 return CLI_EXIT_REFUSED;
             }
 
             int quit_rc = cli_client_quit(cli_bus());
             if (quit_rc != CLI_EXIT_OK) {
-                fprintf(stderr, "错误：无法通知现有实例退出（rc=%d）。\n", quit_rc);
+                cli_err("cli.err.daemon.quit_failed", quit_rc);
                 return quit_rc;
             }
 
             /* 退出是优雅的：停止音频、保存会话可能需要数秒 */
             if (!cli_wait_until_offline(cli_bus(), 10000)) {
-                fprintf(stderr, "错误：旧实例 %d 仍在退出中（等待 10 秒未能释放总线名），请稍后重试。\n",
-                        pid);
+                cli_err("cli.err.daemon.old_instance_exiting", pid);
                 return CLI_EXIT_REFUSED;
             }
         }
@@ -779,14 +739,14 @@ static int cli_cmd_daemon(int argc, char **argv) {
             if (rc != CLI_EXIT_OK) {
                 return rc;
             }
-            printf("后台播放已重启，正在装载 '%s'。\n", open_path);
+            cli_out("cli.msg.daemon.restarted_loading", open_path);
             return cli_client_play(cli_bus(), open_path, -1, -1);
         }
 
         char pid_text[32] = "";
         int rc = daemon_start_background(NULL, debug, force, pid_text, sizeof(pid_text));
         if (rc == CLI_EXIT_OK) {
-            printf("后台播放已重启（pid %s）。\n", pid_text[0] ? pid_text : "?");
+            cli_out("cli.msg.daemon.restarted_pid", pid_text[0] ? pid_text : "?");
         }
         return rc;
     }
@@ -798,12 +758,12 @@ static int cli_cmd_daemon(int argc, char **argv) {
         }
         rc = cli_client_reload(cli_bus());
         if (rc == CLI_EXIT_OK) {
-            printf("已通知实例重新加载配置。\n");
+            cli_out("cli.msg.daemon.reloaded");
         }
         return rc;
     }
 
-    fprintf(stderr, "错误：未知 daemon 子命令 '%s'。\n", action);
+    cli_err("cli.err.daemon.unknown_subcommand", action);
     return CLI_EXIT_USAGE;
 }
 
@@ -814,6 +774,11 @@ static int cli_cmd_show(int argc, char **argv) {
     int want_json = 0;
     int watch_ms = 0;
     int width_set = 0;
+
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "show", NULL);
+        return CLI_EXIT_OK;
+    }
 
     for (int i = 2; i < argc; i++) {
         const char *arg = argv[i];
@@ -850,7 +815,7 @@ static int cli_cmd_show(int argc, char **argv) {
             int cols = 0;
             int rows = 0;
             if (sscanf(argv[++i], "%dx%d", &cols, &rows) != 2) {
-                fprintf(stderr, "错误：--cover-size 需要 WxH 形式，例如 16x8。\n");
+                cli_err("cli.err.show.cover_size");
                 return CLI_EXIT_USAGE;
             }
             char pair[64];
@@ -876,7 +841,7 @@ static int cli_cmd_show(int argc, char **argv) {
         } else if (strcmp(arg, "--no-progress") == 0) {
             strncat(options, "progress=0;", sizeof(options) - strlen(options) - 1);
         } else {
-            fprintf(stderr, "错误：未知的 show 选项 '%s'（用 `ter-music help` 查看用法）。\n", arg);
+            cli_err("cli.err.show.unknown_option", arg);
             return CLI_EXIT_USAGE;
         }
     }
@@ -947,8 +912,17 @@ static int cli_split_comma_paths(char **argv, int from, int to,
 }
 
 static int cli_cmd_queue(int argc, char **argv) {
+    if (argc >= 4 && argv[2][0] != '-' && cli_help_requested(argc, argv, 3) &&
+        cli_help_print_command(argv[0], "queue", argv[2]) == 0) {
+        return CLI_EXIT_OK;
+    }
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "queue", NULL);
+        return CLI_EXIT_OK;
+    }
+
     if (argc < 3) {
-        fprintf(stderr, "错误：queue 需要子命令：list | clear | shuffle | remove | append | insert\n");
+        cli_err("cli.err.queue.missing_subcommand");
         return CLI_EXIT_USAGE;
     }
     const char *action = argv[2];
@@ -962,12 +936,12 @@ static int cli_cmd_queue(int argc, char **argv) {
             } else if (strcmp(argv[i], "--count") == 0 && i + 1 < argc) {
                 count = atoi(argv[++i]);
             } else {
-                fprintf(stderr, "错误：未知的 queue list 选项 '%s'。\n", argv[i]);
+                cli_err("cli.err.queue.unknown_list_option", argv[i]);
                 return CLI_EXIT_USAGE;
             }
         }
         if (offset < 0) {
-            fprintf(stderr, "错误：--offset 不能为负。\n");
+            cli_err("cli.err.queue.negative_offset");
             return CLI_EXIT_USAGE;
         }
         int rc = cli_require_instance();
@@ -988,12 +962,12 @@ static int cli_cmd_queue(int argc, char **argv) {
 
     if (strcmp(action, "remove") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "错误：queue remove 需要位置参数：<pos>。\n");
+            cli_err("cli.err.queue.remove_needs_pos");
             return CLI_EXIT_USAGE;
         }
         int pos = atoi(argv[3]);
         if (pos < 0) {
-            fprintf(stderr, "错误：queue remove 的位置不能为负。\n");
+            cli_err("cli.err.queue.remove_negative");
             return CLI_EXIT_USAGE;
         }
         int rc = cli_require_instance();
@@ -1003,13 +977,13 @@ static int cli_cmd_queue(int argc, char **argv) {
 
     if (strcmp(action, "append") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "错误：queue append 需要至少一个路径（逗号或空格分隔）。\n");
+            cli_err("cli.err.queue.append_needs_path");
             return CLI_EXIT_USAGE;
         }
         char **paths = NULL;
         int n = 0;
         if (cli_split_comma_paths(argv, 3, argc, &paths, &n) != 0 || n <= 0) {
-            fprintf(stderr, "错误：queue append 解析路径失败。\n");
+            cli_err("cli.err.queue.append_parse");
             return CLI_EXIT_USAGE;
         }
         int rc = cli_require_instance();
@@ -1023,13 +997,13 @@ static int cli_cmd_queue(int argc, char **argv) {
 
     if (strcmp(action, "insert") == 0) {
         if (argc < 5) {
-            fprintf(stderr, "错误：queue insert 需要：<pos> <path>。\n");
+            cli_err("cli.err.queue.insert_needs_args");
             return CLI_EXIT_USAGE;
         }
         int pos = atoi(argv[3]);
         const char *path = argv[4];
         if (pos < 0) {
-            fprintf(stderr, "错误：queue insert 的位置不能为负。\n");
+            cli_err("cli.err.queue.insert_negative");
             return CLI_EXIT_USAGE;
         }
         int rc = cli_require_instance();
@@ -1037,15 +1011,24 @@ static int cli_cmd_queue(int argc, char **argv) {
         return cli_client_queue_insert(cli_bus(), pos, path);
     }
 
-    fprintf(stderr, "错误：未知 queue 子命令 '%s'。\n", action);
+    cli_err("cli.err.queue.unknown_subcommand", action);
     return CLI_EXIT_USAGE;
 }
 
 /* ── config ─────────────────────────────────────────────────────── */
 
 static int cli_cmd_config(int argc, char **argv) {
+    if (argc >= 4 && argv[2][0] != '-' && cli_help_requested(argc, argv, 3) &&
+        cli_help_print_command(argv[0], "config", argv[2]) == 0) {
+        return CLI_EXIT_OK;
+    }
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "config", NULL);
+        return CLI_EXIT_OK;
+    }
+
     if (argc < 3) {
-        fprintf(stderr, "错误：config 需要子命令：get | set | reload | reset\n");
+        cli_err("cli.err.config.missing_subcommand");
         return CLI_EXIT_USAGE;
     }
     const char *action = argv[2];
@@ -1059,7 +1042,7 @@ static int cli_cmd_config(int argc, char **argv) {
 
     if (strcmp(action, "set") == 0) {
         if (argc < 5) {
-            fprintf(stderr, "错误：config set 需要：<key> <value>。\n");
+            cli_err("cli.err.config.set_needs_args");
             return CLI_EXIT_USAGE;
         }
         int rc = cli_require_instance();
@@ -1072,7 +1055,7 @@ static int cli_cmd_config(int argc, char **argv) {
         if (rc != CLI_EXIT_OK) return rc;
         rc = cli_client_config_reload(cli_bus());
         if (rc == CLI_EXIT_OK) {
-            printf("已通知核心重新加载配置。\n");
+            cli_out("cli.msg.config.reloaded");
         }
         return rc;
     }
@@ -1083,25 +1066,25 @@ static int cli_cmd_config(int argc, char **argv) {
         for (int i = 3; i < argc; i++) {
             if (strcmp(argv[i], "--yes") == 0) confirmed = 1;
             else {
-                fprintf(stderr, "错误：未知的 config reset 选项 '%s'。\n", argv[i]);
+                cli_err("cli.err.config.unknown_reset_option", argv[i]);
                 return CLI_EXIT_USAGE;
             }
         }
         if (!confirmed) {
-            fprintf(stderr, "错误：config reset 会把全部配置恢复为默认值。\n");
-            fprintf(stderr, "      确认请加 --yes：ter-music config reset --yes\n");
+            cli_err("cli.err.config.reset_confirm");
+            cli_err("cli.err.config.reset_confirm_hint");
             return CLI_EXIT_USAGE;
         }
         int rc = cli_require_instance();
         if (rc != CLI_EXIT_OK) return rc;
         rc = cli_client_config_reset(cli_bus());
         if (rc == CLI_EXIT_OK) {
-            printf("已重置为默认配置。\n");
+            cli_out("cli.msg.config.reset");
         }
         return rc;
     }
 
-    fprintf(stderr, "错误：未知 config 子命令 '%s'。\n", action);
+    cli_err("cli.err.config.unknown_subcommand", action);
     return CLI_EXIT_USAGE;
 }
 
@@ -1109,13 +1092,17 @@ static int cli_cmd_config(int argc, char **argv) {
 
 static int cli_cmd_lyrics(int argc, char **argv) {
     int lines = 0;   /* <=0 = 当前歌词行上下文 */
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "lyrics", NULL);
+        return CLI_EXIT_OK;
+    }
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--lines") == 0 && i + 1 < argc) {
             lines = atoi(argv[++i]);
         } else if (strncmp(argv[i], "--lines=", 8) == 0) {
             lines = atoi(argv[i] + 8);
         } else {
-            fprintf(stderr, "错误：未知的 lyrics 选项 '%s'。\n", argv[i]);
+            cli_err("cli.err.lyrics.unknown_option", argv[i]);
             return CLI_EXIT_USAGE;
         }
     }
@@ -1125,8 +1112,12 @@ static int cli_cmd_lyrics(int argc, char **argv) {
 }
 
 static int cli_cmd_track(int argc, char **argv) {
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "track", NULL);
+        return CLI_EXIT_OK;
+    }
     for (int i = 2; i < argc; i++) {
-        fprintf(stderr, "错误：track 不接受选项 '%s'。\n", argv[i]);
+        cli_err("cli.err.track.no_options", argv[i]);
         return CLI_EXIT_USAGE;
     }
     int rc = cli_require_instance();
@@ -1138,6 +1129,10 @@ static int cli_cmd_cover(int argc, char **argv) {
     int width = 0;   /* <=0 = 沿用配置 */
     int height = 0;
     const char *charset = NULL;
+    if (cli_help_requested(argc, argv, 2)) {
+        cli_help_print_command(argv[0], "cover", NULL);
+        return CLI_EXIT_OK;
+    }
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--width") == 0 && i + 1 < argc) {
             width = atoi(argv[++i]);
@@ -1146,7 +1141,7 @@ static int cli_cmd_cover(int argc, char **argv) {
         } else if (strcmp(argv[i], "--charset") == 0 && i + 1 < argc) {
             charset = argv[++i];
         } else {
-            fprintf(stderr, "错误：未知的 cover 选项 '%s'。\n", argv[i]);
+            cli_err("cli.err.cover.unknown_option", argv[i]);
             return CLI_EXIT_USAGE;
         }
     }
@@ -1159,18 +1154,40 @@ static int cli_cmd_cover(int argc, char **argv) {
 
 int cli_run(int argc, char **argv) {
     ensure_utf8_locale();
+    /* main() 已调用时以下两步幂等：--lang 已在任意位置被移除，语言已初始化 */
+    cli_lang_extract_option(&argc, argv);
+    cli_lang_init();
     cli_extract_global_options(&argc, argv);
 
     if (argc < 2) {
-        cli_print_help(argv[0]);
+        cli_help_print_overview(argv[0]);
         return CLI_EXIT_OK;
     }
 
     const char *command = argv[1];
 
-    if (strcmp(command, "help") == 0 || strcmp(command, "--help") == 0 ||
-        strcmp(command, "-h") == 0) {
-        cli_print_help(argv[0]);
+    if (strcmp(command, "help") == 0) {
+        if (argc == 2) {
+            cli_help_print_overview(argv[0]);
+            return CLI_EXIT_OK;
+        }
+        if (strcmp(argv[2], "all") == 0) {
+            cli_help_print_all(argv[0]);
+            return CLI_EXIT_OK;
+        }
+        int rc = (argc >= 4)
+                     ? cli_help_print_command(argv[0], argv[2], argv[3])
+                     : cli_help_print_command(argv[0], argv[2], NULL);
+        if (rc != 0) {
+            cli_err("cli.err.help.unknown_target", argv[2]);
+            cli_err("cli.err.help.hint", argv[0]);
+            return CLI_EXIT_USAGE;
+        }
+        return CLI_EXIT_OK;
+    }
+    if (strcmp(command, "--help") == 0 || strcmp(command, "-h") == 0) {
+        /* 带多余参数时同样只输出概览 */
+        cli_help_print_overview(argv[0]);
         return CLI_EXIT_OK;
     }
     if (strcmp(command, "version") == 0 || strcmp(command, "--version") == 0) {
@@ -1251,7 +1268,7 @@ int cli_run(int argc, char **argv) {
     }
 
     /* "tui" 由 main.c 在分发前剥离，不应到达这里 */
-    fprintf(stderr, "错误：未知命令 '%s'。\n", command);
-    cli_print_help(argv[0]);
+    cli_err("cli.err.unknown_command", command);
+    cli_help_print_overview(argv[0]);
     return CLI_EXIT_USAGE;
 }

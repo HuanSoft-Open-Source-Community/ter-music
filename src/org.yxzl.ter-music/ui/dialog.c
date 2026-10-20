@@ -91,7 +91,7 @@ static void redraw_text_input(WINDOW *win, int row, int col, const char *prompt,
     }
 
     int prompt_width = utf8_str_width(prompt);
-    int available_width = w - col - 1;
+    int available_width = w - col - 2;
     if (available_width < 1) {
         available_width = 1;
     }
@@ -123,8 +123,16 @@ static void redraw_text_input(WINDOW *win, int row, int col, const char *prompt,
     }
 
     mvwprintw(win, row, col, "%s%s", prompt, visible_input);
-    wclrtoeol(win);
-    wmove(win, row, col + prompt_width + utf8_str_width(visible_input));
+    int text_end = col + prompt_width + utf8_str_width(visible_input);
+    int clear_len = (w - 1) - text_end;
+    if (clear_len > 0) {
+        mvwhline(win, row, text_end, ' ', clear_len);
+    }
+    int cursor_x = text_end;
+    if (cursor_x > w - 2) {
+        cursor_x = w - 2;
+    }
+    wmove(win, row, cursor_x);
     wrefresh(win);
 }
 

@@ -16,6 +16,9 @@
 
 set -uo pipefail
 
+# 断言依赖中文输出（"队列共"/"实例："）：固定 CLI 语言，避免英文 LANG 的开发者环境误报。
+export TER_MUSIC_CLI_LANG=zh_CN
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 

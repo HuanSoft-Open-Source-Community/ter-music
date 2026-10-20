@@ -25,10 +25,6 @@
 
 extern WINDOW *win_controls;
 
-/* ── Braille album art buffer (set from ui.c, used here) ── */
-extern char g_braille_art_buffer[8192];
-extern int g_album_cover_size;
-
 /* ============================================================
  * Spectrum glyph helpers
  * ============================================================ */
@@ -93,12 +89,12 @@ static void render_album_cover(void)
     /* 当前曲目的封面路径是**后端**的“当前曲目信息”，经门面取 */
     if (player_cover_path(cover_path, sizeof(cover_path)) != 0) return;
 
-    if (g_album_cover_size != optimal_size || g_braille_art_buffer[0] == '\0') {
-        g_album_cover_size = optimal_size;
+    if (!braille_art_cache_matches(cover_path, optimal_size)) {
+        braille_art_cache_begin(cover_path, optimal_size);
         if (generate_braille_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
                                           cover_char_width, optimal_size,
                                           g_braille_art_buffer, sizeof(g_braille_art_buffer)) != 0) {
-            g_braille_art_buffer[0] = '\0';
+            braille_art_cache_fail();
             return;
         }
     }

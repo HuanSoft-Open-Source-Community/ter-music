@@ -319,6 +319,7 @@ ter-music [OPTIONS]
                        或 local（进程内播弄，留作回归基线）
   --attach-only        不自动拉起核心：无核心在行时以退去之码 3 终
   --bus <名称>         指特定核心／实例之总线名（默指主实例）
+  --lang <语言ID>      本次行止用此语言（如 zh_CN、en_US），不写入节度
   -h, --help           显助益之文
   -v, --version        显版本之文
   tui [path]           明入文墨之界
@@ -345,15 +346,21 @@ ter-music --help
 
 | 令目 | 所司之事 |
 | --- | --- |
-| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 于本进程扫描其径，以队列付于核心而播之；无核心在行则先拉起核心 |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon] [--foreground] [--quiet]` | 于本进程扫描其径，以队列付于核心而播之；无核心在行则先拉起核心（`--foreground` 为前台核心，`--quiet` 存以兼容） |
 | `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | 基础传输之御 |
 | `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | 相对、绝对或按百分率而跳转 |
 | `volume [0-100\|+N\|-N]` | 查询或设音量 |
 | `speed [0.5-3.0]` | 查询或设迅疾之度 |
 | `mode [NAME\|0-16]` | 查询或设播弄之制（如 `list_repeat`、`folder_shuffle_repeat` 之定名） |
 | `show [OPTIONS]` | 出当下之信息块（基本信息／文书封面／音程／歌辞二行） |
+| `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | 察改核心所执之活队列 |
+| `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | 读改核心节度（键名同 `config.xml`；`reset` 必带 `--yes`） |
+| `lyrics [--lines N]` | 当前歌辞之上下文，或至多 N 行带时之辞 |
+| `track` | 当前曲目之人读元数据 |
+| `cover [--width N] [--height N] [--charset braille\|ascii\|half]` | 当前曲目之文书封面 |
+| `keys list\|check [--json]` | 只读之键位审，无需核心在行 |
 | `daemon start\|foreground\|stop\|restart\|status\|reload` | 播弄核心之管摄（`daemon stop --all` 兼停以 `--force` 所启之次实例） |
-| `version` / `help` | 版本／用法 |
+| `version` / `help` | 版本／助益（`help all` 出全量助文） |
 
 `show` 之选项（用之，则一时盖过节度所存之设）：
 
@@ -370,7 +377,13 @@ ter-music --help
 | `--width N` | 输出之修广（默取端闱之广） |
 | `--bus NAME` | 指特定实例之总线名（默指主实例） |
 
-**退去之码：** `0` 成；`1` 用法有误；`3` 无实例在行；`4` D-Bus不可用；`5` 为实例所拒。
+**退去之码：** `0` 成；`1` 用法有误（含未知之助目）；`3` 无实例在行；`4` D-Bus不可用；`5` 为实例所拒。
+
+**助文与分页：** `ter-music help`、`--help`、`-h` 出简短之概。`ter-music help <令>`——或于解析选项之令（`play`、`show`、`daemon`、`queue`、`config`、`lyrics`、`track`、`cover`、`keys`）用 `<令> --help`——出一级之详；`ter-music help <令> <子令>` 与 `<令> <子令> --help` 出二级之详；`ter-music help all` 出全量助文。未知之助目以退去之码 `1` 终。
+
+助文依端闱之广而折行。stdin 与 stdout 皆为 TTY 且文逾一屏者，启内置之分页：`空格`／`PageDown` 下页，`b`／`PageUp` 上页，`j`／`k` 逐行卷之，`g`／`G` 至首／尾，`q` 退。非 TTY 之出、`TERM=dumb` 及 `TER_MUSIC_NO_PAGER=1` 者，径出全文，不生 ANSI 转义之序。
+
+**CLI 择语：** CLI 本地之助文、谬误、表列与提示，依 `--lang` > `TER_MUSIC_CLI_LANG` > 节度之 `ui_language` > `LC_ALL` > `LC_MESSAGES` > `LANG` > `zh_CN` 取之（详 §5.9.1）。`--lang` 与 `TER_MUSIC_CLI_LANG` 可置于命令行之任意处；`C`、`POSIX` 与空 locale 视为无偏好，仍用节度。`--lang` 所指语言包未纳置者，示警而回退 `zh_CN`。`show`、`track`、`lyrics`、`cover` 之正文由核心依其 `ui_language` 渲染，`--lang` 惟改 CLI 自身之辞。
 
 **示例**：
 
@@ -438,7 +451,7 @@ ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
 
 注意：
 
-- 容器之内不达 `systemctl --user`，故役使必于宿主之端闱启之；`ter-music help` 察知沙箱者，亦印此提示。
+- 容器之内不达 `systemctl --user`，故役使必于宿主之端闱启之；`play` 与 `daemon` 察知沙箱者，亦印此提示。
 - `ter-music daemon stop` 如常而行，终其实例；事毕容器见收，故 `ll-cli ps` 不复列其应用。
 - `ll-cli run` 于诸般失败之码，尽以 `255` 为归；宿主之脚本宜改读 `ter-music show --json` 之 `"running"` 字段，而不恃退去之码。
 - 若应用之器**已行**（背景之役使，或文墨之界），则 `ll-cli run … -- <符令>` 尽以其所出归于*方行之容器*之常出，端闱遂空无一字。可假 `journalctl --user -u org.yxzl.ter-music` 观之，或改由 `ll-cli enter`（端闱犹接）：
@@ -717,7 +730,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `clear_history_on_startup`：启时清播弄之迹（0/1）
 - `resume_last_playback`：续从前之处播弄（0/1）
 - `seamless_preload`：当前曲末预解下曲，达无隙播弄（0/1）
-- `ui_language`：界语（字符串ID："zh_CN"、"en_US"等，通过F7语言视图设置）
+- `ui_language`：界语之ID。内置者为 `zh_CN`、`en_US`；经 F7 语言视图所纳之第三方语言ID（如 `ja_JP`）亦可用。非法之ID回退 `zh_CN`。
 - `volume_percent`：默音量之率（0-100）
 - `audio_latency_ms`：输出时延（千分秒）
 - `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
@@ -780,6 +793,22 @@ Ter-Music 用 XML 之国际化（i18n）制。内置语言包在源码 `data/lan
 6. 源码 `data/lang/<id>.xml`
 
 欲添新语言，依上制创 `<id>.xml`，置任一搜索路径（推荐 `~/.config/ter-music/lang/`）。该语言将自现于 F7 语言选择之视。
+
+`ui_language` 不复限于内置之 `zh_CN`／`en_US`：于 F7 择第三方语言者，存其ID；节度之验惟拒不可安全为文件名之ID。未纳置或验而不合者，回退 `zh_CN`。
+
+**CLI 择语之序。** CLI 本地之辞（助文、谬误、表列与提示），自高而低如次：
+
+1. `--lang <ID>`
+2. `TER_MUSIC_CLI_LANG`
+3. `config.xml` 之 `ui_language`（即 F7 之择）
+4. `LC_ALL`
+5. `LC_MESSAGES`
+6. `LANG`
+7. `zh_CN`
+
+`--lang` 与 `TER_MUSIC_CLI_LANG` 可置于命令行之任意处（含子令之前），并依 locale 之名归一（`en_US.UTF-8` → `en_US`，`zh-*` → `zh_CN`）。`C`、`POSIX` 与空 locale 之值谓「无偏好」，仍循序而下，故节度之 `ui_language` 犹胜之。显指之语言包未纳置者，示警而回退 `zh_CN`。
+
+`--lang` 惟改 CLI 自身之辞。`show`、`track`、`lyrics`、`cover` 所出之正文，由核心依其 `ui_language` 渲染；非改核心节度，则仍用文墨之界之语。
 
 #### 八之二 tar.gz 语言包布之规
 

@@ -99,6 +99,88 @@ void rounded_box(WINDOW *win)
 }
 
 /* ============================================================
+ * rounded_box_open_bottom — top edge and left/right verticals,
+ * leaving the bottom row untouched (no ╰ ╯ or bottom line).
+ * ============================================================ */
+void rounded_box_open_bottom(WINDOW *win)
+{
+    int h, w;
+    getmaxyx(win, h, w);
+    if (h < 2 || w < 2) return;
+
+    /* top corners */
+    mvwaddstr(win, 0, 0, "\xe2\x95\xad");          /* ╭ U+256D */
+    mvwaddstr(win, 0, w - 1, "\xe2\x95\xae");      /* ╮ U+256E */
+
+    /* top horizontal line */
+    for (int x = 1; x < w - 1; x++) {
+        mvwaddstr(win, 0, x, "\xe2\x94\x80");       /* ─ U+2500 */
+    }
+
+    /* vertical lines (bottom row intentionally left open) */
+    for (int y = 1; y < h - 1; y++) {
+        mvwaddstr(win, y, 0, "\xe2\x94\x82");       /* │ U+2502 */
+        mvwaddstr(win, y, w - 1, "\xe2\x94\x82");   /* │ U+2502 */
+    }
+}
+
+/* ============================================================
+ * Unified content area — geometry and row helpers
+ * ============================================================ */
+void menu_content_area(MenuContentArea *out)
+{
+    if (!out) return;
+
+    getmaxyx(stdscr, out->max_y, out->max_x);
+    out->menu_width = out->max_x / 4;
+    out->content_x = out->menu_width + 2;
+    out->content_width = out->max_x - out->content_x - 2;
+    if (out->content_width < 1) out->content_width = 1;
+}
+
+void menu_content_clear_rows(const MenuContentArea *area, int top, int bottom)
+{
+    if (!area) return;
+
+    int last = area->max_y - 1;
+    if (top < 0) top = 0;
+    if (bottom > last) bottom = last;
+    if (top > last || bottom < 0 || top > bottom) return;
+
+    /* Explicit width: never touch col 0, max_x-2 or max_x-1. */
+    for (int row = top; row <= bottom; row++) {
+        mvhline(row, area->content_x, ' ', area->content_width);
+    }
+}
+
+void menu_content_clear_row(const MenuContentArea *area, int row)
+{
+    menu_content_clear_rows(area, row, row);
+}
+
+void menu_content_puts(const MenuContentArea *area, int row, const char *text)
+{
+    if (!area) return;
+    if (row < 0 || row >= area->max_y) return;
+    if (!text) {
+        menu_content_clear_row(area, row);
+        return;
+    }
+
+    /* UTF-8: at most 4 bytes per display column, plus "..." and NUL. */
+    char buf[(size_t)area->content_width * 4 + 4];
+    if (utf8_str_width(text) <= area->content_width) {
+        snprintf(buf, sizeof(buf), "%s", text);
+    } else if (area->content_width > 3) {
+        utf8_str_substring(buf, text, 0, area->content_width - 3);
+        memcpy(buf + strlen(buf), "...", 4);
+    } else {
+        utf8_str_substring(buf, text, 0, area->content_width);
+    }
+    mvaddstr(row, area->content_x, buf);
+}
+
+/* ============================================================
  * Sidebar item arrays
  *
  * Declared extern in menu_internal.h so all view modules can

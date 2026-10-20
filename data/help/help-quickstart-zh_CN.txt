@@ -15,6 +15,7 @@ ter-music 快速上手
     --frontend=local   迁移期基线：本进程自己出声（默认 remote=交给常驻核心）
     --attach-only      只连接已在运行的核心，没有核心就报错退出
     --bus <名称>       指定目标实例的总线名（默认主实例）
+    --lang <语言ID>    本次运行使用该语言（如 zh_CN、en_US），不写入 config.xml
 
   运行模型：默认是“常驻核心 + 前端”。TUI 只是前端，声音由核心进程播放；
   没有核心时前端会自动在后台拉起一个（Linyaps 容器内改为请求 D-Bus 激活）。
@@ -288,12 +289,35 @@ ter-music 快速上手
 
 19. 命令行（CLI）
 ------------------
-  ter-music help 打印完整用法。所有子命令都是纯 D-Bus 客户端，
-  默认发给主实例（daemon 或 TUI），可用 --bus <名称> 指定次要实例
-  （--bus 写在子命令之后）。
+  ter-music help 打印简短概览；帮助分层如下：
+    help | --help | -h              简短概览
+    help <命令>                     一级详情
+    help <命令> <子命令>            二级详情
+    help all                        全量帮助
+    <命令> --help                   一级详情（会解析选项的命令：play、
+                                    show、daemon、queue、config、lyrics、
+                                    track、cover、keys）
+    <命令> <子命令> --help          二级详情
+  未知的帮助目标以退出码 1 结束。
+
+  帮助文本按终端宽度换行。stdin 与 stdout 都是 TTY 且内容超过一屏时，
+  启用内置分页器：空格/PageDown 下一页、b/PageUp 上一页、j/k 逐行滚动、
+  g/G 跳到首/尾、q 退出。非 TTY 输出、TERM=dumb 与
+  TER_MUSIC_NO_PAGER=1 会直接完整输出，不产生 ANSI 转义序列。
+
+  CLI 本地帮助、错误、表格与提示按以下语言优先级取用：
+    --lang > TER_MUSIC_CLI_LANG > 配置 ui_language > LC_ALL >
+    LC_MESSAGES > LANG > zh_CN
+  --lang 与 TER_MUSIC_CLI_LANG 可写在命令行任意位置。C、POSIX 与空
+  locale 视为无偏好，继续使用配置的 ui_language。--lang 指定的语言包
+  未安装时会警告并回退 zh_CN。show/track/lyrics/cover 的正文由核心按其
+  ui_language 渲染，--lang 只影响 CLI 自身的文案。
+
+  所有子命令都是纯 D-Bus 客户端，默认发给主实例（daemon 或 TUI），
+  可用 --bus <名称> 指定次要实例（--bus 写在子命令之后）。
 
   播放控制:
-    play <路径> [--index N] [--mode 模式] [--foreground] [--quiet]
+    play <路径> [--index N] [--mode 模式] [--no-daemon] [--foreground] [--quiet]
       · 有路径：本进程扫描后把本地路径队列分块下发并播放；路径支持 ~
         和相对路径，直接给单个音频文件时精确命中该文件。
       · 无路径且无 --index：继续播放核心当前队列（Control.Play）；
@@ -326,20 +350,26 @@ ter-music 快速上手
 
   信息显示:
     show [--json|--watch[=ms]|--one-line|--full|--compact|--preset|--fields
-          --cover|--no-cover|--cover-size|--charset|--progress|--lyrics|--width]
+          --cover|--no-cover|--cover-size|--charset|--progress|--no-progress
+          --lyrics|--width] [--bus <名称>]
                                   输出当前播放信息（内容取自“设置 → 信息显示”）
     track                         当前曲目的人读信息
     cover [--width N --height N --charset braille|ascii|half]
                                   当前曲目字符封面
     lyrics [--lines N]            默认当前歌词行上下文；--lines N 拉全量带时间戳
 
+  键位（只读，无需核心在运行）:
+    keys list [--json]            按上下文列出各动作的生效键位
+    keys check [--json]           审计 config.xml 中的键位覆盖
+
   后台播放进程:
     daemon start [--open 路径] [--debug] [--force]
-    daemon foreground [--debug] [--force]
+    daemon foreground [--open 路径] [--debug] [--force] [--no-autoplay]
                                 注：核心不扫描目录，--open 只作提示，队列由 play 下发
-    daemon stop [--force] [--all] | restart | status [--json] | reload
+    daemon stop [--force] [--all] | status [--json] | reload
+    daemon restart [--open 路径] [--debug] [--force]
 
-  其他: version | --version | help | --help | tui
+  其他: version | --version | help | help all | --help | tui
 
   退出码：0 成功；1 参数错误；3 没有运行实例；4 D-Bus 不可用；
           5 实例拒绝或操作失败。

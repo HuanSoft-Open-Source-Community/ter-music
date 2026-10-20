@@ -319,6 +319,7 @@ ter-music [OPTIONS]
                        或 local（进程内播放，保留作回归基线）
   --attach-only        不自动拉起核心：没有核心在跑时以退出码 3 结束
   --bus <名称>         指定目标核心/实例的总线名（默认主实例）
+  --lang <语言ID>      本次运行使用该语言（如 zh_CN、en_US），不写入配置
   -h, --help           显示帮助信息
   -v, --version        显示版本信息
   tui [path]           显式启动 TUI
@@ -350,15 +351,21 @@ ter-music --help
 
 | 命令 | 说明 |
 | --- | --- |
-| `play [PATH] [--index N] [--mode MODE] [--no-daemon]` | 在本进程扫描路径，把队列下发给核心并播放；无核心时先拉起核心 |
+| `play [PATH] [--index N] [--mode MODE] [--no-daemon] [--foreground] [--quiet]` | 在本进程扫描路径，把队列下发给核心并播放；无核心时先拉起核心（`--foreground` 作为前台核心运行，`--quiet` 为兼容保留） |
 | `pause` / `resume` / `toggle` / `stop` / `next` / `prev` | 基础传输控制 |
 | `seek <+SECONDS\|-SECONDS\|mm:ss\|N%>` | 相对、绝对或按百分比的跳转 |
 | `volume [0-100\|+N\|-N]` | 查询或设置音量 |
 | `speed [0.5-3.0]` | 查询或设置播放倍速 |
 | `mode [NAME\|0-16]` | 查询或设置播放模式（支持 `list_repeat`、`folder_shuffle_repeat` 等稳定名称） |
 | `show [OPTIONS]` | 打印当前信息块（基本信息 / 字符封面 / 进度 / 两行歌词） |
+| `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | 查看或修改核心持有的活动队列 |
+| `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | 读取或修改核心配置（键名同 `config.xml`；`reset` 必须带 `--yes`） |
+| `lyrics [--lines N]` | 当前歌词行上下文，或最多 N 行带时间戳歌词 |
+| `track` | 当前曲目的人读元数据 |
+| `cover [--width N] [--height N] [--charset braille\|ascii\|half]` | 当前曲目的字符封面 |
+| `keys list\|check [--json]` | 只读的键位审计，不需要播放核心在运行 |
 | `daemon start\|foreground\|stop\|restart\|status\|reload` | 播放核心管理（`daemon stop --all` 连 `--force` 起的次级实例一起停） |
-| `version` / `help` | 版本 / 用法 |
+| `version` / `help` | 版本 / 帮助（`help all` 输出全量帮助） |
 
 `show` 选项（每项都会在该次调用中覆盖已保存的 TUI 设置）：
 
@@ -375,8 +382,28 @@ ter-music --help
 | `--width N` | 输出宽度（默认使用终端宽度） |
 | `--bus NAME` | 指定目标实例的总线名称（默认为主实例） |
 
-**退出码**：`0` 成功；`1` 用法错误；`3` 没有正在运行的实例；
-`4` D-Bus 不可用；`5` 被实例拒绝。
+**退出码**：`0` 成功；`1` 用法错误（含未知的帮助目标）；
+`3` 没有正在运行的实例；`4` D-Bus 不可用；`5` 被实例拒绝。
+
+**帮助与分页**：`ter-music help`、`--help`、`-h` 输出简短概览。
+`ter-music help <命令>`——或对会解析选项的命令（`play`、`show`、`daemon`、
+`queue`、`config`、`lyrics`、`track`、`cover`、`keys`）使用
+`<命令> --help`——输出一级详情；`ter-music help <命令> <子命令>` 与
+`<命令> <子命令> --help` 输出二级详情；`ter-music help all` 输出全量帮助。
+未知的帮助目标以退出码 `1` 结束。
+
+帮助文本按终端宽度换行。当 stdin 与 stdout 都是 TTY 且内容超过一屏时，
+启用内置分页器：`空格`/`PageDown` 下一页，`b`/`PageUp` 上一页，
+`j`/`k` 逐行滚动，`g`/`G` 跳到首/尾，`q` 退出。非 TTY 输出、`TERM=dumb`
+以及 `TER_MUSIC_NO_PAGER=1` 会直接完整输出，不产生 ANSI 转义序列。
+
+**CLI 语言**：CLI 本地帮助、错误、表格与提示按 `--lang` >
+`TER_MUSIC_CLI_LANG` > 配置项 `ui_language` > `LC_ALL` > `LC_MESSAGES` >
+`LANG` > `zh_CN` 取用（详见 §5.9.1）。`--lang` 与 `TER_MUSIC_CLI_LANG`
+可写在命令行任意位置；`C`、`POSIX` 与空 locale 视为无偏好，继续使用配置。
+`--lang` 指定的语言包未安装时会给出警告并回退 `zh_CN`。`show`、`track`、
+`lyrics`、`cover` 的正文由核心按其 `ui_language` 渲染，`--lang` 只影响
+CLI 自身的文案。
 
 **示例**：
 
@@ -460,7 +487,7 @@ ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
 注意事项：
 
 - 容器内不可访问 `systemctl --user`，因此必须在宿主 shell 中启用该服务；
-  `ter-music help` 在检测到沙箱时会打印同样的提示。
+  `play` 与 `daemon` 在检测到沙箱时会打印同样的提示。
 - `ter-music daemon stop` 照常工作并停止实例；之后容器被回收，因此 `ll-cli ps`
   不再列出该应用。
 - `ll-cli run` 会把所有失败退出码映射为 `255`；宿主脚本应改为解析
@@ -774,7 +801,7 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `clear_history_on_startup`：启动时清空播放历史（0/1）
 - `resume_last_playback`：从上次位置继续播放（0/1）
 - `seamless_preload`：在当前曲目末尾预解码下一曲，实现无缝播放（0/1）
-- `ui_language`：界面语言（字符串ID："zh_CN"、"en_US"等，通过F7语言视图设置）
+- `ui_language`：界面语言 ID。内置语言包为 `zh_CN`、`en_US`；通过 F7 语言视图安装的第三方语言 ID（如 `ja_JP`）同样有效。非法 ID 会回退到 `zh_CN`。
 - `volume_percent`：默认音量百分比（0-100）
 - `audio_latency_ms`：输出时延（毫秒）
 - `audio_backend`：音频后端（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
@@ -837,6 +864,31 @@ Ter-Music 使用基于 XML 的国际化（i18n）系统。内置语言包位于�
 6. 源码树 `data/lang/<id>.xml`
 
 要添加新语言，按上述格式创建 `<id>.xml` 文件，放入任一搜索路径（推荐 `~/.config/ter-music/lang/`）。该语言将自动出现在 F7 语言选择视图中。
+
+`ui_language` 不再只允许内置的 `zh_CN`/`en_US`：在 F7 中选择第三方语言会存入
+其 ID，配置校验只拒绝无法安全用作文件名的 ID。未安装或校验不通过的 ID 会
+回退到 `zh_CN`。
+
+**CLI 语言选择。** CLI 本地文案（帮助、错误、表格与提示）按以下优先级
+从高到低取用：
+
+1. `--lang <ID>`
+2. `TER_MUSIC_CLI_LANG`
+3. `config.xml` 中的 `ui_language`（即 F7 的选择）
+4. `LC_ALL`
+5. `LC_MESSAGES`
+6. `LANG`
+7. `zh_CN`
+
+`--lang` 与 `TER_MUSIC_CLI_LANG` 可出现在命令行任意位置（包括子命令之前），
+并按 locale 名称归一化（`en_US.UTF-8` → `en_US`，`zh-*` → `zh_CN`）。
+`C`、`POSIX` 与空 locale 值表示“无偏好”，会继续沿优先级向下查找，因此配置
+中的 `ui_language` 仍然优先于它们。显式指定的语言包未安装时会打印警告并
+回退到 `zh_CN`。
+
+`--lang` 只影响 CLI 自身的字符串。`show`、`track`、`lyrics`、`cover`
+输出的正文由核心按其 `ui_language` 渲染，除非修改核心配置，否则这些正文
+仍使用 TUI 的界面语言。
 
 #### 5.9.2 tar.gz 语言包分发规范
 

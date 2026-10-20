@@ -15,25 +15,26 @@
 
 #include "player/player.h"
 
+#include "audio/audio.h"
 #include "player/player_backend.h"
 
 #include "logger/logger.h"
 
 #include <string.h>
 
-static PlayerBackend g_active_backend = PLAYER_BACKEND_LOCAL;
+static PlayerBackend g_facade_backend = PLAYER_BACKEND_LOCAL;
 static int g_initialized = 0;
 
 static int use_remote(void)
 {
-    return g_active_backend == PLAYER_BACKEND_REMOTE;
+    return g_facade_backend == PLAYER_BACKEND_REMOTE;
 }
 
 /* ── 生命周期 ───────────────────────────────────────────────────── */
 
 int player_init(PlayerBackend backend, const char *bus_name)
 {
-    g_active_backend = backend;
+    g_facade_backend = backend;
     g_initialized = 1;
     log_info("player", "Player facade using the %s backend",
              backend == PLAYER_BACKEND_REMOTE ? "remote" : "local");
@@ -84,7 +85,7 @@ int player_is_connected(void)
 
 PlayerBackend player_backend(void)
 {
-    return g_active_backend;
+    return g_facade_backend;
 }
 
 int player_restart_core(void)
@@ -411,6 +412,13 @@ int player_cover_path(char *out, size_t out_size)
 {
     return use_remote() ? player_remote_cover_path(out, out_size)
                         : player_local_cover_path(out, out_size);
+}
+int player_audio_backend_available(int backend)
+{
+    if (use_remote()) {
+        return -1;   /* 前端不初始化音频，未知；由核心下次启动时校验 */
+    }
+    return audio_backend_is_available(backend) ? 1 : 0;
 }
 void player_visualizer(int *levels, int *peaks, int max_levels, uint64_t *last_update_ms)
 {

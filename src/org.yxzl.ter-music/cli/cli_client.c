@@ -13,6 +13,7 @@
 #include "app/open.h"
 #include "config/config.h"
 #include "config/config_fields.h"
+#include "i18n/i18n.h"
 #include "media/rpc.h"
 #include "playlist/playlist.h"
 #include "playlist/playlist_queue.h"
@@ -23,6 +24,7 @@
 #include "util/utf8.h"
 
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +41,24 @@ extern void get_audio_metadata(const char *path, char *title, char *artist, char
 #include <dbus/dbus.h>
 #include <signal.h>
 #include <math.h>
+
+/* 带格式参数的输出：格式串来自语言包，末尾统一补换行。语言包未就绪时
+ * i18n_get() 返回键名本身，不会崩溃（与 cli.c 的 cli_out/cli_err 同约定）。 */
+static void cli_client_out(const char *key, ...) {
+    va_list args;
+    va_start(args, key);
+    vfprintf(stdout, i18n_get(key), args);
+    va_end(args);
+    fputc('\n', stdout);
+}
+
+static void cli_client_err(const char *key, ...) {
+    va_list args;
+    va_start(args, key);
+    vfprintf(stderr, i18n_get(key), args);
+    va_end(args);
+    fputc('\n', stderr);
+}
 
 #define CLI_CALL_TIMEOUT_MS 5000
 
@@ -103,12 +123,12 @@ static DBusConnection *cli_connect(void) {
 
     DBusConnection *connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
     if (dbus_error_is_set(&error)) {
-        fprintf(stderr, "错误：无法连接会话总线：%s\n", error.message);
+        cli_client_err("cli.err.bus_connect_fmt", error.message);
         dbus_error_free(&error);
         return NULL;
     }
     if (!connection) {
-        fprintf(stderr, "错误：无法连接会话总线（D-Bus 不可用）。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.bus_unavailable"));
         return NULL;
     }
 
@@ -253,7 +273,7 @@ static DBusMessage *cli_call0_quit(CliClient *client, const char *interface_name
             }
             return NULL;
         }
-        fprintf(stderr, "错误：D-Bus 调用失败（%s）。\n", method);
+        cli_client_err("cli.err.dbus_call_method_fmt", method);
         return NULL;
     }
 
@@ -285,12 +305,12 @@ static DBusMessage *cli_send(CliClient *client, DBusMessage *message) {
         }
         if (dbus_error_has_name(&error, DBUS_ERROR_SERVICE_UNKNOWN) ||
             dbus_error_has_name(&error, DBUS_ERROR_NAME_HAS_NO_OWNER)) {
-            fprintf(stderr, "错误：没有正在运行的 ter-music 实例（用 `ter-music play <路径>` 或 `ter-music daemon start` 启动）。\n");
+            fprintf(stderr, "%s\n", i18n_get("cli.err.no_instance_cli"));
         } else if (dbus_error_has_name(&error, DBUS_ERROR_UNKNOWN_METHOD) ||
                    dbus_error_has_name(&error, DBUS_ERROR_UNKNOWN_INTERFACE)) {
-            fprintf(stderr, "错误：运行中的实例不支持该接口（可能是旧版本）：%s\n", error.message);
+            cli_client_err("cli.err.unsupported_interface_fmt", error.message);
         } else {
-            fprintf(stderr, "错误：D-Bus 调用失败：%s\n", error.message);
+            cli_client_err("cli.err.dbus_call_fmt", error.message);
         }
         dbus_error_free(&error);
         return NULL;
@@ -780,9 +800,8 @@ int cli_client_check_api(const char *bus) {
         return rc;
     }
     if (api < TER_MUSIC_API_VERSION) {
-        fprintf(stderr, "错误：核心过旧（需要 api_version>=%d，当前=%ld）。\n",
-                TER_MUSIC_API_VERSION, api);
-        fprintf(stderr, "      请升级播放服务，或先 `ter-music daemon stop` 再起新版核心。\n");
+        cli_client_err("cli.err.core_too_old_fmt", TER_MUSIC_API_VERSION, api);
+        fprintf(stderr, "%s\n", i18n_get("cli.err.core_too_old_hint"));
         g_api_checked_rc = CLI_EXIT_REFUSED;
         snprintf(g_api_checked_bus, sizeof(g_api_checked_bus), "%s", name);
         return CLI_EXIT_REFUSED;
@@ -817,7 +836,7 @@ int cli_client_transport(const char *bus, const char *method) {
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：操作被实例拒绝（%s）。\n", method);
+        cli_client_err("cli.err.operation_refused_fmt", method);
         return CLI_EXIT_REFUSED;
     }
     return CLI_EXIT_OK;
@@ -825,7 +844,7 @@ int cli_client_transport(const char *bus, const char *method) {
 
 int cli_client_seek(const char *bus, const char *argument) {
     if (!argument || argument[0] == '\0') {
-        fprintf(stderr, "错误：seek 需要参数，例如 `ter-music seek +10`、`ter-music seek 1:23`、`ter-music seek 50%%`。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.seek_usage"));
         return CLI_EXIT_USAGE;
     }
 
@@ -851,7 +870,7 @@ int cli_client_seek(const char *bus, const char *argument) {
         }
         long duration_ms = 0;
         if (cli_json_int(json, "duration_ms", &duration_ms) != 0 || duration_ms <= 0) {
-            fprintf(stderr, "错误：当前曲目时长未知，无法按百分比跳转。\n");
+            fprintf(stderr, "%s\n", i18n_get("cli.err.seek_duration_unknown"));
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
@@ -880,7 +899,7 @@ int cli_client_seek(const char *bus, const char *argument) {
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：跳转失败（无曲目或时长未知）。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.seek_failed"));
         return CLI_EXIT_REFUSED;
     }
     return CLI_EXIT_OK;
@@ -941,7 +960,7 @@ int cli_client_speed(const char *bus, const char *argument) {
 
     double speed = atof(argument);
     if (speed < 0.5 || speed > 3.0) {
-        fprintf(stderr, "错误：倍速需在 0.5 - 3.0 之间。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.speed_range"));
         cli_client_close(&client);
         return CLI_EXIT_USAGE;
     }
@@ -980,8 +999,7 @@ int cli_client_mode(const char *bus, const char *argument) {
 
     int mode = info_play_mode_from_id(argument);
     if (mode < 0) {
-        fprintf(stderr, "错误：未知播放模式 '%s'。可用值：sequential, single_repeat, list_repeat, "
-                        "shuffle_once, shuffle_repeat, folder_*, album_*, artist_* 或 0-16。\n", argument);
+        cli_client_err("cli.err.mode_unknown_fmt", argument);
         cli_client_close(&client);
         return CLI_EXIT_USAGE;
     }
@@ -997,7 +1015,7 @@ int cli_client_mode(const char *bus, const char *argument) {
 static int cli_show_once(CliClient *client, const char *options, int want_json) {
     char *text = malloc(INFO_JSON_MAX);
     if (!text) {
-        fprintf(stderr, "错误：内存不足。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.oom"));
         return CLI_EXIT_DBUS;
     }
 
@@ -1060,12 +1078,12 @@ int cli_client_show(const char *bus, const char *options, int want_json,
     }
 
     if (want_json) {
-        fprintf(stderr, "错误：--watch 与 --json 不能同时使用。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.watch_json_conflict"));
         cli_client_close(&client);
         return CLI_EXIT_USAGE;
     }
     if (!isatty(STDOUT_FILENO)) {
-        fprintf(stderr, "错误：--watch 需要在终端里直接运行（请勿重定向输出）。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.watch_requires_tty"));
         cli_client_close(&client);
         return CLI_EXIT_USAGE;
     }
@@ -1149,8 +1167,8 @@ static int play_push_chunk_cb(const char *chunk_json, int chunk_index,
         return -1;
     }
     if (written < 0) {
-        fprintf(stderr, "错误：核心拒绝了第 %d 块队列（%d 首）。\n",
-                chunk_index + 1, entries_in_chunk);
+        cli_client_err("cli.err.queue_chunk_refused_fmt",
+                       chunk_index + 1, entries_in_chunk);
         push->error_rc = CLI_EXIT_REFUSED;
         return -1;
     }
@@ -1209,8 +1227,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
                      g_app_config.last_opened_path);
         }
         if (!default_path[0]) {
-            fprintf(stderr, "错误：播放队列为空且未指定路径；请在配置里设置默认音乐目录"
-                            "（default_startup_path），或 `ter-music play <路径>`。\n");
+            fprintf(stderr, "%s\n", i18n_get("cli.err.play_no_default_path"));
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
@@ -1224,7 +1241,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
             return rc;
         }
         if (!ok) {
-            fprintf(stderr, "错误：实例中没有可播放的曲目，请先 `ter-music play <路径>`。\n");
+            fprintf(stderr, "%s\n", i18n_get("cli.err.play_no_tracks"));
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
@@ -1235,7 +1252,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
     /* ── 有装载路径：本进程扫描装载，再分块下发，最后 PlayAt + 设模式 ── */
     int selected_track = -1;
     if (cli_client_load_local_content(load_path, &selected_track) < 0) {
-        fprintf(stderr, "错误：无法打开 '%s'（路径不存在或没有可播放的音频）。\n", load_path);
+        cli_client_err("cli.err.open_path_fmt", load_path);
         cli_client_close(&client);
         return CLI_EXIT_REFUSED;
     }
@@ -1247,7 +1264,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
         return deliver_error;
     }
     if (written <= 0) {
-        fprintf(stderr, "错误：装载内容后没有可播放的曲目。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.loaded_no_tracks"));
         cli_client_close(&client);
         return CLI_EXIT_REFUSED;
     }
@@ -1259,7 +1276,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
     }
     /* 分块后 written 是全量条数（不再被截成 500），范围校验以它为准 */
     if (position >= written) {
-        fprintf(stderr, "错误：曲目序号 %d 超出范围（共 %d 首）。\n", position, written);
+        cli_client_err("cli.err.position_out_of_range_fmt", position, written);
         cli_client_close(&client);
         return CLI_EXIT_REFUSED;
     }
@@ -1271,7 +1288,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：核心未能开始播放第 %d 首。\n", position + 1);
+        cli_client_err("cli.err.play_at_failed_fmt", position + 1);
         cli_client_close(&client);
         return CLI_EXIT_REFUSED;
     }
@@ -1292,7 +1309,7 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
             return rc;
         }
         if (!ok_mode) {
-            fprintf(stderr, "错误：核心拒绝了播放模式（mode=%d）。\n", mode);
+            cli_client_err("cli.err.mode_refused_fmt", mode);
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
@@ -1392,13 +1409,14 @@ static void cli_print_queue_page(const char *json) {
     JsonValue rows;
     if (json_get_path(&reader, "rows", &rows) != 0 ||
         rows.type != JSON_VALUE_ARRAY) {
-        printf("队列共 %lld 首\n", total);
+        cli_client_out("cli.table.total_fmt", total);
         return;
     }
 
-    printf("队列共 %lld 首，当前第 %lld 首（本页自第 %lld 首起）\n",
-           total, current + 1, page_offset + 1);
-    printf(" %4s  %-24s  %-18s  %s\n", "序号", "标题", "艺术家", "路径");
+    cli_client_out("cli.table.total_current_fmt", total, current + 1, page_offset + 1);
+    printf(" %4s  %-24s  %-18s  %s\n",
+           i18n_get("cli.table.index"), i18n_get("cli.table.title"),
+           i18n_get("cli.table.artist"), i18n_get("cli.table.path"));
 
     JsonReader array = reader;
     if (json_reader_enter(&array, &rows) != 0) {
@@ -1434,8 +1452,7 @@ static void cli_print_queue_page(const char *json) {
 
 int cli_client_queue_list(const char *bus, int offset, int count) {
     if (count < 0 || count > RPC_PAGE_MAX) {
-        fprintf(stderr, "错误：--count 需在 0-%d 之间（0 = 默认 %d 行）。\n",
-                RPC_PAGE_MAX, RPC_PAGE_DEFAULT);
+        cli_client_err("cli.err.queue_count_range_fmt", RPC_PAGE_MAX, RPC_PAGE_DEFAULT);
         return CLI_EXIT_USAGE;
     }
     int rc = cli_client_check_api(bus);
@@ -1462,7 +1479,7 @@ int cli_client_queue_list(const char *bus, int offset, int count) {
                          text, capacity);
     if (rc != CLI_EXIT_OK) {
         if (rc == CLI_EXIT_REFUSED) {
-            fprintf(stderr, "提示：核心拒绝了这一页（可能 count 过大），请减小 --count。\n");
+            fprintf(stderr, "%s\n", i18n_get("cli.msg.queue_page_refused"));
         }
         free(text);
         cli_client_close(&client);
@@ -1492,7 +1509,7 @@ int cli_client_queue_clear(const char *bus) {
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：核心拒绝了 Queue.Clear。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.queue_clear_refused"));
         return CLI_EXIT_REFUSED;
     }
     return CLI_EXIT_OK;
@@ -1515,7 +1532,7 @@ int cli_client_queue_shuffle(const char *bus) {
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：核心拒绝了 Queue.Shuffle。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.queue_shuffle_refused"));
         return CLI_EXIT_REFUSED;
     }
     return CLI_EXIT_OK;
@@ -1523,7 +1540,7 @@ int cli_client_queue_shuffle(const char *bus) {
 
 int cli_client_queue_remove(const char *bus, int position) {
     if (position < 0) {
-        fprintf(stderr, "错误：queue remove 需要非负的位置参数。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.queue_remove_position"));
         return CLI_EXIT_USAGE;
     }
     int rc = cli_client_check_api(bus);
@@ -1541,12 +1558,12 @@ int cli_client_queue_remove(const char *bus, int position) {
     cli_client_close(&client);
     if (rc != CLI_EXIT_OK) {
         if (rc == CLI_EXIT_REFUSED) {
-            fprintf(stderr, "错误：删除第 %d 首失败（位置越界或核心拒绝）。\n", position + 1);
+            cli_client_err("cli.err.queue_remove_failed_fmt", position + 1);
         }
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：核心未能删除第 %d 首。\n", position + 1);
+        cli_client_err("cli.err.queue_remove_refused_fmt", position + 1);
         return CLI_EXIT_REFUSED;
     }
     return CLI_EXIT_OK;
@@ -1554,13 +1571,13 @@ int cli_client_queue_remove(const char *bus, int position) {
 
 int cli_client_queue_append(const char *bus, char **paths, int n) {
     if (n <= 0 || !paths) {
-        fprintf(stderr, "错误：queue append 需要至少一个本地文件路径。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.queue_append_no_path"));
         return CLI_EXIT_USAGE;
     }
     for (int i = 0; i < n; i++) {
         if (!paths[i] || !paths[i][0] || !bq_path_is_local(paths[i])) {
-            fprintf(stderr, "错误：不是可下发的本地路径：'%s'。\n",
-                    paths[i] ? paths[i] : "");
+            cli_client_err("cli.err.not_local_path_fmt",
+                           paths[i] ? paths[i] : "");
             return CLI_EXIT_USAGE;
         }
     }
@@ -1579,7 +1596,7 @@ int cli_client_queue_append(const char *bus, char **paths, int n) {
     for (int i = 0; i < n; i++) {
         char *payload = cli_build_single_entry_json(paths[i]);
         if (!payload) {
-            fprintf(stderr, "错误：无法为 '%s' 构造队列条目。\n", paths[i]);
+            cli_client_err("cli.err.build_entry_failed_fmt", paths[i]);
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
@@ -1588,30 +1605,30 @@ int cli_client_queue_append(const char *bus, char **paths, int n) {
         free(payload);
         rc = cli_reply_int(reply, &written);
         if (rc != CLI_EXIT_OK) {
-            fprintf(stderr, "错误：追加 '%s' 失败（rc=%d）。\n", paths[i], rc);
+            cli_client_err("cli.err.queue_append_failed_fmt", paths[i], rc);
             cli_client_close(&client);
             return g_cli_last_error_is_core ? CLI_EXIT_REFUSED : rc;
         }
         if (written <= 0) {
-            fprintf(stderr, "错误：核心拒绝了 '%s'。\n", paths[i]);
+            cli_client_err("cli.err.queue_append_refused_fmt", paths[i]);
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
         appended += written;
     }
 
-    printf("已追加 %d 首到队列末尾。\n", appended);
+    cli_client_out("cli.msg.queue_appended_fmt", appended);
     cli_client_close(&client);
     return CLI_EXIT_OK;
 }
 
 int cli_client_queue_insert(const char *bus, int position, const char *path) {
     if (position < 0) {
-        fprintf(stderr, "错误：queue insert 需要非负的位置参数。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.queue_insert_position"));
         return CLI_EXIT_USAGE;
     }
     if (!path || !path[0] || !bq_path_is_local(path)) {
-        fprintf(stderr, "错误：queue insert 需要一个本地文件路径。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.queue_insert_path"));
         return CLI_EXIT_USAGE;
     }
 
@@ -1629,7 +1646,7 @@ int cli_client_queue_insert(const char *bus, int position, const char *path) {
      * 越界（>= 队列长度）由核心回 OutOfRange。 */
     char *payload = cli_build_single_entry_json(path);
     if (!payload) {
-        fprintf(stderr, "错误：无法为 '%s' 构造队列条目。\n", path);
+        cli_client_err("cli.err.build_entry_failed_fmt", path);
         cli_client_close(&client);
         return CLI_EXIT_REFUSED;
     }
@@ -1640,15 +1657,15 @@ int cli_client_queue_insert(const char *bus, int position, const char *path) {
     rc = cli_reply_int(reply, &written);
     cli_client_close(&client);
     if (rc != CLI_EXIT_OK) {
-        fprintf(stderr, "错误：在第 %d 首之后插入失败（rc=%d，可能位置越界）。\n",
-                position + 1, rc);
+        cli_client_err("cli.err.queue_insert_failed_fmt",
+                       position + 1, rc);
         return g_cli_last_error_is_core ? CLI_EXIT_REFUSED : rc;
     }
     if (written <= 0) {
-        fprintf(stderr, "错误：核心拒绝了插入 '%s'。\n", path);
+        cli_client_err("cli.err.queue_insert_refused_fmt", path);
         return CLI_EXIT_REFUSED;
     }
-    printf("已在第 %d 首之后插入 1 首。\n", position + 1);
+    cli_client_out("cli.msg.queue_inserted_fmt", position + 1);
     return CLI_EXIT_OK;
 }
 
@@ -1691,7 +1708,7 @@ int cli_client_config_get(const char *bus, const char *key) {
                          text, capacity);
     if (rc != CLI_EXIT_OK) {
         if (rc == CLI_EXIT_REFUSED) {
-            fprintf(stderr, "提示：配置载荷超出上限，请改用 `config get <key>` 单项读取。\n");
+            fprintf(stderr, "%s\n", i18n_get("cli.msg.config_payload_too_large"));
         }
         free(text);
         cli_client_close(&client);
@@ -1724,7 +1741,7 @@ int cli_client_config_get(const char *bus, const char *key) {
     const char *section = NULL;
     ConfigFieldType type = CFG_STRING;
     if (!cli_config_field_lookup(key, &section, &type)) {
-        fprintf(stderr, "错误：未知配置键 '%s'。\n", key);
+        cli_client_err("cli.err.config_unknown_key_fmt", key);
         free(text);
         cli_client_close(&client);
         return CLI_EXIT_USAGE;
@@ -1734,7 +1751,7 @@ int cli_client_config_get(const char *bus, const char *key) {
     snprintf(path, sizeof(path), "%s.%s", section, key);
     JsonValue value;
     if (json_get_path(&reader, path, &value) != 0) {
-        fprintf(stderr, "错误：核心未返回键 '%s'。\n", key);
+        cli_client_err("cli.err.config_key_missing_fmt", key);
         free(text);
         cli_client_close(&client);
         return CLI_EXIT_REFUSED;
@@ -1757,14 +1774,14 @@ int cli_client_config_get(const char *bus, const char *key) {
 
 int cli_client_config_set(const char *bus, const char *key, const char *value) {
     if (!key || !key[0] || !value) {
-        fprintf(stderr, "错误：config set 需要 <key> <value>。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.config_set_usage"));
         return CLI_EXIT_USAGE;
     }
 
     const char *section = NULL;
     ConfigFieldType type = CFG_STRING;
     if (!cli_config_field_lookup(key, &section, &type)) {
-        fprintf(stderr, "错误：未知配置键 '%s'（equalizer 复合项请用 TUI 设置）。\n", key);
+        cli_client_err("cli.err.config_set_unknown_key_fmt", key);
         return CLI_EXIT_USAGE;
     }
 
@@ -1786,7 +1803,7 @@ int cli_client_config_set(const char *bus, const char *key, const char *value) {
         char *end = NULL;
         double num = strtod(value, &end);
         if (!end || end == value) {
-            fprintf(stderr, "错误：'%s' 需要数值，收到 '%s'。\n", key, value);
+            cli_client_err("cli.err.config_value_not_number_fmt", key, value);
             free(patch);
             return CLI_EXIT_USAGE;
         }
@@ -1825,7 +1842,7 @@ int cli_client_config_set(const char *bus, const char *key, const char *value) {
         return rc;
     }
     if (!ok) {
-        fprintf(stderr, "错误：核心拒绝了配置写入（键或值非法）。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.config_set_refused"));
         return CLI_EXIT_REFUSED;
     }
     return CLI_EXIT_OK;
@@ -1872,7 +1889,7 @@ static void cli_print_lyrics_lines(const char *json) {
 
     int has_lyrics = json_get_bool(&reader, "has_lyrics", 0);
     if (!has_lyrics) {
-        printf("（当前曲目无歌词）\n");
+        printf("%s\n", i18n_get("cli.msg.lyrics_none"));
         return;
     }
 
@@ -1881,9 +1898,9 @@ static void cli_print_lyrics_lines(const char *json) {
     json_get_string(&reader, "current_text", current, sizeof(current));
     json_get_string(&reader, "next_text", next, sizeof(next));
 
-    printf("当前：%s\n", current);
+    printf("%s%s\n", i18n_get("info.lyrics.current"), current);
     if (next[0]) {
-        printf("下句：%s\n", next);
+        printf("%s%s\n", i18n_get("cli.field.next"), next);
     }
 }
 
@@ -1912,7 +1929,7 @@ static int cli_print_lyrics_document(CliClient *client, int want_lines) {
         rc = cli_call_string(client, reply, text, capacity);
         if (rc != CLI_EXIT_OK) {
             if (rc == CLI_EXIT_REFUSED) {
-                fprintf(stderr, "提示：歌词页过大被拒，请减小 --lines。\n");
+                fprintf(stderr, "%s\n", i18n_get("cli.msg.lyrics_page_refused"));
             }
             break;
         }
@@ -1921,7 +1938,7 @@ static int cli_print_lyrics_document(CliClient *client, int want_lines) {
         json_reader_init(&reader, text, strlen(text));
         int has_lyrics = json_get_bool(&reader, "has_lyrics", 0);
         if (!has_lyrics) {
-            printf("（当前曲目无歌词）\n");
+            printf("%s\n", i18n_get("cli.msg.lyrics_none"));
             break;
         }
 
@@ -2036,7 +2053,7 @@ int cli_client_track(const char *bus) {
 
     int valid = json_get_bool(&reader, "valid", 0);
     if (!valid) {
-        printf("（当前没有播放曲目）\n");
+        printf("%s\n", i18n_get("cli.msg.no_track"));
         free(text);
         cli_client_close(&client);
         return CLI_EXIT_OK;
@@ -2053,14 +2070,14 @@ int cli_client_track(const char *bus) {
     long long queue_count = json_get_int(&reader, "queue_count", 0);
 
     /* 位置/时长来自 playback 段（这里只补队列位与曲目编号，避免二次往返） */
-    printf("标题：%s\n", title[0] ? title : "(未知)");
-    printf("艺术家：%s\n", artist[0] ? artist : "(未知)");
-    printf("专辑：%s\n", album[0] ? album : "(未知)");
-    printf("曲目编号：%lld\n", number);
+    printf("%s%s\n", i18n_get("player.title"), title[0] ? title : i18n_get("cli.msg.unknown"));
+    printf("%s%s\n", i18n_get("player.artist"), artist[0] ? artist : i18n_get("cli.msg.unknown"));
+    printf("%s%s\n", i18n_get("player.album"), album[0] ? album : i18n_get("cli.msg.unknown"));
+    cli_client_out("cli.field.track_number_fmt", number);
     if (queue_position >= 0) {
-        printf("队列位置：第 %lld / %lld 首\n", queue_position, queue_count);
+        cli_client_out("cli.field.queue_position_fmt", queue_position, queue_count);
     }
-    printf("路径：%s\n", path[0] ? path : "(未知)");
+    printf("%s%s\n", i18n_get("info.field.path"), path[0] ? path : i18n_get("cli.msg.unknown"));
 
     free(text);
     cli_client_close(&client);
@@ -2074,15 +2091,15 @@ int cli_client_cover(const char *bus, int width, int height, const char *charset
     }
     if (width < 0 || height < 0 ||
         width > INFO_COVER_COLS_MAX || height > INFO_COVER_ROWS_MAX) {
-        fprintf(stderr, "错误：封面尺寸越界（列 %d-%d，行 %d-%d）。\n",
-                INFO_COVER_COLS_MIN, INFO_COVER_COLS_MAX,
-                INFO_COVER_ROWS_MIN, INFO_COVER_ROWS_MAX);
+        cli_client_err("cli.err.cover_size_range_fmt",
+                       INFO_COVER_COLS_MIN, INFO_COVER_COLS_MAX,
+                       INFO_COVER_ROWS_MIN, INFO_COVER_ROWS_MAX);
         return CLI_EXIT_USAGE;
     }
     if (charset && charset[0] &&
         strcmp(charset, "braille") != 0 && strcmp(charset, "ascii") != 0 &&
         strcmp(charset, "half") != 0) {
-        fprintf(stderr, "错误：--charset 需为 braille、ascii 或 half。\n");
+        fprintf(stderr, "%s\n", i18n_get("cli.err.cover_charset"));
         return CLI_EXIT_USAGE;
     }
 
@@ -2116,7 +2133,7 @@ int cli_client_cover(const char *bus, int width, int height, const char *charset
         fputc('\n', stdout);
     }
     if (len == 0) {
-        printf("（当前曲目没有封面）\n");
+        printf("%s\n", i18n_get("cli.msg.cover_none"));
     }
 
     free(text);
@@ -2194,7 +2211,7 @@ int cli_client_reload(const char *bus) {
 
 int cli_client_primary_available(const char *bus) {
     (void)bus;
-    fprintf(stderr, "错误：本版本编译时未启用 D-Bus 支持，CLI 控制命令不可用。\n");
+    fprintf(stderr, "%s\n", i18n_get("cli.err.no_dbus_build"));
     return 0;
 }
 
@@ -2267,7 +2284,7 @@ int cli_client_reload(const char *bus) {
 
 int cli_client_check_api(const char *bus) {
     (void)bus;
-    fprintf(stderr, "错误：本版本编译时未启用 D-Bus 支持，CLI 控制命令不可用。\n");
+    fprintf(stderr, "%s\n", i18n_get("cli.err.no_dbus_build"));
     return CLI_EXIT_DBUS;
 }
 

@@ -46,20 +46,41 @@ void reset_language_view(void)
 
 /* ── Prompt for file path (inline input) ─────────────────────── */
 
+/* 仅在内容区内重绘提示行：清行 + 按显示宽度截断，避免换行与残影。 */
+static void lang_prompt_redraw(const MenuContentArea *area, int row,
+                               const char *prompt, const char *input)
+{
+    char line[MAX_PATH_LEN + 512];
+    snprintf(line, sizeof(line), "%s%s", prompt, input);
+    menu_content_clear_row(area, row);
+    menu_content_puts(area, row, line);
+
+    int prompt_width = (int)utf8_str_width(prompt);
+    if (prompt_width > area->content_width) prompt_width = area->content_width;
+    int avail = area->content_width - prompt_width;
+    if (avail < 1) avail = 1;
+
+    char view[MAX_PATH_LEN];
+    utf8_str_truncate(view, input, avail);
+
+    int cx = area->content_x + prompt_width + (int)utf8_str_width(view);
+    int max_cx = area->content_x + area->content_width - 1;
+    if (cx > max_cx) cx = max_cx;
+    if (cx < area->content_x) cx = area->content_x;
+    move(row, cx);
+    refresh();
+}
+
 static int lang_prompt_path(char *buf, size_t size)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
+    MenuContentArea area;
+    menu_content_area(&area);
 
-    int menu_width = max_x / 4;
-    int x = menu_width + 2;
-    int y = max_y - 4;
+    int y = area.max_y - 4;
+    const char *prompt = i18n_get("lang_mgr.add_prompt");
 
     curs_set(1);
-    mvprintw(y, x, "%s", i18n_get("lang_mgr.add_prompt"));
-    clrtoeol();
-    int input_x = getcurx(stdscr);
-    refresh();
+    lang_prompt_redraw(&area, y, prompt, "");
 
     buf[0] = '\0';
     size_t pos = 0;
@@ -75,26 +96,19 @@ static int lang_prompt_path(char *buf, size_t size)
                     back++;
                 pos -= back;
                 buf[pos] = '\0';
-                move(y, input_x);
-                clrtoeol();
-                printw("%s", buf);
-                refresh();
+                lang_prompt_redraw(&area, y, prompt, buf);
             }
         } else if (ch >= 32) {
             buf[pos++] = (char)ch;
             buf[pos] = '\0';
-            move(y, input_x);
-            clrtoeol();
-            printw("%s", buf);
-            refresh();
+            lang_prompt_redraw(&area, y, prompt, buf);
         }
     }
 
     curs_set(0);
 
-    /* Clean up prompt line */
-    int cw = max_x / 4;
-    mvhline(y, cw + 2, ' ', max_x - cw - 3);
+    /* Clean up prompt line (content area only) */
+    menu_content_clear_row(&area, y);
 
     if (ch == 27) {
         buf[0] = '\0';
@@ -107,27 +121,36 @@ static int lang_prompt_path(char *buf, size_t size)
 
 void render_language_content(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
+    MenuContentArea area;
+    menu_content_area(&area);
 
-    int menu_width = max_x / 4;
-    int content_start_x = menu_width + 2;
+    int max_y = area.max_y;
     int start_y = 2;
+    char line[512];
 
     lang_refresh_list();
 
+    menu_content_clear_rows(&area, start_y, max_y - 2);
+
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
 
-    mvprintw(start_y, content_start_x, "%s", i18n_get("lang_mgr.title"));
-    mvhline(start_y + 1, content_start_x, '=', max_x - content_start_x - 1);
+    snprintf(line, sizeof(line), "%s", i18n_get("lang_mgr.title"));
+    menu_content_puts(&area, start_y, line);
+
+    int sep_width = area.content_width < 40 ? area.content_width : 40;
+    char sep[41];
+    for (int i = 0; i < sep_width; i++) sep[i] = '=';
+    sep[sep_width] = '\0';
+    menu_content_puts(&area, start_y + 1, sep);
     start_y += 3;
 
     const char *cur_lang = i18n_current_lang();
-    int visible = max_y - start_y - 6;
-    if (visible < 3) visible = 3;
+    int visible = max_y - start_y - 3;
+    if (visible < 1) visible = 1;
 
     if (g_lang_count == 0) {
-        mvprintw(start_y, content_start_x, "  %s", i18n_get("lang_mgr.no_langs"));
+        snprintf(line, sizeof(line), "  %s", i18n_get("lang_mgr.no_langs"));
+        menu_content_puts(&area, start_y, line);
         attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
         refresh();
         return;
@@ -142,12 +165,12 @@ void render_language_content(void)
     for (int i = 0; i < visible && (g_lang_scroll + i) < g_lang_count; i++) {
         int idx = g_lang_scroll + i;
         int row = start_y + i;
-
-        mvhline(row, content_start_x, ' ', max_x - content_start_x - 1);
+        if (row > max_y - 4) break;
 
         int is_current = (strcmp(g_langs[idx].id, cur_lang) == 0);
+        int is_selected = (idx == g_lang_selected && g_focus_area == FOCUS_CONTENT);
 
-        if (idx == g_lang_selected) attron(A_REVERSE);
+        if (is_selected) attron(A_REVERSE);
 
         char marker[4] = "  ";
         if (is_current) strcpy(marker, " *");
@@ -162,33 +185,37 @@ void render_language_content(void)
         else
             cov_buf[0] = '\0';
         int cov_width = 9;  /* fixed: " 100.000%" */
-        int avail = max_x - content_start_x - 2 - 1 - (int)utf8_str_width(tag) - 2 - cov_width - 3;
+        int avail = area.content_width - 2 - 1 - (int)utf8_str_width(tag) - 2 - cov_width;
         if (avail < 6) avail = 6;
+        if (avail > 120) avail = 120;
         char name_buf[128];
         utf8_str_truncate(name_buf, g_langs[idx].name, avail);
         char padded_name[256];
         utf8_str_pad(padded_name, sizeof(padded_name), name_buf, avail);
 
-        mvprintw(row, content_start_x, "%s %s  %s%s",
+        snprintf(line, sizeof(line), "%s %s  %s%s",
                  marker, padded_name, tag, cov_buf);
+        menu_content_puts(&area, row, line);
 
-        if (idx == g_lang_selected) attroff(A_REVERSE);
+        if (is_selected) attroff(A_REVERSE);
     }
 
     /* Draw scrollbar */
     scrollbar_draw(stdscr, start_y, visible,
-                   g_lang_count, visible, g_lang_scroll, max_x - 2);
+                   g_lang_count, visible, g_lang_scroll, area.max_x - 2);
 
     /* Hint bar */
     int hint_row = max_y - 3;
-    mvhline(hint_row, content_start_x, ' ', max_x - content_start_x - 1);
-    mvprintw(hint_row, content_start_x, "%s", i18n_get("lang_mgr.hint"));
+    menu_content_clear_row(&area, hint_row);
+    snprintf(line, sizeof(line), "%s", i18n_get("lang_mgr.hint"));
+    menu_content_puts(&area, hint_row, line);
 
     /* Action bar */
     int act_row = max_y - 2;
-    mvhline(act_row, content_start_x, ' ', max_x - content_start_x - 1);
+    menu_content_clear_row(&area, act_row);
     attron(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
-    mvprintw(act_row, content_start_x, "%s", i18n_get("lang_mgr.actions"));
+    snprintf(line, sizeof(line), "%s", i18n_get("lang_mgr.actions"));
+    menu_content_puts(&area, act_row, line);
     attroff(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));

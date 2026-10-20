@@ -110,6 +110,30 @@ int g_rainbow_color_offset = 0;
 /* ── Braille album art buffer ── */
 char g_braille_art_buffer[8192] = "";
 int g_album_cover_size = 0;
+char g_braille_art_cover_path[MAX_PATH_LEN] = "";
+
+int braille_art_cache_matches(const char *cover_path, int cover_size)
+{
+    return cover_path && cover_path[0] &&
+           g_braille_art_buffer[0] != '\0' &&
+           g_album_cover_size == cover_size &&
+           strcmp(g_braille_art_cover_path, cover_path) == 0;
+}
+
+void braille_art_cache_begin(const char *cover_path, int cover_size)
+{
+    snprintf(g_braille_art_cover_path, sizeof(g_braille_art_cover_path), "%s",
+             cover_path ? cover_path : "");
+    g_album_cover_size = cover_size;
+    g_braille_art_buffer[0] = '\0';
+}
+
+void braille_art_cache_fail(void)
+{
+    g_braille_art_buffer[0] = '\0';
+    g_braille_art_cover_path[0] = '\0';
+    g_album_cover_size = 0;
+}
 
 /* ── Konami sequence ── */
 #define KONAMI_SEQ_LENGTH 12

@@ -22,53 +22,64 @@
  * Info view rendering
  * ============================================================ */
 
+static void info_put_row(const MenuContentArea *area, int limit, int row, const char *text)
+{
+    if (row < 0 || row > limit) return;
+    menu_content_puts(area, row, text);
+}
+
 void render_info_content(void)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
+    MenuContentArea area;
+    menu_content_area(&area);
 
-    int menu_width = max_x / 4;
-    int content_start_x = menu_width + 2;
     int start_y = 2;
+    int limit = area.max_y - 3;
+    char buf[512];
+
+    menu_content_clear_rows(&area, 2, limit);
 
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
 
-    mvprintw(start_y, content_start_x, "%s %s",
+    snprintf(buf, sizeof(buf), "%s %s",
              i18n_get("info.about_title"), APP_NAME);
-    mvprintw(start_y + 1, content_start_x, "========================================");
+    info_put_row(&area, limit, start_y, buf);
+    snprintf(buf, sizeof(buf), "========================================");
+    info_put_row(&area, limit, start_y + 1, buf);
     start_y += 3;
 
-    mvprintw(start_y, content_start_x,
-             i18n_get("info.name_fmt"), APP_NAME);
-    mvprintw(start_y + 1, content_start_x,
-             i18n_get("info.version_fmt"), APP_VERSION);
-    mvprintw(start_y + 2, content_start_x,
-             i18n_get("info.authors_fmt"), APP_AUTHORS);
-    mvprintw(start_y + 3, content_start_x,
-             i18n_get("info.email_fmt"), APP_EMAIL);
+    snprintf(buf, sizeof(buf), i18n_get("info.name_fmt"), APP_NAME);
+    info_put_row(&area, limit, start_y, buf);
+    snprintf(buf, sizeof(buf), i18n_get("info.version_fmt"), APP_VERSION);
+    info_put_row(&area, limit, start_y + 1, buf);
+    snprintf(buf, sizeof(buf), i18n_get("info.authors_fmt"), APP_AUTHORS);
+    info_put_row(&area, limit, start_y + 2, buf);
+    snprintf(buf, sizeof(buf), i18n_get("info.email_fmt"), APP_EMAIL);
+    info_put_row(&area, limit, start_y + 3, buf);
     start_y += 5;
 
-    mvprintw(start_y, content_start_x, "%s",
-             i18n_get("info.summary"));
-    mvprintw(start_y + 1, content_start_x, "%s",
-             i18n_get("info.summary_line1"));
-    mvprintw(start_y + 2, content_start_x, "%s",
-             i18n_get("info.summary_line2"));
-    mvprintw(start_y + 3, content_start_x, "%s",
-             i18n_get("info.summary_line3"));
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary"));
+    info_put_row(&area, limit, start_y, buf);
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line1"));
+    info_put_row(&area, limit, start_y + 1, buf);
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line2"));
+    info_put_row(&area, limit, start_y + 2, buf);
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line3"));
+    info_put_row(&area, limit, start_y + 3, buf);
     start_y += 5;
 
-    mvprintw(start_y, content_start_x, "%s",
-             i18n_get("info.repository"));
-    mvprintw(start_y + 1, content_start_x, "  %s", APP_REPO);
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.repository"));
+    info_put_row(&area, limit, start_y, buf);
+    snprintf(buf, sizeof(buf), "  %s", APP_REPO);
+    info_put_row(&area, limit, start_y + 1, buf);
     start_y += 3;
 
-    mvprintw(start_y, content_start_x, "%s",
-             i18n_get("info.license"));
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.license"));
+    info_put_row(&area, limit, start_y, buf);
     start_y += 2;
 
-    mvprintw(start_y, content_start_x, "%s",
-             i18n_get("info.readonly"));
+    snprintf(buf, sizeof(buf), "%s", i18n_get("info.readonly"));
+    info_put_row(&area, limit, start_y, buf);
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
     refresh();

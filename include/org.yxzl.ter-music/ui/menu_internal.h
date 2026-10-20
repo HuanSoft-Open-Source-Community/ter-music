@@ -2,6 +2,7 @@
 #define MENU_INTERNAL_H
 
 #include "types.h"
+#include <ncursesw/ncurses.h>
 
 /*
  * Internal declarations shared across menu/view modules
@@ -50,6 +51,27 @@ const char *get_status_message(void);
 time_t get_status_message_time(void);
 
 void rounded_box(WINDOW *win);
+
+/* ============================================================
+ * Unified non-main content area (defined in util.c)
+ *
+ * content_x/content_width reserve the scrollbar column (max_x-2)
+ * and the right border column (max_x-1) so clearing text never
+ * erases the frame.
+ * ============================================================ */
+
+typedef struct {
+    int max_y, max_x;
+    int menu_width;      /* max_x / 4 */
+    int content_x;       /* menu_width + 2 */
+    int content_width;   /* max_x - content_x - 2 */
+} MenuContentArea;
+
+void menu_content_area(MenuContentArea *out);
+void menu_content_clear_rows(const MenuContentArea *area, int top, int bottom);
+void menu_content_clear_row(const MenuContentArea *area, int row);
+void menu_content_puts(const MenuContentArea *area, int row, const char *text);
+void rounded_box_open_bottom(WINDOW *win);
 
 /* ============================================================
  * Global variable declarations (defined in util.c)

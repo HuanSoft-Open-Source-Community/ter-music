@@ -34,6 +34,12 @@ extern WINDOW *win_lyrics;
 extern int g_ascii_fallback_ui;
 extern char g_braille_art_buffer[8192];
 extern int g_album_cover_size;
+extern char g_braille_art_cover_path[MAX_PATH_LEN];
+
+/* 字符画封面缓存：路径 + 尺寸 + 缓冲非空才算命中 */
+int  braille_art_cache_matches(const char *cover_path, int cover_size);
+void braille_art_cache_begin(const char *cover_path, int cover_size);
+void braille_art_cache_fail(void);
 
 /* ── Control index constants ── */
 enum {
