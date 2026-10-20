@@ -11,6 +11,8 @@
  */
 
 #include "cli/cli.h"
+#include "cli/help.h"
+#include "cli/lang.h"
 
 #include "config/config.h"
 #include "i18n/i18n.h"
@@ -53,6 +55,16 @@ typedef struct {
 
 static KeyAuditMessages g_key_errors;
 static KeyAuditMessages g_key_warnings;
+
+/* 按 i18n 键输出一行；译文本身不携带换行，统一在此追加。 */
+static void keys_print_line(FILE *stream, const char *key, ...)
+{
+    va_list args;
+    va_start(args, key);
+    vfprintf(stream, i18n_get(key), args);
+    va_end(args);
+    fputc('\n', stream);
+}
 
 static void msg_add(KeyAuditMessages *list, const char *fmt, ...)
 {
@@ -110,15 +122,9 @@ static void keys_prepare(void)
         config_load_from_xml(path, &g_app_config);
     }
     keymap_reload();
-    i18n_init(g_app_config.ui_language);
-}
-
-static void keys_print_usage(const char *program)
-{
-    fprintf(stderr, "用法：%s keys list|check [--json]\n", program ? program : "ter-music");
-    fprintf(stderr, "  keys list   列出全部动作的上下文、名称、有效键、默认键与遮蔽关系\n");
-    fprintf(stderr, "  keys check  严格审计配置；非法项/冲突/无默认键时退出码非 0\n");
-    fprintf(stderr, "  --json      输出机器可读 JSON（便于 CI）\n");
+    /* 与 CLI 入口共用语言解析（--lang > env > 配置 > locale），
+     * 避免用配置值覆盖 --lang/TER_MUSIC_CLI_LANG 的解析结果。 */
+    cli_lang_init();
 }
 
 static void join_keys(char keys[][KEYNAME_MAX_LEN], int count,
@@ -128,7 +134,7 @@ static void join_keys(char keys[][KEYNAME_MAX_LEN], int count,
         return;
     }
     if (count <= 0) {
-        snprintf(out, out_size, "(无)");
+        snprintf(out, out_size, "%s", i18n_get("general.none"));
         return;
     }
 
@@ -219,7 +225,7 @@ static int audit_raw_conflicts(const KeyBindingOverride *overrides, int count,
                     }
                     conflicts++;
                     msg_add(errors,
-                            "冲突：上下文 %s 中 %s 与 %s 都使用 %s",
+                            i18n_get("cli.keys.msg.conflict"),
                             actions_context_id(def_a->context),
                             def_a->id, def_b->id, keys_a[i]);
                 }
@@ -299,13 +305,13 @@ static void audit_terminfo(KeyAuditMessages *warnings)
 
     const char *term = getenv("TERM");
     if (!term || term[0] == '\0') {
-        msg_add(warnings, "TERM 未设置，跳过 terminfo 能力检查");
+        msg_add(warnings, "%s", i18n_get("cli.keys.msg.term_unset"));
         return;
     }
 
     int errret = 0;
     if (setupterm(NULL, STDOUT_FILENO, &errret) != 0) {
-        msg_add(warnings, "setupterm 失败（TERM=%s），跳过 terminfo 能力检查", term);
+        msg_add(warnings, i18n_get("cli.keys.msg.setupterm_failed"), term);
         return;
     }
 
@@ -334,7 +340,7 @@ static void audit_terminfo(KeyAuditMessages *warnings)
         }
         char *cap = tigetstr(caps[i].cap);
         if (cap == NULL || cap == (char *)-1) {
-            msg_add(warnings, "terminfo 缺少能力 %s（%s，TERM=%s）",
+            msg_add(warnings, i18n_get("cli.keys.msg.terminfo_missing_named"),
                     caps[i].cap, caps[i].name, term);
         }
     }
@@ -348,7 +354,7 @@ static void audit_terminfo(KeyAuditMessages *warnings)
         snprintf(cap_name, sizeof(cap_name), "kf%d", n);
         char *cap = tigetstr(cap_name);
         if (cap == NULL || cap == (char *)-1) {
-            msg_add(warnings, "terminfo 缺少能力 %s（f%d，TERM=%s）",
+            msg_add(warnings, i18n_get("cli.keys.msg.terminfo_missing_func"),
                     cap_name, n, term);
         }
     }
@@ -362,7 +368,7 @@ static int keys_list_json(const KeyShadowList *shadows)
 {
     char *buffer = malloc(KEY_AUDIT_JSON_CAP);
     if (!buffer) {
-        fprintf(stderr, "错误：内存不足，无法生成 JSON。\n");
+        keys_print_line(stderr, "cli.err.json_oom");
         return CLI_EXIT_USAGE;
     }
 
@@ -444,7 +450,7 @@ static int keys_list_json(const KeyShadowList *shadows)
 
     if (json_writer_overflowed(cap, pos)) {
         free(buffer);
-        fprintf(stderr, "错误：键位审计 JSON 超出缓冲上限。\n");
+        keys_print_line(stderr, "cli.err.json_overflow");
         return CLI_EXIT_USAGE;
     }
 
@@ -489,18 +495,18 @@ static int keys_list_human(const KeyShadowList *shadows)
             printf("  %-30s %-24s %s", def->id, keymap_action_label(id),
                    keys_text);
             if (!actions_is_bindable(id)) {
-                printf("  [锁定]  [默认: %s]", defaults_text);
+                printf(i18n_get("cli.keys.list.locked_fmt"), defaults_text);
             } else if (overridden) {
-                printf("  [*覆盖]  [默认: %s]", defaults_text);
+                printf(i18n_get("cli.keys.list.overridden_fmt"), defaults_text);
             }
             printf("\n");
         }
         printf("\n");
     }
 
-    printf("遮蔽关系（子上下文动作 -> 父上下文动作）：\n");
+    printf("%s\n", i18n_get("cli.keys.list.shadows_title"));
     if (shadows->count == 0) {
-        printf("  无\n");
+        printf("%s\n", i18n_get("cli.keys.list.shadows_none"));
     } else {
         for (int i = 0; i < shadows->count; i++) {
             const KeyShadow *shadow = &shadows->items[i];
@@ -509,8 +515,11 @@ static int keys_list_human(const KeyShadowList *shadows)
             if (!child || !parent) {
                 continue;
             }
-            printf("  %s 遮蔽 %s（%s）%s\n", child->id, parent->id, shadow->key,
-                   shadow->via_override ? "［覆盖引入-应修复］" : "");
+            printf(i18n_get("cli.keys.list.shadow_fmt"), child->id, parent->id,
+                   shadow->key,
+                   shadow->via_override
+                       ? i18n_get("cli.keys.list.shadow_override") : "");
+            printf("\n");
         }
     }
     return CLI_EXIT_OK;
@@ -521,7 +530,7 @@ static int keys_cmd_list(int want_json)
     KeyShadowList shadows = {0};
     if (collect_shadows(&shadows) != 0) {
         shadows_free(&shadows);
-        fprintf(stderr, "错误：内存不足，无法收集遮蔽关系。\n");
+        keys_print_line(stderr, "cli.err.shadow_oom");
         return CLI_EXIT_USAGE;
     }
 
@@ -542,7 +551,7 @@ static int keys_check_json(int ok, int actions, int overrides,
 {
     char *buffer = malloc(KEY_AUDIT_JSON_CAP);
     if (!buffer) {
-        fprintf(stderr, "错误：内存不足，无法生成 JSON。\n");
+        keys_print_line(stderr, "cli.err.json_oom");
         return CLI_EXIT_USAGE;
     }
 
@@ -585,7 +594,7 @@ static int keys_check_json(int ok, int actions, int overrides,
 
     if (json_writer_overflowed(cap, pos)) {
         free(buffer);
-        fprintf(stderr, "错误：键位审计 JSON 超出缓冲上限。\n");
+        keys_print_line(stderr, "cli.err.json_overflow");
         return CLI_EXIT_USAGE;
     }
 
@@ -602,31 +611,35 @@ static int keys_check_human(int ok, int actions, int overrides,
                             const KeyAuditMessages *errors,
                             const KeyAuditMessages *warnings)
 {
-    printf("键位审计\n");
-    printf("  配置文件：%s\n", config_path ? config_path : "(未初始化)");
-    printf("  动作总数：%d\n", actions);
-    printf("  覆盖数（原始条目）：%d\n", overrides);
-    printf("  锁定动作覆盖（已忽略）：%d\n", locked_overrides);
-    printf("  非法项：%d\n", invalid);
-    printf("  冲突：%d\n", conflicts);
-    printf("  无默认键动作：%d\n", missing_defaults);
-    printf("  遮蔽数：%d（覆盖引入：%d，须为 0）\n", shadows,
-           override_shadows);
+    keys_print_line(stdout, "cli.keys.check.title");
+    keys_print_line(stdout, "cli.keys.check.config",
+                    config_path ? config_path
+                                : i18n_get("cli.keys.check.config_uninitialized"));
+    keys_print_line(stdout, "cli.keys.check.actions", actions);
+    keys_print_line(stdout, "cli.keys.check.overrides", overrides);
+    keys_print_line(stdout, "cli.keys.check.locked_overrides", locked_overrides);
+    keys_print_line(stdout, "cli.keys.check.invalid", invalid);
+    keys_print_line(stdout, "cli.keys.check.conflicts", conflicts);
+    keys_print_line(stdout, "cli.keys.check.missing_defaults", missing_defaults);
+    keys_print_line(stdout, "cli.keys.check.shadows", shadows,
+                    override_shadows);
 
     if (warnings->count > 0) {
-        printf("警告：\n");
+        keys_print_line(stdout, "main.warn.prefix");
         for (int i = 0; i < warnings->count; i++) {
             printf("  - %s\n", warnings->items[i]);
         }
     }
     if (errors->count > 0) {
-        printf("错误：\n");
+        keys_print_line(stdout, "cli.keys.check.errors");
         for (int i = 0; i < errors->count; i++) {
             printf("  - %s\n", errors->items[i]);
         }
     }
 
-    printf("结论：%s\n", ok ? "通过" : "失败");
+    keys_print_line(stdout, "cli.keys.check.result",
+                    i18n_get(ok ? "cli.keys.check.pass"
+                                : "cli.keys.check.fail"));
     return CLI_EXIT_OK;
 }
 
@@ -648,8 +661,9 @@ static int keys_cmd_check(int want_json)
         if (config_load_raw_keybindings(config_path, raw,
                                         MAX_KEYBINDING_OVERRIDES, &raw_count,
                                         raw_err, sizeof(raw_err)) != 0) {
-            msg_add(&g_key_errors, "读取原始覆盖失败：%s",
-                    raw_err[0] ? raw_err : "未知错误");
+            msg_add(&g_key_errors, i18n_get("cli.keys.msg.raw_read_failed"),
+                    raw_err[0] ? raw_err
+                               : i18n_get("cli.keys.msg.unknown_error"));
             failed = 1;
             raw_count = 0;
         }
@@ -665,7 +679,7 @@ static int keys_cmd_check(int want_json)
         ActionId id = actions_from_id(raw[i].action);
         if (id == ACTION_NONE) {
             invalid++;
-            msg_add(&g_key_errors, "未知动作：action='%s' key='%s'",
+            msg_add(&g_key_errors, i18n_get("cli.keys.msg.unknown_action"),
                     raw[i].action, raw[i].key);
             continue;
         }
@@ -674,7 +688,7 @@ static int keys_cmd_check(int want_json)
         if (keyname_parse(raw[i].key, &stroke) != 0 ||
             !keyname_is_bindable(stroke)) {
             invalid++;
-            msg_add(&g_key_errors, "非法键：action='%s' key='%s'",
+            msg_add(&g_key_errors, i18n_get("cli.keys.msg.invalid_key"),
                     raw[i].action, raw[i].key);
             continue;
         }
@@ -685,7 +699,7 @@ static int keys_cmd_check(int want_json)
             if (strcmp(raw[i].key, "default") != 0) {
                 locked_overrides++;
                 msg_add(&g_key_warnings,
-                        "动作 '%s' 已锁定，覆盖被忽略（文件条目保留）",
+                        i18n_get("cli.keys.msg.locked_action"),
                         raw[i].action);
             }
             continue;
@@ -700,7 +714,8 @@ static int keys_cmd_check(int want_json)
         }
         if (duplicate) {
             invalid++;
-            msg_add(&g_key_errors, "重复动作：action='%s'", raw[i].action);
+            msg_add(&g_key_errors, i18n_get("cli.keys.msg.duplicate_action"),
+                    raw[i].action);
             continue;
         }
 
@@ -711,7 +726,8 @@ static int keys_cmd_check(int want_json)
     char validate_err[KEY_AUDIT_MESSAGE_LEN] = "";
     if (actions_validate_overrides(raw, raw_count, validate_err,
                                    sizeof(validate_err)) != 0) {
-        msg_add(&g_key_errors, "原始覆盖校验失败：%s", validate_err);
+        msg_add(&g_key_errors, i18n_get("cli.keys.msg.raw_validate_failed"),
+                validate_err);
         failed = 1;
     }
 
@@ -725,7 +741,8 @@ static int keys_cmd_check(int want_json)
     if (actions_validate_overrides(g_app_config.keybinding_overrides,
                                    runtime_count, validate_err,
                                    sizeof(validate_err)) != 0) {
-        msg_add(&g_key_errors, "运行时覆盖校验失败：%s", validate_err);
+        msg_add(&g_key_errors, i18n_get("cli.keys.msg.runtime_validate_failed"),
+                validate_err);
         failed = 1;
     }
 
@@ -734,7 +751,7 @@ static int keys_cmd_check(int want_json)
 
     KeyShadowList shadows = {0};
     if (collect_shadows(&shadows) != 0) {
-        msg_add(&g_key_errors, "内存不足，无法收集遮蔽关系");
+        msg_add(&g_key_errors, "%s", i18n_get("cli.keys.msg.shadow_oom"));
         failed = 1;
     }
 
@@ -772,19 +789,37 @@ static int keys_cmd_check(int want_json)
 
 int cli_cmd_keys(int argc, char **argv)
 {
+    const char *program = (argc > 0 && argv && argv[0]) ? argv[0] : "ter-music";
+
     if (argc < 3) {
-        keys_print_usage(argv[0]);
+        cli_help_print_command(program, "keys", NULL);
         return CLI_EXIT_USAGE;
     }
 
     const char *action = argv[2];
+
+    /* --help 在参数解析前处理：keys --help 为一级详情，
+     * keys list|check --help 为对应二级详情。 */
+    if (strcmp(action, "--help") == 0) {
+        cli_help_print_command(program, "keys", NULL);
+        return CLI_EXIT_OK;
+    }
+    if (strcmp(action, "list") == 0 || strcmp(action, "check") == 0) {
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--help") == 0) {
+                cli_help_print_command(program, "keys", action);
+                return CLI_EXIT_OK;
+            }
+        }
+    }
+
     int want_json = 0;
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--json") == 0) {
             want_json = 1;
         } else {
-            fprintf(stderr, "错误：未知的 keys 选项 '%s'。\n", argv[i]);
-            keys_print_usage(argv[0]);
+            keys_print_line(stderr, "cli.keys.err.unknown_option", argv[i]);
+            cli_help_print_command(program, "keys", NULL);
             return CLI_EXIT_USAGE;
         }
     }
@@ -798,7 +833,7 @@ int cli_cmd_keys(int argc, char **argv)
         return keys_cmd_check(want_json);
     }
 
-    fprintf(stderr, "错误：未知 keys 子命令 '%s'。\n", action);
-    keys_print_usage(argv[0]);
+    keys_print_line(stderr, "cli.keys.err.unknown_subcommand", action);
+    cli_help_print_command(program, "keys", NULL);
     return CLI_EXIT_USAGE;
 }

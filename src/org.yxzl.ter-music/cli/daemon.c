@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,27 @@ int g_daemon_mode = 0;
 #define DAEMON_LOG_NAME "daemon.log"
 
 extern volatile sig_atomic_t g_should_exit;
+
+/* 按 i18n 键向 stderr 输出一行；译文本身不携带换行，统一在此追加。 */
+static void daemon_err_line(const char *key, ...)
+{
+    va_list args;
+    va_start(args, key);
+    vfprintf(stderr, i18n_get(key), args);
+    va_end(args);
+    fputc('\n', stderr);
+}
+
+/* 按 i18n 键经 cli_diag 输出一行（保留累积缓冲与日志行为）。 */
+static void daemon_diag_line(const char *key, ...)
+{
+    char buffer[768];
+    va_list args;
+    va_start(args, key);
+    vsnprintf(buffer, sizeof(buffer), i18n_get(key), args);
+    va_end(args);
+    cli_diag("%s\n", buffer);
+}
 
 static uint64_t daemon_now_ms(void)
 {
@@ -199,21 +221,21 @@ int daemon_run_foreground(const char *open_path, int debug, int force,
     if (!media_session_has_primary_name()) {
         const char *bus = media_session_bus_name();
         if (!force) {
-            fprintf(stderr, "错误：已有 ter-music 主实例在运行，无法作为后台播放进程启动。\n");
-            fprintf(stderr, "      用 `ter-music play <路径>` 控制现有实例，或先 `ter-music daemon stop`。\n");
+            daemon_err_line("cli.daemon.err.primary_running");
+            daemon_err_line("cli.daemon.err.primary_running.hint");
             log_warn("daemon", "Primary bus name unavailable (using '%s'), refusing to start", bus);
             daemon_shutdown();
             return CLI_EXIT_REFUSED;
         }
         log_warn("daemon", "Running as secondary instance on bus '%s' (--force)", bus);
-        fprintf(stderr, "警告：以次要实例身份运行（总线名 %s），CLI 命令仍会发送给主实例。\n", bus);
+        daemon_err_line("cli.daemon.warn.secondary_instance", bus);
     }
 
     if (open_path && open_path[0]) {
         /* 后端不再扫描目录：`--open <dir>` 是“前端负责扫描”的旧语义，
          * 继续接受它只会让人以为核心会自己加载曲目。 */
-        fprintf(stderr, "错误：核心不再扫描目录。\n");
-        fprintf(stderr, "      请在前端（TUI 或 `ter-music play <路径>`）扫描后，经 D-Bus Queue.Set 下发队列。\n");
+        daemon_err_line("cli.daemon.err.no_scan");
+        daemon_err_line("cli.daemon.err.no_scan.hint");
         log_warn("daemon", "Refusing --open '%s': the core does not scan directories any more", open_path);
     } else {
         /* 队列一律由前端下发（Queue.Set/Append）：核心不扫描目录，也不自行
@@ -291,8 +313,8 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
     if (!media_session_has_primary_name()) {
         /* 前台核心默认要持主名；已有主实例时拒绝起第二个抢主名的核心。
          * （次要实例语义只属于 `daemon foreground --force`。） */
-        fprintf(stderr, "错误：已有 ter-music 主实例在运行，--foreground 无法再起前台核心。\n");
-        fprintf(stderr, "      请先 `ter-music daemon stop`，或去掉 --foreground 控制现有实例。\n");
+        daemon_err_line("cli.daemon.err.foreground_primary_running");
+        daemon_err_line("cli.daemon.err.foreground_primary_running.hint");
         daemon_shutdown();
         return CLI_EXIT_REFUSED;
     }
@@ -302,7 +324,7 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
     for (int i = 0; i < nchunks; i++) {
         int written = (i == 0) ? bq_set_json(chunks[i]) : bq_append_json(chunks[i]);
         if (written < 0) {
-            fprintf(stderr, "错误：装载的内容下发失败（队列为空或载荷被拒）。\n");
+            daemon_err_line("cli.daemon.err.queue_load_failed");
             daemon_shutdown();
             return CLI_EXIT_REFUSED;
         }
@@ -310,7 +332,7 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
 
     int total = bq_count();
     if (total <= 0) {
-        fprintf(stderr, "错误：没有可播放的曲目。\n");
+        daemon_err_line("cli.daemon.err.no_tracks");
         daemon_shutdown();
         return CLI_EXIT_REFUSED;
     }
@@ -329,7 +351,7 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
 
     int position = (start_index >= 0) ? start_index : 0;
     if (position >= total) {
-        fprintf(stderr, "错误：曲目序号 %d 超出范围（共 %d 首）。\n", position, total);
+        daemon_err_line("cli.daemon.err.index_out_of_range", position, total);
         daemon_shutdown();
         return CLI_EXIT_REFUSED;
     }
@@ -363,7 +385,7 @@ static void daemon_log_tail(const char *log_path) {
         return;
     }
 
-    fprintf(stderr, "最近日志（%s）：\n", log_path);
+    daemon_err_line("cli.daemon.log_tail", log_path);
     for (int i = 0; i < available; i++) {
         const char *line = lines[(count - available + i) % 8];
         fprintf(stderr, "  %s", line);
@@ -384,12 +406,12 @@ int daemon_start_background(const char *open_path, int debug, int force,
         int pid = 0;
         cli_client_instance_mode(NULL, mode, sizeof(mode), &pid);
         if (!force) {
-            cli_diag("错误：已有 ter-music 实例在运行（%s，pid %d）。\n",
-                     mode[0] ? mode : "unknown", pid);
-            cli_diag("      用 `ter-music play <路径>` 直接控制它，或先 `ter-music daemon stop`。\n");
+            daemon_diag_line("cli.daemon.err.instance_running",
+                             mode[0] ? mode : "unknown", pid);
+            daemon_diag_line("cli.daemon.err.instance_running.hint");
             return CLI_EXIT_REFUSED;
         }
-        fprintf(stderr, "警告：已有实例在运行（pid %d），将以次要实例身份启动（--force）。\n", pid);
+        daemon_err_line("cli.daemon.warn.instance_running_force", pid);
     }
 
     const char *config_dir = app_config_dir(1);
@@ -410,7 +432,7 @@ int daemon_start_background(const char *open_path, int debug, int force,
 
     pid_t pid = fork();
     if (pid < 0) {
-        cli_diag("错误：fork 失败：%s\n", strerror(errno));
+        daemon_diag_line("cli.daemon.err.fork_failed", strerror(errno));
         if (pid_pipe[0] >= 0) close(pid_pipe[0]);
         if (pid_pipe[1] >= 0) close(pid_pipe[1]);
         return CLI_EXIT_DBUS;
@@ -518,7 +540,8 @@ int daemon_start_background(const char *open_path, int debug, int force,
 
     int daemon_pid = 0;
     if (cli_client_wait_for_online(expect_name, DAEMON_START_TIMEOUT_MS, &daemon_pid) != CLI_EXIT_OK) {
-        cli_diag("错误：后台播放进程未在 %d 秒内就绪。\n", DAEMON_START_TIMEOUT_MS / 1000);
+        daemon_diag_line("cli.daemon.err.start_timeout",
+                         DAEMON_START_TIMEOUT_MS / 1000);
         daemon_log_tail(log_path);
         return CLI_EXIT_DBUS;
     }
@@ -529,10 +552,9 @@ int daemon_start_background(const char *open_path, int debug, int force,
     if (expect_name) {
         /* `--bus` 必须写在子命令**之后**：main 按 argv[1] 分派，写在前面会被
          * 当成"打开 TUI"（实测：`ter-music --bus X daemon stop` 会走进 TUI）。 */
-        fprintf(stderr, "次要实例总线名：%s\n"
-                        "  控制它：ter-music daemon status --bus %s（--bus 写在子命令之后）\n"
-                        "  全部停止：ter-music daemon stop --all\n",
-                expect_name, expect_name);
+        daemon_err_line("cli.daemon.secondary.bus_name", expect_name);
+        daemon_err_line("cli.daemon.secondary.control_hint", expect_name);
+        daemon_err_line("cli.daemon.secondary.stop_all_hint");
     }
     return CLI_EXIT_OK;
 }

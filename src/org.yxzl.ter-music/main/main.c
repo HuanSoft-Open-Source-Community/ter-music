@@ -17,6 +17,8 @@
 #include "ui/remote_view.h"
 #include "app/open.h"
 #include "cli/cli.h"
+#include "cli/help.h"
+#include "cli/lang.h"
 #include "core/core.h"
 #include "player/player.h"
 #include <stdio.h>
@@ -83,7 +85,8 @@ void crash_handler(int sig) {
     endwin();
     ui_restore_stdio(); /* 恢复被守卫改道的 fd2，随后的错误与 backtrace 才能到真实终端 */
     cleanup_temp_playlist();
-    fprintf(stderr, "致命错误：收到信号 %d\n", sig);
+    fprintf(stderr, i18n_get("main.err.fatal_signal"), sig);
+    fputc('\n', stderr);
     fprintf(stderr, "Backtrace:\n");
     void *bt[48];
     int n = backtrace(bt, 48);
@@ -148,28 +151,9 @@ static int find_audio_directory_recursive(const char *path, char *found_path, si
     return 0;
 }
 
+/* 顶层帮助统一走 CLI 帮助模型（概览含 TUI 选项、命令分组与 --lang）。 */
 static void print_usage(const char *prog_name) {
-    printf("用法：%s [选项]            进入 TUI 界面\n", prog_name);
-    printf("      %s <命令> [选项]      使用 CLI 模式（播放控制 / 信息显示 / 后台播放）\n\n", prog_name);
-    printf("TUI 选项：\n");
-    printf("  -o, --open <path>    启动时打开指定音乐目录、音频文件或远程URL\n");
-    printf("  -d, --debug          启用调试日志（输出到 ter-music-debug.log）\n");
-    printf("  -h, --help           显示帮助信息\n");
-    printf("\nCLI 命令（用 `%s help` 查看完整列表）：\n", prog_name);
-    printf("  play/pause/resume/toggle/stop/next/prev   基础播放控制\n");
-    printf("  seek/volume/speed/mode                    跳转、音量、倍速、播放模式\n");
-    printf("  show [--json|--watch|--one-line|...]      输出当前播放信息\n");
-    printf("  daemon start|stop|restart|status|reload   后台播放进程管理\n");
-    printf("\n");
-    printf("远程 URL 示例：\n");
-    printf("  %s ftp://user:pass@host/path/to/music\n", prog_name);
-    printf("  %s sftp://host/path\n", prog_name);
-    printf("  %s --open http://webdav-server/music\n", prog_name);
-    printf("\n");
-    printf("本地示例：\n");
-    printf("  %s -o ~/Music\n", prog_name);
-    printf("  %s --open /path/to/music\n", prog_name);
-    printf("  %s -o /path/to/song.mp3\n", prog_name);
+    cli_help_print_overview(prog_name);
 }
 
 /* 断线重连钩子：把前端持有的内容队列整表推给核心（忽略返回值，失败下次再推） */
@@ -182,6 +166,9 @@ static void push_content_to_core(void)
 }
 
 int main(int argc, char *argv[]) {
+    /* --lang 可写在任意位置（含命令之前），必须先于 CLI 命令判断剥离。 */
+    cli_lang_extract_option(&argc, argv);
+
     /* 崩溃处理器必须装在独立信号栈上：栈溢出时才能打印 backtrace */
     crash_install_alt_stack();
     signal(SIGHUP, sighup_handler);
@@ -191,8 +178,12 @@ int main(int argc, char *argv[]) {
     /* CLI 子命令前置分发：必须早于 isatty 检查、logger_init 与 ncurses 初始化，
      * 因为 CLI 客户端不需要终端，daemon 运行时也没有终端。 */
     if (argc > 1 && strcmp(argv[1], "tui") == 0) {
+        /* 保留 argv[0] 作为程序名，避免 `tui --help` 的 usage 显示成 "tui"。 */
+        for (int i = 1; i < argc - 1; i++) {
+            argv[i] = argv[i + 1];
+        }
         argc--;
-        argv++;
+        argv[argc] = NULL;
     } else if (argc > 1 && cli_is_command(argv[1])) {
         return cli_run(argc, argv);
     }
@@ -203,8 +194,9 @@ int main(int argc, char *argv[]) {
         strchr(argv[1], '/') == NULL && strstr(argv[1], "://") == NULL) {
         struct stat probe;
         if (stat(argv[1], &probe) != 0) {
-            fprintf(stderr, "提示：'%s' 既不是已知命令，也不是存在的路径（用 `%s help` 查看命令列表）。\n",
-                    argv[1], argv[0]);
+            cli_lang_init();
+            fprintf(stderr, i18n_get("main.hint.unknown_first_arg"), argv[1], argv[0]);
+            fputc('\n', stderr);
         }
     }
 
@@ -238,7 +230,8 @@ int main(int argc, char *argv[]) {
                 } else if (strcmp(optarg, "local") == 0) {
                     frontend = PLAYER_BACKEND_LOCAL;
                 } else {
-                    fprintf(stderr, "错误：--frontend 只接受 local 或 remote。\n");
+                    cli_lang_init();
+                    fprintf(stderr, "%s\n", i18n_get("main.err.frontend_invalid"));
                     return 1;
                 }
                 break;
@@ -255,9 +248,11 @@ int main(int argc, char *argv[]) {
                 printf("%s %s\n", APP_NAME, APP_VERSION);
                 return 0;
             case 'h':
+                cli_lang_init();
                 print_usage(argv[0]);
                 return 0;
             default:
+                cli_lang_init();
                 print_usage(argv[0]);
                 return 1;
         }
@@ -274,8 +269,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (!isatty(STDOUT_FILENO)) {
-        fprintf(stderr, "错误：ter-music 需要在终端里直接运行。\n");
-        fprintf(stderr, "请不要把它通过管道重定向到其他命令。\n");
+        cli_lang_init();
+        fprintf(stderr, "%s\n", i18n_get("main.err.not_a_tty"));
+        fprintf(stderr, "%s\n", i18n_get("main.err.not_a_tty_hint"));
         return 1;
     }
     
@@ -296,6 +292,12 @@ int main(int argc, char *argv[]) {
      * 两者在远端模式的前端进程里都不初始化。 */
     init_all_persistent_data();
 
+    /* --lang / TER_MUSIC_CLI_LANG 对 TUI 同样生效：只改本次进程的镜像，
+     * 不写盘，保存配置时仍以用户原有设置为准。 */
+    if (cli_lang_is_explicit()) {
+        snprintf(g_app_config.ui_language, sizeof(g_app_config.ui_language), "%s",
+                 cli_lang_resolve());
+    }
     i18n_init(g_app_config.ui_language);
     if (frontend == PLAYER_BACKEND_LOCAL) {
         set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支） */
@@ -596,16 +598,16 @@ int main(int argc, char *argv[]) {
             cleanup();
             log_error("main", "Cannot connect to the playback service (core), api_version=%d",
                       TER_MUSIC_API_VERSION);
-            fprintf(stderr, "错误：无法连接到播放服务（核心）。\n");
-            fprintf(stderr, "      请确认核心版本不低于 %d，或先 `ter-music daemon start`。\n",
-                    TER_MUSIC_API_VERSION);
+            fprintf(stderr, "%s\n", i18n_get("main.err.core_connect"));
+            fprintf(stderr, i18n_get("main.err.core_connect_hint"), TER_MUSIC_API_VERSION);
+            fputc('\n', stderr);
             /* 语义化退出码：名字不在线=无实例(3)，名字在线却连不上=总线不可用(4) */
             return cli_client_primary_available(bus_name[0] ? bus_name : NULL)
                        ? CLI_EXIT_DBUS : CLI_EXIT_NO_INSTANCE;
         }
         cleanup();
         log_error("main", "Cannot initialise the player facade");
-        fprintf(stderr, "错误：无法初始化播放器门面。\n");
+        fprintf(stderr, "%s\n", i18n_get("main.err.facade_init"));
         return 1;
     }
 

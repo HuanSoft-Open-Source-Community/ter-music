@@ -1148,10 +1148,26 @@ static void clamp_config_values(AppConfig *cfg)
     if (cfg->last_played_position < 0)
         cfg->last_played_position = 0;
 
-    if (cfg->ui_language[0] == '\0' ||
-        (strcmp(cfg->ui_language, "zh_CN") != 0 &&
-         strcmp(cfg->ui_language, "en_US") != 0))
-        strcpy(cfg->ui_language, "zh_CN");
+    /* 语言 ID 允许第三方语言包（如 ja_JP、de-DE），只允许字母/数字/
+     * 下划线/连字符；拒绝路径分隔符、点号、空格、控制字符与其他字符。
+     * 同时拒绝空值与超长值。 */
+    {
+        size_t lang_len = strnlen(cfg->ui_language, sizeof(cfg->ui_language));
+        int lang_valid = (lang_len > 0 && lang_len < sizeof(cfg->ui_language));
+
+        for (size_t i = 0; lang_valid && i < lang_len; i++) {
+            unsigned char ch = (unsigned char)cfg->ui_language[i];
+            int allowed = (ch >= 'A' && ch <= 'Z') ||
+                          (ch >= 'a' && ch <= 'z') ||
+                          (ch >= '0' && ch <= '9') ||
+                          ch == '_' || ch == '-';
+            if (!allowed)
+                lang_valid = 0;
+        }
+
+        if (!lang_valid)
+            strcpy(cfg->ui_language, "zh_CN");
+    }
 
     if (cfg->volume_percent < 0)   cfg->volume_percent = 0;
     if (cfg->volume_percent > 100) cfg->volume_percent = 100;
