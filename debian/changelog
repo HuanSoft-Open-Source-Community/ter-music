@@ -23,6 +23,46 @@ ter-music (2.4.0-1) unstable; urgency=medium
     core" (breaking). The config.xml root version attribute is now written
     with the contract number ("8") instead of the old "2.2" literal;
     historical "2.2" files still load and are rewritten by the migration.
+  * Never let two cores play at once after a front end exits. The core used to
+    release its D-Bus name before it had stopped the audio, leaving a short
+    window in which a front end started right after "q" saw no core, launched a
+    second one and the two played the same music in parallel (and "stop" only
+    silenced the instance that front end had attached to). The shutdown order
+    is now: persist the session, stop and join the playback thread, destroy the
+    backend stream, and only then release the bus name. The visible cost is
+    that "daemon stop"/"restart" may see the instance go offline up to the
+    playback-thread shutdown timeout (2s) plus the stream teardown later than
+    before, which the CLI's 5s/10s wait budgets still cover.
+  * Never let a remote front end play audio in its own process. With
+    resume_last_playback enabled, the start-up resume path used to run before
+    player_init(), so player_backend() still returned the facade's default
+    LOCAL and the TUI created a real playback thread and PipeWire stream for a
+    track the core was also playing, producing doubled audio (most audible
+    with PipeWire, whose on-demand backend fallback made the accidental local
+    stream succeed). After the front-end/backend split the resume path only
+    records the selection and plays through the facade once the core is
+    connected and the queue is delivered; as a second line of defence
+    play_audio() refuses to run unless init_audio_device() ran in this
+    process, and UI cleanup tears down any local audio engine (stop, join,
+    backend stream) before the front end exits. A front end therefore only
+    ever owns content and D-Bus commands, never an audio thread.
+  * Report and persist the audible position, not the prebuffered write
+    position. The playback thread counted every sample it had written into
+    PipeWire's 1 MB ring (~2.9 s at 44.1 kHz stereo) as progress, while the
+    process callback consumes that ring at real time. The UI, MPRIS and
+    session resume therefore ran seconds ahead of what the user heard; after
+    q the saved position included the unplayed ring and a restart appeared to
+    have advanced during the pause. audio_get_position_seconds() now subtracts
+    the backend's unplayed frames, and persist_playback_session_state() saves
+    that corrected position. PipeWire reports the ring occupancy; Pulse/ALSA,
+    whose writes are already bounded by the device, report zero.
+  * Call PipeWire stream controls from the thread loop's locking context.
+    pw_stream_set_active/set_control/flush were invoked without
+    pw_thread_loop_lock(), so libpipewire diagnosed every pause, resume, flush
+    and volume change as "called from wrong context" and the log filled with
+    those lines. The four controls now take the loop lock (after dropping the
+    internal state mutex, to keep the lock order deadlock-free). The audible
+    volume/pause behaviour is unchanged; the diagnostics are gone.
 
  -- Yanxi Bamboo Forest <yxzl666xx@outlook.com>  Mon, 19 Oct 2026 09:55:42 +0800
 
