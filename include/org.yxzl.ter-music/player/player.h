@@ -63,6 +63,12 @@ typedef struct {
 
 /* ── 生命周期 ─────────────────────────────────────────────────── */
 
+/* 只选择门面后端，不连接/不初始化播放栈。用于 main() 在内容扫描、配置
+ * 持久化、断点恢复等早于 player_init() 的路径之前确定角色，避免这些路径
+ * 把 remote 前端误判成 LOCAL（从而直写 config.xml 或在 TUI 进程起本地
+ * 播放线程）。可重复调用，player_init() 会再次确认。 */
+void player_select_backend(PlayerBackend backend);
+
 /* 连接/初始化。backend=REMOTE 时 bus_name 可为 NULL（用主名）。
  * 远程后端在返回前完成版本握手；不兼容返回 -1。 */
 int player_init(PlayerBackend backend, const char *bus_name);

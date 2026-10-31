@@ -774,7 +774,9 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - 已实现 `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer`，
   因此 `busctl --user introspect` / `gdbus introspect` 可直接使用。
 - MPRIS 元数据额外携带 `xesam:url`（恒为 `file://` URI，远程来源的曲目也是
-  本地缓存路径）与 `xesam:trackNumber`；`OpenUri` 只接受本地文件。
+  本地缓存路径）与 `xesam:trackNumber`；`OpenUri` 明确返回
+  `org.freedesktop.DBus.Error.NotSupported`，因为核心不再装载内容。请通过
+  `ter-music %F`（桌面入口）或 TUI 打开文件。
 - `CanQuit` 刻意保持为 `false`，以免桌面媒体组件直接结束播放器进程；
   如需退出，请使用 `ter-music daemon stop` 或 `Control.Quit`。
 
@@ -798,7 +800,7 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `default_play_mode`：默认播放模式（0=顺序、1=单曲循环、2=列表循环、3=随机一次、4=随机重复……）
 - `advanced_play_modes_enabled`：启用高级文件夹/专辑/艺术家播放模式（0/1）
 - `lyrics_alignment`：歌词对齐方式（0=居左、1=居中、2=居右）
-- `clear_history_on_startup`：启动时清空播放历史（0/1）
+- `clear_history_on_startup`：启动时清空目录历史（0/1）
 - `resume_last_playback`：从上次位置继续播放（0/1）
 - `seamless_preload`：在当前曲目末尾预解码下一曲，实现无缝播放（0/1）
 - `ui_language`：界面语言 ID。内置语言包为 `zh_CN`、`en_US`；通过 F7 语言视图安装的第三方语言 ID（如 `ja_JP`）同样有效。非法 ID 会回退到 `zh_CN`。

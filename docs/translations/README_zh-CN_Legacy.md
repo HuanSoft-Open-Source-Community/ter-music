@@ -705,7 +705,8 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 - `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer` 俱已备，
   故 `busctl --user introspect`／`gdbus introspect` 可行。
 - MPRIS之Metadata复载 `xesam:url`（恒为 `file://` 之URI，虽自远方而来者亦为本地之藏径）
-  与 `xesam:trackNumber`；`OpenUri` 惟受本地文卷。
+  与 `xesam:trackNumber`；`OpenUri` 明答 `org.freedesktop.DBus.Error.NotSupported`，
+  盖核心不复载内容矣。开卷当用 `ter-music %F`（桌面之入口）或 TUI。
 - `CanQuit` 故守 `false`，使桌面媒体之件不得径杀其器；欲终之者，当用
   `ter-music daemon stop` 或 `Control.Quit`。
 
@@ -727,7 +728,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `default_play_mode`：默播弄之制（0=序进、1=单曲回环、2=全帙周流、3=乱序一度、4=乱序杂陈……）
 - `advanced_play_modes_enabled`：启进阶文件/专辑/艺术家播弄之制（0/1）
 - `lyrics_alignment`：歌辞对齐之式（0=居左、1=居中、2=居右）
-- `clear_history_on_startup`：启时清播弄之迹（0/1）
+- `clear_history_on_startup`：启时清目录之迹（0/1）
 - `resume_last_playback`：续从前之处播弄（0/1）
 - `seamless_preload`：当前曲末预解下曲，达无隙播弄（0/1）
 - `ui_language`：界语之ID。内置者为 `zh_CN`、`en_US`；经 F7 语言视图所纳之第三方语言ID（如 `ja_JP`）亦可用。非法之ID回退 `zh_CN`。

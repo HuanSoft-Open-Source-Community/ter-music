@@ -1020,6 +1020,9 @@
   <string key="cli.err.play.no_default_path">错误：未指定路径且未配置默认音乐目录（default_startup_path）。</string>
   <string key="cli.err.play.cannot_open">错误：无法打开 '%s'（路径不存在或没有可播放的音频）。</string>
   <string key="cli.err.play.dispatch_failed">错误：装载的内容下发失败（队列为空或载荷被拒）。</string>
+  <string key="cli.err.play.no_daemon">错误：没有正在运行的实例（已指定 --no-daemon，不自动启动后台播放）。</string>
+  <string key="cli.err.custom_bus.no_service">错误：自定义 --bus 指定的实例没有在运行。</string>
+  <string key="cli.err.custom_bus.hint">      自定义总线只能接入已存在的实例；请先启动该实例，或使用默认总线/--attach-only。</string>
   <string key="cli.warn.secondary.running">警告：另有 %d 个次要实例在运行（普通 CLI 命令只发给主实例）：</string>
   <string key="cli.warn.secondary.not_running">警告：主实例未在运行，但仍有 %d 个次要实例在运行：</string>
   <string key="cli.warn.secondary.control_one">  控制单个：ter-music daemon stop --bus &lt;名称&gt;（--bus 写在子命令之后）</string>
@@ -1108,6 +1111,7 @@
   <string key="cli.table.path">路径</string>
   <string key="cli.err.queue_count_range_fmt">错误：--count 需在 0-%d 之间（0 = 默认 %d 行）。</string>
   <string key="cli.msg.queue_page_refused">提示：核心拒绝了这一页（可能 count 过大），请减小 --count。</string>
+  <string key="cli.msg.queue_page_fallback">提示：这一页超出核心响应上限，改用安全页大小 %d 行重试。</string>
   <string key="cli.err.queue_clear_refused">错误：核心拒绝了 Queue.Clear。</string>
   <string key="cli.err.queue_shuffle_refused">错误：核心拒绝了 Queue.Shuffle。</string>
   <string key="cli.err.queue_remove_position">错误：queue remove 需要非负的位置参数。</string>

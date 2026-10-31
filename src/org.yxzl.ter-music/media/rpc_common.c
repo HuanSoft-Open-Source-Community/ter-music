@@ -96,6 +96,10 @@ DBusMessage *rpc_error(DBusMessage *message,
 }
 
 int rpc_track_available(void) {
+    char current_path[MAX_PATH_LEN];
+    if (audio_current_track_path(current_path, sizeof(current_path))) {
+        return 1;
+    }
     return g_current_play_index >= 0 && g_current_play_index < bq_count();
 }
 
@@ -116,7 +120,17 @@ void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
     }
 
     memset(snapshot, 0, sizeof(*snapshot));
-    snapshot->current_index = g_current_play_index;
+
+    char current_path[MAX_PATH_LEN];
+    int have_path = audio_current_track_path(current_path, sizeof(current_path));
+    int position = -1;
+    if (have_path) {
+        position = bq_position_of_path(current_path);
+    } else if (g_current_play_index >= 0 && g_current_play_index < bq_count()) {
+        position = g_current_play_index;
+    }
+
+    snapshot->current_index = position;
     snapshot->playlist_total = bq_count();
     snapshot->play_state = g_play_state;
     snapshot->loop_mode = g_play_mode;
@@ -124,18 +138,22 @@ void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
     snapshot->rate = (double)g_playback_speed;
     snapshot->position_us = (int64_t)audio_get_position_seconds() * 1000000LL;
     snapshot->length_us = (int64_t)audio_get_duration_seconds() * 1000000LL;
-    snapshot->can_seek = rpc_track_available() && audio_get_duration_seconds() > 0;
+    snapshot->can_seek = (position >= 0 || have_path) && audio_get_duration_seconds() > 0;
 
     /* 曲目信息来自后端队列条目：内容由前端下发时已随带元数据；
-     * 队列已不含该位置时退回到在播条目（见上），保持 valid=true 的诚实上报。 */
+     * 当前路径已不在队列（被删除/清空）时退回到在播条目，保持 valid=true
+     * 的诚实上报；此时 queue_position/current_index 为 -1，符合 API 文档。 */
     BackendQueueEntry entry;
     int have_entry = 0;
-    if (rpc_track_available()) {
-        have_entry = (bq_entry_at(g_current_play_index, &entry) == 0);
+    if (position >= 0) {
+        have_entry = (bq_entry_at(position, &entry) == 0);
     }
     if (!have_entry) {
         snapshot->can_seek = audio_get_duration_seconds() > 0;
         have_entry = (rpc_playing_entry(&entry) == 0);
+        if (have_entry) {
+            snapshot->current_index = -1;
+        }
     }
     if (!have_entry) {
         return;
@@ -161,7 +179,17 @@ int rpc_action_play_selected(void) {
         return 0;
     }
 
-    int target_index = (g_current_play_index >= 0) ? g_current_play_index : 0;
+    int target_index = -1;
+    char current_path[MAX_PATH_LEN];
+    if (audio_current_track_path(current_path, sizeof(current_path))) {
+        target_index = bq_position_of_path(current_path);
+    }
+    if (target_index < 0 && g_current_play_index >= 0 && g_current_play_index < total) {
+        target_index = g_current_play_index;
+    }
+    if (target_index < 0) {
+        target_index = 0;
+    }
     if (target_index >= 0 && target_index < total) {
         play_audio(target_index);
         return 1;

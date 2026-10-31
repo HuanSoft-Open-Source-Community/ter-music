@@ -20,6 +20,10 @@
  * @return 实际下发条目数（≥0）；-1 = 失败（内容过大 / 载荷被拒） */
 int playlist_queue_sync(void);
 
+/* 同上，但显式指定“当前曲目”锚点（目标路径）。本地高级组模式下跨组选曲时，
+ * 必须以目标为锚重建，否则组模式会围绕旧当前曲目把目标裁掉。 */
+int playlist_queue_sync_with_anchor(const char *anchor_track_path);
+
 /* 分块下发辅助的回调类型。playlist_queue_foreach_chunk 每装配满一块
  * （单块 ≤ BQ_SET_MAX）就回调一次：chunk_json 为 {"entries":[…]} 形态，
  * chunk_index 从 0 计（0 = 首块，调用方据此选择 Set/Append），entries_in_chunk

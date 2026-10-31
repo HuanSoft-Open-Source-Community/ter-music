@@ -236,9 +236,13 @@ void rpc_info_sync(void) {
     rpc_info_sync_visualizer();
 
     char track_path[MAX_PATH_LEN] = "";
-    if (rpc_track_available()) {
-        if (bq_path_at(g_current_play_index, track_path,
-                                    sizeof(track_path)) != 0) {
+    int track_position = -1;
+    if (audio_current_track_path(track_path, sizeof(track_path))) {
+        track_position = bq_position_of_path(track_path);
+    } else if (g_current_play_index >= 0 && g_current_play_index < bq_count()) {
+        track_position = g_current_play_index;
+        if (bq_path_at(track_position, track_path, sizeof(track_path)) != 0) {
+            track_position = -1;
             track_path[0] = '\0';
         }
     }
@@ -246,7 +250,7 @@ void rpc_info_sync(void) {
     int changed = 0;
     if (!g_info.key_valid) {
         changed = 1;
-    } else if (g_info.track_index != g_current_play_index ||
+    } else if (g_info.track_index != track_position ||
                strcmp(g_info.track_path, track_path) != 0 ||
                g_info.playlist_total != bq_count() ||
                g_info.state != g_play_state ||
@@ -268,7 +272,7 @@ void rpc_info_sync(void) {
                                 g_current_album_cover_path) != 0);
 
     g_info.key_valid = 1;
-    g_info.track_index = g_current_play_index;
+    g_info.track_index = track_position;
     snprintf(g_info.track_path,
              sizeof(g_info.track_path), "%s", track_path);
     g_info.playlist_total = bq_count();

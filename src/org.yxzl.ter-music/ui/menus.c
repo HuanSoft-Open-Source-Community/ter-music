@@ -635,13 +635,18 @@ void try_migrate_from_json(void)
     load_all_playlists();
 }
 
-void frontend_init_config(void)
+void frontend_init_config(int readonly_mirror)
 {
     ensure_config_dir_exists();
-    /* 配置读取 + 运行时应用（倍速/播放模式）+ 版本迁移（core_config_apply
-     * 内部调用 config_run_migrations）。远端模式在这里读到的只是给界面用的
-     * 镜像；config.xml 的落盘仍由核心独占。 */
-    core_config_apply();
+    if (readonly_mirror) {
+        /* 远端前端只是核心配置的镜像持有者：只读加载，不迁移、不应用运行时
+         * 字段、不置脏、不落盘。真正的配置由 player_config_refresh() 在接入
+         * 核心后拉取。 */
+        load_config_readonly();
+    } else {
+        /* TUI-local 即核心：读取配置、执行迁移并应用运行时字段。 */
+        core_config_apply(); /* config-ownership-allow: 仅 local(TUI-即-核心) 分支；remote 走 load_config_readonly() */
+    }
     apply_color_theme();
 }
 
@@ -657,9 +662,9 @@ void content_init(void)
     try_migrate_from_json();
 }
 
-void init_all_persistent_data(void)
+void init_all_persistent_data(int readonly_mirror)
 {
-    frontend_init_config();
+    frontend_init_config(readonly_mirror);
     content_init();
 }
 

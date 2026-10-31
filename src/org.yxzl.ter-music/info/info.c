@@ -565,15 +565,24 @@ void info_track_snapshot(InfoTrack *out)
      * 而 Queue.Get 显示 N，两个接口自相矛盾。 */
     out->playlist_total = bq_count();
     out->queue_count = bq_count();
-    out->queue_position = bq_position();
+    out->queue_position = -1;
 
-    /* 队列里没有这个位置 ≠ 没有曲目：Queue.Set 的契约是“只替换未来曲目、当前
-     * 播放不中断”（见 queue/backend_queue.h），新表短于播放线程下标时退回到在播
-     * 条目，避免 `ter-music show`/Info 出现“正在出声却报无曲目”。 */
+    /* 当前曲目的身份是“正在出声的路径”，不是队列位置：队列被编辑/重排后
+     * 下标可能已经指向另一首，甚至当前条目已被移除。 */
+    char current_path[MAX_PATH_LEN];
+    int have_path = audio_current_track_path(current_path, sizeof(current_path));
+    int position = -1;
+    if (have_path) {
+        position = bq_position_of_path(current_path);
+    } else if (g_current_play_index >= 0 && g_current_play_index < out->playlist_total) {
+        /* 兼容旧时序：路径尚未写入时仍按旧下标上报。 */
+        position = g_current_play_index;
+    }
+
     BackendQueueEntry entry;
     int have_entry = 0;
-    if (g_current_play_index >= 0 && g_current_play_index < out->playlist_total) {
-        have_entry = (bq_entry_at(g_current_play_index, &entry) == 0);
+    if (position >= 0) {
+        have_entry = (bq_entry_at(position, &entry) == 0);
     }
     if (!have_entry) {
         if (g_play_state != PLAY_STATE_PLAYING && g_play_state != PLAY_STATE_PAUSED) {
@@ -583,10 +592,12 @@ void info_track_snapshot(InfoTrack *out)
             return;
         }
         have_entry = 1;
+        position = -1;   /* 不在队列里：Queue.Get 的 queue_position 应为 null */
     }
 
     out->valid = 1;
-    out->index = g_current_play_index;
+    out->index = position;
+    out->queue_position = position;
     info_build_track_id(out->track_id, sizeof(out->track_id), entry.path);
     snprintf(out->path, sizeof(out->path), "%s", entry.path);
     out->cue_track_number = entry.cue_track_number;
@@ -1041,7 +1052,7 @@ static int info_render_field_line(int bit, const InfoTrack *t,
                      play_mode_display_name(pb->play_mode, 0));
             return 1;
         case INFO_FIELD_INDEX:
-            if (t->valid && t->playlist_total > 0) {
+            if (t->valid && t->index >= 0 && t->playlist_total > 0) {
                 snprintf(out, out_size, "%s%d/%d", i18n_get("info.field.index"),
                          t->index + 1, t->playlist_total);
             } else {
@@ -1379,7 +1390,7 @@ static size_t info_append_track_object(char *out, size_t out_size, size_t pos,
 
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "index");
-    if (t->valid) {
+    if (t->valid && t->index >= 0) {
         pos = json_append_int(out, out_size, pos, t->index);
     } else {
         pos = json_append_raw(out, out_size, pos, "null");
@@ -1387,7 +1398,7 @@ static size_t info_append_track_object(char *out, size_t out_size, size_t pos,
 
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "number");
-    if (t->valid) {
+    if (t->valid && t->index >= 0) {
         pos = json_append_int(out, out_size, pos, t->index + 1);
     } else {
         pos = json_append_raw(out, out_size, pos, "null");

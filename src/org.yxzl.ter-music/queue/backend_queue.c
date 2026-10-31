@@ -447,9 +447,27 @@ int bq_set_json(const char *json)
     }
 
     /* Set 契约：整表替换的是**未来曲目**，正在播放的曲目不中断。替换前把原
-     * 游标条目记为“在播条目”，新表短于播放线程下标时上层（MPRIS/Info）仍能
-     * 用它如实上报正在出声的曲目。游标随后置到新表首。 */
+     * 游标条目记为“在播条目”，并记录旧队列是否仍是新队列的前缀。
+     *
+     * 前缀扩展（含完全相等）是最常见的“追加内容/重新打开同一内容”场景：
+     * 此时保留旧游标位置，避免前端追加一首歌或重新打开 TUI 就把正在播放的
+     * 队列位置拉回 0。非前缀的整表替换仍按原契约把游标置到新表首。 */
+    char keep_path[MAX_PATH_LEN];
+    keep_path[0] = '\0';
+    int keep_position = -1;
+    int old_count = g_bq.count;
+    if (g_bq.position >= 0 && g_bq.position < old_count) {
+        keep_position = g_bq.position;
+        snprintf(keep_path, sizeof(keep_path), "%s", g_bq.entries[keep_position].path);
+    }
     bq_pin_current_locked();
+
+    int is_prefix = (old_count > 0 && count >= old_count);
+    for (int i = 0; is_prefix && i < old_count; i++) {
+        if (strcmp(g_bq.entries[i].path, parsed[i].path) != 0) {
+            is_prefix = 0;
+        }
+    }
 
     if (count > 0) {
         memcpy(g_bq.entries, parsed, (size_t)count * sizeof(*parsed));
@@ -457,10 +475,17 @@ int bq_set_json(const char *json)
     free(parsed);
     g_bq.count = count;
     g_bq.position = count > 0 ? 0 : -1;
+    if (count > 0 && is_prefix && keep_position >= 0 && keep_position < count &&
+        keep_path[0] != '\0') {
+        /* 旧队列是新队列的前缀，因此旧位置在新队列中仍指向同一路径。 */
+        g_bq.position = keep_position;
+    }
+    int final_position = g_bq.position;
     bq_bump_revision_locked();
     pthread_mutex_unlock(&g_bq_mutex);
 
-    log_info("bq", "Queue set to %d entr%s", count, count == 1 ? "y" : "ies");
+    log_info("bq", "Queue set to %d entr%s (cursor=%d)", count,
+             count == 1 ? "y" : "ies", final_position);
     return count;
 }
 
@@ -698,11 +723,35 @@ static void bq_shuffle_rest_locked(void)
     if (g_bq.count <= 1) {
         return;
     }
-    /* 随机重排改变的是执行顺序：先记住在播条目，再打乱游标之后的部分 */
+    /* 随机重排改变的是执行顺序：先记住在播条目，只打乱**游标之后**的部分。
+     * 旧实现把 first 取成游标本身，游标在 0 时会把当前曲目一起打乱，
+     * 导致 Queue.Shuffle 的“当前条目置首”契约失效。 */
     bq_pin_current_locked();
-    int first = g_bq.position > 0 ? g_bq.position : 0;
+    int first = g_bq.position >= 0 ? g_bq.position + 1 : 0;
+    if (first >= g_bq.count) {
+        return;
+    }
     for (int i = g_bq.count - 1; i > first; i--) {
         int j = first + (int)(rand() % (i - first + 1));
+        BackendQueueEntry tmp = g_bq.entries[i];
+        g_bq.entries[i] = g_bq.entries[j];
+        g_bq.entries[j] = tmp;
+    }
+    g_bq.shuffle_generation++;
+    bq_bump_revision_locked();
+}
+
+/* 整队洗牌：shuffle-repeat 走到队尾、开启下一轮时使用。不能复用
+ * bq_shuffle_rest_locked()（它只动游标之后，游标在末尾时等于没洗）。 */
+static void bq_shuffle_all_locked(void)
+{
+    bq_ensure_ready_locked();
+    if (g_bq.count <= 1) {
+        return;
+    }
+    bq_pin_current_locked();
+    for (int i = g_bq.count - 1; i > 0; i--) {
+        int j = (int)(rand() % (i + 1));
         BackendQueueEntry tmp = g_bq.entries[i];
         g_bq.entries[i] = g_bq.entries[j];
         g_bq.entries[j] = tmp;
@@ -714,6 +763,27 @@ static void bq_shuffle_rest_locked(void)
 void bq_shuffle_rest(void)
 {
     pthread_mutex_lock(&g_bq_mutex);
+    bq_shuffle_rest_locked();
+    pthread_mutex_unlock(&g_bq_mutex);
+}
+
+/* Queue.Shuffle 的契约：当前条目置首、其余打乱。 */
+void bq_shuffle_keep_current(void)
+{
+    pthread_mutex_lock(&g_bq_mutex);
+    bq_ensure_ready_locked();
+    if (g_bq.count <= 1) {
+        pthread_mutex_unlock(&g_bq_mutex);
+        return;
+    }
+
+    bq_pin_current_locked();
+    if (g_bq.position > 0 && g_bq.position < g_bq.count) {
+        BackendQueueEntry tmp = g_bq.entries[0];
+        g_bq.entries[0] = g_bq.entries[g_bq.position];
+        g_bq.entries[g_bq.position] = tmp;
+    }
+    g_bq.position = 0;
     bq_shuffle_rest_locked();
     pthread_mutex_unlock(&g_bq_mutex);
 }
@@ -745,7 +815,7 @@ void bq_apply_mode(PlayMode mode)
             bq_shuffle_keeping_current_locked(&current);
         } else {
             g_bq.position = 0;
-            bq_shuffle_rest_locked();
+            bq_shuffle_all_locked();
         }
     } else if (have_current) {
         int position = bq_position_of_path_locked(current.path);
@@ -806,8 +876,10 @@ int bq_advance(PlayMode mode, int *out_position)
     }
 
     if (pm_is_shuffle(mode) && pm_repeats(mode) && g_bq.position + 1 >= g_bq.count) {
-        bq_shuffle_rest_locked();
-        g_bq.position = 1 < g_bq.count ? 1 : 0;
+        /* 下一轮重新洗整队，游标回到 0；旧实现只洗“游标之后”（此时为空），
+         * 再把游标置 1，既没洗牌又跳过了第 0 条。 */
+        bq_shuffle_all_locked();
+        g_bq.position = 0;
         /* 游标指向即将出声的条目：在播记录随之刷新 */
         bq_pin_current_locked();
         bq_bump_revision_locked();

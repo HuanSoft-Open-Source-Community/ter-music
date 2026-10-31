@@ -55,4 +55,13 @@ void persist_playback_session_state(void);
 int audio_get_position_seconds(void);
 int audio_get_duration_seconds(void);
 
+/* 正在出声的曲目路径（g_play_mutex 下的拷贝）。
+ * @return 1 = 有当前曲目且 out 已填充；0 = 无。 */
+int audio_current_track_path(char *out, size_t out_size);
+
+/* 队列被编辑/重排后调用：若正在出声的路径仍在 bq 中，把
+ * g_current_play_index 同步到它的新位置；若已不在队列，置 -1。
+ * 前端 metadata 仍用当前路径/pinned 条目上报，不依赖这个下标。 */
+void audio_sync_queue_position(void);
+
 #endif

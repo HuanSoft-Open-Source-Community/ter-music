@@ -523,7 +523,7 @@ else
         *) bad "S9：没接入核心的前端本该以非 0 的语义化退出码结束，实测 rc='${s9_rc:-空}'（0 意味着它其实接上了主核心）" ;;
     esac
 
-    if grep -qE "实例在运行|无法连接" "$WORK_DIR/s9.stderr" 2>/dev/null; then
+    if grep -qE "实例在运行|无法连接|自定义 --bus" "$WORK_DIR/s9.stderr" 2>/dev/null; then
         ok "S9：前端把没接入的原因说清楚了（$(head -1 "$WORK_DIR/s9.stderr")）"
     else
         bad "S9：前端既没接入核心也没给出原因：stderr=$(head -1 "$WORK_DIR/s9.stderr" 2>/dev/null || echo 空)"

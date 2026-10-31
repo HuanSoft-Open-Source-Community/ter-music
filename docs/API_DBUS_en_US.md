@@ -312,7 +312,7 @@ queue positions are the only cursor it knows.
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
 | `Get` | `(i offset, i count) -> s` | One page of the queue: `{"revision":n,"count":n,"current_position":n\|null,"offset":n,"rows":[{"position":n,"path":"…","title":"…","artist":"…","album":"…","is_cue":b}]}`. `count` follows the paging contract (0 = 200, max 1000, more or negative → `Error.InvalidArgs`); a page that would not fit the payload cap fails with `Error.TooLarge` |
-| `Set` | `(s json) -> i` | Replace the whole queue; returns the number of entries written |
+| `Set` | `(s json) -> i` | Replace the whole queue; returns the number of entries written. If the previous queue is a prefix of the new one (including an identical table), the cursor follows the same path and is not reset to 0; a genuinely different table normally resets it to 0, but if the currently sounding path still exists in the new table the core keeps the cursor on that path. A client that needs a guaranteed reset can call `PlayAt(0)` |
 | `Append` | `(s json) -> i` | Append entries; returns the number written |
 | `InsertAfter` | `(i position, s json) -> i` | Insert entries after a position; returns the number written. Called with only a payload, the position defaults to the currently playing entry |
 | `RemoveAt` | `(i position) -> b` | Remove one entry |
@@ -342,6 +342,13 @@ Rules:
   content list in ≤500-entry blocks, first block `Set`, later blocks `Append`).
 * Array order **is** execution order. `Control.SetPlayMode` re-applies a play mode to
   the delivered queue (folder/album/artist and shuffle) while keeping the current entry.
+* `Set` is prefix-aware for the cursor: when the previous queue is a prefix of the
+  new one (identical table included), the current path keeps its position. This
+  is what lets a front end append content or re-open the same content without
+  resetting playback to the first entry. A genuinely different table resets the
+  cursor to 0, except that a currently sounding path which still exists in the
+  new table stays selected (otherwise metadata and the queue cursor would
+  disagree).
 * `path` must be local: `smb://`, `ftp://`, `http(s)://` and friends are
   rejected with `Error.InvalidArgs`. The front end downloads remote content and
   passes the local cache path.

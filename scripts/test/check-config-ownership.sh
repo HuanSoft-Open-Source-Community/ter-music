@@ -19,6 +19,10 @@
 #                                         该独立函数，Config.Reset 的落盘由核心
 #                                         save_config() 完成；列入仅为防将来出现
 #                                         同名"恢复出厂写盘"入口绕过门面。
+#   Task 11 强化（2026-10）：间接写入口同样纳入扫描——core_config_apply()、
+#     core_config_flush_dirty()、config_run_migrations()、set_volume_percent()、
+#     core_config_mark_dirty()。远端前端只要误调其一，就会迁移/置脏/最终落盘。
+#     真正属于 local(TUI-即-核心) 分支的调用必须用 config-ownership-allow 标注。
 #
 # 分域判定依据（Task 10.1）：
 #   前端文件（永不得直写，纳入扫描）：
@@ -51,7 +55,7 @@ MODE="strict"
 FRONT_DIRS=(ui app main)
 # 前端专属实现文件（分域判定见头注）：远端门面同样禁止直写。
 FRONT_FILES=(player/player_remote.c)
-PATTERNS='save_config\(|config_save_to_xml\(|persist_playback_session_state\(|reset_config\('
+PATTERNS='save_config\(|config_save_to_xml\(|persist_playback_session_state\(|reset_config\(|core_config_apply\(|core_config_flush_dirty\(|config_run_migrations\(|set_volume_percent\(|core_config_mark_dirty\('
 
 # 计入围前过滤：
 #   1) 含 config-ownership-allow: 的行（同行豁免）与"独立豁免标记注释行"

@@ -1020,6 +1020,9 @@
   <string key="cli.err.play.no_default_path">Error: no path was specified and no default music folder is configured (default_startup_path).</string>
   <string key="cli.err.play.cannot_open">Error: cannot open '%s' (the path does not exist or contains no playable audio).</string>
   <string key="cli.err.play.dispatch_failed">Error: failed to deliver the loaded content (the queue is empty or the payload was rejected).</string>
+  <string key="cli.err.play.no_daemon">Error: no instance is running (--no-daemon was given, so the background core will not be started automatically).</string>
+  <string key="cli.err.custom_bus.no_service">Error: the instance named by the custom --bus is not running.</string>
+  <string key="cli.err.custom_bus.hint">      A custom bus can only attach to an existing instance; start it first, or use the primary bus/--attach-only.</string>
   <string key="cli.warn.secondary.running">Warning: %d secondary instance(s) are also running (regular CLI commands are sent only to the primary instance):</string>
   <string key="cli.warn.secondary.not_running">Warning: the primary instance is not running, but %d secondary instance(s) are:</string>
   <string key="cli.warn.secondary.control_one">  Control one: ter-music daemon stop --bus &lt;name&gt; (--bus goes after the subcommand)</string>
@@ -1108,6 +1111,7 @@
   <string key="cli.table.path">Path</string>
   <string key="cli.err.queue_count_range_fmt">Error: --count must be between 0 and %d (0 = default %d rows).</string>
   <string key="cli.msg.queue_page_refused">Note: the core rejected this page (count may be too large); reduce --count.</string>
+  <string key="cli.msg.queue_page_fallback">Note: this page exceeds the core response cap; retrying with the safe page size of %d rows.</string>
   <string key="cli.err.queue_clear_refused">Error: the core rejected Queue.Clear.</string>
   <string key="cli.err.queue_shuffle_refused">Error: the core rejected Queue.Shuffle.</string>
   <string key="cli.err.queue_remove_position">Error: queue remove requires a non-negative position.</string>

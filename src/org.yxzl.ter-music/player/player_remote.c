@@ -146,6 +146,10 @@ typedef struct {
     /* 上次已知的核心配置：player_config_persist() 只把相对它的差异下发 */
     AppConfig synced_config;
     int config_synced;
+    /* Control.ReloadConfig/Config.Reload 是异步标志：核心在下一轮 media tick
+     * 才读盘。这里安排一次延迟 refresh，避免“点了重新加载、界面仍是旧值”。 */
+    int config_refresh_due_ms;
+    int config_refresh_retries;
 } RemoteState;
 
 const char *player_remote_play_mode_name_of(PlayMode mode, int use_english);
@@ -528,6 +532,34 @@ static int remote_handshake(void)
     return 0;
 }
 
+/* 订阅核心的变更信号：配置由其他前端/CLI 改动时刷新镜像，队列被编辑时
+ * 让页缓存失效。这比轮询 GetAll/Queue.Get 便宜，也复用既有 D-Bus 契约。 */
+static void remote_subscribe_signals(void)
+{
+    if (!g_remote.connection) {
+        return;
+    }
+    DBusError error;
+    dbus_error_init(&error);
+    dbus_bus_add_match(
+        g_remote.connection,
+        "type='signal',interface='org.yxzl.ter_music.Config',member='ConfigChanged'",
+        &error);
+    if (dbus_error_is_set(&error)) {
+        log_debug("player_remote", "Cannot subscribe to ConfigChanged: %s", error.message);
+        dbus_error_free(&error);
+    }
+    dbus_error_init(&error);
+    dbus_bus_add_match(
+        g_remote.connection,
+        "type='signal',interface='org.yxzl.ter_music.Queue',member='QueueChanged'",
+        &error);
+    if (dbus_error_is_set(&error)) {
+        log_debug("player_remote", "Cannot subscribe to QueueChanged: %s", error.message);
+        dbus_error_free(&error);
+    }
+}
+
 static int remote_try_connect(void)
 {
     ensure_session_bus();
@@ -545,6 +577,7 @@ static int remote_try_connect(void)
     }
     dbus_connection_set_exit_on_disconnect(connection, FALSE);
     g_remote.connection = connection;
+    remote_subscribe_signals();
 
     if (remote_handshake() != 0) {
         remote_close_connection();
@@ -552,6 +585,7 @@ static int remote_try_connect(void)
     }
 
     g_remote.connected = 1;
+    g_remote.offline = 0;
     g_remote.backoff_index = 0;
     g_remote.next_ping_ms = (int)(remote_now_ms() + (uint64_t)g_remote.ping_interval_ms);
     /* 接回来的可能是另一个核心进程（重启过）：歌词缓存不再可信 */
@@ -913,6 +947,49 @@ void player_remote_shutdown(void)
     g_remote.initialized = 0;
 }
 
+/* ReloadConfig 是异步的：核心在 media tick 中读盘。这里按短延迟重试几轮
+ * Config.GetAll，让设置页在下一两个事件循环内看到新值。 */
+static void remote_service_config_refresh(uint64_t now)
+{
+    if (!g_remote.connected || g_remote.config_refresh_retries <= 0) {
+        return;
+    }
+    if ((int)now < g_remote.config_refresh_due_ms) {
+        return;
+    }
+    if (player_remote_config_refresh() == 0) {
+        g_remote.config_refresh_retries = 0;
+        return;
+    }
+    g_remote.config_refresh_retries--;
+    if (g_remote.config_refresh_retries > 0) {
+        g_remote.config_refresh_due_ms = (int)now + 300;
+    }
+}
+
+/* 处理排队的 D-Bus 信号（非阻塞）。只在已连接的主循环中调用。 */
+static void remote_process_signals(uint64_t now)
+{
+    if (!g_remote.connection) {
+        return;
+    }
+    dbus_connection_read_write(g_remote.connection, 0);
+
+    DBusMessage *message = NULL;
+    while ((message = dbus_connection_pop_message(g_remote.connection)) != NULL) {
+        if (dbus_message_is_signal(message, REMOTE_IFACE_CONFIG, "ConfigChanged")) {
+            /* 核心（或另一个前端）改了配置：稍等核心落盘/应用后刷新镜像。 */
+            g_remote.config_refresh_due_ms = (int)now + 50;
+            g_remote.config_refresh_retries = 2;
+        } else if (dbus_message_is_signal(message, REMOTE_IFACE_QUEUE, "QueueChanged")) {
+            /* 队列内容/顺序/游标被别的前端改动：当前页缓存立即失效。 */
+            g_remote.queue_revision++;
+            remote_queue_cache_reset();
+        }
+        dbus_message_unref(message);
+    }
+}
+
 int player_remote_pump(void)
 {
     if (!g_remote.initialized) {
@@ -928,6 +1005,7 @@ int player_remote_pump(void)
         /* 指数退避重连；成功后重新握手并 Attach */
         if (remote_try_connect() == 0) {
             remote_refresh_snapshot();
+            player_remote_config_refresh();
             g_remote.state_revision++;
             /* 通知前端：核心（可能是新起的）里没有队列，需要前端补推 */
             player_notify_reconnected();
@@ -940,6 +1018,10 @@ int player_remote_pump(void)
         g_remote.reconnect_due_ms = (int)(now + (uint64_t)k_backoff_ms[g_remote.backoff_index]);
         return -1;
     }
+
+    /* 匹配到的 ConfigChanged/QueueChanged 在这里非阻塞取回：外部前端改配置
+     * 或队列时，镜像与页缓存需要跟着变化，而不是等下一次主动操作。 */
+    remote_process_signals(now);
 
     /* 心跳：按核心给的间隔 Ping，核心据此判定前端在线 */
     if ((int)now >= g_remote.next_ping_ms) {
@@ -966,6 +1048,8 @@ int player_remote_pump(void)
         g_remote.reconnect_due_ms = (int)(now + k_backoff_ms[0]);
         return -1;
     }
+
+    remote_service_config_refresh(remote_now_ms());
     return 0;
 }
 
@@ -1009,6 +1093,13 @@ int player_remote_restart_core(void)
 
     /* 核心确实不在了：拉起一个新的后台核心，再给它一点时间上线。
      * 界面在事件循环里调用本函数，其余工作由后续的 player_pump() 继续。 */
+    if (strcmp(g_remote.bus_name, CLI_PRIMARY_BUS_NAME) != 0) {
+        /* 自定义 bus 只能接入已存在的实例；daemon_start_background() 只会
+         * 启动默认主名，不能拿来满足自定义实例。 */
+        log_warn("player_remote", "Cannot auto-start a custom core bus '%s'", g_remote.bus_name);
+        return -1;
+    }
+
     if (cli_in_sandbox()) {
         if (cli_client_activate_instance(g_remote.bus_name[0] ? g_remote.bus_name : NULL)
             != CLI_EXIT_OK) {
@@ -1021,10 +1112,12 @@ int player_remote_restart_core(void)
         }
     }
 
-    /* 不在这里等待：把下次重连提前，由事件循环的心跳把它接上 */
+    /* 不在这里等待：把下次重连提前，由事件循环的心跳把它接上。
+     * 重启动作已经成功发起，返回 0 让界面显示“已重启/正在重连”，而不是
+     * “重启失败”；真正的在线状态由下一次 pump() 决定。 */
     g_remote.reconnect_due_ms = (int)remote_now_ms() + 300;
     g_remote.offline = 1;
-    return -1;   /* 尚未连上；界面据 offline 状态继续提示，后续 pump 会自动接入 */
+    return 0;
 }
 
 /* ── 修订号与快照 ───────────────────────────────────────────────── */
@@ -1100,16 +1193,23 @@ static int remote_bool_call(const char *interface_name, const char *method)
 void player_remote_play(int track_index)
 {
     if (track_index >= 0) {
-        /* 越界保护（对齐本地后端 player_local_play 的下标校验）：PlayAt 的入参
-         * 是队列位置，越界时不发命令，避免核心回 OutOfRange 后界面看似“点了没反应”。
-         * 队列内容变化后的正常播放入口走 play_track_index()（路径反查位置再播）。 */
-        if (track_index >= g_remote.queue_count) {
+        /* 门面契约（player.h）：入参是**播放列表下标**，不是队列位置。
+         * 远端队列可能已被 shuffle/组模式/其他前端重排，必须先用路径反查
+         * 队列位置；找不到就先整表补推一次再查。旧实现直接把内容下标当
+         * PlayAt 位置，队列一重排就会播错曲。 */
+        char path[MAX_PATH_LEN];
+        if (playlist_get_track_path(track_index, path, sizeof(path)) != 0) {
             return;
         }
-        DBusMessage *reply = remote_call_i(REMOTE_IFACE_QUEUE, "PlayAt", 3000, track_index);
-        if (reply) {
-            dbus_message_unref(reply);
+        int position = player_remote_queue_find(path);
+        if (position < 0) {
+            player_remote_queue_push();
+            position = player_remote_queue_find(path);
         }
+        if (position < 0) {
+            return;
+        }
+        player_remote_queue_play(position);
     } else {
         remote_bool_call(REMOTE_IFACE_CONTROL, "Play");
     }
@@ -1137,11 +1237,15 @@ void player_remote_set_volume(int percent)
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
 
-    /* 乐观回显：立刻改本地快照，界面无需等下一次拉取 */
+    /* 乐观回显：立刻改本地快照，界面无需等下一次拉取。同时同步配置镜像
+     * 和“已知核心基线”，避免设置页显示旧值、也避免下一次 persist 把旧音量
+     * 当成前端改动推回核心。 */
     if (percent != g_remote.playback.volume_percent) {
         g_remote.playback.volume_percent = percent;
         g_remote.state_revision++;
     }
+    g_app_config.volume_percent = percent;
+    g_remote.synced_config.volume_percent = percent;
 
     DBusMessage *reply = remote_call_i(REMOTE_IFACE_CONTROL, "SetVolume", 2000, percent);
     if (reply) {
@@ -1160,6 +1264,9 @@ void player_remote_set_speed(float rate)
         g_remote.playback.speed = rate;
         g_remote.state_revision++;
     }
+    g_app_config.default_playback_speed = rate;
+    g_remote.synced_config.default_playback_speed = rate;
+
     DBusMessage *reply = remote_call_d(REMOTE_IFACE_CONTROL, "SetSpeed", 2000, (double)rate);
     if (reply) {
         dbus_message_unref(reply);
@@ -1168,6 +1275,12 @@ void player_remote_set_speed(float rate)
 
 void player_remote_set_play_mode(PlayMode mode)
 {
+    if ((int)mode < 0 || (int)mode >= PLAY_MODE_COUNT) {
+        return;
+    }
+    g_app_config.default_play_mode = (int)mode;
+    g_remote.synced_config.default_play_mode = (int)mode;
+
     DBusMessage *reply = remote_call_i(REMOTE_IFACE_CONTROL, "SetPlayMode", 2000, mode);
     if (reply) {
         dbus_message_unref(reply);
@@ -1256,9 +1369,9 @@ const char *player_remote_play_mode_name_of(PlayMode mode, int use_english)
 int player_remote_queue_count(void)    { return g_remote.queue_count; }
 int player_remote_queue_position(void) { return g_remote.queue_position; }
 
-/* 队列页缓存窗口大小：一页 ≤256 条，配合 Queue.Get 的接收缓冲（RPC_PAYLOAD_MAX/2）
- * 让单页载荷稳定在 256 KB 以内；块对齐取页，顺扫时同一块只拉一次。 */
-#define QUEUE_CACHE_WINDOW 256
+/* 队列页缓存窗口大小：一行最坏约 512+3*256 字节，64 行的 JSON 仍低于
+ * 核心 128 KiB 的响应上限；块对齐取页，顺扫时同一块只拉一次。 */
+#define QUEUE_CACHE_WINDOW 64
 
 /* 确保缓存窗口覆盖 position 并把该位置条目拷到 *out。
  * 未命中即按需拉取 position 所在块（Queue.Get）。成功 0，越界/失败 -1。 */
@@ -1332,6 +1445,13 @@ int player_remote_queue_play(int position)
         dbus_message_unref(reply);
     }
     remote_refresh_snapshot();
+    if (rc == 0 && ok &&
+        (PlayMode)g_remote.playback.play_mode != PLAY_MODE_SEQUENTIAL) {
+        /* 高级组/洗牌模式：目标已在出声，再以当前曲目为锚应用模式，
+         * 组模式会收拢到目标所在组，洗牌会把目标置首。顺序模式无需重排，
+         * 避免每次点播都写一次配置。 */
+        player_remote_set_play_mode((PlayMode)g_remote.playback.play_mode);
+    }
     return rc == 0 && ok ? 0 : -1;
 }
 
@@ -1437,7 +1557,12 @@ static int remote_push_chunk_cb(const char *chunk_json, int chunk_index,
     return (rc == 0 && written >= 0) ? 0 : -1;
 }
 
-int player_remote_queue_push(void)
+/* 队列下发内部入口。apply_mode=1：内容装载/编辑后的正常路径，下发完成后把
+ * 核心的当前播放模式重新应用到这份队列（远端核心不会在 Queue.Set 时自动
+ * 组模式/洗牌；本地后端的 playlist_queue_sync 一直是这么做的）。
+ * apply_mode=0：player_remote_queue_find() 的路径反查补推，必须保留完整内容
+ * 顺序，否则目标曲目可能先被组模式裁掉。 */
+static int remote_queue_push_internal(int apply_mode)
 {
     if (!g_remote.connected) {
         return -1;
@@ -1463,7 +1588,21 @@ int player_remote_queue_push(void)
     int total = playlist_queue_foreach_chunk(remote_push_chunk_cb, NULL);
     g_remote.queue_revision++;
     remote_refresh_snapshot();
+    if (total > 0 && apply_mode) {
+        /* 内容顺序已到达核心；让核心按**它当前实际持有的模式**重建执行顺序
+         * （组模式会以核心当前曲目为锚，洗牌会把当前条目置首）。使用快照
+         * 里的模式而不是配置镜像，避免镜像尚未刷新时把核心模式卷回旧值。 */
+        PlayMode mode = (PlayMode)g_remote.playback.play_mode;
+        if (mode != PLAY_MODE_SEQUENTIAL) {
+            player_remote_set_play_mode(mode);
+        }
+    }
     return total;
+}
+
+int player_remote_queue_push(void)
+{
+    return remote_queue_push_internal(1);
 }
 
 int player_remote_queue_find(const char *path)
@@ -1472,58 +1611,46 @@ int player_remote_queue_find(const char *path)
         return -1;
     }
 
-    /* 逐页扫描后端队列（页上限 RPC_PAGE_MAX）。
-     * 缓冲约 120 KB：一页 500 行 × 约 240 B 的载荷放得下，同时避免在栈上
-     * 开 256 KB（沙箱栈 8 MB，每次栈审计都要求静态帧远小于该值）。 */
-    char json[RPC_PAYLOAD_MAX / 2];
+    /* 小页扫描：一行最坏约 512+3*256 字节，单页 1000 行必然超过核心的
+     * 128 KiB 响应上限并得到 Error.TooLarge，play 的路径反查就会失效。
+     * 64 行在最坏元数据下仍安全，大列表只是多几次往返。 */
+    enum { QUEUE_FIND_PAGE = 64 };
+    BackendQueueEntry *page =
+        malloc(sizeof(BackendQueueEntry) * (size_t)QUEUE_FIND_PAGE);
+    if (!page) {
+        return -1;
+    }
+
     int offset = 0;
-    while (offset < g_remote.queue_count) {
-        DBusMessage *reply = remote_call_ii(REMOTE_IFACE_QUEUE, "Get", 3000,
-                                            offset, RPC_PAGE_MAX);
-        if (!reply) {
-            return -1;
-        }
-        int rc = remote_reply_string(reply, json, sizeof(json));
-        dbus_message_unref(reply);
-        if (rc != 0) {
-            return -1;
-        }
-
-        JsonReader reader;
-        JsonValue rows;
-        json_reader_init(&reader, json, strlen(json));
-        if (json_get_path(&reader, "rows", &rows) != 0 ||
-            json_reader_enter(&reader, &rows) != 0) {
-            return -1;
-        }
-
-        int in_page = 0;
-        JsonValue row;
-        while (json_array_next(&reader, &row) == 1) {
-            JsonReader row_reader = reader;
-            JsonValue value;
-            if (json_reader_enter(&row_reader, &row) != 0) {
-                continue;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        offset = 0;
+        while (offset < g_remote.queue_count) {
+            int got = player_remote_queue_page(offset, QUEUE_FIND_PAGE, page,
+                                               QUEUE_FIND_PAGE);
+            if (got <= 0) {
+                free(page);
+                return -1;
             }
-            if (json_get_path(&row_reader, "path", &value) == 0 &&
-                value.type == JSON_VALUE_STRING) {
-                char row_path[MAX_PATH_LEN];
-                json_value_string(&value, row_path, sizeof(row_path));
-                if (strcmp(row_path, path) == 0) {
-                    long position = 0;
-                    if (json_get_path(&row_reader, "position", &value) == 0) {
-                        position = json_value_int(&value, 0);
-                    }
-                    return (int)position;
+            for (int i = 0; i < got; i++) {
+                if (page[i].path[0] != '\0' && strcmp(page[i].path, path) == 0) {
+                    free(page);
+                    return offset + i;
                 }
             }
-            in_page++;
+            offset += got;
         }
-        if (in_page == 0) {
-            break;
+        /* 目标在内容列表里却不在核心队列：可能被高级组模式收敛掉了。
+         * 补推一次**不应用模式**的完整队列，让调用方先 PlayAt 目标，
+         * 再由 player_remote_queue_play() 以目标为锚应用模式。 */
+        if (attempt == 0 && playlist_find_track_index_by_path(path) >= 0) {
+            if (remote_queue_push_internal(0) <= 0) {
+                break;
+            }
+            continue;
         }
-        offset += in_page;
+        break;
     }
+    free(page);
     return -1;
 }
 
@@ -1533,6 +1660,14 @@ int player_remote_queue_page(int offset, int count, BackendQueueEntry *out, int 
 {
     if (!out || out_cap <= 0 || count <= 0) {
         return 0;
+    }
+    /* 保证单页 JSON 在最坏元数据下仍低于核心的响应上限。 */
+    enum { QUEUE_PAGE_SAFE = 64 };
+    if (count > QUEUE_PAGE_SAFE) {
+        count = QUEUE_PAGE_SAFE;
+    }
+    if (out_cap > count) {
+        out_cap = count;
     }
 
     /* 单页 JSON 的接收缓冲：与 Queue.Get 的分页上限同量级（见上面的说明） */
@@ -2073,10 +2208,11 @@ int player_remote_config_persist(void)
 
         /* refresh 成功会顺带把 g_app_config 与 synced_config 都置为核心基线 */
         if (player_remote_config_refresh() != 0) {
-            /* 取不到核心基线：标记为已同步并保留用户改动，下次再试，不吞改动 */
-            log_warn("player_remote", "config persist: refresh failed, keeping local change");
-            remote_config_mark_synced();
-            return 0;
+            /* 取不到核心基线：绝不能 mark_synced——那会把本次改动算进“已同步”
+             * 基线，下一次 persist 的 diff 就再也发不出去了。保留 config_synced=0，
+             * 让下一次 persist 重新 refresh 并把改动补发。 */
+            log_warn("player_remote", "config persist: refresh failed, keeping the change pending");
+            return -1;
         }
 
         g_app_config = desired;             /* 重新施加本次改动 */
@@ -2241,7 +2377,13 @@ int player_remote_config_reload(void)
         dbus_message_unref(reply);
     }
     g_remote.config_revision++;
-    return rc == 0 && ok ? 0 : -1;
+    if (rc == 0 && ok) {
+        /* 核心在下一轮 media tick 才读盘；延迟 refresh 一次（失败重试两轮）。 */
+        g_remote.config_refresh_due_ms = (int)remote_now_ms() + 150;
+        g_remote.config_refresh_retries = 3;
+        return 0;
+    }
+    return -1;
 }
 
 int player_remote_config_reset(void)
@@ -2253,7 +2395,12 @@ int player_remote_config_reset(void)
         dbus_message_unref(reply);
     }
     g_remote.config_revision++;
-    return rc == 0 && ok ? 0 : -1;
+    if (rc == 0 && ok) {
+        /* Reset 在核心侧同步完成：立即把镜像换成默认值。 */
+        player_remote_config_refresh();
+        return 0;
+    }
+    return -1;
 }
 
 #else /* !HAVE_DBUS */

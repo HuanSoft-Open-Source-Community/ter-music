@@ -1295,6 +1295,7 @@ cleanup:
     g_play_thread_finished = 1;
     g_play_state = PLAY_STATE_STOPPED;
     g_current_play_index = -1;
+    g_current_play_path[0] = '\0';
 
     g_audio_sample_rate = 0;
     g_audio_bit_rate = 0;

@@ -342,6 +342,9 @@ static void prompt_folder_input(int append_mode) {
                 } else {
                     update_controls_status(i18n_get("dialog.no_audio_found"));
                     playlist_clear_content();
+                    /* 内容清空必须同步到核心：remote 下本地 mirror 清空并不
+                     * 等于核心队列清空，否则旧队列仍可被 CLI/下一首使用。 */
+                    player_queue_push();
                 }
                 render_playlist_content();
             }
@@ -350,6 +353,7 @@ static void prompt_folder_input(int append_mode) {
             if (!append_mode) {
                 player_stop();
                 playlist_clear_content();
+                player_queue_push();
             }
             render_playlist_content();
         }

@@ -546,6 +546,31 @@ check_queue() {
         bad "未捕获 QueueChanged 信号"
     fi
 
+    # Queue.Set 前缀契约：同一张表重发时游标跟随路径，不回到 0
+    dbus_call org.yxzl.ter_music.Queue Set "$payload" >/dev/null
+    dbus_call org.yxzl.ter_music.Queue PlayAt 1 >/dev/null
+    sleep 0.2
+    dbus_call org.yxzl.ter_music.Queue Set "$payload" >/dev/null
+    local prefix_pos
+    prefix_pos="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 0 10)" 'doc["current_position"]')"
+    [ "$prefix_pos" = "1" ] && ok "Queue.Set 相同前缀保持游标（position=1）" \
+        || bad "Queue.Set 前缀后游标=$prefix_pos（期望 1）"
+
+    # Queue.Shuffle 契约：当前条目置首、其余打乱（不是只打乱游标之后）
+    dbus_call org.yxzl.ter_music.Queue PlayAt 1 >/dev/null
+    sleep 0.2
+    dbus_call org.yxzl.ter_music.Queue Shuffle >/dev/null
+    local shuffled
+    shuffled="$(dbus_call org.yxzl.ter_music.Queue Get 0 10)"
+    local shuf_pos shuf_first
+    shuf_pos="$(json_field "$shuffled" 'doc["current_position"]')"
+    shuf_first="$(json_field "$shuffled" 'doc["rows"][0]["path"]')"
+    if [ "$shuf_pos" = "0" ] && [ "$shuf_first" = "$music/tone2.wav" ]; then
+        ok "Queue.Shuffle 当前条目置首（游标 0，首行 tone2）"
+    else
+        bad "Queue.Shuffle 未保持当前条目：position=$shuf_pos first=$shuf_first"
+    fi
+
     dbus_call org.yxzl.ter_music.Control Stop >/dev/null
     dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
 }

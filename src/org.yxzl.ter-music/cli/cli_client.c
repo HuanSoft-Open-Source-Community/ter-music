@@ -283,7 +283,8 @@ static DBusMessage *cli_call0_quit(CliClient *client, const char *interface_name
     return reply;
 }
 
-static DBusMessage *cli_send(CliClient *client, DBusMessage *message) {
+static DBusMessage *cli_send_internal(CliClient *client, DBusMessage *message,
+                                      int quiet) {
     if (!message) {
         return NULL;
     }
@@ -303,19 +304,25 @@ static DBusMessage *cli_send(CliClient *client, DBusMessage *message) {
         if (error.name && strncmp(error.name, "org.yxzl.ter_music.Error.", 25) == 0) {
             g_cli_last_error_is_core = 1;
         }
-        if (dbus_error_has_name(&error, DBUS_ERROR_SERVICE_UNKNOWN) ||
-            dbus_error_has_name(&error, DBUS_ERROR_NAME_HAS_NO_OWNER)) {
-            fprintf(stderr, "%s\n", i18n_get("cli.err.no_instance_cli"));
-        } else if (dbus_error_has_name(&error, DBUS_ERROR_UNKNOWN_METHOD) ||
-                   dbus_error_has_name(&error, DBUS_ERROR_UNKNOWN_INTERFACE)) {
-            cli_client_err("cli.err.unsupported_interface_fmt", error.message);
-        } else {
-            cli_client_err("cli.err.dbus_call_fmt", error.message);
+        if (!quiet) {
+            if (dbus_error_has_name(&error, DBUS_ERROR_SERVICE_UNKNOWN) ||
+                dbus_error_has_name(&error, DBUS_ERROR_NAME_HAS_NO_OWNER)) {
+                fprintf(stderr, "%s\n", i18n_get("cli.err.no_instance_cli"));
+            } else if (dbus_error_has_name(&error, DBUS_ERROR_UNKNOWN_METHOD) ||
+                       dbus_error_has_name(&error, DBUS_ERROR_UNKNOWN_INTERFACE)) {
+                cli_client_err("cli.err.unsupported_interface_fmt", error.message);
+            } else {
+                cli_client_err("cli.err.dbus_call_fmt", error.message);
+            }
         }
         dbus_error_free(&error);
         return NULL;
     }
     return reply;
+}
+
+static DBusMessage *cli_send(CliClient *client, DBusMessage *message) {
+    return cli_send_internal(client, message, 0);
 }
 
 static DBusMessage *cli_call0(CliClient *client, const char *interface_name,
@@ -399,6 +406,22 @@ static DBusMessage *cli_call_ii(CliClient *client, const char *interface_name,
     dbus_message_append_args(message, DBUS_TYPE_INT32, &first,
                              DBUS_TYPE_INT32, &second, DBUS_TYPE_INVALID);
     return cli_send(client, message);
+}
+
+/* 静默版：调用方要先探测一次“这一页是否过大”，失败后自行回退并决定
+ * 是否向用户报错；不能让第一次探测在 stderr 留下一个假错误。 */
+static DBusMessage *cli_call_ii_quiet(CliClient *client, const char *interface_name,
+                                      const char *method, int a, int b) {
+    DBusMessage *message = dbus_message_new_method_call(client->bus, CLI_OBJECT_PATH,
+                                                        interface_name, method);
+    if (!message) {
+        return NULL;
+    }
+    dbus_int32_t first = (dbus_int32_t)a;
+    dbus_int32_t second = (dbus_int32_t)b;
+    dbus_message_append_args(message, DBUS_TYPE_INT32, &first,
+                             DBUS_TYPE_INT32, &second, DBUS_TYPE_INVALID);
+    return cli_send_internal(client, message, 1);
 }
 
 /* int32 + string 入参：Queue.InsertAfter(position, json) */
@@ -1313,6 +1336,23 @@ int cli_client_play(const char *bus, const char *path, int index, int mode) {
             cli_client_close(&client);
             return CLI_EXIT_REFUSED;
         }
+    } else {
+        /* 未显式 --mode：也要把核心当前模式重新应用到刚下发的队列。
+         * 核心 Queue.Set 本身不组模式/不洗牌；不补这一步，配置里的
+         * default_play_mode 在 CLI 起播时会被静默忽略。 */
+        int current_mode = 0;
+        if (cli_reply_int(cli_call0(&client, CLI_CONTROL_INTERFACE, "GetPlayMode"),
+                          &current_mode) == CLI_EXIT_OK &&
+            current_mode > 0) {
+            int ok_mode = 0;
+            rc = cli_reply_bool(
+                cli_call_i(&client, CLI_CONTROL_INTERFACE, "SetPlayMode", current_mode),
+                &ok_mode);
+            if (rc != CLI_EXIT_OK || !ok_mode) {
+                cli_client_close(&client);
+                return CLI_EXIT_REFUSED;
+            }
+        }
     }
 
     cli_client_close(&client);
@@ -1475,11 +1515,23 @@ int cli_client_queue_list(const char *bus, int offset, int count) {
     }
 
     rc = cli_call_string(&client,
-                         cli_call_ii(&client, CLI_QUEUE_INTERFACE, "Get", offset, count),
+                         cli_call_ii_quiet(&client, CLI_QUEUE_INTERFACE, "Get", offset, count),
                          text, capacity);
+    if (rc == CLI_EXIT_REFUSED && (count == 0 || count > 64)) {
+        /* 单页行数 × 最坏元数据可能超过核心的响应上限（Error.TooLarge /
+         * CLI_EXIT_REFUSED）。默认 200 行在长标题曲库上也会触发；退回到
+         * 64 行安全页，至少让用户看到队列开头而不是一条空错误。 */
+        fprintf(stderr, i18n_get("cli.msg.queue_page_fallback"), 64);
+        fputc('\n', stderr);
+        rc = cli_call_string(&client,
+                             cli_call_ii_quiet(&client, CLI_QUEUE_INTERFACE, "Get", offset, 64),
+                             text, capacity);
+    }
     if (rc != CLI_EXIT_OK) {
         if (rc == CLI_EXIT_REFUSED) {
             fprintf(stderr, "%s\n", i18n_get("cli.msg.queue_page_refused"));
+        } else {
+            cli_client_err("cli.err.dbus_call_method_fmt", "Queue.Get");
         }
         free(text);
         cli_client_close(&client);

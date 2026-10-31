@@ -127,6 +127,9 @@ static void rerender_remote_view(void)
 /* 列目录改走后台线程：结果在 remote_view_tick() 里取回，UI 不阻塞 */
 static int g_remote_check_pending = 0;   /* 本次列目录是“测试连接”而非“浏览目录” */
 static int g_remote_download_seen = 0;   /* 本次 UI 会话里见过“下载中”状态 */
+/* 当前远程会话是否已用首曲替换过内容列表；跨 tick 保持，首曲失败时下一首
+ * 仍走 load_single_file()，成功后才切到 append。 */
+static int g_remote_content_started = 0;
 
 static void remote_refresh_entries(void)
 {
@@ -301,20 +304,46 @@ static void remote_drain_downloads(void)
     int first = 0;
     int last = 0;
     while (remote_cache_take_ready(path, sizeof(path), &first, &last)) {
-        int autoplay = (first && remote_cache_session_autoplay()) ? 1 : 0;
-        /* 前端自己装载内容（扫描/元数据），随后把路径队列下发给核心 */
-        int loaded = first ? (app_open_path(path, NULL, 0, NULL, NULL) == APP_OPEN_OK)
-                           : (append_playlist(path) > 0);
+        (void)last;
+        /* 新下载会话的首个 ready 项：重置“已替换内容”标记。首曲失败时，
+         * 下一次循环仍会走替换分支，而不是把新会话追加到旧内容尾部。 */
+        if (first) {
+            g_remote_content_started = 0;
+        }
+        int replacing = !g_remote_content_started;
+        int autoplay = (replacing && remote_cache_session_autoplay()) ? 1 : 0;
+
+        /* 第一首只装载缓存文件本身，不能走 app_open_path()：后者会把
+         * 缓存父目录整体扫描成内容，旧会话残留的缓存文件会混进本次队列。
+         * 后续曲目追加到同一内容列表。 */
+        int loaded;
+        if (replacing) {
+            loaded = (load_single_file(path) > 0);
+        } else {
+            loaded = (append_playlist(path) > 0);
+        }
         if (!loaded) {
             log_warn("remote_view", "Failed to load cache path '%s'", path);
-        } else {
-            /* 走门面下发整表（remote 下 playlist_queue_sync 只写进程内镜像、
-             * 不会把路径交给核心）；自动播放用内容下标入口，队列新鲜度由
-             * ui_play_track_index 内部保证（必要时先重推再定位）。 */
+            continue;
+        }
+
+        if (replacing) {
+            /* 首曲整表下发；后续用 Append，避免每下载一首就把核心游标
+             * 拉回 0，也避免 O(n²) 的整表编码。 */
             player_queue_push();
-            if (autoplay) {
-                ui_play_track_index(0);
+            g_remote_content_started = 1;
+        } else {
+            int index = playlist_count() - 1;
+            if (index >= 0 && player_queue_append(index) == 0) {
+                /* appended */
+            } else {
+                /* 未连接/追加失败：下次重连钩子会整表补推。 */
+                log_warn("remote_view", "Could not append '%s' to the core queue", path);
             }
+        }
+
+        if (autoplay) {
+            ui_play_track_index(0);
         }
     }
 

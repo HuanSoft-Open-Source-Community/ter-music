@@ -20,6 +20,7 @@
 #include "logger/logger.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
+#include "playlist/playlist_queue.h"
 #include "config/config.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -1461,6 +1462,9 @@ int library_load_into_playlist(const int *rowids, int count, int append) {
         playlist_unlock();
         search_clear();
         recompute_sort_order();
+        /* 内容列表变了，立即同步进程内队列镜像；远端核心由 UI 层调用
+         * player_queue_push() 下发（library 不依赖 D-Bus/门面）。 */
+        playlist_queue_sync();
     }
 
     free(new_pl);

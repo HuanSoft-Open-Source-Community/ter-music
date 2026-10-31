@@ -295,13 +295,27 @@ static int local_sync_chunk(const char *chunk_json, int chunk_index,
     return result < 0 ? -1 : 0;
 }
 
-int playlist_queue_sync(void)
+int playlist_queue_sync_with_anchor(const char *anchor_track_path)
 {
     int total = playlist_count();
     if (total <= 0) {
         bq_clear();
         play_queue_sync_mirror(resolve_index, NULL);
+        audio_sync_queue_position();
         return 0;
+    }
+
+    /* 锚点必须在 bq_set_json 之前取：整表替换会把游标重置到新表首，
+     * 之后再取 current_anchor_path() 拿到的已经是“新第一首”，
+     * 不是用户正在听的曲目。 */
+    char anchor[MAX_PATH_LEN] = "";
+    if (anchor_track_path && anchor_track_path[0]) {
+        snprintf(anchor, sizeof(anchor), "%s", anchor_track_path);
+    } else {
+        const char *current = current_anchor_path();
+        if (current && current[0]) {
+            snprintf(anchor, sizeof(anchor), "%s", current);
+        }
     }
 
     /* 装配与分块下发复用 playlist_queue_foreach_chunk：单块 ≤ BQ_SET_MAX，
@@ -312,11 +326,16 @@ int playlist_queue_sync(void)
         return -1;
     }
 
-    /* 内容列表换了：按当前播放模式重建执行顺序，锚点保持原曲不动 */
-    const char *anchor = current_anchor_path();
-    play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
+    /* 内容列表换了：按当前播放模式重建执行顺序。显式锚点用于高级组模式下
+     * 跨组选曲；普通内容刷新则保持替换前的当前曲目。 */
+    play_queue_rebuild(&g_play_queue, g_play_mode, anchor[0] ? anchor : NULL);
     play_queue_sync_mirror(resolve_index, NULL);
     return written;
+}
+
+int playlist_queue_sync(void)
+{
+    return playlist_queue_sync_with_anchor(NULL);
 }
 
 int playlist_queue_push_entry(int index, int insert_after)

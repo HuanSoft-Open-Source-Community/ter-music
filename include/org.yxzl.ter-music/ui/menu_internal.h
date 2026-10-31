@@ -109,7 +109,7 @@ void ensure_config_dir_exists(void);
 void init_default_config(void);
 void apply_color_theme(void);
 void try_migrate_from_json(void);
-void init_all_persistent_data(void);
+void init_all_persistent_data(int readonly_mirror);
 int  load_temp_playlist(void);
 void save_temp_playlist(void);
 void cleanup_temp_playlist(void);

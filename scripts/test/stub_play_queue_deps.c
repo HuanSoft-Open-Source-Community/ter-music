@@ -22,3 +22,9 @@ const char *i18n_get(const char *key)
 {
     return key ? key : "";
 }
+
+/* audio/play_queue.c 在重建后会把“正在出声的路径”同步回队列游标；
+ * 契约单测没有音频引擎，桩为空操作即可。 */
+void audio_sync_queue_position(void)
+{
+}

@@ -33,6 +33,15 @@ static const char *k_payload =
     "\"cue_offset\":12,\"is_cue\":true,\"lyrics_source\":2}"
     "]}";
 
+static const char *k_payload_extended =
+    "{\"entries\":["
+    "{\"path\":\"/music/a/01.flac\",\"title\":\"A1\",\"artist\":\"X\",\"album\":\"AL\",\"duration_seconds\":180},"
+    "{\"path\":\"/music/a/02.flac\",\"title\":\"A2\",\"artist\":\"X\",\"album\":\"AL\",\"duration_seconds\":181},"
+    "{\"path\":\"/music/b/03.flac\",\"title\":\"B1\",\"artist\":\"Y\",\"album\":\"BL\",\"duration_seconds\":182,"
+    "\"cue_offset\":12,\"is_cue\":true,\"lyrics_source\":2},"
+    "{\"path\":\"/music/c/04.flac\",\"title\":\"C1\",\"artist\":\"Z\",\"album\":\"CL\",\"duration_seconds\":183}"
+    "]}";
+
 static void test_set_and_query(void)
 {
     bq_init();
@@ -378,6 +387,73 @@ static void test_pinned_entry_on_set(void)
     bq_shutdown();
 }
 
+/* Set 的前缀保留：远端增量下载、追加目录、重新打开同一内容时，旧队列
+ * 是新队列的前缀，不能把正在播放的游标复位到 0。 */
+static void test_set_prefix_preserves_cursor(void)
+{
+    bq_init();
+    bq_set_json(k_payload);
+    bq_set_position(1);
+
+    CHECK(bq_set_json(k_payload) == 3, "相同内容再次 Set");
+    CHECK(bq_position() == 1, "相同内容 Set 后游标保持");
+
+    CHECK(bq_set_json(k_payload_extended) == 4, "前缀扩展 Set");
+    CHECK(bq_position() == 1, "前缀扩展 Set 后游标保持");
+
+    BackendQueueEntry entry;
+    CHECK(bq_entry_at(1, &entry) == 0 &&
+          strcmp(entry.path, "/music/a/02.flac") == 0,
+          "前缀扩展后原游标仍指向同一路径");
+
+    CHECK(bq_set_json("[{\"path\":\"/short/a.mp3\"}]") == 1, "非前缀替换 Set");
+    CHECK(bq_position() == 0, "非前缀替换仍把游标置首");
+
+    bq_shutdown();
+}
+
+/* Queue.Shuffle：当前条目置首、其余打乱，与 API 文档一致。 */
+static void test_shuffle_keeps_current_first(void)
+{
+    bq_init();
+    bq_set_json(k_payload);
+    bq_set_position(2);
+
+    bq_shuffle_keep_current();
+    CHECK(bq_position() == 0, "Shuffle 后游标置 0");
+    BackendQueueEntry entry;
+    CHECK(bq_entry_at(0, &entry) == 0 &&
+          strcmp(entry.path, "/music/b/03.flac") == 0,
+          "Shuffle 后当前条目在队首");
+
+    /* PlayMode 重建也必须保持当前条目在首位（旧实现会把 0 号一起打乱）。 */
+    bq_set_json(k_payload);
+    bq_set_position(2);
+    bq_apply_mode(PLAY_MODE_SHUFFLE_REPEAT);
+    CHECK(bq_position() == 0, "Shuffle 模式重建后游标置 0");
+    CHECK(bq_entry_at(0, &entry) == 0 &&
+          strcmp(entry.path, "/music/b/03.flac") == 0,
+          "Shuffle 模式重建后当前条目仍在队首");
+
+    /* bq_shuffle_rest()：当前条目留在原游标，只洗之后的部分。 */
+    bq_set_json(k_payload);
+    bq_set_position(1);
+    bq_shuffle_rest();
+    CHECK(bq_position() == 1, "bq_shuffle_rest 保持游标");
+    CHECK(bq_entry_at(1, &entry) == 0 &&
+          strcmp(entry.path, "/music/a/02.flac") == 0,
+          "bq_shuffle_rest 保持当前条目");
+
+    /* shuffle-repeat 到队尾：整队重洗后从 0 开始下一轮，而不是跳过 0。 */
+    bq_set_json(k_payload);
+    bq_set_position(2);
+    int next = -1;
+    CHECK(bq_advance(PLAY_MODE_SHUFFLE_REPEAT, &next) == 1 && next == 0,
+          "shuffle-repeat 到队尾后回到游标 0");
+
+    bq_shutdown();
+}
+
 /* 追加器的溢出探测：缓冲区写满时静默丢弃，渲染结束后必须能查出被截断 */
 static void test_render_overflow_probe(void)
 {
@@ -412,6 +488,8 @@ int main(void)
     test_over_limit_rejected();
     test_chunked_set_then_append();
     test_pinned_entry_on_set();
+    test_set_prefix_preserves_cursor();
+    test_shuffle_keeps_current_first();
     test_render_overflow_probe();
     test_render();
 

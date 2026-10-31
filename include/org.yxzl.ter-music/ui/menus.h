@@ -70,13 +70,15 @@ char* extract_json_string(const char *json, const char *key, char *output, size_
 long  extract_json_int(const char *json, const char *key);
 double extract_json_float(const char *json, const char *key);
 /* 启动分叉（架构反转）：
- *   frontend_init_config() —— 配置 + 主题 + i18n：**两种前端模式都要做**；
- *   content_init()         —— 曲库/收藏/历史/歌单/迁移：**只有本地模式做**，
- *                             远端模式的内容库由核心之外的前端进程持有。
- * init_all_persistent_data() 保留为两者的组合（本地模式与既有调用方沿用）。 */
-void frontend_init_config(void);
+ *   frontend_init_config(readonly_mirror) —— 配置镜像 + 主题：两种模式都要做。
+ *       readonly_mirror=1（远端前端）只 load_config_readonly()，不迁移、不应用
+ *       运行时字段、不设脏、不落盘；=0（TUI-local 即核心）走 core_config_apply()。
+ *   content_init() —— 曲库/收藏/历史/歌单/迁移：两种模式都要做，因为内容始终
+ *       由前端进程持有（remote 前端也需要读写自己的内容库）。
+ * init_all_persistent_data() 是两者的组合。 */
+void frontend_init_config(int readonly_mirror);
 void content_init(void);
-void init_all_persistent_data(void);
+void init_all_persistent_data(int readonly_mirror);
 
 void save_temp_playlist(void);
 void cleanup_temp_playlist(void);

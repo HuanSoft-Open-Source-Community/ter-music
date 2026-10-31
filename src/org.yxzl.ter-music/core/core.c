@@ -13,6 +13,7 @@
 #include "audio/audio.h"
 #include "config/config.h"
 #include "lyrics/lyrics.h"
+#include "media/rpc.h"
 #include "media/session.h"
 #include "logger/logger.h"
 
@@ -191,6 +192,10 @@ void core_tick(void)
         g_config_reload_requested = 0;
         log_info("core", "Reloading configuration");
         core_config_apply();
+#ifdef HAVE_DBUS
+        /* 让所有已连接的前端（不只发起 Reload 的那个）刷新配置镜像。 */
+        rpc_config_emit_changed(NULL);
+#endif
         if (g_config_listener) {
             g_config_listener();   /* 前端重刷配色/脏标记 */
         }

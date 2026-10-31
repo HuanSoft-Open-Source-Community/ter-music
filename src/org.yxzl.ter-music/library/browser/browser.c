@@ -20,6 +20,7 @@
 #include "library/library.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
+#include "player/player.h"
 #include "ui/ui.h"
 #include "ui/dialog.h"
 #include "ui/keymap.h"
@@ -725,7 +726,13 @@ static int handle_track_list_input(ActionId action, const int *rowids, int count
     case ACTION_BROWSER_QUEUE_APPEND:
         /* Append to current playlist */
         if (g_library_state.selected_index < count) {
-            library_load_into_playlist(&rowids[g_library_state.selected_index], 1, 1);
+            int added = library_load_into_playlist(
+                &rowids[g_library_state.selected_index], 1, 1);
+            if (added > 0) {
+                /* library 只更新内容与进程内镜像；远端核心的队列必须由
+                 * 前端经门面重推。 */
+                player_queue_push();
+            }
         }
         return 1;
     default:

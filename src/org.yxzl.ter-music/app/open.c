@@ -7,8 +7,6 @@
 
 #include "app/open.h"
 
-#include "audio/audio.h"
-#include "audio/play_queue.h"
 #include "config/config.h"
 #include "player/player.h"
 #include "logger/logger.h"
@@ -53,15 +51,33 @@ static void expand_user_path(const char *input, char *output, size_t output_size
         return;
     }
 
-    if (input[0] == '~') {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(output, output_size, "%s%s", home, input + 1);
-            return;
-        }
+    /* Q: 核心只接受本地路径；file:// URI 仍可能从前端/桌面入口传入。 */
+    const char *source = input;
+    if (strncmp(source, "file://", 7) == 0) {
+        source += 7;
     }
 
-    snprintf(output, output_size, "%s", input);
+    if (source[0] == '~') {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(output, output_size, "%s%s", home, source + 1);
+            source = NULL;
+        }
+    }
+    if (source) {
+        snprintf(output, output_size, "%s", source);
+    }
+
+    /* 前端扫描/队列交给核心时必须用绝对路径：核心可能从另一个 cwd 启动，
+     * 相对路径会在核心进程里解析成完全不同的文件。realpath 只对存在的
+     * 路径成功；不存在时保留原串，让后续 stat() 给出正常错误。 */
+    if (output[0] != '\0') {
+        char *resolved = realpath(output, NULL);
+        if (resolved) {
+            snprintf(output, output_size, "%s", resolved);
+            free(resolved);
+        }
+    }
 }
 
 int app_dir_has_audio_files(const char *path)
@@ -197,10 +213,9 @@ AppOpenResult app_open_path(const char *path,
         return APP_OPEN_ERR_INVALID_PATH;
     }
 
-    if (!app_dir_has_audio_files(expanded)) {
-        return APP_OPEN_ERR_NO_AUDIO;
-    }
-
+    /* 不能只检查直接子文件：用户打开“音乐/歌手/专辑”这类父目录时，音频可能
+     * 全在子目录里。load_playlist() 会递归扫描并给出真实结果，不要用
+     * app_dir_has_audio_files() 的直接子项探测提前误判为“没有音频”。 */
     if (load_playlist(expanded) <= 0) {
         return APP_OPEN_ERR_NO_AUDIO;
     }
@@ -227,18 +242,12 @@ int app_resume_saved_playback(void)
         return 0;
     }
 
-    /* 后端分流（Task 4.1）：远程前端绝不在本进程起播放线程/占音频设备，
-     * 也不预设引擎跳转位置。这里只把选中项落到界面，真正的"恢复播放 + 跳转
-     * 到上次进度"延后到连接建立、队列下发完成后由 main 经门面执行。
-     * 返回 1 表示"应当恢复"，调用侧据此在 remote 分支安排延后下发。 */
-    if (player_backend() == PLAYER_BACKEND_REMOTE) {
-        app_set_selection_for_track(track_index);
-        return 1;
-    }
-
-    audio_set_initial_seek_position(g_app_config.last_played_position);
+    /* 两种后端都只把选中项落到界面；真正的“从上次进度起播”必须在
+     * player_init() 之后、内容队列到达核心之后由 main 统一执行。
+     * 这样 remote 前端绝不会在本进程起播放线程，local 后端也能先把内容
+     * 下标换成队列位置，避免队列重排后播错曲目。
+     * 返回 1 表示“应当恢复”，0 表示没有可恢复的目标。 */
     app_set_selection_for_track(track_index);
-    play_audio(track_index); /* ui-purity-allow: remote 已在上方早退，此行仅 local=TUI 即核心执行 */
     return 1;
 }
 
@@ -322,11 +331,19 @@ int app_restore_session(int honor_autoplay,
             int idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
             if (idx >= 0 && idx < playlist_count()) {
                 app_set_selection_for_track(idx);
-                /* 后端分流（Task 4.1）：远程前端不直调 play_audio，自动播放的
-                 * 实际下发由调用方在连接+队列就绪后经门面完成（本函数当前无调用者，
-                 * 保留仅为与 app_resume_saved_playback 一致，不在前端起播放线程）。 */
-                if (player_backend() == PLAYER_BACKEND_LOCAL) {
-                    play_audio(idx); /* ui-purity-allow: local 分支=TUI 即核心自动起播（remote 被 guard 挡在外） */
+                /* 统一走门面：本地后端按内容下标映射到队列位置，远端后端
+                 * 先推队列再按路径反查；本函数当前虽然无调用者，也不能再留
+                 * “直接 play_audio(内容下标)”这种分离前写法。 */
+                char track_path[MAX_PATH_LEN];
+                if (playlist_get_track_path(idx, track_path, sizeof(track_path)) == 0) {
+                    int position = player_queue_find(track_path);
+                    if (position < 0) {
+                        player_queue_push();
+                        position = player_queue_find(track_path);
+                    }
+                    if (position >= 0) {
+                        player_queue_play(position);
+                    }
                 }
             }
         }

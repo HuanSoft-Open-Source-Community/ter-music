@@ -32,12 +32,17 @@ static int use_remote(void)
 
 /* ── 生命周期 ───────────────────────────────────────────────────── */
 
-int player_init(PlayerBackend backend, const char *bus_name)
+void player_select_backend(PlayerBackend backend)
 {
     g_facade_backend = backend;
-    g_initialized = 1;
-    log_info("player", "Player facade using the %s backend",
+    log_info("player", "Player facade selected the %s backend (not connected yet)",
              backend == PLAYER_BACKEND_REMOTE ? "remote" : "local");
+}
+
+int player_init(PlayerBackend backend, const char *bus_name)
+{
+    player_select_backend(backend);
+    g_initialized = 1;
     return backend == PLAYER_BACKEND_REMOTE
         ? player_remote_init(backend, bus_name)
         : player_local_init(backend, bus_name);

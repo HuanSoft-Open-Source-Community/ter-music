@@ -80,8 +80,11 @@ export XDG_CACHE_HOME="$WORK_DIR/home/.cache"
 mkdir -p "$WORK_DIR/serve" "$WORK_DIR/home"
 
 info "准备本地 HTTP 服务"
-ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=440:duration=2" \
-    -c:a pcm_s16le -y "$WORK_DIR/serve/remote-tone.wav" 2>/dev/null
+for n in 1 2 3; do
+    ffmpeg -hide_banner -loglevel error -f lavfi \
+        -i "sine=frequency=$((440 + n * 110)):duration=2" \
+        -c:a pcm_s16le -y "$WORK_DIR/serve/remote-tone$n.wav" 2>/dev/null
+done
 
 PORT="$(python3 - <<'PY'
 import socket
@@ -95,7 +98,7 @@ PY
 HTTP_PID=$!
 sleep 1
 
-if curl -sf "http://127.0.0.1:$PORT/remote-tone.wav" -o /dev/null; then
+if curl -sf "http://127.0.0.1:$PORT/remote-tone1.wav" -o /dev/null; then
     ok "HTTP 服务可用（127.0.0.1:$PORT）"
 else
     bad "HTTP 服务不可用"
@@ -124,7 +127,7 @@ EOF
 info "以远程 URL 启动 TUI（前端远程会话）"
 if ! python3 "$SCRIPT_DIR/tui-probe.py" --bin "$TM_BIN" \
         --music "http://127.0.0.1:$PORT/" --home "$HOME" \
-        --keys " " --state-out "$WORK_DIR/state.json" --wait 6 >"$WORK_DIR/probe.out" 2>&1; then
+        --keys " " --state-out "$WORK_DIR/state.json" --wait 8 >"$WORK_DIR/probe.out" 2>&1; then
     bad "TUI 探针失败：$(tail -2 "$WORK_DIR/probe.out" | tr '\n' ' ')"
     KEEP=1
 else
@@ -133,11 +136,17 @@ fi
 
 info "断言：前端已把曲目下载到本地缓存"
 CACHE_ROOT="$XDG_CACHE_HOME/ter-music/remote"
-cached="$(find "$CACHE_ROOT" -name 'remote-tone.wav' -type f 2>/dev/null | head -1)"
+cached="$(find "$CACHE_ROOT" -name 'remote-tone1.wav' -type f 2>/dev/null | head -1)"
+cached_count="$(find "$CACHE_ROOT" -name 'remote-tone*.wav' -type f 2>/dev/null | wc -l)"
 if [ -n "$cached" ]; then
     ok "缓存命中：${cached#"$WORK_DIR"/}"
 else
     bad "缓存目录未出现下载的音频（$CACHE_ROOT）"
+fi
+if [ "$cached_count" = "3" ]; then
+    ok "多曲下载全部落盘（3/3）"
+else
+    bad "只缓存了 $cached_count/3 首（多曲下载未完成）"
 fi
 if find "$CACHE_ROOT" -name '*.part' 2>/dev/null | grep -q .; then
     bad "缓存里存在未完成的 .part 文件"
@@ -160,6 +169,19 @@ PY
         bad "核心侧曲目路径不是缓存文件：$core_path"
     else
         printf '  skip 快照里还没有曲目（下载/交付可能尚未完成）\n'
+    fi
+
+    queue_count="$(python3 - "$WORK_DIR/state.json" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding='utf-8'))
+track = doc.get('track') or {}
+print(track.get('queue_count'))
+PY
+)"
+    if [ "$queue_count" = "3" ]; then
+        ok "多曲下载经 Queue.Append 全部到达核心（queue_count=3）"
+    else
+        bad "核心队列只有 ${queue_count:-?} 条（期望 3；首曲 Set 后逐曲 Append）"
     fi
 
     if python3 - "$WORK_DIR/state.json" <<'PY'

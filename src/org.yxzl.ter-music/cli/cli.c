@@ -113,6 +113,12 @@ static const char *cli_bus(void) {
     return g_cli_bus[0] ? g_cli_bus : NULL;
 }
 
+/* --bus 是否在指定“非默认实例”。自定义实例只能被接入，不能被默认
+ * daemon_start_background() 拉起的进程满足。 */
+static int cli_bus_is_custom(void) {
+    return g_cli_bus[0] != '\0' && strcmp(g_cli_bus, CLI_PRIMARY_BUS_NAME) != 0;
+}
+
 /* ── TUI 会命中的诊断输出（语义见 cli.h） ─────────────────────── */
 static char g_cli_diag_buf[1024];
 static size_t g_cli_diag_len = 0;
@@ -195,6 +201,13 @@ static int cli_ensure_core_instance(void) {
     if (cli_client_primary_available(cli_bus())) {
         return CLI_EXIT_OK;
     }
+    if (cli_bus_is_custom()) {
+        /* 自定义 bus 只能接入已有实例；绝不能启动一个默认主实例来“凑数”，
+         * 否则随后的连接失败会留下一个没有任何前端能控制的孤儿核心。 */
+        cli_diag_key("cli.err.custom_bus.no_service");
+        cli_diag_key("cli.err.custom_bus.hint");
+        return CLI_EXIT_NO_INSTANCE;
+    }
     if (cli_in_sandbox()) {
         if (cli_client_activate_instance(cli_bus()) == CLI_EXIT_OK) {
             int pid = 0;
@@ -226,6 +239,14 @@ int cli_ensure_core_for_frontend(const char *bus, int attach_only)
     if (attach_only) {
         cli_diag_key("cli.err.attach_only.no_service");
         cli_diag_key("cli.err.attach_only.hint");
+        return CLI_EXIT_NO_INSTANCE;
+    }
+
+    if (bus && bus[0] != '\0' && strcmp(bus, CLI_PRIMARY_BUS_NAME) != 0) {
+        /* 目标是非默认实例：daemon_start_background() 只会拉起默认主名，
+         * 连接随后必然失败并留下孤儿核心。自定义 bus 只能接入。 */
+        cli_diag_key("cli.err.custom_bus.no_service");
+        cli_diag_key("cli.err.custom_bus.hint");
         return CLI_EXIT_NO_INSTANCE;
     }
 
@@ -310,6 +331,21 @@ static void cli_foreground_chunks_free(CliForegroundChunks *c)
     c->capacity = 0;
 }
 
+/* play 的内容装载需要读取 default_startup_path/last_opened_path。CLI 不走
+ * TUI 的 init_all_persistent_data()，因此必须自己只读加载配置：不迁移、不写盘。 */
+static void cli_load_config_mirror(void)
+{
+    ensure_config_dir_exists();
+    init_default_config();
+    const char *path = get_config_file_path();
+    if (!path || path[0] == '\0' || access(path, R_OK) != 0) {
+        return;
+    }
+    if (config_load_from_xml(path, &g_app_config) != 0) {
+        log_warn("cli", "Could not read config.xml for play defaults; using built-in defaults");
+    }
+}
+
 static int cli_cmd_play(int argc, char **argv) {
     const char *path = NULL;
     int index = -1;
@@ -322,6 +358,7 @@ static int cli_cmd_play(int argc, char **argv) {
         return CLI_EXIT_OK;
     }
 
+    cli_load_config_mirror();
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) {
             index = atoi(argv[++i]);
@@ -411,6 +448,12 @@ static int cli_cmd_play(int argc, char **argv) {
     }
 
     /* ── 前端负责内容：先确保播放服务在跑，再扫描并分块下发队列 ── */
+    if (!allow_daemon && !cli_client_primary_available(cli_bus())) {
+        cli_err("cli.err.play.no_daemon");
+        cli_err("cli.err.no_instance.hint");
+        return CLI_EXIT_NO_INSTANCE;
+    }
+
     int rc = cli_ensure_core_instance();
     if (rc != CLI_EXIT_OK) {
         return rc;

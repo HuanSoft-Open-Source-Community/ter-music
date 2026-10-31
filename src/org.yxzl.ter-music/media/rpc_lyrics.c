@@ -65,12 +65,12 @@ static void lyrics_api_prepare(char *out, size_t out_size, uint64_t revision) {
     out[0] = '\0';
 
     char track_id[96] = "";
-    if (rpc_track_available()) {
-        char track_path[MAX_PATH_LEN];
-        if (bq_path_at(g_current_play_index, track_path,
-                                    sizeof(track_path)) == 0) {
-            info_build_track_id(track_id, sizeof(track_id), track_path);
-        }
+    char current_path[MAX_PATH_LEN];
+    if (audio_current_track_path(current_path, sizeof(current_path))) {
+        info_build_track_id(track_id, sizeof(track_id), current_path);
+    } else if (rpc_track_available() &&
+               bq_path_at(g_current_play_index, current_path, sizeof(current_path)) == 0) {
+        info_build_track_id(track_id, sizeof(track_id), current_path);
     }
 
     int track_changed = (strcmp(g_lyrics_api.track_id, track_id) != 0);
@@ -250,12 +250,12 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
         }
 
         char track_id[96] = "";
-        if (rpc_track_available()) {
-            char track_path[MAX_PATH_LEN];
-            if (bq_path_at(g_current_play_index, track_path,
-                                        sizeof(track_path)) == 0) {
-                info_build_track_id(track_id, sizeof(track_id), track_path);
-            }
+        char current_path[MAX_PATH_LEN];
+        if (audio_current_track_path(current_path, sizeof(current_path))) {
+            info_build_track_id(track_id, sizeof(track_id), current_path);
+        } else if (rpc_track_available() &&
+                   bq_path_at(g_current_play_index, current_path, sizeof(current_path)) == 0) {
+            info_build_track_id(track_id, sizeof(track_id), current_path);
         }
 
         /* 单页最多 1000 行 × 每行 ~512 字节，堆分配（避免大栈帧） */

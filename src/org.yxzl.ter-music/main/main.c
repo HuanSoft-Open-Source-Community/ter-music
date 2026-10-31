@@ -206,6 +206,7 @@ int main(int argc, char *argv[]) {
     PlayerBackend frontend = PLAYER_BACKEND_REMOTE;
     int attach_only = 0;
     char bus_name[128] = "";
+    char effective_lang[64] = "";
     int opt;
     enum { OPT_FRONTEND = 1000, OPT_ATTACH_ONLY, OPT_BUS };
     struct option long_options[] = {
@@ -268,6 +269,12 @@ int main(int argc, char *argv[]) {
         log_info("main", "Debug logging enabled via --debug flag");
     }
 
+    /* 先确定门面角色，再初始化任何持久化数据：后续的内容扫描、配置持久化、
+     * 断点恢复都可能经过 player_* 门面，不能等到 player_init() 才分流。
+     * remote 前端只是配置镜像持有者，从这一刻起禁止直写核心 config.xml。 */
+    player_select_backend(frontend);
+    config_set_core_writer(frontend == PLAYER_BACKEND_LOCAL);
+
     if (!isatty(STDOUT_FILENO)) {
         cli_lang_init();
         fprintf(stderr, "%s\n", i18n_get("main.err.not_a_tty"));
@@ -289,22 +296,17 @@ int main(int argc, char *argv[]) {
      * 以及**内容**（曲库 SQLite、歌单、收藏、历史、目录历史）。
      * 内容永远是前端的东西——核心不认识内容，内容类 D-Bus 接口也已撤下，
      * 前端不落盘就没有第二个进程能落盘。交给核心的只有音频栈与 MPRIS，
-     * 两者在远端模式的前端进程里都不初始化。 */
-    init_all_persistent_data();
+     * 两者在远端模式的前端进程里都不初始化。
+     * readonly_mirror=1：远端前端只读加载配置，不迁移/不应用运行时/不落盘。 */
+    init_all_persistent_data(frontend == PLAYER_BACKEND_REMOTE);
 
-    /* --lang / TER_MUSIC_CLI_LANG 对 TUI 同样生效：只改本次进程的镜像，
-     * 不写盘，保存配置时仍以用户原有设置为准。 */
-    if (cli_lang_is_explicit()) {
-        snprintf(g_app_config.ui_language, sizeof(g_app_config.ui_language), "%s",
-                 cli_lang_resolve());
-    }
-    i18n_init(g_app_config.ui_language);
+    /* --lang / TER_MUSIC_CLI_LANG 对 TUI 同样生效：只影响本进程的 i18n，
+     * 不写 g_app_config（否则之后任意一次配置保存都会把它持久化）。 */
+    snprintf(effective_lang, sizeof(effective_lang), "%s",
+             cli_lang_is_explicit() ? cli_lang_resolve() : g_app_config.ui_language);
+    i18n_init(effective_lang);
     if (frontend == PLAYER_BACKEND_LOCAL) {
-        set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支） */
-    }
-
-    if (g_app_config.clear_history_on_startup && frontend == PLAYER_BACKEND_LOCAL) {
-        clear_dir_history();
+        set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支）; config-ownership-allow: 仅 local 核心宿主 */
     }
 
     if (frontend == PLAYER_BACKEND_LOCAL) {
@@ -352,9 +354,6 @@ int main(int argc, char *argv[]) {
     int resumed_playback = 0;
     int opened_single_file = 0;
     int opened_track_index = -1;
-    /* remote 前端：连接建立、队列下发完成后再经门面驱动的自动播放内容下标
-     * （-1 = 无）。断点恢复优先于它（Task 4.1）。 */
-    int remote_autoplay_index = -1;
     char final_path[MAX_PATH_LEN] = "";
 
     int temp_loaded = load_temp_playlist();
@@ -462,9 +461,8 @@ int main(int argc, char *argv[]) {
         }
         attempted_resume_load = 1;
         log_info("main", "Attempting resume load from: '%s'", resume_dir);
-        /* app_open_path() 会先过 app_dir_has_audio_files()（仅检查直接子文件），
-         * 而树根的音频可能全部位于子目录中（正是需要恢复的场景），
-         * 因此这里直接使用递归扫描的 load_playlist()。 */
+        /* 恢复时直接递归扫描树根：树根音频可能全在子目录中，且这里要保留
+         * 用户上次浏览的根路径（而不是 app_open_path() 可能回退到的目录）。 */
         if (load_playlist(resume_dir) > 0) {
             g_selected_index = 0;
             snprintf(final_path, sizeof(final_path), "%s", resume_dir);
@@ -522,65 +520,12 @@ int main(int argc, char *argv[]) {
     
     if (loaded && final_path[0] != '\0') {
         add_dir_history_entry(final_path);
-        
-        if (g_app_config.remember_last_path) {
-            snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", final_path);
-            player_config_persist();
-        }
-
-        if (g_app_config.resume_last_playback && !opened_single_file &&
-            ((attempted_resume_load && !open_path) ||
-             strcmp(final_path, g_app_config.last_played_folder_path) == 0)) {
-            log_info("main", "Attempting to resume playback session");
-            resumed_playback = app_resume_saved_playback();
-            if (resumed_playback) {
-                log_info("main", "Playback session restored: track idx=%d pos=%d",
-                         g_current_play_index, g_app_config.last_played_position); /* ui-purity-allow: local 恢复日志只读引擎全局（remote 分支在 app_resume_saved_playback 早退，不会置 resumed_playback） */
-            } else {
-                log_info("main", "Resume playback failed, clearing saved session");
-                app_clear_saved_session();
-            }
-        }
-
-        /* 队列内容由内容列表下发产生（load_playlist 内已同步到后端队列），
-         * 不再从 queue.txt 覆盖：queue.txt 是前端自己的持久化文件，
-         * 后端队列只接受前端下发的内容。 */
-
-        if (!resumed_playback && playlist_count() > 0 &&
-            (g_app_config.auto_play_on_start || opened_single_file)) {
-            int auto_idx = -1;
-            if (opened_single_file) {
-                auto_idx = opened_track_index;
-                if (auto_idx < 0) {
-                    auto_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
-                }
-            } else if (g_app_config.auto_play_on_start) {
-                auto_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
-            }
-            if (auto_idx >= 0) {
-                log_info("main", "Auto-playing track idx=%d", auto_idx);
-                /* 后端分流（Task 4.1）：remote 不在前端进程直调 play_audio，
-                 * 只把选中项落到界面并记下内容下标，待连接+队列下发后经门面播放。
-                 * local（TUI 即核心）保持原有的直接播放行为不变。 */
-                if (frontend == PLAYER_BACKEND_REMOTE) {
-                    app_set_selection_for_track(auto_idx);
-                    remote_autoplay_index = auto_idx;
-                } else {
-                    play_audio(auto_idx); /* ui-purity-allow: local 分支（else=非 remote）=TUI 即核心直接起播 */
-                    app_set_selection_for_track(auto_idx);
-                }
-            }
-        }
-        if (attempted_resume_load && !open_path && !resumed_playback) {
-            app_clear_saved_session();
-        }
-    } else if (attempted_resume_load) {
-        app_clear_saved_session();
     }
-    
+
     /* 前端门面：界面只经 player_* 访问核心状态与命令。
-     *   remote（默认）——界面是播放服务的客户端，先确保核心在跑；
-     *   local（迁移期基线）——本进程即核心，直接调用引擎。 */
+     * 必须在任何 player_config_persist()/断点恢复之前初始化，否则远端前端
+     * 会按默认的 LOCAL 后端直写 config.xml、甚至在本进程起本地播放线程。
+     * 内容扫描仍发生在连接之前，避免大目录扫描期间前端心跳超时。 */
     if (frontend == PLAYER_BACKEND_REMOTE) {
         int rc = cli_ensure_core_for_frontend(bus_name[0] ? bus_name : NULL, attach_only);
         if (rc != 0) {
@@ -614,36 +559,102 @@ int main(int argc, char *argv[]) {
     if (frontend == PLAYER_BACKEND_REMOTE) {
         /* 断线重连后把内容队列补推给核心：核心只执行，内容只有前端有 */
         player_set_reconnect_hook(push_content_to_core);
+
+        /* 远端前端的配置是核心配置的镜像：接入后先对齐基线。设置页的首次
+         * persist 因此只包含用户本次改动，不会把磁盘上的旧值整份推回核心。 */
+        if (player_config_refresh() != 0) {
+            log_warn("main", "Could not refresh the config mirror from the core");
+        } else {
+            apply_color_theme();
+            if (!cli_lang_is_explicit() &&
+                strcmp(effective_lang, g_app_config.ui_language) != 0) {
+                snprintf(effective_lang, sizeof(effective_lang), "%s",
+                         g_app_config.ui_language);
+                i18n_init(effective_lang);
+            }
+        }
+    } else {
+        /* 本地模式的音量在音频设备初始化时应用；远端模式由核心持有 */
+        set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支）; config-ownership-allow: 仅 local 核心宿主 */
     }
 
-    if (frontend == PLAYER_BACKEND_LOCAL) {
-        /* 本地模式的音量在音频设备初始化时应用；远端模式由核心持有 */
-        set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支） */
-    } else if (loaded) {
-        /* 内容归前端：本进程已经扫描/排序完成，这里把路径队列整表下发给核心 */
+    /* 目录历史归前端。放在 player_init()/远端配置镜像刷新之后，才能按
+     * 核心的 clear_history_on_startup 决定；内容装载期间已经写入的当前
+     * 目录在清空后补回，避免“清历史”把本次打开也清掉。 */
+    if (g_app_config.clear_history_on_startup) {
+        clear_dir_history();
+        if (loaded && final_path[0] != '\0') {
+            add_dir_history_entry(final_path);
+        }
+    }
+
+    /* 内容归前端：本进程已经扫描/排序完成，这里把路径队列整表下发给核心。
+     * 必须在断点恢复/自动播放之前完成，否则 PlayAt 找不到目标位置。 */
+    if (frontend == PLAYER_BACKEND_REMOTE && loaded) {
         int pushed = player_queue_push();
         log_info("main", "Delivered %d queue entries to the core", pushed);
+    }
 
-        /* 断点恢复 / 自动播放改由门面驱动核心（Task 4.1）：此刻连接已建立、
-         * 队列已下发，前端绝不在本进程起播放线程，只下发命令。
-         *   - resume：按上次曲目路径反查队列位置播放，再跳到上次进度；
-         *   - 否则若 auto_play_on_start：经统一入口按内容下标播放首曲。 */
-        if (resumed_playback) {
-            int pos = player_queue_find(g_app_config.last_played_track_path);
-            if (pos >= 0) {
-                player_queue_play(pos);
-                if (g_app_config.last_played_position > 0) {
-                    player_seek_seconds(g_app_config.last_played_position);
+    /* last_opened_path 是前端内容状态，但落盘要经核心（remote）或本地配置
+     * 拥有者（local）；必须放在 player_init() 之后。 */
+    if (loaded && final_path[0] != '\0' && g_app_config.remember_last_path) {
+        snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path),
+                 "%s", final_path);
+        player_config_persist();
+    }
+
+    if (loaded && final_path[0] != '\0') {
+        if (g_app_config.resume_last_playback && !opened_single_file &&
+            ((attempted_resume_load && !open_path) ||
+             strcmp(final_path, g_app_config.last_played_folder_path) == 0)) {
+            log_info("main", "Attempting to resume playback session");
+            resumed_playback = app_resume_saved_playback();
+            if (resumed_playback) {
+                int pos = player_queue_find(g_app_config.last_played_track_path);
+                if (pos >= 0) {
+                    if (frontend == PLAYER_BACKEND_LOCAL) {
+                        audio_set_initial_seek_position(g_app_config.last_played_position);
+                        player_queue_play(pos);
+                    } else {
+                        player_queue_play(pos);
+                        if (g_app_config.last_played_position > 0) {
+                            player_seek_seconds(g_app_config.last_played_position);
+                        }
+                    }
+                    log_info("main", "Restored playback via facade at queue position=%d", pos);
+                } else {
+                    log_warn("main", "Resume track is not in the delivered queue");
+                    app_clear_saved_session();
+                    resumed_playback = 0;
                 }
-                log_info("main", "Restored playback via facade at queue position=%d", pos);
             } else {
-                log_warn("main", "Resume track is not in the delivered queue");
+                log_info("main", "Resume playback failed, clearing saved session");
+                app_clear_saved_session();
             }
-        } else if (remote_autoplay_index >= 0) {
-            ui_play_track_index(remote_autoplay_index);
-            log_info("main", "Auto-play started via facade for content idx=%d",
-                     remote_autoplay_index);
         }
+
+        if (!resumed_playback && playlist_count() > 0 &&
+            (g_app_config.auto_play_on_start || opened_single_file)) {
+            int auto_idx = -1;
+            if (opened_single_file) {
+                auto_idx = opened_track_index;
+                if (auto_idx < 0) {
+                    auto_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
+                }
+            } else if (g_app_config.auto_play_on_start) {
+                auto_idx = g_sort_state.active ? g_sort_state.sorted_indices[0] : 0;
+            }
+            if (auto_idx >= 0) {
+                log_info("main", "Auto-playing track idx=%d", auto_idx);
+                app_set_selection_for_track(auto_idx);
+                ui_play_track_index(auto_idx);
+            }
+        }
+        if (attempted_resume_load && !open_path && !resumed_playback) {
+            app_clear_saved_session();
+        }
+    } else if (attempted_resume_load) {
+        app_clear_saved_session();
     }
 
     log_info("main", "Starting event loop");
