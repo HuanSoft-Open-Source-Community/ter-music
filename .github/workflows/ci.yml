@@ -244,6 +244,9 @@ jobs:
       - name: PipeWire backend playback
         run: scripts/test/pipewire-backend-e2e.sh --bin ./build/ter-music
 
+      - name: PipeWire playback census (至多一路播放输出)
+        run: scripts/test/pipewire-playback-census-e2e.sh --bin ./build/ter-music
+
       - name: D-Bus RPC surface
         run: scripts/test/dbus-rpc-check.sh --bin ./build/ter-music
 
