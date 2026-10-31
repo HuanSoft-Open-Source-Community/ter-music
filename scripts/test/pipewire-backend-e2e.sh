@@ -344,6 +344,29 @@ core_count() {
     printf '%s' "$n"
 }
 
+# 核心日志中 play_audio() 的次数：倍速变更必须真正重建播放线程才能应用
+# 新的倍率。仅比较位置无法区分数值上“没有重启”；日志计数可以。
+play_audio_log_count() {
+    local log
+    log="$(latest_log)"
+    if [ -n "$log" ] && [ -f "$log" ]; then
+        grep -c 'play_audio(index=' "$log" 2>/dev/null || true
+    else
+        printf '0'
+    fi
+}
+
+wait_play_audio_increase() {
+    local before="$1" _
+    for _ in $(seq 1 15); do
+        if [ "$(play_audio_log_count)" -gt "$before" ]; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
 # ── 起核心 ────────────────────────────────────────────────────────
 info "启动核心（audio_backend=3，音乐目录 $MUSIC_DIR）"
 TER_MUSIC_FORCE_LOG=1 "$TM_BIN" daemon start --open "$MUSIC_DIR" \
@@ -402,6 +425,50 @@ if [ -n "$FIRST_POS" ] && [ "$FIRST_POS" -le 1500 ]; then
 else
     bad "首个进度采样已超前（${FIRST_POS:-无}ms，>1500ms）：进度统计的是写入量而非可听位置，断点会多走一段"
     diag "进度超前"
+fi
+
+# ── 倍速重启：必须从可听位置重启，且位置 0 也要重建线程 ────────────
+# 1) 位置跳变：PipeWire 环里提前写了约 3 秒；若重启用 g_current_position，
+#    新线程会从“已写入”处开始，设置倍速后位置向前跳约一个环。
+#    这里用 speed 1.0 触发同一条重启路径，避免把 atempo 滤镜的环境可用性
+#    混进“可听位置”判别；滤镜本身不属于本回归。
+# 2) 位置 0：g_initial_seek_position 也为 0，不能再用 >0 当“是否重启”的判别。
+info "倍速变更：从可听位置重启，位置 0 也必须真正应用"
+SPEED_RC=0
+SPEED_BEFORE_POS="$(show_position_ms)"
+SPEED_LOG_BEFORE="$(play_audio_log_count)"
+"$TM_BIN" speed 1.0 > "$WORK_DIR/speed-jump.log" 2>&1 || SPEED_RC=$?
+if [ "$SPEED_RC" -eq 0 ] && wait_play_audio_increase "$SPEED_LOG_BEFORE"; then
+    ok "speed 1.0 触发了播放线程重建"
+else
+    bad "speed 1.0 未触发播放线程重建（rc=$SPEED_RC，play_audio 计数 ${SPEED_LOG_BEFORE}→$(play_audio_log_count)）"
+    diag "倍速重启"
+fi
+sleep 0.7
+SPEED_AFTER_POS="$(show_position_ms)"
+if [ "$SPEED_BEFORE_POS" -ge 0 ] 2>/dev/null && [ "$SPEED_AFTER_POS" -ge 0 ] 2>/dev/null; then
+    SPEED_DELTA=$((SPEED_AFTER_POS - SPEED_BEFORE_POS))
+    if [ "$SPEED_DELTA" -ge -1000 ] && [ "$SPEED_DELTA" -le 2500 ]; then
+        ok "倍速重启未把可听位置向前跳（${SPEED_BEFORE_POS}ms → ${SPEED_AFTER_POS}ms，Δ=${SPEED_DELTA}ms）"
+    else
+        bad "倍速重启按写入位置起播，可听位置跳出容差（${SPEED_BEFORE_POS}ms → ${SPEED_AFTER_POS}ms，Δ=${SPEED_DELTA}ms）"
+        diag "倍速位置"
+    fi
+else
+    bad "倍速重启前后无法读取有效位置（${SPEED_BEFORE_POS:-无}ms → ${SPEED_AFTER_POS:-无}ms）"
+    diag "倍速位置"
+fi
+
+ZERO_LOG_BEFORE="$(play_audio_log_count)"
+"$TM_BIN" seek 0 > "$WORK_DIR/speed-zero-seek.log" 2>&1 || true
+sleep 0.3
+ZERO_RC=0
+"$TM_BIN" speed 1.0 > "$WORK_DIR/speed-zero.log" 2>&1 || ZERO_RC=$?
+if [ "$ZERO_RC" -eq 0 ] && wait_play_audio_increase "$ZERO_LOG_BEFORE"; then
+    ok "可听位置为 0 时设置倍速仍重建了播放线程"
+else
+    bad "可听位置为 0 时设置倍速被跳过（rc=$ZERO_RC，play_audio 计数 ${ZERO_LOG_BEFORE}→$(play_audio_log_count)）"
+    diag "倍速零位置"
 fi
 
 # ── 音量命令 ──────────────────────────────────────────────────────

@@ -119,6 +119,10 @@ int g_seek_position = 0;
 int g_initial_seek_position = 0;
 int g_cue_offset = 0;
 
+/* 本次 play_audio() 是否由倍速变更触发。可听位置为 0 时 g_initial_seek_position
+ * 也是 0，不能再拿它当“是否重启”的判别；否则同曲目已在播放时会被直接跳过。 */
+static int g_speed_change_restart_pending = 0;
+
 /* ── Progress ── */
 int g_current_position = 0;
 int g_total_duration = 0;
@@ -523,27 +527,34 @@ void apply_playback_speed_change(void)
         pthread_mutex_lock(&g_play_mutex);
         int was_paused = (g_play_state == PLAY_STATE_PAUSED);
         int current_idx = g_current_play_index;
-        int current_pos = g_current_position;
+        /* 与 persist_playback_session_state() 同一口径：保存/恢复的是用户
+         * 实际听到的位置，而不是 PipeWire 环里提前写入的几秒。 */
+        int current_pos = audio_get_position_seconds();
         char current_path[MAX_PATH_LEN];
         snprintf(current_path, sizeof(current_path), "%s", g_current_play_path);
         if (current_idx < 0 && current_path[0] != '\0') {
             current_idx = bq_position_of_path(current_path);
         }
-        pthread_mutex_unlock(&g_play_mutex);
-
         if (current_idx < 0) {
+            pthread_mutex_unlock(&g_play_mutex);
             /* 当前条目已从队列移除：无法按队列位置重启，但倍速仍会应用到
              * 下一首。不要用 -1 调 play_audio() 把正在播放的声音打断。 */
             log_warn("audio", "Speed change: current track is no longer in the queue");
             return;
         }
 
+        /* 可听位置可能为 0（刚起播、缓冲还没被消费），此时 g_initial_seek_position
+         * 与“没有倍速重启”无法区分，因此额外记录本次重启意图。 */
         g_initial_seek_position = current_pos;
-        pthread_mutex_lock(&g_play_mutex);
+        g_speed_change_restart_pending = 1;
         g_play_thread_running = 0;
         pthread_mutex_unlock(&g_play_mutex);
+
         signal_playback_thread();
-        reap_finished_playback_thread();
+        /* 倍速重启必须先等旧线程完全退出（含后端流清理）再起新线程。
+         * 只 reap 一次时旧线程可能仍 active，play_audio() 会走 pending 异步
+         * 切换；新旧 PipeWire 流在 20ms 窗口内竞争，可导致新线程刚起就退出。 */
+        wait_for_playback_thread_shutdown();
         play_audio(current_idx);
         if (was_paused) { usleep(50000); pause_audio(); }
     }
@@ -711,6 +722,18 @@ static void persist_playback_session_on_switch(int index)
  * Play audio (public API)
  * ============================================================ */
 
+/* 取走“本次起播来自倍速变更”的意图。只在队列条目有效、确实要进入起播流程时
+ * 调用；返回 1 时 false 分支也不能再因“同曲目已在播放”而跳过线程重建。 */
+static int take_speed_change_restart(void)
+{
+    int pending;
+    pthread_mutex_lock(&g_play_mutex);
+    pending = g_speed_change_restart_pending;
+    g_speed_change_restart_pending = 0;
+    pthread_mutex_unlock(&g_play_mutex);
+    return pending;
+}
+
 void play_audio(int index)
 {
     /* 退出闸门：一旦进程被要求退出（Control.Quit / SIGTERM / 总线丢失），
@@ -742,6 +765,10 @@ void play_audio(int index)
     snprintf(track_path, sizeof(track_path), "%s", entry.path);
     log_info("audio", "play_audio(index=%d) track='%s'", index, track_path);
 
+    /* 倍速重启可能在可听位置 0 触发，g_initial_seek_position 此时也是 0；
+     * 必须靠显式意图区分“普通同曲目起播（可跳过）”与“倍速重建线程”。 */
+    int force_speed_restart = take_speed_change_restart();
+
     /* 队列由前端下发：位置 index 必须与后端游标一致，但前端也可能直接
      * 指定某个位置（Queue.PlayAt），因此这里以调用方给的位置为准。 */
     if (bq_position() != index) {
@@ -751,7 +778,7 @@ void play_audio(int index)
     reap_finished_playback_thread();
     pthread_mutex_lock(&g_play_mutex);
 
-    int is_speed_change_restart = (g_initial_seek_position > 0);
+    int is_speed_change_restart = force_speed_restart || (g_initial_seek_position > 0);
     if (!is_speed_change_restart && g_play_state == PLAY_STATE_PLAYING && g_current_play_index == index) {
         log_debug("audio", "Skipping play: same index=%d already playing", index);
         snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);

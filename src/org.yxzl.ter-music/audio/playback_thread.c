@@ -1246,6 +1246,24 @@ void *play_audio_thread(void *arg)
      * ════════════════════════════════════════════════════════ */
 
 cleanup:
+    /* PipeWire（或任何报告未消费帧的后端）的写端可能比播放端快：整首
+     * 解码/写入完成后，后端环里仍可能有未消费的音频。若立刻 cleanup_stream() 并调度下一首，
+     * 用户会听到曲目被截尾、队列提前前进；2 秒短曲在 PipeWire 上尤其明显。
+     * EOS 后先等后端缓冲排空（有上限，避免设备卡死时永久等待），再拆流。 */
+    if (reached_end_of_stream && !playback_error) {
+        int waited_ms = 0;
+        while (g_play_thread_running && waited_ms < 5000) {
+            if (audio_backend_buffered_frames() <= 0) {
+                break;
+            }
+            usleep(10000);
+            waited_ms += 10;
+        }
+        if (waited_ms > 0) {
+            log_debug("audio", "EOS: waited %dms for backend buffer drain", waited_ms);
+        }
+    }
+
     drain_atempo_filter(filtered_frame);
     audio_backend_cleanup_stream();
 
