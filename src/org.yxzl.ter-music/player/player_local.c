@@ -200,6 +200,16 @@ void player_local_shutdown(void)
     g_local.connected = 0;
 }
 
+/* 退出前收掉本进程的音频引擎（停止播放线程、拆后端流）。
+ * 与 player_local_shutdown() 分开：后者在 main 的 player_shutdown() 阶段调用，
+ * 那时会话尚未持久化；本函数只在 UI cleanup 持久化之后调用。 */
+void player_local_teardown_audio(void)
+{
+    stop_audio();
+    wait_for_playback_thread_shutdown();
+    audio_backend_shutdown();
+}
+
 int player_local_pump(void)
 {
     if (!g_local.initialized) {

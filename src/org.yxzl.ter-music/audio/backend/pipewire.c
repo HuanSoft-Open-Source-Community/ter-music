@@ -136,6 +136,21 @@ static void pw_ring_reset(void) {
     pthread_mutex_unlock(&pw_ring_mutex);
 }
 
+/* 尚未被 PipeWire process 回调取走的帧数。
+ * progress_tracker 统计的是“写入”而不是“播完”，而 PipeWire 允许一次把
+ * 1MB 环填满（44.1kHz/双声道约 2.9s）；不校正的话 UI 与断点恢复都会比
+ * 实际听到的位置提前约一个环。 */
+int pw_ring_buffered_frames(void) {
+    pthread_mutex_lock(&pw_state_mutex);
+    int channels = pw_channels;
+    pthread_mutex_unlock(&pw_state_mutex);
+    if (channels <= 0) channels = 2;
+
+    int frame_bytes = channels * (int)sizeof(int32_t);
+    int bytes = pw_ring_bytes_available();
+    return bytes > 0 ? bytes / frame_bytes : 0;
+}
+
 /* ================================================================== */
 /*  dlopen / dlsym 宏                                                 */
 /* ================================================================== */
@@ -446,6 +461,38 @@ int pw_probe_backend(void) {
 int get_configured_latency_ms(void);
 
 /*
+ * 从非循环线程发起 pw_stream_set_active()/set_control()/flush() 时，
+ * 必须持有 PipeWire 自己的循环锁：库会校验调用上下文，缺锁直接以
+ * -EPERM 拒绝并在日志里打 "called from wrong context"（实测 1.6.4），
+ * 结果是暂停与音量参数完全不生效。
+ *
+ * 关键约束：绝不能在持有 pw_state_mutex 的时候去取循环锁。
+ * 循环线程里的 pw_stream_on_process() 是"隐式持有循环锁 → 再取
+ * pw_state_mutex"的顺序，这里若反序就会构成 AB-BA 死锁。
+ * 所以必须先摘出 loop 指针并立刻释放 pw_state_mutex，再取循环锁；
+ * 同理，返回循环锁之后不得再取 pw_state_mutex，需要状态快照的调用方
+ * 一律在加锁前读好。
+ *
+ * loop 未创建或未 start 成功时没有"正确上下文"可言，返回 NULL 让调用方
+ * 整段跳过，与原先"流不可用就什么都不做"的语义一致。
+ */
+static struct pw_thread_loop *pw_control_lock(void) {
+    pthread_mutex_lock(&pw_state_mutex);
+    struct pw_thread_loop *loop = pw_loop;
+    int running = pw_thread_running;
+    pthread_mutex_unlock(&pw_state_mutex);
+
+    if (!loop || !running) return NULL;
+
+    PW.thread_loop_lock(loop);
+    return loop;
+}
+
+static void pw_control_unlock(struct pw_thread_loop *loop) {
+    if (loop) PW.thread_loop_unlock(loop);
+}
+
+/*
  * 统一销毁流程（prepare 失败清理与 pw_cleanup_stream_locked 共用）：
  *   标记 destroying → 加锁 loop 停用/断开 → 停 loop → 销毁 stream
  *   → 断开 core → 销毁 context → 销毁 thread loop → 置空
@@ -595,7 +642,11 @@ int pw_prepare_stream(int sample_rate, int channels) {
         update_controls_status(i18n_get("audio.pw.start_thread"));
         goto fail;
     }
+    /* 与 pw_teardown_stream() 对称：在 pw_state_mutex 下发布，
+     * pw_control_lock() 才能可靠看到"loop 已可加锁" */
+    pthread_mutex_lock(&pw_state_mutex);
     pw_thread_running = 1;
+    pthread_mutex_unlock(&pw_state_mutex);
 
     /* 只有真正进入 STREAMING 才算成功；ERROR/UNCONNECTED 立即失败 */
     enum pw_stream_state state = PW_STREAM_STATE_CONNECTING;
@@ -651,7 +702,14 @@ void pw_flush_stream(void) {
     int destroying = pw_stream_destroying;
     pthread_mutex_unlock(&pw_state_mutex);
 
-    if (ready && s && !destroying) PW.stream_flush(s, 0);
+    if (ready && s && !destroying) {
+        struct pw_thread_loop *loop = pw_control_lock();
+        if (loop) {
+            PW.stream_flush(s, 0);
+            pw_control_unlock(loop);
+        }
+    }
+    /* 环形缓冲与 PipeWire 循环无关，放在循环锁之外复位 */
     pw_ring_reset();
     pthread_mutex_unlock(&pw_api_mutex);
 }
@@ -694,7 +752,13 @@ void pw_pause_stream(void) {
     int destroying = pw_stream_destroying;
     pthread_mutex_unlock(&pw_state_mutex);
 
-    if (ready && s && !destroying) PW.stream_set_active(s, 0);
+    if (ready && s && !destroying) {
+        struct pw_thread_loop *loop = pw_control_lock();
+        if (loop) {
+            PW.stream_set_active(s, 0);
+            pw_control_unlock(loop);
+        }
+    }
     pthread_mutex_unlock(&pw_api_mutex);
 }
 
@@ -706,7 +770,13 @@ void pw_resume_stream(void) {
     int destroying = pw_stream_destroying;
     pthread_mutex_unlock(&pw_state_mutex);
 
-    if (ready && s && !destroying) PW.stream_set_active(s, 1);
+    if (ready && s && !destroying) {
+        struct pw_thread_loop *loop = pw_control_lock();
+        if (loop) {
+            PW.stream_set_active(s, 1);
+            pw_control_unlock(loop);
+        }
+    }
     pthread_mutex_unlock(&pw_api_mutex);
 }
 
@@ -720,9 +790,13 @@ void pw_sync_volume(int volume) {
 
     if (ready && s && !destroying) {
         float vol_linear = (float)volume / 100.0f;
-        int r = PW.stream_set_control(s, SPA_PROP_volume, 1, &vol_linear);
-        if (r < 0)
-            log_warn("audio", "PipeWire set volume failed: %d", r);
+        struct pw_thread_loop *loop = pw_control_lock();
+        if (loop) {
+            int r = PW.stream_set_control(s, SPA_PROP_volume, 1, &vol_linear);
+            pw_control_unlock(loop);
+            if (r < 0)
+                log_warn("audio", "PipeWire set volume failed: %d", r);
+        }
     }
     pthread_mutex_unlock(&pw_api_mutex);
 }

@@ -40,6 +40,7 @@ struct alsa_funcs {
     int                (*pcm_drop)(snd_pcm_t *);
     int                (*pcm_close)(snd_pcm_t *);
     int                (*pcm_pause)(snd_pcm_t *, int);
+    const char *       (*strerror)(int);
 
     int   loaded;
     void *handle;

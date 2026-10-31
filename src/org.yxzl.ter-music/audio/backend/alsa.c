@@ -52,6 +52,7 @@ int alsa_load(void) {
     ALSA_LOAD(pcm_drop);
     ALSA_LOAD(pcm_close);
     ALSA_LOAD(pcm_pause);
+    ALSA_LOAD(strerror);
 
     A.loaded = 1;
     return 0;

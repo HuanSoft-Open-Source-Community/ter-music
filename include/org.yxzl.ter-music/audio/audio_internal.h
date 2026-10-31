@@ -102,6 +102,9 @@ int  pipewire_load(void);
 void pipewire_unload(void);
 int  build_audio_format_pod(void *dst, int sample_rate, int channels);
 int  pw_probe_backend(void);
+/* 环形缓冲里尚未被 PipeWire 消费的帧数（用于把“已写入”进度校正成
+ * 用户实际听到的位置；见 audio_get_position_seconds()）。 */
+int  pw_ring_buffered_frames(void);
 int  pw_prepare_stream(int sample_rate, int channels);
 void pw_cleanup_stream_locked(void);
 void pw_cleanup_stream(void);
@@ -142,9 +145,30 @@ int  audio_backend_prepare_stream(int sample_rate, int channels);
 void audio_backend_cleanup_stream(void);
 void audio_backend_flush_stream(void);
 int  audio_backend_write_samples(const int32_t *samples, int frame_count);
+/* 已写入后端、尚未真正播出的帧数；用于把进度校正为可听位置。 */
+int  audio_backend_buffered_frames(void);
 void audio_backend_pause_stream(void);
 void audio_backend_resume_stream(void);
 void audio_backend_sync_volume(int force);
+
+/* ---- 后端能力探测（定义在 backend_ops.c） ----
+ * audio_backend_probe(): 真实探测某个后端当前是否可用（0 = 可用）。
+ * 探测失败时把可读原因写入 *reason_out（指向静态字符串，调用方无需释放）。
+ * audio_backend_display_name(): 后端的本地化显示名（i18n 键 audio.backend.name.*）。
+ * audio_backend_format_message(): 按语言包的 {from}/{to}/{reason} 占位符风格
+ * 拼装后端相关提示（占位符风格与 cli/help.c、ui/help_view.c 一致）。 */
+int         audio_backend_probe(int backend, const char **reason_out);
+const char *audio_backend_display_name(int backend);
+void        audio_backend_format_message(char *out, size_t out_size, const char *tmpl,
+                                          const char *from, const char *to,
+                                          const char *reason);
+
+/* ---- 音频后端候选顺序：PipeWire > PulseAudio > ALSA（定义在 audio.c） ---- */
+extern const int g_backend_candidates[];
+#define BACKEND_CANDIDATE_COUNT 3
+
+/* 用户显式指定的后端（初始化时从配置捕获）：运行时回退时优先尝试它 */
+extern int g_requested_backend;
 
 /* ---- Playback thread（定义在 playback_thread.c） ---- */
 void *play_audio_thread(void *arg);

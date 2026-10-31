@@ -72,12 +72,18 @@ void player_select_backend(PlayerBackend backend);
 /* 连接/初始化。backend=REMOTE 时 bus_name 可为 NULL（用主名）。
  * 远程后端在返回前完成版本握手；不兼容返回 -1。 */
 int player_init(PlayerBackend backend, const char *bus_name);
-/* 收尾（幂等，重复调用不再发消息）。本地后端：停进程内播放。
+/* 收尾（幂等，重复调用不再发消息）。本地后端只注销门面状态；真正的
+ * 播放线程/后端流由 player_teardown_audio() 在会话持久化之后收尾。
  * 远端后端按**前端配置镜像** preferences.stop_core_on_exit 分流：
  * 1 = Control.Quit 让核心进程收尾退出；0 = Control.Detach 只注销注册，
  * 核心继续播放。两条消息都**只在**本前端确实接入过核心（握手完成且持有
  * Attach 令牌）时才发送；从未接入过核心的收尾不动核心。 */
 void player_shutdown(void);
+
+/* 退出时收掉本进程的音频引擎（停播放线程 + 销毁后端流），不发送任何
+ * D-Bus 消息。local 后端总是调用；remote 后端仅在检测到本进程意外初始化
+ * 过音频引擎时调用（正常远端前端没有本地音频），用于防御历史/回归路径。 */
+void player_teardown_audio(void);
 
 /* 每轮事件循环调用，非阻塞。
  * 本地后端：重算快照并与上次比较，递增变化的修订号；
