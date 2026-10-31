@@ -71,6 +71,18 @@ export XDG_CONFIG_HOME="$WORK_DIR/home/.config"
 export XDG_CACHE_HOME="$WORK_DIR/home/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$WORK_DIR/music" "$WORK_DIR/big"
 
+# CLI 的 `play --index`（无路径）依赖 default_startup_path：写一份最小 v9
+# 配置，验证 CLI 自己会只读加载配置，而不是误以为“没有默认目录”。
+mkdir -p "$XDG_CONFIG_HOME/ter-music"
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="9">
+  <paths>
+    <default_startup_path>$WORK_DIR/music</default_startup_path>
+  </paths>
+</ter-music-config>
+EOF
+
 cleanup() {
     "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
     if [ "$KEEP" -eq 0 ] && [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
@@ -253,6 +265,75 @@ if [ "$HAVE_FFMPEG" -eq 1 ]; then
     fi
 else
     skip ">500 场景（无 ffmpeg 生成占位音频）"
+fi
+
+# ── --no-daemon / 自定义 --bus：不得偷偷拉起默认核心 ─────────────
+info "--no-daemon 与自定义 --bus 的无实例行为"
+stop_core
+"$TM_BIN" play "$WORK_DIR/music" --no-daemon >/dev/null 2>&1
+no_daemon_rc=$?
+if [ "$no_daemon_rc" -eq 3 ] && ! daemon_up; then
+    ok "--no-daemon 无实例 → 3 且未启动核心"
+else
+    bad "--no-daemon 无实例 → rc=$no_daemon_rc（期望 3，核心应保持停止）"
+fi
+"$TM_BIN" play "$WORK_DIR/music" --bus org.mpris.MediaPlayer2.nope >/dev/null 2>&1
+custom_bus_rc=$?
+if [ "$custom_bus_rc" -eq 3 ] && ! daemon_up; then
+    ok "自定义 --bus 无实例 → 3 且未启动默认核心"
+else
+    bad "自定义 --bus 无实例 → rc=$custom_bus_rc（期望 3，核心应保持停止）"
+fi
+
+# ── play --index（无路径）：CLI 必须只读加载 default_startup_path ──
+info "play --index（无路径）使用默认音乐目录"
+if [ "$HAVE_FFMPEG" -eq 1 ]; then
+    # 前面的 config reset --yes 已把默认目录清空；重写一份最小配置，
+    # 专门验证 CLI 的只读配置加载（而不是验证上一次 reset 的残留）。
+    mkdir -p "$XDG_CONFIG_HOME/ter-music"
+    cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="9">
+  <paths>
+    <default_startup_path>$WORK_DIR/music</default_startup_path>
+  </paths>
+</ter-music-config>
+EOF
+    "$TM_BIN" daemon start >/dev/null 2>&1
+    sleep 1
+    "$TM_BIN" play --index 1 >/dev/null 2>&1
+    play_index_rc=$?
+    if [ "$play_index_rc" -eq 0 ] &&
+       "$TM_BIN" queue list 2>/dev/null | grep -E '^>' | grep -q 'tone2'; then
+        ok "play --index 1 装载默认目录并从 tone2 起播"
+    else
+        bad "play --index 1 失败（rc=$play_index_rc）或当前行不是 tone2"
+    fi
+    stop_core
+else
+    skip "play --index（无 ffmpeg 素材）"
+fi
+
+# ── play <父目录>：音频全在子目录时也必须递归装载 ─────────────────
+info "play <父目录>：直接子项无音频、子目录有音频"
+if [ "$HAVE_FFMPEG" -eq 1 ]; then
+    mkdir -p "$WORK_DIR/parentonly/artist/album"
+    cp "$WORK_DIR/music/tone1.wav" "$WORK_DIR/parentonly/artist/album/only.wav"
+    "$TM_BIN" daemon start >/dev/null 2>&1
+    sleep 1
+    "$TM_BIN" play "$WORK_DIR/parentonly" >/dev/null 2>&1
+    parent_rc=$?
+    parent_total="$("$TM_BIN" queue list --count 10 2>/dev/null |
+        sed -n 's/^队列共 \([0-9]\{1,\}\) 首.*/\1/p')"
+    if [ "$parent_rc" -eq 0 ] && [ "$parent_total" = "1" ] &&
+       "$TM_BIN" queue list 2>/dev/null | grep -q 'only.wav'; then
+        ok "父目录递归装载成功（只含子目录音频也能播）"
+    else
+        bad "父目录递归装载失败：rc=$parent_rc total=${parent_total:-空}"
+    fi
+    stop_core
+else
+    skip "父目录递归装载（无 ffmpeg 素材）"
 fi
 
 # ── 错误路径：无实例退出码 3 ──────────────────────────────────────

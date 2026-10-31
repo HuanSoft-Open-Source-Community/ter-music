@@ -29,6 +29,9 @@ extern int   g_speed_count;
 /* ---- 播放状态（定义在 audio.c） ---- */
 extern PlayState g_play_state;
 extern int       g_current_play_index;
+/* 正在出声的曲目路径（g_play_mutex 保护）。队列被重排/编辑后，下标可能
+ * 短暂失去对应关系，但这条路径始终是“当前曲目”的身份。 */
+extern char      g_current_play_path[];
 extern PlayMode  g_play_mode;
 extern PlayQueue g_play_queue;
 extern pthread_t g_play_thread;

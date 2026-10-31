@@ -900,7 +900,9 @@ player:
   implemented, so `busctl --user introspect` / `gdbus introspect` work.
 - MPRIS metadata additionally carries `xesam:url` (always a `file://` URI,
   including for tracks downloaded from a remote source) and
-  `xesam:trackNumber`; `OpenUri` accepts local files only.
+  `xesam:trackNumber`; `OpenUri` answers
+  `org.freedesktop.DBus.Error.NotSupported` because the core no longer loads
+  content. Open files through `ter-music %F` (desktop entry) or the TUI instead.
 - `CanQuit` stays `false` on purpose so desktop media widgets cannot kill the
   player; use `ter-music daemon stop` or `Control.Quit` instead.
 
@@ -926,7 +928,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `default_play_mode`: Default play mode (0=Sequential, 1=Single Repeat, 2=List Repeat, 3=Shuffle Once, 4=Shuffle Repeat, ...)
 - `advanced_play_modes_enabled`: Enable advanced folder/album/artist play modes (0/1)
 - `lyrics_alignment`: Lyrics text alignment (0=Left, 1=Center, 2=Right)
-- `clear_history_on_startup`: Clear playback history on startup (0/1)
+- `clear_history_on_startup`: Clear the directory history on startup (0/1)
 - `resume_last_playback`: Resume playback from last position (0/1)
 - `seamless_preload`: Pre-decode next track at end of current for gapless playback (0/1)
 - `ui_language`: Interface language ID. Built-in packs are `zh_CN` and `en_US`; any third-party ID installed through the F7 language view is also valid (e.g. `ja_JP`). An invalid ID falls back to `zh_CN`.

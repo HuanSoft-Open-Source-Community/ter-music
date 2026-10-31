@@ -100,7 +100,11 @@ void bq_apply_mode(PlayMode mode);          /* 重建顺序，保持当前条目
 int  bq_advance(PlayMode mode, int *out_position);   /* 1 = 前进成功，0 = 到头 */
 int  bq_rewind(PlayMode mode, int *out_position);
 int  bq_peek_next(PlayMode mode, int *out_position); /* 只探测，不改游标 */
-void bq_shuffle_rest(void);                 /* 保持当前条目，打乱其余 */
+void bq_shuffle_rest(void);                 /* 保持当前条目，只打乱游标之后 */
+/* Queue.Shuffle 的契约实现：当前条目移到队首，其余打乱，游标置 0。
+ * 与 bq_shuffle_rest()（只打乱游标之后的部分）区分开，避免 RPC 层再犯
+ * “文档说当前置首、实现却没有”的契约漂移。 */
+void bq_shuffle_keep_current(void);
 
 /* ── 序列化（Queue.Get / QueueChanged） ───────────────────────────── */
 size_t bq_render_get(char *out, size_t out_size, int offset, int count);

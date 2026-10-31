@@ -124,6 +124,23 @@ AppConfig g_app_config = {0};
 static char config_dir[MAX_PATH_LEN];
 static char config_file[MAX_PATH_LEN];
 
+/* 配置写权限：默认允许（daemon、TUI-local、工具与单测）。远端前端在启动时
+ * 关闭，config.xml 的唯一写者必须是核心；save_config()/config_run_migrations()
+ * 在关闭状态下拒绝写盘，作为静态门禁之外的运行时防线。 */
+static int g_core_config_writer = 1;
+
+void config_set_core_writer(int enabled)
+{
+    g_core_config_writer = enabled ? 1 : 0;
+    log_info("config", "Configuration writer role: %s",
+             g_core_config_writer ? "core" : "front-end (read-only)");
+}
+
+int config_core_writer_enabled(void)
+{
+    return g_core_config_writer;
+}
+
 /* 安全拼接 base + suffix：超长时返回 -1 而不静默截断
  *（原先用 snprintf 直接拼接，路径过长会安静地生成错误路径，
  * 例如把 config.xml 截成 config.x，随后读写到不该碰的文件）。 */
@@ -286,12 +303,32 @@ void load_config(void)
     }
 }
 
+/* 远端前端的只读镜像加载：绝不迁移、绝不写盘。旧 JSON 配置留给核心在启动
+ * 时迁移；这里读不到 XML 就保留默认值，后续 player_config_refresh() 会以
+ * 核心的配置为准覆盖镜像。 */
+void load_config_readonly(void)
+{
+    log_info("config", "Loading read-only config mirror from '%s'", config_file);
+
+    init_default_config();
+    if (config_file[0] != '\0' &&
+        config_load_from_xml(config_file, &g_app_config) == 0) {
+        return;
+    }
+    log_debug("config", "No readable config.xml; the mirror starts from defaults");
+}
+
 /* 配置迁移：把旧版本文件推进到 CONFIG_CURRENT_VERSION。
  * 由**核心**调用（config.xml 归核心独占写）：daemon 与 TUI-local 都在
  * core_config_apply() 里走到这里；远端模式的前端不写核心配置。
  * @return 0 完成（含“无需迁移”）；-1 迁移失败 */
 int config_run_migrations(void)
 {
+    if (!g_core_config_writer) {
+        log_error("config", "Refusing to migrate config.xml in a read-only front-end process");
+        return -1;
+    }
+
     /* config_file 是本文件的静态路径（ensure_config_dir_exists 之后有效） */
     int file_version = g_app_config.config_file_version;
     int loaded = (file_version > 0);
@@ -360,6 +397,11 @@ int config_run_migrations(void)
 
 void save_config(void)
 {
+    if (!g_core_config_writer) {
+        log_error("config", "Refusing to write config.xml from a read-only front-end process");
+        return;
+    }
+
     log_debug("menu_views", "Saving config to '%s'", config_file);
     g_app_config.config_version = CONFIG_CURRENT_VERSION;
     g_app_config.config_file_version = CONFIG_CURRENT_VERSION;

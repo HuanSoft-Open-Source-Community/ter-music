@@ -47,6 +47,15 @@ const char *get_config_dir(void);      /* 已解析的配置目录，未初始�
 const char *get_config_file_path(void);/* 已解析的 config.xml 完整路径，未初始化时返回 NULL */
 void init_default_config(void);        /* 全量默认值（不读文件） */
 void load_config(void);                /* 默认值 + XML 读取（不改运行时全局） */
+/* 只读加载：默认值 + XML 读取，不执行 v1 JSON 迁移、不迁移、不落盘。
+ * 远端前端只拥有配置镜像，启动时用它代替 load_config()/core_config_apply()。 */
+void load_config_readonly(void);
+
+/* 配置写权限（进程角色）：默认允许。远端前端启动时置 0；config.xml 的
+ * 唯一写者是核心（daemon / TUI-local）。禁止时 save_config() 与
+ * config_run_migrations() 只记录错误并拒绝写盘，作为门禁之外的运行时防线。 */
+void config_set_core_writer(int enabled);
+int config_core_writer_enabled(void);
 
 /**
  * 只读解析 XML 中的 <keybindings><binding action="..." key="..."/></keybindings>。

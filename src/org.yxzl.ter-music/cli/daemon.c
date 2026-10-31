@@ -337,18 +337,9 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
         return CLI_EXIT_REFUSED;
     }
 
-    /* 先按配置应用的当前模式重排执行顺序（与旧 playlist_queue_sync 内部的
-     * play_queue_rebuild 同语义；前台核心刚起步，无"保持当前曲目"锚点）。 */
-    play_queue_rebuild(&g_play_queue, g_play_mode, NULL);
-    total = bq_count();
-
-    /* 模式在内容下发之后设置：set_play_mode → play_queue_rebuild → bq_apply_mode
-     * 会按模式重排执行顺序（洗牌/组模式），无需额外 Queue.Shuffle。 */
-    if (play_mode >= 0) {
-        set_play_mode((PlayMode)play_mode);
-        total = bq_count();
-    }
-
+    /* start_index 是**内容列表下标**（前端装配顺序 = 队列初始顺序）。
+     * 必须先按它起播，再应用播放模式；否则 shuffle 先把队列重排，
+     * PlayAt(N) 播到的就是另一首。 */
     int position = (start_index >= 0) ? start_index : 0;
     if (position >= total) {
         daemon_err_line("cli.daemon.err.index_out_of_range", position, total);
@@ -358,6 +349,11 @@ int daemon_run_foreground_with_queue(const char *const *chunks, int nchunks,
 
     bq_play_at(position);
     play_audio(position);
+    audio_sync_queue_position();
+
+    /* 模式在起播之后设置：set_play_mode → play_queue_rebuild → bq_apply_mode
+     * 会按模式重排执行顺序（洗牌/组模式），同时保持当前条目（按路径锚定）。 */
+    set_play_mode((play_mode >= 0) ? (PlayMode)play_mode : g_play_mode);
     core_notify_state_changed();
 
     log_info("daemon", "Entering main loop (queue=%d, playing=%d)", bq_count(), position);

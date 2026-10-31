@@ -274,6 +274,9 @@ jobs:
       - name: Big library delivered in chunks (600 entries)
         run: scripts/test/big-library-e2e.sh --bin ./build/ter-music
 
+      - name: Play mode applied on startup and cross-group selection
+        run: scripts/test/playmode-startup-e2e.sh --bin ./build/ter-music
+
       - name: Config across restart and play-mode regrouping
         run: scripts/test/config-restart-e2e.sh --bin ./build/ter-music
 

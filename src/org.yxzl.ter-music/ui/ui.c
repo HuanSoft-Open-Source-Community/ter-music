@@ -459,6 +459,9 @@ static void sync_player_revisions(void)
         request_ui_refresh(dirty);
     }
     if (now_config != config) {
+        /* 远端前端的配置镜像来自核心：核心/CLI 改了 keybindings 时，
+         * 这里必须同步重建键位表，否则设置页显示已改而按键仍是旧语义。 */
+        keymap_reload();
         apply_color_theme();
         request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
     }

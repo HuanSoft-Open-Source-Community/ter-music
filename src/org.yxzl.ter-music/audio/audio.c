@@ -80,6 +80,9 @@ char g_audio_codec_name[32] = "";
 /* ── Playback state ── */
 PlayState g_play_state = PLAY_STATE_STOPPED;
 int g_current_play_index = -1;
+/* 当前出声曲目的路径（身份），与队列位置解耦：队列重排后下标会变，
+ * 但路径仍是同一首歌；当前条目被删除后下标为 -1，路径仍可用于上报/暂停。 */
+char g_current_play_path[MAX_PATH_LEN] = "";
 PlayMode g_play_mode = PLAY_MODE_SEQUENTIAL;
 pthread_t g_play_thread;
 int g_play_thread_running = 0;
@@ -310,6 +313,38 @@ int audio_get_duration_seconds(void)
     return g_total_duration > 0 ? g_total_duration : 0;
 }
 
+int audio_current_track_path(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return 0;
+    }
+    out[0] = '\0';
+
+    pthread_mutex_lock(&g_play_mutex);
+    snprintf(out, out_size, "%s", g_current_play_path);
+    pthread_mutex_unlock(&g_play_mutex);
+    return out[0] ? 1 : 0;
+}
+
+void audio_sync_queue_position(void)
+{
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_current_play_path[0] != '\0') {
+        int position = bq_position_of_path(g_current_play_path);
+        if (position >= 0) {
+            g_current_play_index = position;
+            /* 非前缀 Queue.Set 可能把游标置 0，但正在出声的路径仍在新表中；
+             * 让游标跟着当前曲目，避免 Queue.Get 与 Info/MPRIS 各说一套。 */
+            if (bq_position() != position) {
+                bq_set_position(position);
+            }
+        } else {
+            g_current_play_index = -1;
+        }
+    }
+    pthread_mutex_unlock(&g_play_mutex);
+}
+
 void set_volume_percent(int volume)
 {
     int clamped = clamp_volume_percent(volume);
@@ -364,9 +399,13 @@ void set_play_mode(PlayMode mode)
      * 当前条目的路径。 */
     if (bq_count() > 0) {
         BackendQueueEntry current;
-        const char *anchor = (bq_current(&current) == 0) ? current.path : NULL;
+        char anchor_path[MAX_PATH_LEN];
+        const char *anchor = audio_current_track_path(anchor_path, sizeof(anchor_path))
+                                 ? anchor_path
+                                 : ((bq_current(&current) == 0) ? current.path : NULL);
         play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
     }
+    audio_sync_queue_position();
     g_app_config.default_play_mode = g_play_mode;
     save_config();
     core_notify_state_changed();
@@ -379,9 +418,13 @@ void cycle_play_mode(void)
     log_info("audio", "Play mode changed: %d (%s)", g_play_mode, get_play_mode_str());
     if (bq_count() > 0) {
         BackendQueueEntry current;
-        const char *anchor = (bq_current(&current) == 0) ? current.path : NULL;
+        char anchor_path[MAX_PATH_LEN];
+        const char *anchor = audio_current_track_path(anchor_path, sizeof(anchor_path))
+                                 ? anchor_path
+                                 : ((bq_current(&current) == 0) ? current.path : NULL);
         play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
     }
+    audio_sync_queue_position();
     g_app_config.default_play_mode = g_play_mode;
     save_config();
     core_notify_state_changed();
@@ -414,7 +457,19 @@ void apply_playback_speed_change(void)
         int was_paused = (g_play_state == PLAY_STATE_PAUSED);
         int current_idx = g_current_play_index;
         int current_pos = g_current_position;
+        char current_path[MAX_PATH_LEN];
+        snprintf(current_path, sizeof(current_path), "%s", g_current_play_path);
+        if (current_idx < 0 && current_path[0] != '\0') {
+            current_idx = bq_position_of_path(current_path);
+        }
         pthread_mutex_unlock(&g_play_mutex);
+
+        if (current_idx < 0) {
+            /* 当前条目已从队列移除：无法按队列位置重启，但倍速仍会应用到
+             * 下一首。不要用 -1 调 play_audio() 把正在播放的声音打断。 */
+            log_warn("audio", "Speed change: current track is no longer in the queue");
+            return;
+        }
 
         g_initial_seek_position = current_pos;
         pthread_mutex_lock(&g_play_mutex);
@@ -503,7 +558,7 @@ void persist_playback_session_state(void)
 {
     int should_resume = 0;
     int play_index = -1, play_position = 0;
-    char track_path[MAX_PATH_LEN], track_folder_path[MAX_PATH_LEN];
+    char track_path[MAX_PATH_LEN] = "", track_folder_path[MAX_PATH_LEN];
 
     /* 退出路径：先去抖落盘里攒着的音量/倍速，再写本次会话的恢复字段 */
     core_config_flush_dirty();
@@ -511,15 +566,24 @@ void persist_playback_session_state(void)
     reap_finished_playback_thread();
     pthread_mutex_lock(&g_play_mutex);
     if (g_play_thread_running &&
-        (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED) &&
-        g_current_play_index >= 0) {
-        should_resume = 1;
-        play_index = g_current_play_index;
+        (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED)) {
         play_position = g_current_position;
+        play_index = g_current_play_index;
+        snprintf(track_path, sizeof(track_path), "%s", g_current_play_path);
+        should_resume = (track_path[0] != '\0' || play_index >= 0);
     }
     pthread_mutex_unlock(&g_play_mutex);
 
-    if (!should_resume || bq_path_at(play_index, track_path, sizeof(track_path)) != 0) {
+    /* 兼容极端时序：路径尚未写入但旧下标仍指向队列条目时，按旧下标补齐。 */
+    if (should_resume && track_path[0] == '\0') {
+        if (play_index >= 0 && bq_path_at(play_index, track_path, sizeof(track_path)) == 0) {
+            /* track_path ready */
+        } else {
+            track_path[0] = '\0';
+        }
+    }
+
+    if (!should_resume || track_path[0] == '\0') {
         g_app_config.resume_last_playback = 0;
         g_app_config.last_played_position = 0;
         g_app_config.last_played_folder_path[0] = '\0';
@@ -602,6 +666,7 @@ void play_audio(int index)
     int is_speed_change_restart = (g_initial_seek_position > 0);
     if (!is_speed_change_restart && g_play_state == PLAY_STATE_PLAYING && g_current_play_index == index) {
         log_debug("audio", "Skipping play: same index=%d already playing", index);
+        snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
@@ -625,6 +690,7 @@ void play_audio(int index)
                 if (!g_play_thread_active) {
                     g_pending_playback_index = -1;
                     g_current_play_index = index;
+                    snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);
                     g_play_thread_active = 1;
                     g_play_thread_running = 1;
                     g_play_thread_finished = 0;
@@ -643,6 +709,7 @@ void play_audio(int index)
 
     g_pending_playback_index = -1;
     g_current_play_index = index;
+    snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);
     g_play_thread_active = 1;
     g_play_thread_running = 1;
     g_play_thread_finished = 0;
@@ -659,6 +726,7 @@ start_playback:
         pthread_mutex_lock(&g_play_mutex);
         g_play_thread_active = 0;
         g_current_play_index = -1;
+        g_current_play_path[0] = '\0';
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
@@ -672,6 +740,7 @@ start_playback:
         g_play_thread_running = 0;
         g_play_state = PLAY_STATE_STOPPED;
         g_current_play_index = -1;
+        g_current_play_path[0] = '\0';
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
@@ -716,10 +785,9 @@ void pause_audio(void)
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
-    if (g_current_play_index < 0 || g_current_play_index >= bq_count()) {
-        pthread_mutex_unlock(&g_play_mutex);
-        return;
-    }
+    /* 不检查队列下标：当前条目可能已被 Queue.RemoveAt/Clear 从队列中移除，
+     * 但播放线程仍在出声；此时仍应允许暂停。当前曲目的身份是
+     * g_current_play_path，而不是队列位置。 */
     g_play_state = PLAY_STATE_PAUSED;
     audio_backend_pause_stream();
     pthread_mutex_unlock(&g_play_mutex);
@@ -733,10 +801,6 @@ void resume_audio(void)
     log_debug("audio", "resume_audio() called");
     pthread_mutex_lock(&g_play_mutex);
     if (g_play_state != PLAY_STATE_PAUSED || !g_play_thread_running) {
-        pthread_mutex_unlock(&g_play_mutex);
-        return;
-    }
-    if (g_current_play_index < 0 || g_current_play_index >= bq_count()) {
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
@@ -758,6 +822,7 @@ void stop_audio(void)
     g_seek_request = 0;
     g_play_state = PLAY_STATE_STOPPED;
     g_current_play_index = -1;
+    g_current_play_path[0] = '\0';
     g_audio_sample_rate = 0;
     g_audio_bit_rate = 0;
     g_audio_bit_depth = 0;

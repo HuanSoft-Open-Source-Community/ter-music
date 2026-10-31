@@ -17,6 +17,7 @@
  */
 
 #include "player/player.h"
+#include "player/player_backend.h"
 
 #include "app/open.h"
 #include "audio/audio.h"
@@ -280,7 +281,19 @@ const InfoPlayback *player_local_playback(void)
 
 int player_local_track_index(void)
 {
-    return (playlist_count() > 0 && g_current_play_index >= 0) ? g_current_play_index : -1;
+    /* 门面契约：返回**内容列表物理下标**，不是后端队列位置。队列被 shuffle/
+     * 组模式重排后两者不同；当前曲目的身份以正在出声的路径为准。 */
+    char current_path[MAX_PATH_LEN];
+    if (audio_current_track_path(current_path, sizeof(current_path))) {
+        return playlist_find_track_index_by_path(current_path);
+    }
+    if (g_current_play_index >= 0 && g_current_play_index < bq_count()) {
+        BackendQueueEntry entry;
+        if (bq_entry_at(g_current_play_index, &entry) == 0) {
+            return playlist_find_track_index_by_path(entry.path);
+        }
+    }
+    return -1;
 }
 
 int player_local_track_metadata(int index, Track *out)
@@ -302,12 +315,30 @@ float player_local_speed(void)          { return g_playback_speed; }
 
 void player_local_play(int track_index)
 {
+    int queue_position = -1;
     if (track_index >= 0 && track_index < playlist_count()) {
-        play_audio(track_index);
+        char path[MAX_PATH_LEN];
+        if (playlist_get_track_path(track_index, path, sizeof(path)) == 0) {
+            queue_position = bq_position_of_path(path);
+            if (queue_position < 0) {
+                /* 目标不在当前队列：若它在完整内容列表里，find 会以目标为锚
+                 * 从完整内容重建队列（含跨高级组选曲），无需先做一次旧锚点同步。 */
+                queue_position = player_local_queue_find(path);
+            }
+        }
+        if (queue_position >= 0) {
+            play_audio(queue_position);
+        }
         app_set_selection_for_track(track_index);
     } else if (playlist_count() > 0) {
-        int index = (g_current_play_index >= 0) ? g_current_play_index : 0;
-        play_audio(index);
+        char current_path[MAX_PATH_LEN];
+        if (audio_current_track_path(current_path, sizeof(current_path))) {
+            queue_position = bq_position_of_path(current_path);
+        }
+        if (queue_position < 0) {
+            queue_position = (g_current_play_index >= 0) ? g_current_play_index : 0;
+        }
+        play_audio(queue_position);
     }
     refresh_snapshot();
 }
@@ -506,7 +537,8 @@ int player_local_queue_clear(void)
 
 int player_local_queue_shuffle(void)
 {
-    bq_shuffle_rest();
+    /* 与远端 Queue.Shuffle 同一契约：当前条目置首，其余打乱。 */
+    bq_shuffle_keep_current();
     play_local_queue_sync_mirror();
     refresh_snapshot();
     return 0;
@@ -522,6 +554,19 @@ int player_local_queue_push(void)
 
 int player_local_queue_find(const char *path)
 {
+    int position = bq_position_of_path(path);
+    if (position >= 0) {
+        return position;
+    }
+    if (!path || playlist_find_track_index_by_path(path) < 0) {
+        return -1;
+    }
+    /* 本地高级组模式（folder/album/artist）会把队列收敛到当前组；用户从
+     * 曲库/搜索选中另一组的曲目时，必须从**完整内容列表**以目标为锚重建，
+     * 不能只在旧队列里重排（旧队列本身已经不含目标）。 */
+    if (playlist_queue_sync_with_anchor(path) < 0) {
+        return -1;
+    }
     return bq_position_of_path(path);
 }
 
@@ -630,11 +675,13 @@ int player_local_lyrics_document(int offset, int count, PlayerLyricsDoc *out)
     out->offset = offset;
 
     char track_id[96] = "";
-    if (g_current_play_index >= 0 && g_current_play_index < playlist_count()) {
-        char track_path[MAX_PATH_LEN];
-        if (playlist_get_track_path(g_current_play_index, track_path,
-                                    sizeof(track_path)) == 0) {
-            info_build_track_id(track_id, sizeof(track_id), track_path);
+    char current_path[MAX_PATH_LEN];
+    if (audio_current_track_path(current_path, sizeof(current_path))) {
+        info_build_track_id(track_id, sizeof(track_id), current_path);
+    } else if (g_current_play_index >= 0 && g_current_play_index < bq_count()) {
+        BackendQueueEntry entry;
+        if (bq_entry_at(g_current_play_index, &entry) == 0) {
+            info_build_track_id(track_id, sizeof(track_id), entry.path);
         }
     }
     snprintf(out->track_id, sizeof(out->track_id), "%s", track_id);

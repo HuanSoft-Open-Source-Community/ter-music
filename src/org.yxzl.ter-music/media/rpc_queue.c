@@ -105,9 +105,12 @@ static DBusMessage *rpc_queue_reply_page(DBusMessage *message, int offset, int c
     return reply;
 }
 
-/* 队列编辑的公共收尾：重建队列派生状态并发信号 */
+/* 队列编辑的公共收尾：把正在出声的曲目位置重新对齐，再重建派生状态并发信号。
+ * Set/Append/Move/Remove/Shuffle/Clear/PlayAt 都经过这里，因此
+ * g_current_play_index 不会停留在旧队列位置。 */
 static void rpc_queue_after_edit(void)
 {
+    audio_sync_queue_position();
     core_notify_state_changed();
     rpc_queue_emit_changed();
 }
@@ -243,8 +246,8 @@ DBusMessage *rpc_queue_handle(DBusMessage *message)
      * 与前端下发的数组顺序决定，核心不再单独提供“重建”入口。 */
 
     if (strcmp(member, "Shuffle") == 0) {
-        /* 当前条目置首、其余打乱（后端队列的洗牌语义） */
-        bq_shuffle_rest();
+        /* 当前条目置首、其余打乱（后端队列的洗牌语义）。 */
+        bq_shuffle_keep_current();
         rpc_queue_after_edit();
         return rpc_reply_bool(message, 1);
     }

@@ -14,6 +14,7 @@
 #include "types.h"
 #include "audio/play_queue.h"
 #include "audio/play_mode_util.h"
+#include "audio/audio.h"
 #include "queue/backend_queue.h"
 #include "i18n/i18n.h"
 #include "logger/logger.h"
@@ -76,6 +77,7 @@ void play_queue_rebuild(PlayQueue *q, PlayMode mode, const char *current_track_p
 
     if (bq_count() == 0) {
         sync_play_queue_handle();
+        audio_sync_queue_position();
         return;
     }
 
@@ -97,6 +99,7 @@ void play_queue_rebuild(PlayQueue *q, PlayMode mode, const char *current_track_p
     }
 
     sync_play_queue_handle();
+    audio_sync_queue_position();
 }
 
 /* ============================================================
