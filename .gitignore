@@ -5,7 +5,10 @@
 .directory
 
 # Build files
+# /build/ is the reference tree; /build-*/ catches every ad-hoc CMake tree
+# (build-mig, build-t2, build-fixexit, build-audit-*, ...) left by local audits.
 /build/
+/build-*/
 CMakeCache.txt
 CMakeFiles/
 Makefile
@@ -59,14 +62,10 @@ oadoc/
 .local/
 .tmp/*
 .*_temp/
-.appimagetool/*
+.appimagetool/
 squashfs-root/*.cache/
 .cache/
+.screenshots/
 scripts/docker/uab-tools/
 __pycache__/
-
-# Local verification build trees (not part of the accepted diff)
-/build-audit-*/
-/build-test9/
-/build-fix12/
 
