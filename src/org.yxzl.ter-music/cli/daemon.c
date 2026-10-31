@@ -148,20 +148,35 @@ static int daemon_prepare_logging(int debug) {
 
 static void daemon_shutdown(void) {
     log_info("daemon", "Shutting down daemon");
-    /* 先持久化会话并释放 D-Bus 名字，再收尾音频：
-     * 播放线程/音频设备的收尾可能较慢（极端情况下阻塞在设备写入，
-     * 见 audio.c 的 wait_for_playback_thread_shutdown），
-     * 但“实例是否在运行”必须立刻对其他进程可见，否则
-     * `ter-music daemon stop/restart` 会一直等到超时。 */
+    /* 收尾顺序：播放彻底停止之后才释放 D-Bus 主总线名。
+     *
+     * 为什么不再“先放名字、后收尾音频”：名字（org.mpris.MediaPlayer2.ter_music）
+     * 一消失，前端就判定“没有核心在跑”，而本进程此刻可能仍在出声——播放线程还没
+     * 退出、后端流还没销毁。用户在这个“名字没了、声音还在”的窗口里按 q 退出再立刻
+     * 启动 TUI，cli_ensure_core_for_frontend() 会经 daemon_start_background() 拉起
+     * 第二个核心，两个核心各一路播放流 = 叠播，而且 `daemon stop` 只停得掉新接入的
+     * 那一路。所以对外可见的“实例消失”必须晚于播放线程退出 + 后端流销毁
+     * （audio_backend_shutdown()）。
+     *
+     * 代价：`daemon stop`/`restart` 与前端退出看到“实例消失”的时间，最多延后到
+     * wait_for_playback_thread_shutdown() 的上限（2s）再加后端流销毁的耗时。
+     *
+     * 为什么仍然可接受：wait_for_playback_thread_shutdown() 自带 2s 上限（极端情况
+     * 阻塞在设备写入也不会无限等），而 CLI 侧等待名字释放的上限是 5s（daemon stop、
+     * 次要实例）与 10s（daemon restart），见 cli/cli.c 的 cli_wait_until_offline()，
+     * 不会被这次收尾顺序顶穿。
+     *
+     * persist_playback_session_state() 保持在最前：它读的是播放线程此刻的实时状态
+     * （g_play_thread_running / g_current_position），必须趁还没收尾时落盘。
+     * bq_shutdown() 保持在名字释放之后：它不涉及出声，沿用“名字释放后不再对外
+     * 服务”的既有节奏；队列本身是前端下发的，退出时不落盘——前端持有内容真相。 */
     persist_playback_session_state();
-    media_session_shutdown();
-
     stop_audio();
     wait_for_playback_thread_shutdown();
-    /* 后端只做播放：不保存内容列表、不碰临时播放列表（那些归前端）。
-     * 队列本身是前端下发的，退出时不再落盘——前端持有内容真相。 */
-    bq_shutdown();
     audio_backend_shutdown();
+    media_session_shutdown();
+
+    bq_shutdown();
     reset_album_cover_cache();
     info_release_cover_cache();
 

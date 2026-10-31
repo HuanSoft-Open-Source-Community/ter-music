@@ -13,6 +13,8 @@
 #   S8  stop_core_on_exit 缺省态（=1）：q 与 F9 正常退出后核心必须离线。
 #   S9  没能接入核心的前端（--bus 指向一个不在线的名字）退出：既不改动总线上既有核心
 #       的存活与曲目状态，也不留下新实例（详见 S9 段注释：本段不是接入门控的判别性测试）。
+#   S10 收尾顺序不变量：核心释放 D-Bus 总线名之前，播放必须已经彻底停止
+#       （顺序颠倒就会重现“名字没了、声音还在”的窗口 → 前端在该窗口里拉起第二个核心 → 叠播）。
 #
 # 用法：scripts/test/lifecycle-e2e.sh [--bin <ter-music>] [--keep]
 # 环境：需要会话总线（未设置时用 dbus-run-session）；需要 ffmpeg 造素材。
@@ -27,7 +29,7 @@ KEEP=0
 WORK_DIR=""
 
 usage() {
-    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # 原始参数：解析循环会 shift 掉 "$@"，重入私有总线时必须带着它
@@ -44,8 +46,10 @@ done
 
 PASS=0
 FAIL=0
+SKIP=0
 ok()   { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1"; }
+skip() { SKIP=$((SKIP + 1)); printf '  SKIP %s\n' "$1"; }
 info() { printf -- '--- %s\n' "$1"; }
 
 # ── 独占的总线：默认起私有会话总线 ───────────────────────────────
@@ -567,6 +571,155 @@ else
     for _ in $(seq 1 20); do daemon_up || break; sleep 0.1; done
 fi
 
+# ── S10：收尾顺序不变量——总线名释放前，播放必须已经彻底停止 ─────────────
+# 叠播（反复启停 TUI 后多个播放线程并行）的根因不在音频后端，而在 daemon_shutdown()
+# 的收尾顺序：一旦先 media_session_shutdown() 释放主总线名、后收尾播放，就留下一个
+# “名字已消失、进程仍在出声”的窗口；用户在该窗口里 q 退出再立刻启动 TUI，
+# cli_ensure_core_for_frontend() 判定“没有核心”，daemon_start_background() 便拉起
+# 第二个核心 → 两路播放流并行，而 `daemon stop` 只停得掉前端新接入的那一路。
+# 本段守这条不变量：stop_audio() 早于播放线程退出，线程退出早于总线名释放。
+#
+# 判定只看核心**调试日志的行序**，不看是否真的出声，所以无声卡/无 PipeWire 的 CI
+# 同样能跑（后端是 ALSA 还是 Pulse 都无所谓）。唯一前提是核心能进 playing 态，
+# 进不去就 skip 并打印原因，绝不让断言空洞地通过。
+# 三行都取 `Shutting down daemon` 之后首次出现的行号：该行是 daemon_shutdown() 打印
+# 的第一条，锚在它之后即可排除“曲目自然播完”同样会打的 Playback thread exiting
+# （素材也因此用 60 秒长音，收尾时绝未播完）。
+# `Releasing D-Bus name` 由 media_session_shutdown() 在 dbus_bus_release_name() 前打印
+# （log_debug；实测 --debug 下确实落盘）。万一某环境看不到它，退回同一函数更早打印的
+# `Shutting down media session`：释放动作在其后，判定只会更宽松而不会更松到失真。
+info "S10 收尾顺序不变量：总线名释放之前，播放必须已经彻底停止"
+
+core_pids() {   # 只数核心进程（`daemon foreground`）：[ ] 让模式串本身匹配不到脚本与
+                # python 包装进程的命令行（与 pipewire-playback-census-e2e.sh 同口径）
+    pgrep -f 'daemon[ ]foreground' 2>/dev/null | tr '\n' ' '
+}
+
+core_count() {
+    local n=0 pid
+    for pid in $(core_pids); do
+        n=$((n + 1))
+    done
+    printf '%s' "$n"
+}
+
+s10_log_dir="$XDG_CONFIG_HOME/ter-music"
+s10_log_before="$(ls -1t "$s10_log_dir"/ter-music-debug-*.log 2>/dev/null | head -1)"
+
+"$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
+for _ in $(seq 1 20); do daemon_up || break; sleep 0.1; done
+
+cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="9">
+  <preferences>
+    <stop_core_on_exit>1</stop_core_on_exit>
+    <core_exit_when_no_frontend>0</core_exit_when_no_frontend>
+    <volume_percent>80</volume_percent>
+  </preferences>
+</ter-music-config>
+EOF
+
+# 本段自己造一条 60 秒长音（开头夹具那批素材只有 6 秒：播完会自然打线程退出行）
+s10_music="$WORK_DIR/s10-music"
+mkdir -p "$s10_music"
+s10_material=""
+if command -v ffmpeg >/dev/null 2>&1; then
+    if ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=520:duration=60" \
+            -c:a pcm_s16le -y "$s10_music/long-60s.wav" >/dev/null 2>&1; then
+        s10_material="$s10_music/long-60s.wav"
+    fi
+fi
+
+# 起一个 --debug 核心（daemon_prepare_logging 把调试日志落到配置目录）
+"$TM_BIN" daemon start --debug >/dev/null 2>&1 || true
+for _ in $(seq 1 25); do daemon_up && break; sleep 0.2; done
+s10_log="$(ls -1t "$s10_log_dir"/ter-music-debug-*.log 2>/dev/null | head -1)"
+
+if ! daemon_up; then
+    bad "S10：夹具没能用 --debug 起一个核心（收尾顺序无从判定）"
+elif [ -z "$s10_material" ]; then
+    skip "S10：没有 ffmpeg（或素材生成失败），造不出 60 秒长音来保证收尾时仍在播"
+    "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
+elif [ -z "$s10_log" ] || [ "$s10_log" = "$s10_log_before" ]; then
+    bad "S10：本次 --debug 核心没有写出自己的调试日志（$s10_log_dir/ter-music-debug-*.log）"
+    "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
+else
+    "$TM_BIN" play "$s10_music" >/dev/null 2>&1 || true
+    s10_state=""
+    for _ in $(seq 1 40); do
+        s10_state="$(snap_field 'doc["playback"]["state"]')"
+        [ "$s10_state" = "playing" ] && break
+        sleep 0.25
+    done
+
+    if [ "$s10_state" != "playing" ]; then
+        skip "S10：该环境里核心始终进不了 playing 态（实测 state=${s10_state:-空}），播放收尾窗口无从观测"
+        "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
+    else
+        # 触发退出：`daemon stop` 发的就是 Control.Quit（与前端 q 退出同一条收尾路径）。
+        # 放后台，好让采样循环盯着整个收尾过程；它自己要等名字释放（上限 5s）。
+        "$TM_BIN" daemon stop >/dev/null 2>&1 &
+        s10_stop_job=$!
+        s10_max_cores=0
+        s10_max_pids=""
+        s10_zero_streak=0
+        for _ in $(seq 1 80); do          # 每 50ms 采一次，上限 4s
+            s10_cores_now="$(core_count)"
+            if [ "${s10_cores_now:-0}" -gt "$s10_max_cores" ]; then
+                s10_max_cores="$s10_cores_now"
+                s10_max_pids="$(core_pids)"
+            fi
+            if [ "${s10_cores_now:-0}" -eq 0 ]; then
+                s10_zero_streak=$((s10_zero_streak + 1))
+                [ "$s10_zero_streak" -ge 3 ] && break
+            else
+                s10_zero_streak=0
+            fi
+            sleep 0.05
+        done
+        wait "$s10_stop_job" 2>/dev/null
+        s10_stop_rc=$?
+
+        s10_anchor="$(awk '/\[daemon\] Shutting down daemon/{print NR; exit}' "$s10_log")"
+        s10_line_stop="$(awk -v a="${s10_anchor:-0}" 'NR>a && /stop_audio\(\) called/{print NR; exit}' "$s10_log")"
+        s10_line_exit="$(awk -v a="${s10_anchor:-0}" 'NR>a && /Playback thread exiting/{print NR; exit}' "$s10_log")"
+        s10_release_mark="Releasing D-Bus name"
+        s10_line_release="$(awk -v a="${s10_anchor:-0}" 'NR>a && /Releasing D-Bus name/{print NR; exit}' "$s10_log")"
+        if [ -z "$s10_line_release" ]; then
+            s10_release_mark="Shutting down media session"
+            s10_line_release="$(awk -v a="${s10_anchor:-0}" 'NR>a && /Shutting down media session/{print NR; exit}' "$s10_log")"
+        fi
+
+        if [ -z "$s10_anchor" ]; then
+            bad "S10：核心日志里没有 'Shutting down daemon'（$s10_log），收尾记录缺失，顺序无从判定"
+        elif [ -z "$s10_line_stop" ] || [ -z "$s10_line_exit" ] || [ -z "$s10_line_release" ]; then
+            bad "S10：收尾日志缺行，无法判定顺序（stop_audio=${s10_line_stop:-无} 线程退出=${s10_line_exit:-无} ${s10_release_mark}=${s10_line_release:-无}）"
+        elif [ "$s10_line_stop" -lt "$s10_line_exit" ] && [ "$s10_line_exit" -lt "$s10_line_release" ]; then
+            ok "S10：总线名在播放彻底停止之后才释放（stop_audio@行${s10_line_stop} < 线程退出@行${s10_line_exit} < ${s10_release_mark}@行${s10_line_release}）"
+        else
+            bad "总线名在播放停止之前就被释放（叠播窗口重现）：stop_audio@行${s10_line_stop:-无} / 线程退出@行${s10_line_exit:-无} / ${s10_release_mark}@行${s10_line_release:-无}"
+            for s10_ln in "$s10_line_stop" "$s10_line_exit" "$s10_line_release"; do
+                [ -n "$s10_ln" ] || continue
+                printf '       %s\n' "$(awk -v n="$s10_ln" 'NR==n' "$s10_log")"
+            done
+        fi
+
+        if [ "${s10_max_cores:-0}" -gt 1 ]; then
+            bad "S10：退出过程中同时存在 ${s10_max_cores} 个 daemon foreground 核心（叠播的直接形态），pid=${s10_max_pids}"
+        else
+            ok "S10：退出过程中核心进程数从未超过 1（峰值 ${s10_max_cores}，每 50ms 采样、上限 4s）"
+        fi
+
+        # 新顺序的代价实测条：把“先停播再放名字”多花的时间摊在 CLI 的 5s 离线等待里
+        if [ "${s10_stop_rc:-0}" -ne 0 ]; then
+            bad "S10：daemon stop 没能在 5s 上限内等到实例离线（退出码 $s10_stop_rc）"
+        else
+            ok "S10：daemon stop 在 CLI 的 5s 离线上限内等到名字释放（收尾顺序调整没顶穿它）"
+        fi
+    fi
+fi
+
 info "结果"
-printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"
+printf '%d 通过, %d 失败, %d 跳过\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

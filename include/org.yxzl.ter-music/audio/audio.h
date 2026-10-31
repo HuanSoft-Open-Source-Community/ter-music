@@ -26,6 +26,12 @@ void toggle_playback_speed(void);
 void apply_playback_speed_change(void);
 void init_ffmpeg();
 void init_audio_device();
+/* 本进程是否初始化过音频引擎：只有 core 宿主（local TUI / daemon）为 1。
+ * 远端前端用它拒绝任何本地起播与本地音频收尾。 */
+int audio_engine_initialized(void);
+/* 停止并销毁当前音频后端的流（PulseAudio / ALSA / PipeWire）。
+ * 进程退出时必须在释放自己的 D-Bus 主总线名之前调用：否则新的前端会在
+ * “名字已经消失、旧进程仍在出声”的窗口里另起一个核心，两路播放叠在一起。 */
 void audio_backend_shutdown(void);
 int audio_backend_is_available(int backend);
 void play_audio(int index);
@@ -49,7 +55,9 @@ void set_volume_percent(int volume);
 void adjust_volume(int delta);
 void persist_playback_session_state(void);
 
-/* 当前播放位置 / 总时长（秒）。无播放时返回 0。
+/* 当前可听播放位置 / 总时长（秒）。无播放时返回 0。
+ * 位置已扣除后端尚未消费的缓冲（PipeWire 的环可提前约 3 秒），因此
+ * 断点恢复/MPRIS/进度条都以用户实际听到的位置为准。
  * 以访问器形式暴露，避免非 TUI 模块（info/cli）为读取两个全局量
  * 而包含 ui/ui.h（该头文件引入 ncurses）。 */
 int audio_get_position_seconds(void);

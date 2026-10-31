@@ -62,6 +62,22 @@ struct pipewire_funcs PW = {0};
 
 int g_active_backend = AUDIO_BACKEND_AUTO;
 
+/* 本进程是否初始化过音频引擎（core 宿主才会调用 init_audio_device()）。
+ * 远端前端只做 D-Bus 客户端：它绝不能在本进程起播放线程/占音频设备。
+ * 这个标志守住那条边界，详见 play_audio() 的退出闸门。 */
+static int g_audio_engine_initialized = 0;
+
+/* 用户显式指定的后端（初始化时从配置捕获）：运行时回退时优先尝试它 */
+int g_requested_backend = AUDIO_BACKEND_AUTO;
+
+/* 音频后端候选顺序：PipeWire > PulseAudio > ALSA。
+ * AUTO 选择与运行时回退共用这一顺序（定义在此处供 backend_ops.c 复用）。 */
+const int g_backend_candidates[] = {
+    AUDIO_BACKEND_PIPEWIRE,
+    AUDIO_BACKEND_PULSE,
+    AUDIO_BACKEND_ALSA
+};
+
 pthread_mutex_t audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t g_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t g_visualizer_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -182,9 +198,10 @@ void audio_backend_shutdown(void)
 }
 
 int audio_backend_is_available(int backend) {
-    if (backend == AUDIO_BACKEND_PULSE)    return pulse_loaded;
-    if (backend == AUDIO_BACKEND_ALSA)     return alsa_loaded;
-    if (backend == AUDIO_BACKEND_PIPEWIRE) return pipewire_loaded;
+    /* 反映“探测通过”，而不是“库能否加载” */
+    if (backend == AUDIO_BACKEND_PULSE)    return (pulse_loaded && pa_connected) ? 1 : 0;
+    if (backend == AUDIO_BACKEND_ALSA)     return (alsa_loaded && alsa_ready) ? 1 : 0;
+    if (backend == AUDIO_BACKEND_PIPEWIRE) return pipewire_loaded ? 1 : 0;
     return 0;
 }
 
@@ -192,9 +209,90 @@ int audio_backend_is_available(int backend) {
  * Audio device initialization
  * ============================================================ */
 
+/* 启动阶段所有候选都失败时的有限重试：间隔约 500ms、总量约 2s，
+ * 覆盖“音频服务晚启动”的场景。 */
+#define BACKEND_SELECT_ATTEMPTS 5
+#define BACKEND_SELECT_RETRY_MS 500
+
+/* 探测一个候选后端，失败时把可读原因写入 *reason_out */
+static int probe_backend_candidate(int candidate, const char **reason_out)
+{
+    if (audio_backend_probe(candidate, reason_out) == 0) return 0;
+
+    log_info("audio", "%s backend unavailable: %s",
+             audio_backend_display_name(candidate),
+             (reason_out && *reason_out) ? *reason_out : "unknown");
+    return -1;
+}
+
+/* ALSA 设备探测失败 = 该后端在本机不可用：把原因明确告知用户 */
+static void report_alsa_probe_failure(const char *reason)
+{
+    if (!reason) return;
+    char msg[256];
+    audio_backend_format_message(msg, sizeof(msg),
+                                 i18n_get("audio.backend.alsa_probe_failed"),
+                                 NULL, NULL, reason);
+    core_status_push(msg);
+}
+
+/* 统一选择器：
+ *   显式选择 → 只探测该候选；
+ *   AUTO      → 依次探测，选中首个可用者。
+ * 返回选中的后端；AUDIO_BACKEND_AUTO 表示没有可用后端。 */
+static int select_audio_backend(int requested)
+{
+    if (requested != AUDIO_BACKEND_AUTO) {
+        log_info("audio", "Trying %s backend", audio_backend_display_name(requested));
+        const char *reason = NULL;
+        if (probe_backend_candidate(requested, &reason) == 0) {
+            log_info("audio", "%s backend selected", audio_backend_display_name(requested));
+            return requested;
+        }
+        if (requested == AUDIO_BACKEND_ALSA) report_alsa_probe_failure(reason);
+        log_error("audio", "%s backend selected but unavailable",
+                  audio_backend_display_name(requested));
+        return AUDIO_BACKEND_AUTO;
+    }
+
+    int selected = AUDIO_BACKEND_AUTO;
+    const char *alsa_reason = NULL;
+    for (int i = 0; i < BACKEND_CANDIDATE_COUNT; i++) {
+        int candidate = g_backend_candidates[i];
+        log_info("audio", "Trying %s backend", audio_backend_display_name(candidate));
+        const char *reason = NULL;
+        if (probe_backend_candidate(candidate, &reason) == 0) {
+            log_info("audio", "%s backend probe passed", audio_backend_display_name(candidate));
+            if (selected == AUDIO_BACKEND_AUTO) selected = candidate;
+            if (candidate == AUDIO_BACKEND_ALSA) alsa_reason = NULL;
+        } else if (candidate == AUDIO_BACKEND_ALSA) {
+            alsa_reason = reason;
+        }
+    }
+
+    /* 一个后端都选不出来时，ALSA 的失败原因才有诊断价值 */
+    if (selected == AUDIO_BACKEND_AUTO) report_alsa_probe_failure(alsa_reason);
+
+    if (selected != AUDIO_BACKEND_AUTO)
+        log_info("audio", "%s backend selected", audio_backend_display_name(selected));
+    return selected;
+}
+
+int audio_engine_initialized(void)
+{
+    return g_audio_engine_initialized;
+}
+
 void init_audio_device(void)
 {
     log_info("audio", "Initializing audio device");
+    /* 先置位：即使所有后端探测失败，本进程也已经是 core 宿主，运行时回退
+     * 仍允许在播放时重新探测（见 audio_backend_prepare_stream）。 */
+    g_audio_engine_initialized = 1;
+
+    /* 调用方（main.c / daemon.c）已把配置里的后端写进 g_active_backend */
+    int requested = g_active_backend;
+    g_requested_backend = requested;
 
     if (pulse_load() == 0) { pulse_loaded = 1; log_info("audio", "PulseAudio library loaded"); }
     else { pulse_loaded = 0; log_info("audio", "PulseAudio library not available"); }
@@ -203,71 +301,27 @@ void init_audio_device(void)
     if (pipewire_load() == 0) { pipewire_loaded = 1; log_info("audio", "PipeWire library loaded"); }
     else { pipewire_loaded = 0; log_info("audio", "PipeWire library not available"); }
 
-    /* PipeWire > PulseAudio > ALSA */
-    if (g_active_backend == AUDIO_BACKEND_AUTO || g_active_backend == AUDIO_BACKEND_PIPEWIRE) {
-        if (pipewire_loaded) {
-            log_info("audio", "Trying PipeWire backend");
-            if (pw_probe_backend() == 0) {
-                g_active_backend = AUDIO_BACKEND_PIPEWIRE;
-                log_info("audio", "PipeWire backend selected");
-                /* 后端名提示不再 printf(stdout)：local 模式下它在 initscr()
-                 * 之后执行、会污染 ncurses 屏幕；由调用方定向展示
-                 * （daemon 写 daemon.log，TUI 进状态行）。 */
-                return;
-            }
-            pipewire_unload(); pipewire_loaded = 0;
-            log_info("audio", "PipeWire connection failed, falling back");
-        } else if (g_active_backend == AUDIO_BACKEND_PIPEWIRE) {
-            log_error("audio", "PipeWire library could not be loaded");
-            return;
+    /* 统一选择：全部候选都失败时做有限次重试（覆盖“服务晚启动”） */
+    int selected = AUDIO_BACKEND_AUTO;
+    for (int attempt = 1; attempt <= BACKEND_SELECT_ATTEMPTS; attempt++) {
+        selected = select_audio_backend(requested);
+        if (selected != AUDIO_BACKEND_AUTO) break;
+        if (attempt < BACKEND_SELECT_ATTEMPTS) {
+            log_warn("audio", "No audio backend available, retry in %dms (attempt %d/%d)",
+                     BACKEND_SELECT_RETRY_MS, attempt, BACKEND_SELECT_ATTEMPTS);
+            usleep(BACKEND_SELECT_RETRY_MS * 1000);
         }
     }
 
-    if (g_active_backend == AUDIO_BACKEND_AUTO || g_active_backend == AUDIO_BACKEND_PULSE) {
-        if (pulse_loaded) {
-            log_info("audio", "Trying PulseAudio backend");
-            pa_ml = P.mainloop_new();
-            if (!pa_ml) { log_warn("audio", "Failed to create PulseAudio mainloop"); goto pulse_failed; }
-            pa_ctx = P.context_new(P.mainloop_get_api(pa_ml), APP_NAME);
-            if (!pa_ctx) { log_warn("audio", "Failed to create PulseAudio context"); P.mainloop_free(pa_ml); pa_ml = NULL; goto pulse_failed; }
-            P.context_connect(pa_ctx, NULL, PA_CONTEXT_NOFLAGS, NULL);
-            while (P.context_get_state(pa_ctx) != PA_CONTEXT_READY) {
-                if (P.context_get_state(pa_ctx) == PA_CONTEXT_FAILED || P.context_get_state(pa_ctx) == PA_CONTEXT_TERMINATED) {
-                    log_warn("audio", "Failed to connect to PulseAudio server");
-                    P.context_unref(pa_ctx); pa_ctx = NULL; P.mainloop_free(pa_ml); pa_ml = NULL; goto pulse_failed;
-                }
-                P.mainloop_iterate(pa_ml, 1, NULL);
-            }
-            pa_connected = 1;
-            g_active_backend = AUDIO_BACKEND_PULSE;
-            log_info("audio", "PulseAudio connected successfully");
-            /* 同上：后端名提示改由调用方定向展示，不写 stdout（详见 PipeWire 分支注释） */
-            return;
-
-pulse_failed:
-            pa_connected = 0;
-            if (g_active_backend == AUDIO_BACKEND_PULSE) { log_error("audio", "PulseAudio selected but unavailable"); return; }
-            log_info("audio", "PulseAudio not available, will try ALSA");
-        } else if (g_active_backend == AUDIO_BACKEND_PULSE) {
-            log_error("audio", "PulseAudio library could not be loaded");
-            return;
-        }
+    g_active_backend = selected;
+    if (selected != AUDIO_BACKEND_AUTO) {
+        log_info("audio", "Audio backend in use: %s", audio_backend_display_name(selected));
+        /* 后端名提示不再 printf(stdout)：local 模式下它在 initscr()
+         * 之后执行、会污染 ncurses 屏幕；由调用方定向展示
+         * （daemon 写 daemon.log，TUI 进状态行）。 */
+    } else {
+        log_error("audio", "No audio backend available");
     }
-
-    if (g_active_backend == AUDIO_BACKEND_AUTO || g_active_backend == AUDIO_BACKEND_ALSA) {
-        if (alsa_loaded) {
-            alsa_ready = 1;
-            g_active_backend = AUDIO_BACKEND_ALSA;
-            log_info("audio", "ALSA backend ready, device='default'");
-            /* 同上：后端名提示改由调用方定向展示，不写 stdout（详见 PipeWire 分支注释） */
-            return;
-        } else if (g_active_backend == AUDIO_BACKEND_ALSA) {
-            log_error("audio", "ALSA library could not be loaded");
-            return;
-        }
-    }
-
-    log_error("audio", "No audio backend available");
 
     /* Initialise equaliser from loaded config */
     init_equalizer_from_config();
@@ -305,7 +359,20 @@ void audio_set_initial_seek_position(int seconds)
 
 int audio_get_position_seconds(void)
 {
-    return g_current_position > 0 ? g_current_position : 0;
+    int position = g_current_position;
+
+    /* progress_tracker 统计的是“已写入后端”的样本：PipeWire 的 1MB 环形
+     * 缓冲会先装下约 3 秒音频再由 process 回调消费，直接返回会把进度、
+     * 断点恢复位置都报得比实际听到的提前一个环（q 退出后再启动会像凭空
+     * 多走了一段）。这里扣除后端尚未消费的帧，让对外位置等于可听位置。 */
+    if (g_play_state != PLAY_STATE_STOPPED && g_output_sample_rate > 0) {
+        int buffered_frames = audio_backend_buffered_frames();
+        if (buffered_frames > 0) {
+            int buffered_seconds = buffered_frames / g_output_sample_rate;
+            position -= buffered_seconds;
+        }
+    }
+    return position > 0 ? position : 0;
 }
 
 int audio_get_duration_seconds(void)
@@ -567,7 +634,8 @@ void persist_playback_session_state(void)
     pthread_mutex_lock(&g_play_mutex);
     if (g_play_thread_running &&
         (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED)) {
-        play_position = g_current_position;
+        /* 保存可听位置，而不是已写入环形缓冲的提前量（见 audio_get_position_seconds）。 */
+        play_position = audio_get_position_seconds();
         play_index = g_current_play_index;
         snprintf(track_path, sizeof(track_path), "%s", g_current_play_path);
         should_resume = (track_path[0] != '\0' || play_index >= 0);
@@ -645,6 +713,26 @@ static void persist_playback_session_on_switch(int index)
 
 void play_audio(int index)
 {
+    /* 退出闸门：一旦进程被要求退出（Control.Quit / SIGTERM / 总线丢失），
+     * 主循环可能在退出前继续派发同一批 D-Bus 消息。此时若还允许起播，
+     * 就会在“正在收尾的旧核心”里再拉起一个播放线程，与新前端随后接管的
+     * 核心叠在一起。退出一旦开始，播放线程只减不增。 */
+    if (g_should_exit) {
+        log_warn("audio", "play_audio(%d) ignored: process is shutting down", index);
+        return;
+    }
+
+    /* 进程边界：只有 core 宿主（local 模式的 TUI，或 daemon）初始化过音频
+     * 引擎，才允许创建播放线程。远端前端只经 D-Bus 下发命令；如果它在这里
+     * 意外走到本地起播，就会与核心各播一路，形成叠播（重音）。
+     * 注意：此闸门必须在 bq_play_at()/持久化之前，拒绝时不留任何副作用。 */
+    if (!g_audio_engine_initialized) {
+        log_error("audio",
+                  "play_audio(%d) refused: this process is a remote front end "
+                  "without an audio engine", index);
+        return;
+    }
+
     BackendQueueEntry entry;
     if (bq_entry_at(index, &entry) != 0) {
         log_warn("audio", "play_audio(%d): queue position out of range", index);
@@ -680,7 +768,9 @@ void play_audio(int index)
         g_play_state = PLAY_STATE_STOPPED;
         pthread_mutex_unlock(&g_play_mutex);
 
-        if (g_active_backend == AUDIO_BACKEND_PULSE) audio_backend_resume_stream();
+        /* 暂停中切歌：所有后端都要恢复流，否则写线程会一直停在“写不进”上，
+         * 切歌无法完成（ALSA/PipeWire 的写线程不会被 Pulse 的 corked 状态唤醒）。 */
+        audio_backend_resume_stream();
         signal_playback_thread();
 
         if (was_paused) {
@@ -744,7 +834,6 @@ start_playback:
         pthread_mutex_unlock(&g_play_mutex);
         return;
     }
-
     pthread_mutex_lock(&g_play_mutex);
     g_play_state = PLAY_STATE_PLAYING;
     pthread_mutex_unlock(&g_play_mutex);

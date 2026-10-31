@@ -1349,15 +1349,22 @@ void cleanup(void)
 
     /* 退出语义按后端分流（Task 4.3）：
      *   - local：本进程即核心，持久化会话、停止本地播放、等播放线程收尾；
-     *   - remote：前端不得 Control.Stop 核心、不得等待（本进程没有）播放线程、
-     *            更不得写会话恢复配置（持久化归核心）；Detach 或 Quit 已由 main 的
-     *            player_shutdown 按 stop_core_on_exit 决定，且仅在该前端已接入核心
-     *            （握手完成且持有 Attach 令牌）时才发送，这里不再重复停止。 */
+     *   - remote：前端不得 Control.Stop 核心、不得写会话恢复配置（持久化归核心）；
+     *            Detach 或 Quit 已由 main 的 player_shutdown 按 stop_core_on_exit
+     *            决定，且仅在该前端已接入核心（握手完成且持有 Attach 令牌）时才发送，
+     *            这里不再重复停止。若本进程因历史/回归路径真的初始化过音频引擎，
+     *            下面也只收掉本进程自己的引擎，绝不向核心发命令。 */
     if (player_backend() == PLAYER_BACKEND_LOCAL) {
         persist_playback_session_state(); /* config-ownership-allow: local(TUI-即-核心)分支才会执行到这里的会话持久化；remote 前端被上方 guard 挡离，持久化归核心 */
-        player_stop();
-        wait_for_playback_thread_shutdown();
     }
+
+    /* 收掉本进程的音频引擎：local 正常收；remote 只在检测到本进程被历史/
+     * 回归路径意外初始化过音频引擎时才收（正常远端前端没有本地音频）。
+     * 由门面决定，界面不直接碰 stop_audio()/audio_backend_shutdown()。
+     * 必须早于下面 media_session_shutdown() 释放主总线名：否则会留下
+     * “名字没了、PipeWire 流还在”的窗口，新 TUI/新核心与旧进程各一路播放
+     * → 叠播（多路重音）。 */
+    player_teardown_audio();
     media_session_shutdown();
     library_shutdown();
 

@@ -62,7 +62,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | 🎯 众视迁转 | 以F2至F8键符，迅疾迁转节度、往迹、曲帙、音乐库、语言诸视 |
 | ⚡ 应感无滞 | 百帧每秒之焕新，音程条贯流转顺滑 |
 | 🔧 CMake营构 | 当世营构之制，跨御统之性尤善 |
-| 🔊 音声传布 | 通PipeWire、PulseAudio、ALSA三枢，运行时自动检测（PipeWire > Pulse > ALSA） |
+| 🔊 音声传布 | 通PipeWire、PulseAudio、ALSA三枢；自动之式启时历探诸枢（PipeWire > Pulse > ALSA，ALSA者实启常器而调其度），探之不中者不选、设界面亦不列之；播时建流不遂，则复探余枢而退就，状语明其所迁 |
 | 🎛️ 10段均衡器 | ISO准图示均衡器，设中可视化条图 |
 | ⏩ 迅疾节度 | 六档迅迟之度，播弄中可随意迁转 |
 | 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约，由前端览之、下载于本地之藏 |
@@ -421,6 +421,7 @@ ter-music daemon stop
 - 不附子目者，`ter-music <path>` 仍入文墨之界。欲开恰名 `play`／`show` 之目录，当用 `-o ./play` 或 `ter-music tui play`。
 - `daemon start --open <目录>` 不复令核心扫描：今先启核心，再由此CLI进程（为前端）扫描其目录、成其队列而下付——与 `ter-music play <目录>` 同一途也。不带 `--open` 之 `daemon start` 惟启一空闲之核心，队列由随后接入之前端下付。
 - 总线之名同时惟许一实例执之；核心在行之时，`daemon start` 拒不再启（欲以次实例强启者，可用 `--force`）。前端（文墨之界与符令行）皆客也，可并存多者。次实例不隐：`daemon status` 以 stderr 历举其 pid 与总线之名，`daemon start --force` 即报新创之名，欲御之者，以 `--bus <名>` 缀于子命令之后（如 `ter-music daemon stop --bus <名>`），欲尽停之则以 `daemon stop --all`（主实例与诸次实例一举而尽）。
+- 核心收尾之际，声未绝则名不释：必待播弄之线程既退、后枢之流既毁，乃释总线之名。故 `q` 之后旋启前端者，所见者此将退之核心，不复别启其二——向者名先释而声犹在，遂有二核心并播一乐之患。其代价者，`daemon stop`／`restart` 见实例之亡，迟于旧时，至多迟一播弄线程收尾之限（二秒）加后枢流毁之顷；然符令行待其离线的度（五秒／十秒）犹足以容之。
 - `daemon stop` 于在行之文墨之界则拒之，非 `--force` 不得终也。
 - 核心所执之会话总线既亡，则核心**自退**：总线既亡，前端无可复联，犹据声器而不舍者，徒成一莫能止之播弄之进程耳。若核心自始未得总线（托管者于无会话总线之境启之），则不在此列。
 
@@ -734,7 +735,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `ui_language`：界语之ID。内置者为 `zh_CN`、`en_US`；经 F7 语言视图所纳之第三方语言ID（如 `ja_JP`）亦可用。非法之ID回退 `zh_CN`。
 - `volume_percent`：默音量之率（0-100）
 - `audio_latency_ms`：输出时延（千分秒）
-- `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）
+- `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）。自动之式启时历探诸枢；明择之枢倘实不可用，播时退就余枢并以状语告之，不默然而败
 - `sort_mode`：排序之式（0=默、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
 - `core_exit_when_no_frontend`：无前端接入时，令核心自退（0/1，默 0）。
@@ -1140,7 +1141,8 @@ Ter-Music者，纯然乐播之器也，本器不供、不藏、不分发任何�
 
 ## 卷十一 祛疑解惑
 **患：音声不发**
-- 音声后端按 PipeWire → PulseAudio → ALSA 序自动检知。行 `pactl info` 或 `pw-cli info` 以察何役运行
+- 音声后端按 PipeWire → PulseAudio → ALSA 序自动检知。自动之式启时历探诸枢（ALSA者实启常器），全不中则须臾复探；所择之枢播时建流不遂，复探余枢而退就，状语与志文皆明其所迁。行 `pactl info` 或 `pw-cli info` 以察何役运行
+- 探之不中之枢不复列于设界面（F2）→ 音声后端；明择之枢不可用者，亦如上退就，非默然而已
 - 察扬声器音量是否开启
 - 若用PipeWire，必 `pipewire` 与 `wireplumber` 之役运行
 - 若用PulseAudio，行 `systemctl status pulseaudio` 以验

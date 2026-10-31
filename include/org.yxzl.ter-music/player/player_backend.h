@@ -186,6 +186,7 @@ int player_remote_reconnect_in_ms(void);
 int  player_local_init(PlayerBackend backend, const char *bus_name);
 
 void player_local_shutdown(void);
+void player_local_teardown_audio(void);
 
 int  player_remote_init(PlayerBackend backend, const char *bus_name);
 

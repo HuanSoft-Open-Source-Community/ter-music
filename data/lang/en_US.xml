@@ -495,6 +495,11 @@
   <string key="audio.backend.pipewire">Using PipeWire backend</string>
   <string key="audio.backend.pulseaudio">Connected to PulseAudio</string>
   <string key="audio.backend.alsa">Using ALSA backend</string>
+  <string key="audio.backend.name.pipewire">PipeWire</string>
+  <string key="audio.backend.name.pulseaudio">PulseAudio</string>
+  <string key="audio.backend.name.alsa">ALSA</string>
+  <string key="audio.backend.fallback">Audio backend {from} is unavailable, switched to {to}</string>
+  <string key="audio.backend.alsa_probe_failed">ALSA device probe failed: {reason}</string>
   <string key="audio.status.downloading">Downloading...</string>
   <string key="audio.status.playing">Playing: </string>
   <string key="audio.err.pulseaudio_disconnected">PulseAudio disconnected</string>
@@ -505,6 +510,7 @@
   <string key="audio.err.alsa_open">Cannot open ALSA device</string>
   <string key="audio.err.alsa_config">Cannot configure ALSA device</string>
   <string key="audio.err.no_backend">No audio backend available</string>
+  <string key="audio.err.backend_select_failed">No usable audio backend: {reason}</string>
   <string key="audio.err.seek_failed">Seek failed</string>
   <string key="audio.err.cannot_open_file">Cannot open audio file</string>
   <string key="audio.err.cannot_read_stream">Cannot read stream info</string>

@@ -495,6 +495,11 @@
   <string key="audio.backend.pipewire">当前使用 PipeWire 音频后端</string>
   <string key="audio.backend.pulseaudio">已连接到 PulseAudio 服务</string>
   <string key="audio.backend.alsa">当前使用 ALSA 音频后端</string>
+  <string key="audio.backend.name.pipewire">PipeWire</string>
+  <string key="audio.backend.name.pulseaudio">PulseAudio</string>
+  <string key="audio.backend.name.alsa">ALSA</string>
+  <string key="audio.backend.fallback">音频后端 {from} 不可用，已切换到 {to}</string>
+  <string key="audio.backend.alsa_probe_failed">ALSA 设备探测失败：{reason}</string>
   <string key="audio.status.downloading">正在下载...</string>
   <string key="audio.status.playing">正在播放：</string>
   <string key="audio.err.pulseaudio_disconnected">PulseAudio 未连接</string>
@@ -505,6 +510,7 @@
   <string key="audio.err.alsa_open">无法打开 ALSA 设备</string>
   <string key="audio.err.alsa_config">无法配置 ALSA 设备</string>
   <string key="audio.err.no_backend">没有可用的音频后端</string>
+  <string key="audio.err.backend_select_failed">没有可用的音频后端：{reason}</string>
   <string key="audio.err.seek_failed">跳转失败</string>
   <string key="audio.err.cannot_open_file">无法打开音频文件</string>
   <string key="audio.err.cannot_read_stream">无法读取音频流信息</string>

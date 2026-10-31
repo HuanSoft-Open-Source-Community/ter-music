@@ -61,6 +61,17 @@ void player_shutdown(void)
     g_initialized = 0;
 }
 
+/* UI cleanup() 在会话持久化之后调用。远端前端正常情况下没有本地音频引擎，
+ * 直接 no-op；若检测到引擎被意外初始化（例如 facade 尚未初始化时的恢复
+ * 路径），也在这里收掉，避免“前端进程自己留一路流”。 */
+void player_teardown_audio(void)
+{
+    if (use_remote() && !audio_engine_initialized()) {
+        return;
+    }
+    player_local_teardown_audio();
+}
+
 /* 重连钩子：远端后端在“从断线恢复到已连接”时回调一次。
  * 前端（main）注册它，用来在核心重启后把内容队列补推回去——
  * 核心不认识内容，队列只有前端能给。 */

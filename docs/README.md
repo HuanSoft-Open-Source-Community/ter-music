@@ -72,7 +72,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🎯 **Multiple View Switching**: Quickly switch between settings, history, playlist, library, language and other views via F2-F8 function keys | <br /> |
 | ⚡ **Responsive UI**: 100 FPS refresh rate, smooth progress bar updates | <br /> |
 | 🔧 **CMake Build**: Modern build system, good cross-platform compatibility | <br /> |
-| 🔊 **Audio Backend**: Supports PipeWire, PulseAudio and ALSA output, auto-detected at runtime (PipeWire > Pulse > ALSA) | <br /> |
+| 🔊 **Audio Backend**: Supports PipeWire, PulseAudio and ALSA output. Auto mode probes each candidate at startup (PipeWire > Pulse > ALSA — service connectable, or for ALSA: the default device really opens and configures); a backend whose probe fails is neither auto-selected nor listed in Settings. If the chosen backend cannot open the stream at play time, the core re-probes the remaining candidates and falls back, announcing the switch in the status line | <br /> |
 | 🎛️ **10-band Equalizer**: ISO graphic equalizer with visual bar chart UI in settings | <br /> |
 | ⏩ **Playback Speed Control**: 6 levels of speed adjustment (0.75x-3.0x), switchable during playback | <br /> |
 | 📊 **Info Bar**: Displays sample rate, bit depth, bitrate and codec of current track | <br /> |
@@ -509,6 +509,14 @@ Notes:
   created, `daemon stop --all` stops the primary and every secondary in one go,
   and any CLI subcommand can be pointed at one instance by putting `--bus <name>`
   **after** the subcommand (`ter-music daemon stop --bus <name>`).
+- A core keeps its bus name until playback has really stopped (the playback
+  thread has exited and the backend stream has been destroyed), so a front end
+  started right after `q` finds that name still online and does not launch a
+  second core — two cores playing the same music at once is what used to happen
+  when the name was released before the audio stopped. The flip side is that
+  `daemon stop`/`restart` may see the instance disappear up to roughly the
+  playback-thread shutdown timeout (2s) plus the stream teardown later than
+  before; the CLI's own wait budgets (5s/10s) still cover it.
 - `daemon stop` refuses to terminate a running TUI unless `--force` is given.
 - The core also exits by itself when its session bus goes away: with no bus no
   front end can reach it any more, and a headless player that keeps holding the
@@ -934,7 +942,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `ui_language`: Interface language ID. Built-in packs are `zh_CN` and `en_US`; any third-party ID installed through the F7 language view is also valid (e.g. `ja_JP`). An invalid ID falls back to `zh_CN`.
 - `volume_percent`: Default volume percentage (0-100)
 - `audio_latency_ms`: Output latency in milliseconds
-- `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire)
+- `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire). Auto probes every candidate at startup; if an explicitly chosen backend turns out unavailable it falls back to the next working one at play time and the switch is announced in the status line
 - `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `cue_encoding`: CUE file character encoding (0=Auto, 1=UTF-8, 2=GB18030, 3=GBK, 4=BIG5, 5=Shift-JIS)
 - `core_exit_when_no_frontend`: let the core exit by itself once no front end has been attached for 10 s (0/1, default 0)
@@ -1288,7 +1296,8 @@ disappears (see
 ## 6. Frequently Asked Questions
 
 **No sound output**
-- The audio backend auto-detects in order: PipeWire → PulseAudio → ALSA. Run `pactl info` or `pw-cli info` to check which service is active
+- The audio backend is auto-detected in order: PipeWire → PulseAudio → ALSA. Auto mode probes each candidate at startup (for ALSA this really opens the default device), retries briefly when nothing answers, and falls back to the next working backend if the chosen one cannot open the stream — the switch is shown in the status line and in the log. Run `pactl info` or `pw-cli info` to check which service is active
+- A backend whose probe fails is not listed in Settings (F2) → Audio; an explicitly chosen but unavailable backend is replaced by the fallback above rather than silently failing
 - Check that your speaker volume is not muted
 - If using PipeWire, ensure `pipewire` and `wireplumber` services are running
 - If using PulseAudio, run `systemctl status pulseaudio` to verify
