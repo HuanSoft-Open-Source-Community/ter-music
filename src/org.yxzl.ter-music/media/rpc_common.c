@@ -22,8 +22,10 @@
 #include "logger/logger.h"
 #include "ui/braille/braille_art.h"
 #include "util/json.h"
+#include "util/utf8_safe.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -89,10 +91,65 @@ void rpc_send(DBusMessage *message) {
     dbus_message_unref(message);
 }
 
+/* 为 D-Bus 准备一个合法 UTF-8 视图：合法时零拷贝返回原指针，非法时才按
+ * 3 倍上限分配清洗缓冲区，并写 *owned 供调用方释放。libdbus 对非法 UTF-8
+ * 的 DBUS_TYPE_STRING 会直接断言 abort，所有动态文本都必须先经过这里。 */
+static const char *rpc_utf8_view(const char *value, char **owned)
+{
+    *owned = NULL;
+    if (!value) {
+        return "";
+    }
+    if (utf8_is_valid(value)) {
+        return value;
+    }
+
+    size_t length = strlen(value);
+    if (length > ((size_t)-1 - 1) / 3) {
+        return "";   /* 不可能是实际可发送的 D-Bus 字符串 */
+    }
+    size_t capacity = length * 3 + 1;
+    char *sanitized = malloc(capacity);
+    if (!sanitized) {
+        return "";
+    }
+    utf8_sanitize_copy(sanitized, capacity, value);
+    *owned = sanitized;
+    return sanitized;
+}
+
+void rpc_append_string(DBusMessage *message, const char *value)
+{
+    if (!message) {
+        return;
+    }
+    char *owned = NULL;
+    const char *safe = rpc_utf8_view(value, &owned);
+    dbus_message_append_args(message, DBUS_TYPE_STRING, &safe, DBUS_TYPE_INVALID);
+    free(owned);
+}
+
+void rpc_iter_append_string(DBusMessageIter *iter, const char *value)
+{
+    if (!iter) {
+        return;
+    }
+    char *owned = NULL;
+    const char *safe = rpc_utf8_view(value, &owned);
+    dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &safe);
+    free(owned);
+}
+
 DBusMessage *rpc_error(DBusMessage *message,
                                         const char *error_name,
                                         const char *text) {
-    return dbus_message_new_error(message, error_name, text);
+    /* libdbus 也要求 error message 文本是合法 UTF-8；与普通字符串参数
+     * 走同一条清洗路径，避免异常路径本身再 abort 一次。 */
+    char *owned = NULL;
+    const char *safe_text = rpc_utf8_view(text, &owned);
+    DBusMessage *reply = dbus_message_new_error(message, error_name, safe_text);
+    free(owned);
+    return reply;
 }
 
 int rpc_track_available(void) {
@@ -312,7 +369,7 @@ DBusMessage *rpc_reply_string(DBusMessage *message, const char *value) {
         return NULL;
     }
     const char *safe = value ? value : "";
-    dbus_message_append_args(reply, DBUS_TYPE_STRING, &safe, DBUS_TYPE_INVALID);
+    rpc_append_string(reply, safe);
     return reply;
 }
 

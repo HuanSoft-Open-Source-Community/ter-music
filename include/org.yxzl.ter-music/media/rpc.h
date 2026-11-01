@@ -141,6 +141,13 @@ DBusMessage *rpc_reply_string(DBusMessage *message, const char *value);
 DBusMessage *rpc_reply_bool(DBusMessage *message, int ok);
 DBusMessage *rpc_reply_int(DBusMessage *message, int value);
 
+/* 追加一个 UTF-8 合法的 DBUS_TYPE_STRING 参数。
+ * 合法值零拷贝直接通过；非法序列替换为 U+FFFD，绝不把非法字节交给 libdbus
+ * （libdbus 会断言 abort 整个进程）。所有动态文本（状态/错误/元数据/JSON/歌词）
+ * 都应经这两个出口进入 D-Bus。 */
+void rpc_append_string(DBusMessage *message, const char *value);
+void rpc_iter_append_string(DBusMessageIter *iter, const char *value);
+
 /* ── 共享引擎动作（MPRIS 与 Control 复用） ──────────────────────── */
 int rpc_track_available(void);
 int rpc_action_play(void);

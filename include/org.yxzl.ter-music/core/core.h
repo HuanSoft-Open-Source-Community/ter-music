@@ -20,7 +20,9 @@
 extern volatile sig_atomic_t g_should_exit;             /* SIGTERM / SIGINT / SIGHUP */
 extern volatile sig_atomic_t g_config_reload_requested; /* SIGHUP / D-Bus ReloadConfig */
 
-/* 状态消息缓冲长度 */
+/* 状态消息缓冲长度（含结尾 NUL）。core_status_push() 必须以 UTF-8 码点
+ * 边界截断并清洗非法序列：状态消息会原样进入 D-Bus 的 DBUS_TYPE_STRING，
+ * 半截多字节字符会让 libdbus 断言 abort。 */
 #define CORE_STATUS_MAX 256
 
 /* ── 每轮主循环工作 ─────────────────────────────────────────────── */

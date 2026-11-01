@@ -874,7 +874,12 @@ start_playback:
     load_lyrics(track_path, lyrics_source);
     update_album_cover_for_track(track_path);
 
-    char msg[64];
+    /* 状态消息 = 本地化前缀 + 标题（缺失时退回路径） + " - " + 艺术家。
+     * 缓冲区必须按字段上限预留：曾用 char[64]，75 字节的
+     * “正在播放：四重罪孽 - 洛天依Official、言和、乐正绫、DELA”
+     * 会被 snprintf 切在“正”的 UTF-8 序列中间，最终让 libdbus 断言
+     * 失败并 abort 整个核心。真正的码点边界截断在 core_status_push()。 */
+    char msg[MAX_PATH_LEN + MAX_META_LEN * 2 + 64];
     snprintf(msg, sizeof(msg), "%s%s - %s",
              i18n_get("audio.status.playing"),
              entry.title[0] ? entry.title : entry.path,
