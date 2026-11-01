@@ -363,7 +363,16 @@ void audio_set_initial_seek_position(int seconds)
 
 int audio_get_position_seconds(void)
 {
-    int position = g_current_position;
+    return (int)(audio_get_position_ms() / 1000);
+}
+
+int64_t audio_get_position_ms(void)
+{
+    int64_t position = progress_tracker_get_position_ms();
+    if (position <= 0 && g_current_position > 0) {
+        /* 跟踪器尚未就绪（刚切曲/刚恢复）时沿用播放线程写下的整秒位置 */
+        position = (int64_t)g_current_position * 1000;
+    }
 
     /* progress_tracker 统计的是“已写入后端”的样本：PipeWire 的 1MB 环形
      * 缓冲会先装下约 3 秒音频再由 process 回调消费，直接返回会把进度、
@@ -372,8 +381,7 @@ int audio_get_position_seconds(void)
     if (g_play_state != PLAY_STATE_STOPPED && g_output_sample_rate > 0) {
         int buffered_frames = audio_backend_buffered_frames();
         if (buffered_frames > 0) {
-            int buffered_seconds = buffered_frames / g_output_sample_rate;
-            position -= buffered_seconds;
+            position -= ((int64_t)buffered_frames * 1000) / g_output_sample_rate;
         }
     }
     return position > 0 ? position : 0;
