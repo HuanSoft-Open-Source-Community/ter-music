@@ -16,6 +16,7 @@
 - [中文（现代版）](README_zh-CN_Modern.md)
 - [Lyrics API (English)](../API_LYRICS_en_US.md)
 - [D-Bus Info & Control API (English)](../API_DBUS_en_US.md)
+- [TUI 局度之考（English）](../UI_LAYOUTS_en_US.md)
 
 ## 卷一 本志叙略
 ### 一 枢要功用
@@ -25,7 +26,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **内嵌歌辞之能**：斐氏AVDictionary与APE标签之文辞，优先于外.lrc文件
 - **10段图示均衡器**：ISO准频（31Hz-16kHz），双二阶IIR滤波，±12dB调幅，设中可视化条图，具**均衡器预设**与**软限幅**之能
 - **17种播弄之制**：自基础（序进、单曲回环、全帙周流、乱序一度、乱序杂陈）至进阶（按文件夹/专辑/艺术家分组）
-- 契LRC歌辞之文，循音程以同辉，逐节次以昭焕，毫厘不爽；**内嵌歌辞**（斐氏AVDictionary与APE标签）先于外.lrc文件。可于歌词定位模式中切换来源（Ctrl+L → Tab）
+- 契LRC歌辞之文，循音程以同辉，逐字以昭焕（逐字之签、行首尾之签、相邻行时之插值，三体皆通）；**内嵌歌辞**（斐氏AVDictionary与APE标签）先于外.lrc文件。可于歌词定位模式中切换来源（Ctrl+L → Tab）
 - 迅疾之度有六：曰迟、曰常、曰稍疾、曰疾、曰倍、曰三倍，任君节度
 - **音乐库**：SQLite库存储，FTS5全文搜检，按艺术家/专辑/流派览之，兼**递归子目录搜索**与增量跟踪
 - **播弄队列**：独立队列之界，显序号、当下播弄之标，可排序；队列归前端（核心惟行所授之径表），再启之时由乐目重建
@@ -35,8 +36,9 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - 自动录纪播弄之迹，便于回溯
 - 志录近所临之乐籍目录，无烦复寻
 - **色采之谱**：24套预设主题 + 1个自定槽位，前后色彩配对保护
+- **数据驭局**：8 个 JSON 预设定诸窗格之位、大小、比例与色；凡局必无缝铺满主区，黑胶碟片可别为一格并代歌辞之格
 - **恒存之储**：SQLite一统（珍存、往迹、曲帙），自动从v1 JSON迁移
-- 专辑封面显明之能，可于点阵中绘封面之图（可于节度中启闭）
+- 专辑封面显明之能，可于格中以彩色半块之字绘封面之图，色自二百五十六而降于八、终归于黑白；信息、控制二区之封面可于节度中启闭，黑胶之格取其面裁为圆标，随碟而转
 - **符令行之制与背景播弄**：诸符令子目咸备（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），兼有离脱背景之播弄役使，端闱既闭而乐声不绝；Linyaps 封缄之态亦可用——背景播弄或经 D-Bus 按需唤起，或凭随包之 systemd 用户役使常驻
 - **信息显明之可自定**：`ter-music show` 所出之基本信息、点阵文书封面、音程之行与歌辞二行（当前及其次），俱可于文界节度中厘定
 - **MPRIS 与歌词 API**：经D-Bus而通桌面媒体之制、`mpris:artUrl`封面、开放歌辞之接口，兼有 `Info`（曲目／音程／文书封面）与 `Control` 二接口，以惠他器
@@ -66,7 +68,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | 🎛️ 10段均衡器 | ISO准图示均衡器，设中可视化条图 |
 | ⏩ 迅疾节度 | 六档迅迟之度，播弄中可随意迁转 |
 | 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约，由前端览之、下载于本地之藏 |
-| 🎨 专辑封面 | 端闱中显乐集之面，可于节度中启闭 |
+| 🎨 专辑封面 | 端闱中显乐集之面，彩色半块之字，色竭则归于黑白；信息、控制二区可于节度中启闭，黑胶之格取封面为旋转圆标 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体之制、`mpris:artUrl`封面，及基于D-Bus之JSON歌辞接口 |
 | 🖥️ 符令行之制 | `ter-music play/pause/next/seek/volume/speed/mode/show` 诸令皆役当下所行之实例；`show` 则出可自定之信息块 |
 | 🌙 背景播弄 | `ter-music daemon start` 行无文界之播弄，任于何端闱皆得御之，不待文墨之界 |
@@ -492,32 +494,39 @@ ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
 
 **断而复续。** 核心亡时（崩溃、见 `kill`、会话注销），前端不退：入于断线之状，按指数退避而重试（1／2／4／8／15／30 秒），一有核心应答即复接入，并补推其内容之队列。于文墨之界中按 `R`，可即重启已亡之核心而重推其队列。
 
-**相容之度。** 总线之面为 `api_version 4`。内容之接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`、`Remote`）已撤：此皆前端之职也。他客当用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五接口，详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
+**相容之度。** 总线之面为 `api_version 5`（于第四版之上增其文，仍通第四版之前端与核心）。内容之接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`、`Remote`）已撤：此皆前端之职也。他客当用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五接口，详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
 
 ### 三 文界局度
-启之，则局分三栏，其制如左：
-```
-┌────────────────────────────┬───────────────┐
-│  Play List                 │  [Spectrum]   │
-│                            ├───────────────┤
-│  歌曲列表区域                │  Lyrics       │
-│                            │               │
-│                            │ 歌词显示区域    │
-│                            │  (或黑胶唱片)   │
-│                            │               │
-├────────────────────────────┤               │
-│   Controls                 │               │
-│   [==========>-----]       │               │
-│  [<<] [Play/Pause] [>>]    │               │
-│  [Stop] [Loop:Off] [Volume]│               │
-└────────────────────────────┴───────────────┘
-Menu: 选项菜单
-```
+主界之局，今以 **JSON 预设**为定：凡可见之窗格，皆由预设定其位、大小、比例与色。凡局必严格铺满主区（终端去底部菜单栏后之全域）——不许空白、不许缝隙、不许重叠。坐标以千分比矩为度，终端伸缩则按比例重算，形制不漂。
 
-- **左上方**：乐目曲帙，显当前目录下所有音声之文（Tab键切换文件浏览/播弄队列）
-- **左下方**：控御之栏，具播弄控御之键与音程条贯
-- **右侧**：歌辞显明之域，同步显当前所播之曲文；亦显乐集之封面（若启此能）
-- **底部**：选项目录，具节度、播弄往迹、所珍、关于、退去诸选项
+可用之格凡六：
+
+- `playlist`：乐目曲帙／播弄队列（Tab 易视）
+- `info`：播弄之状、当前曲目之文、音声之数与字符封面
+- `controls`：音程条贯与播弄控御之键
+- `spectrum`：音声柱状之谱
+- `lyrics`：当前歌辞之行
+- `vinyl`：黑胶之戏——彩色半块碟面、旋转封面圆标与彩色频谱柱，色不可用则退字符之戏（自歌辞格中析出）
+
+黑胶与歌辞二格有定退之则：
+
+- 同局并定义二者，则**隐歌辞之格**，显黑胶之格；
+- 局中惟有 `lyrics`，则无歌辞之曲仍于该格退显黑胶之戏；
+- 局中惟有 `vinyl`，则无论有歌辞与否，皆显黑胶之格。
+
+彩色黑胶须颜色与色对俱足：碟面以定色沟槽，频谱柱按声之高低分绿、黄、红三档，中心为封面内切之圆，随碟五秒一周；封面不可得则仍绘彩色碟面与柱，中留纯色。单色之端、ASCII 之界或色对不足者，仍守旧字符之戏，信息、控制二区封面亦守旧预算。
+
+**择局之法**：`F2` → `界面外观` → `界面布局`（`←`／`→` 循环，`Enter` 开全目）；`重新加载布局` 复读布局之文。所选存于 `~/.config/ter-music/ui-layout`，乃前端本地之好，不书核心 `config.xml`，亦不经 D-Bus 同步。
+
+**布局之文**：
+
+- 内置预设：`<prefix>/share/ter-music/layouts/layouts.json`（源码树为 `data/layouts/layouts.json`）
+- 用户之覆：`~/.config/ter-music/layouts.json`（同 `id` 者覆内置）
+- 开发之覆：`TER_MUSIC_LAYOUTS=/path/to/layouts.json`
+
+内置八局：`classic`、`vinyl`、`dual`、`karaoke`、`visualizer`、`focus`、`stage`、`neon`。`classic` 为默，存旧五格之制；`dual` 定义六格，以示隐歌辞之则；`neon` 示逐格之色覆。凡有空洞、重叠或面积之和不为一千乘一千者，全份见拒。窗格之文（含信息格之专辑封面）严裁于边框之内（不犯其框）；格小不能容者，惟见其底与框。信息之格随其广狭自陈：广则元文与音数并列、封面居右；狭而高则封面居上，元文、音数在下；封面与边框之间必留空列，地不足则隐其封面。
+
+其详制、色律与自定之例，见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)。
 
 ### 四 常操之法
 #### 焦点迁转
@@ -664,7 +673,10 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 - 歌辞之名必与音声之名同，后缀为`.lrc`
 - 例：`song.mp3` → `song.lrc`
 - 器将随播弄之时，自动焕明当前歌辞之行
-- 若不得歌辞之文，歌辞区将显"No lyrics loaded"
+- **逐字（卡拉OK）之辉**：LRC有逐字／逐段之签者，按字而明；一行首尾俱有签者，于
+  `[行首, 行尾)` 之间均分；旧式惟行首有签者，按「本行之初 → 下行之初」均分（末行
+  仍用前段之时长）。行长而窗不能容者，仍以整行焕明
+- 若不得歌辞之文，歌辞区存黑胶之戏（色可用则为色块，否则仍字符）；频谱之格仍显音声柱状之谱
 - **切换歌词来源**：在歌词定位模式下按 `Tab` 可在内嵌/外置间切换
 
 他器可经D-Bus歌辞接口读当前A/B两行歌辞，详说见
@@ -681,7 +693,9 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 
 同一D-Bus对象亦供开放歌辞接口：接口 `org.yxzl.ter_music.Lyrics`，方法
 `GetLyrics`、`GetDocument` 与 `SetSource`（于内嵌歌辞与外部歌辞之间切换），
-信号 `LyricsChanged`。JSON之构与调用之例见
+信号 `LyricsChanged`。自 `api_version 5` 始，A/B之快照增 `char_sung`／
+`char_total`，`GetDocument` 之每行增 `end`、`timing`、`char_total`，逐字之LRC
+复有 `chars`（相对行首之毫秒数列），他客可依此作同式之逐字焕明。JSON之构与调用之例见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
 
 同一对象之路，复布四接口，俾他器得读曲目之文、文书封面与音程，且得御其器：
@@ -699,10 +713,12 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
   一次所读不逾千条。
 - `org.yxzl.ter_music.Config`：惟此一门可改核心之制。远方服务器之条目**不**在其中，
   乃前端所守（见下文）。
-- `Info.GetInfo` 以 `core.api_version`（今为 `4`）与所备方法之目相质，客可先验其合否。
+- `Info.GetInfo` 以 `core.api_version`（今为 `5`）与所备方法之目相质，客可先验其合否。
   第三版去 `Remote` 接口与 `track.is_remote` 之目，且凡路径之参惟受本地者；
   第四版以径表语义之 `Queue` 代内容之接口（`Playlist`、`Library`、`Favorites`、
-  `History`、`DirHistory`）——内容归于前端。
+  `History`、`DirHistory`）——内容归于前端。第五版增歌辞逐字之时
+  （`char_sung`、`char_total`、`end`、`timing`、`chars`），皆为增量：新前端通
+  第四版之核心（自退为整行焕明），第四版之前端亦通第五版之核心。
 - `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer` 俱已备，
   故 `busctl --user introspect`／`gdbus introspect` 可行。
 - MPRIS之Metadata复载 `xesam:url`（恒为 `file://` 之URI，虽自远方而来者亦为本地之藏径）
@@ -723,8 +739,8 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `default_startup_path`：默认启行之目录
 - `auto_play_on_start`：启器时自动播弄（0/1）
 - `remember_last_path`：记上次所临之目录（0/1）
-- `show_album_cover`：显专辑封面（0/1）
-- `show_lyrics_panel`：显歌辞之板（0/1）
+- `show_album_cover`：显信息、控制二区之专辑封面（0/1；黑胶中心之标不与此开关相干）
+- `show_lyrics_panel`：TUI 中已**弃用**。窗格之显隐今由布局预设定之；此键惟于 `~/.config/ter-music/ui-layout` 未有时，为初启映射之提示（`1` → `classic`，`0` → `focus`）。为通旧客，仍存于 `Config.GetAll`
 - `default_playback_speed`：默播之速（0.75、1.0、1.25、1.5、2.0、3.0）
 - `default_play_mode`：默播弄之制（0=序进、1=单曲回环、2=全帙周流、3=乱序一度、4=乱序杂陈……）
 - `advanced_play_modes_enabled`：启进阶文件/专辑/艺术家播弄之制（0/1）
@@ -753,6 +769,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
   前端自藏于同目录之 `remote.xml`（服务器条目与密码密文，权为 0600），
   所下之曲藏于 `$XDG_CACHE_HOME/ter-music/remote/`
 - 色采主题节度：24套预设主题 + 1个自定槽位，所有文界元素之前景、背景色
+- TUI 布局之择：`~/.config/ter-music/ui-layout`（前端所书单行布局 id）；布局之文：内置 `layouts/layouts.json` 与可选之 `~/.config/ter-music/layouts.json`。择局不书 `config.xml`
 - 均衡器：10段增益、前置放大、启/禁
 - 信息显明（CLI / D-Bus）之节度，可于**节度 → 信息显示**中厘定：
   - `info_preset`：预设（0=全、1=简、2=自定）
@@ -1053,7 +1070,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 
 - **`player/` 门面**：`player.c` 分付于 `player_local.c`（进程内播弄，留作迁移之基线）或 `player_remote.c`（D-Bus之客，默用者）。界面惟呼门面，故前端可独立营构，同一套文墨之界亦得御任一面。
 - **`queue/backend_queue.c`**：核心之径表——序次、游标与版本之号，兼条目之元数据（径、标题、艺术家、专辑、时长、CUE之偏与轨号、歌辞之源）。`audio/play_queue.c` 乃进程内后端所用之薄转发，`playlist/playlist_queue.c` 乃惟一的「内容 → 核心队列」之桥。
-- **D-Bus之面，`api_version 4`**：`Queue.Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **惟受本地之径**（远方之URL见拒），一次所写不逾五百条，分页所读以 `RPC_PAGE_MAX`（千条）为限；`QueueChanged` 广播条目之数／当下之标／版本之号，故任意多之前端皆得同其步。
+- **D-Bus之面，`api_version 5`**：`Queue.Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **惟受本地之径**（远方之URL见拒），一次所写不逾五百条，分页所读以 `RPC_PAGE_MAX`（千条）为限；`QueueChanged` 广播条目之数／当下之标／版本之号，故任意多之前端皆得同其步。歌辞之接口复带逐字之时（`GetDocument` 之 `end`／`timing`／`chars`，`GetLyrics` 之 `char_sung`／`char_total`）。
 - **前端之登记**：每前端皆当登记而心跳，`core_exit_when_no_frontend` 与 `Info.GetInfo.frontends` 皆本于此。断线非致命：前端按指数退避（1／2／4／8／15／30 秒）而复接，并补推其内容之队列——盖核心自身无内容也。
 
 ### 二 架构门禁
@@ -1066,7 +1083,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 | 前端之纯 | `scripts/test/check-ui-purity.sh` | 界面之达播弄之面，**惟**经 `player` 门面——不得直连引擎播弄之全局或播弄之令 |
 | 配置之属 | `scripts/test/check-config-ownership.sh` | `config.xml` 为核所独有。前端**不得**用 `save_config()`／`config_save_to_xml()`：惟改己之配置镜像，以差异付之门面 `player_config_persist()`（远方之制即 `Config.Set`） |
 
-与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
+与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异、布局之 schema／几何／状态，兼逐格栅格之验，以证诸预设无缝铺满），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
 
 ### 三 模块地图
 
@@ -1089,9 +1106,10 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 - **lyrics/**：**核心**之歌辞引擎——寻索、内嵌（斐氏）与外部 `.lrc` 之解析、
   来源之偏好、时轴与分页之构
 - **ui/**：**前端**之ncurses文墨之界——主事之循环、控御之栏、节度、选单、
-  曲帙／队列之视、珍存、往迹、浏览之视、局度、音程、可视化之绘、`lyrics.c`
-  （惟司渲染，其引擎在核心）、点阵绘艺、封面图之加载、对谈之框、鼠迹、滚动条
-  与共用之器
+  曲帙／队列之视、珍存、往迹、浏览之视、局度（`layout.c`、`layout_spec.c`、
+  `layout_geometry.c`、`layout_state.c`）、`vinyl.c`（共享彩色/字符黑胶之戏与独立之格）、
+  音程、可视化之绘、`lyrics.c`（惟司渲染，其引擎在核心）、点阵绘艺、封面图之
+  加载、对谈之框、鼠迹、滚动条与共用之器
 - **media/**：**核心**之D-Bus会话——`session.c`（总线之名、自省、分发）、
   `rpc_common.c`（回复之助、分页）、`rpc_info.c`、`rpc_control.c`、
   `rpc_queue.c`、`rpc_lyrics.c`、`rpc_config.c`，及MPRIS媒体播弄之接口

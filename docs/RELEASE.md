@@ -44,7 +44,15 @@
      `queue.txt`（内容由前端的内容列表恢复，游标由 `resume_last_playback` 恢复）；
    - **只播本地文件**：MPRIS `OpenUri`、`Queue.Set` 与 CLI/daemon 的路径参数
      都只接受本地路径，收到远程 URL 会明确报错（远程源由前端下载成缓存文件
-     后交给核心播放）。
+     后交给核心播放）；
+   - **D-Bus `api_version` 4 → 5（歌词逐字时间，增量兼容）**：
+     `Lyrics.GetDocument` 的每行增加 `end`、`timing`（`none`/`line`/`chars`）、
+     `char_total`，逐字段 LRC 另带相对行首的毫秒数组 `chars`；
+     `Lyrics.GetLyrics` 与 `Info.GetInfo` 的 `lyrics` 对象增加
+     `char_sung`/`char_total`。新前端/CLI 只要求核心 `api_version >= 4`
+     （v4 核心缺字段时逐字高亮降级为整行），v4 前端/CLI 也能接入 v5 核心；
+     TUI 歌词面板按逐字点亮，旧式只有行首时间戳的歌词按「本行起点 → 下一行
+     起点」均分（最后一行沿用前一段时长）。
    回归脚本：`scripts/test/check-core-purity.sh`、`check-ui-purity.sh`、
    `check-config-ownership.sh`、`run-unit-tests.sh`、`dbus-rpc-check.sh`、
    `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
