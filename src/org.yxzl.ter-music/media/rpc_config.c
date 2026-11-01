@@ -39,7 +39,7 @@ void rpc_config_emit_changed(const char *patch_json)
         return;
     }
     const char *value = (patch_json && patch_json[0]) ? patch_json : "{}";
-    dbus_message_append_args(signal, DBUS_TYPE_STRING, &value, DBUS_TYPE_INVALID);
+    rpc_append_string(signal, value);
     rpc_send(signal);
 }
 

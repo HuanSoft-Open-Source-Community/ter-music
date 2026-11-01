@@ -6,6 +6,21 @@ int scrollbar_draw(WINDOW *win, int top, int height,
         return 0;
     }
 
+    int win_h, win_w;
+    getmaxyx(win, win_h, win_w);
+    if (col < 1 || col >= win_w - 1 || top < 1 || top >= win_h - 1) {
+        return 0;
+    }
+    if (height > win_h - 1 - top) {
+        height = win_h - 1 - top;
+    }
+    if (height <= 0 || visible <= 0) {
+        return 0;
+    }
+    if (visible > height) {
+        visible = height;
+    }
+
     // 先清除整个滚动条轨道，防止其他内容写到该列后形成视觉残留
     for (int i = 0; i < height; i++) {
         mvwaddch(win, top + i, col, ' ');

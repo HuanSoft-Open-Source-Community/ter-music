@@ -16,6 +16,7 @@
 #include "ui/dialog.h"
 #include "player/player.h"
 #include "ui/ui.h"
+#include "ui/layout.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/keymap.h"
@@ -91,7 +92,7 @@ static const char *settings_options[] = {
     "settings.opt.remember_path",
     "settings.opt.clear_history",
     "settings.opt.latency",
-    "settings.opt.show_lyrics",
+    "settings.opt.ui_layout",
     "settings.opt.play_mode",
     "settings.opt.default_speed",
     "settings.opt.cover_art",
@@ -124,7 +125,8 @@ static const char *settings_options[] = {
     "settings.opt.info_lyrics",
     "settings.opt.reload_config",
     "settings.opt.reset_config",
-    "settings.opt.stop_core_on_exit"
+    "settings.opt.stop_core_on_exit",
+    "settings.opt.layout_reload"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -144,7 +146,7 @@ static const char *settings_options_ascii[] = {
     "Remember Last Path",
     "Clear History On Start",
     "Output Latency",
-    "Show Lyrics Panel",
+    "UI Layout",
     "Default Play Mode",
     "Default Speed",
     "Show Album Cover",
@@ -177,11 +179,18 @@ static const char *settings_options_ascii[] = {
     "Lyric Lines",
     "Reload Config",
     "Restore Defaults",
-    "Stop Playback Process On Exit"
+    "Stop Playback Process On Exit",
+    "Reload Layouts"
 };
 /* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
- * 另含尾部追加的 stop_core_on_exit）。 */
-#define SETTINGS_OPTION_COUNT 51
+ * 另含尾部追加的 stop_core_on_exit、layout_reload）。 */
+#define SETTINGS_OPTION_COUNT 52
+
+/* 编译期护栏：两张文案表必须与枚举/段数组使用同一数量。 */
+typedef char settings_option_arrays_must_match_count[
+    (sizeof(settings_options) / sizeof(settings_options[0]) == SETTINGS_OPTION_COUNT &&
+     sizeof(settings_options_ascii) / sizeof(settings_options_ascii[0]) == SETTINGS_OPTION_COUNT)
+        ? 1 : -1];
 
 enum {
     SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
@@ -201,7 +210,7 @@ enum {
     SETTINGS_IDX_REMEMBER_PATH       = 14,
     SETTINGS_IDX_CLEAR_HISTORY       = 15,
     SETTINGS_IDX_LATENCY             = 16,
-    SETTINGS_IDX_SHOW_LYRICS         = 17,
+    SETTINGS_IDX_UI_LAYOUT           = 17,
     SETTINGS_IDX_DEFAULT_PLAY_MODE   = 18,
     SETTINGS_IDX_DEFAULT_SPEED       = 19,
     SETTINGS_IDX_SHOW_ALBUM_COVER    = 20,
@@ -240,7 +249,8 @@ enum {
     SETTINGS_IDX_RESET_CONFIG        = 49,
     /* ── 生命周期：退出时停止播放进程（尾部追加，不重排既有下标，
      * 规避 196-197 行注释所述"删除死项整体前移"约束） ── */
-    SETTINGS_IDX_STOP_CORE_ON_EXIT   = 50
+    SETTINGS_IDX_STOP_CORE_ON_EXIT   = 50,
+    SETTINGS_IDX_LAYOUT_RELOAD       = 51
 };
 
 typedef struct {
@@ -260,7 +270,9 @@ static const int settings_theme_option_indices[] = {
     SETTINGS_IDX_THEME_COLOR_PAIR_8,
     SETTINGS_IDX_THEME_COLOR_PAIR_9,
     SETTINGS_IDX_THEME_COLOR_PAIR_10,
-    SETTINGS_IDX_THEME_COLOR_PAIR_11
+    SETTINGS_IDX_THEME_COLOR_PAIR_11,
+    SETTINGS_IDX_UI_LAYOUT,
+    SETTINGS_IDX_LAYOUT_RELOAD
 };
 
 static const int settings_path_option_indices[] = {
@@ -279,7 +291,6 @@ static const int settings_playback_option_indices[] = {
      * 仅有配置字段、未在此页暴露，故紧随启动/退出开关组之后）。 */
     SETTINGS_IDX_STOP_CORE_ON_EXIT,
     SETTINGS_IDX_LATENCY,
-    SETTINGS_IDX_SHOW_LYRICS,
     SETTINGS_IDX_SHOW_ALBUM_COVER,
     SETTINGS_IDX_SEAMLESS_PRELOAD,
     SETTINGS_IDX_LYRICS_ALIGNMENT,
@@ -636,10 +647,13 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%d ms",
                  i18n_get(current_settings_options[option_index]), separator,
                  g_app_config.audio_latency_ms);
-    } else if (option_index == SETTINGS_IDX_SHOW_LYRICS) {
+    } else if (option_index == SETTINGS_IDX_UI_LAYOUT) {
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
-                 menu_bool_text(g_app_config.show_lyrics_panel));
+                 ui_layout_current_name());
+    } else if (option_index == SETTINGS_IDX_LAYOUT_RELOAD) {
+        snprintf(line, line_size, "%s",
+                 i18n_get(current_settings_options[option_index]));
     } else if (option_index == SETTINGS_IDX_SHOW_ALBUM_COVER) {
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
@@ -891,8 +905,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
         return;
     }
 
-    extern float g_playback_speed;
-
     switch (option_index) {
         case SETTINGS_IDX_AUTO_PLAY:
             g_app_config.auto_play_on_start = !g_app_config.auto_play_on_start;
@@ -916,10 +928,21 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             player_config_persist();
             show_status_message(i18n_get("settings.opt.latency_hint"));
             break;
-        case SETTINGS_IDX_SHOW_LYRICS:
-            g_app_config.show_lyrics_panel = !g_app_config.show_lyrics_panel;
-            player_config_persist();
+        case SETTINGS_IDX_UI_LAYOUT: {
+            int count = ui_layout_count();
+            if (count <= 0) {
+                break;
+            }
+            int index = ui_layout_current_index();
+            index = (delta < 0) ? (index - 1 + count) % count : (index + 1) % count;
+            const char *layout_id = ui_layout_id_at(index);
+            if (layout_id && ui_layout_select(layout_id) == 0) {
+                show_status_message(i18n_get("settings.layout.saved"));
+            } else {
+                show_status_message(i18n_get("settings.layout.save_failed"));
+            }
             break;
+        }
         case SETTINGS_IDX_SHOW_ALBUM_COVER:
             g_app_config.show_album_cover = !g_app_config.show_album_cover;
             player_config_persist();
@@ -1162,8 +1185,6 @@ static void close_sel_menu(int apply)
     if (!g_sel_active) return;
 
     if (apply) {
-        extern float g_playback_speed;
-
         switch (g_sel_src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
                 g_app_config.default_play_mode = g_sel_idx;
@@ -1221,6 +1242,16 @@ static void close_sel_menu(int apply)
                 g_app_config.lyrics_alignment = g_sel_idx;
                 player_config_persist();
                 break;
+
+            case SETTINGS_IDX_UI_LAYOUT: {
+                const char *layout_id = ui_layout_id_at(g_sel_idx);
+                if (layout_id && ui_layout_select(layout_id) == 0) {
+                    show_status_message(i18n_get("settings.layout.saved"));
+                } else {
+                    show_status_message(i18n_get("settings.layout.save_failed"));
+                }
+                break;
+            }
 
             case SETTINGS_IDX_LATENCY: {
                 int latency_opts[] = {20, 40, 60, 80, 100, 120, 150, 200, 250};
@@ -1380,6 +1411,10 @@ static void open_sel_menu(int option_index)
             count = 3;
             cur   = g_app_config.lyrics_alignment;
             break;
+        case SETTINGS_IDX_UI_LAYOUT:
+            count = ui_layout_count();
+            cur   = ui_layout_current_index();
+            break;
         case SETTINGS_IDX_INFO_PRESET:
             count = INFO_PRESET_COUNT;
             cur   = g_app_config.info_preset;
@@ -1514,17 +1549,26 @@ static void create_sel_window(void)
                 const char *a[]={i18n_get("sort.default"),i18n_get("sort.title"),
                                  i18n_get("sort.artist"),i18n_get("sort.album"),
                                  i18n_get("sort.filename")};
-                if (i<5) snprintf(opts[i],48,"%s",a[i]); break;
+                if (i<5) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
             }
             case SETTINGS_IDX_CUE_ENCODING:{
                 const char *a[]={i18n_get("general.auto"),"UTF-8","GB18030","GBK",
                                  "BIG5","Shift-JIS"};
-                if (i<CUE_ENCODING_COUNT) snprintf(opts[i],48,"%s",a[i]); break;
+                if (i<CUE_ENCODING_COUNT) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
             }
             case SETTINGS_IDX_LYRICS_ALIGNMENT:{
                 const char *a[]={i18n_get("align.left"),i18n_get("align.center"),
                                  i18n_get("align.right")};
-                if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
+                if (i<3) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
             }
             case SETTINGS_IDX_LATENCY:{
                 /* 输出延迟弹窗：按 "%d ms" 表渲染（Task 5.3，独立完整的 case）。 */
@@ -1542,6 +1586,11 @@ static void create_sel_window(void)
                 };
                 if (i < EQ_PRESET_COUNT)
                     snprintf(opts[i], 48, "%s", i18n_get(preset_keys[i]));
+                break;
+            }
+            case SETTINGS_IDX_UI_LAYOUT: {
+                const char *name = ui_layout_name_at(i);
+                snprintf(opts[i], 48, "%s", name ? name : "");
                 break;
             }
             case SETTINGS_IDX_INFO_PRESET:
@@ -1669,17 +1718,26 @@ static void draw_sel_menu(void)
                 const char *a[]={i18n_get("sort.default"),i18n_get("sort.title"),
                                  i18n_get("sort.artist"),i18n_get("sort.album"),
                                  i18n_get("sort.filename")};
-                if (i<5) snprintf(opts[i],48,"%s",a[i]); break;
+                if (i<5) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
             }
             case SETTINGS_IDX_CUE_ENCODING:{
                 const char *a[]={i18n_get("general.auto"),"UTF-8","GB18030","GBK",
                                  "BIG5","Shift-JIS"};
-                if (i<CUE_ENCODING_COUNT) snprintf(opts[i],48,"%s",a[i]); break;
+                if (i<CUE_ENCODING_COUNT) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
             }
             case SETTINGS_IDX_LYRICS_ALIGNMENT:{
                 const char *a[]={i18n_get("align.left"),i18n_get("align.center"),
                                  i18n_get("align.right")};
-                if (i<3) snprintf(opts[i],48,"%s",a[i]); break;
+                if (i<3) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
             }
             case SETTINGS_IDX_LATENCY:{
                 /* 输出延迟弹窗：按 "%d ms" 表渲染（Task 5.3，独立完整的 case，
@@ -1698,6 +1756,11 @@ static void draw_sel_menu(void)
                 };
                 if (i < EQ_PRESET_COUNT)
                     snprintf(opts[i], 48, "%s", i18n_get(preset_keys[i]));
+                break;
+            }
+            case SETTINGS_IDX_UI_LAYOUT: {
+                const char *name = ui_layout_name_at(i);
+                snprintf(opts[i], 48, "%s", name ? name : "");
                 break;
             }
             case SETTINGS_IDX_INFO_PRESET:
@@ -1763,6 +1826,7 @@ static void draw_sel_menu(void)
         case SETTINGS_IDX_LATENCY:           title = i18n_get("popup.latency"); break;
         case SETTINGS_IDX_CUE_ENCODING:      title = i18n_get("popup.cue_enc"); break;
         case SETTINGS_IDX_EQ_PRESET:        title = i18n_get("popup.eq_preset"); break;
+        case SETTINGS_IDX_UI_LAYOUT:         title = i18n_get("settings.opt.ui_layout"); break;
         case SETTINGS_IDX_INFO_PRESET:
         case SETTINGS_IDX_INFO_FIELDS:
         case SETTINGS_IDX_INFO_COVER_SIZE:
@@ -1926,6 +1990,22 @@ static void activate_settings_current_option(void)
         return;
     }
 
+    if (g_settings_current_option == SETTINGS_IDX_LAYOUT_RELOAD) {
+        char previous_id[LAYOUT_ID_MAX];
+        snprintf(previous_id, sizeof(previous_id), "%s", ui_layout_current_id());
+        int count = ui_layout_reload();
+        if (count < 0) {
+            show_status_message(i18n_get("settings.layout.reload_failed"));
+        } else if (strcmp(previous_id, ui_layout_current_id()) != 0) {
+            show_status_message(i18n_get("settings.layout.fallback"));
+        } else {
+            char msg[128];
+            snprintf(msg, sizeof(msg), i18n_get("settings.layout.reload_ok"), count);
+            show_status_message(msg);
+        }
+        return;
+    }
+
     /* 配置管理动作项（Task 5.5）：重新加载 / 恢复默认，均经门面下发。
      * 生效后由配置修订号变化驱动重刷配色与内容（sync_player_revisions），
      * 状态提示复用既有 status 机制。 */
@@ -1947,7 +2027,6 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_REMEMBER_PATH ||
         g_settings_current_option == SETTINGS_IDX_CLEAR_HISTORY ||
         g_settings_current_option == SETTINGS_IDX_STOP_CORE_ON_EXIT ||
-        g_settings_current_option == SETTINGS_IDX_SHOW_LYRICS ||
         g_settings_current_option == SETTINGS_IDX_SHOW_ALBUM_COVER ||
         g_settings_current_option == SETTINGS_IDX_SEAMLESS_PRELOAD ||
         g_settings_current_option == SETTINGS_IDX_ADVANCED_PLAY_MODES ||
@@ -1960,6 +2039,7 @@ static void activate_settings_current_option(void)
 
     /* Multi-choice: ENTER opens the popup */
     if (g_settings_current_option == SETTINGS_IDX_LATENCY ||
+        g_settings_current_option == SETTINGS_IDX_UI_LAYOUT ||
         g_settings_current_option == SETTINGS_IDX_DEFAULT_PLAY_MODE ||
         g_settings_current_option == SETTINGS_IDX_DEFAULT_SPEED ||
         g_settings_current_option == SETTINGS_IDX_LYRICS_ALIGNMENT ||
@@ -2279,6 +2359,9 @@ void render_settings_content(void)
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.color.auto_avoid_same"));
         menu_content_puts(&area, start_y, hint_buf);
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
+                 i18n_get("settings.layout.hint"));
+        menu_content_puts(&area, start_y + 1, hint_buf);
     } else if (g_menu_selected_idx == 1) {  /* 默认路径 */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.hint"));
@@ -2685,6 +2768,11 @@ int handle_settings_input(int ch)
 
         case ACTION_SETTINGS_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
+                if (g_settings_current_option == SETTINGS_IDX_UI_LAYOUT) {
+                    adjust_or_toggle_settings_option(SETTINGS_IDX_UI_LAYOUT, -1);
+                    rerender_settings_view();
+                    return 1;
+                }
                 g_focus_area = FOCUS_SIDEBAR;
                 render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
                 render_settings_content();
@@ -2702,8 +2790,12 @@ int handle_settings_input(int ch)
                     render_settings_content();
                 }
             } else {
-                /* RIGHT in content mode behaves like ENTER */
-                activate_settings_current_option();
+                if (g_settings_current_option == SETTINGS_IDX_UI_LAYOUT) {
+                    adjust_or_toggle_settings_option(SETTINGS_IDX_UI_LAYOUT, 1);
+                } else {
+                    /* RIGHT in content mode behaves like ENTER */
+                    activate_settings_current_option();
+                }
                 rerender_settings_view();
             }
             return 1;

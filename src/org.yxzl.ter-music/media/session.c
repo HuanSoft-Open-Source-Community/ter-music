@@ -194,8 +194,7 @@ static void append_string_array(DBusMessageIter *iter, const char *const *values
     dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY, "s", &array_iter);
     if (values) {
         for (int i = 0; values[i] != NULL; i++) {
-            const char *value = values[i];
-            dbus_message_iter_append_basic(&array_iter, DBUS_TYPE_STRING, &value);
+            rpc_iter_append_string(&array_iter, values[i]);
         }
     }
     dbus_message_iter_close_container(iter, &array_iter);
@@ -211,7 +210,7 @@ static void append_string_variant(DBusMessageIter *dict_iter,
     dbus_message_iter_open_container(dict_iter, DBUS_TYPE_DICT_ENTRY, NULL, &entry_iter);
     dbus_message_iter_append_basic(&entry_iter, DBUS_TYPE_STRING, &key);
     dbus_message_iter_open_container(&entry_iter, DBUS_TYPE_VARIANT, "s", &variant_iter);
-    dbus_message_iter_append_basic(&variant_iter, DBUS_TYPE_STRING, &safe_value);
+    rpc_iter_append_string(&variant_iter, safe_value);
     dbus_message_iter_close_container(&entry_iter, &variant_iter);
     dbus_message_iter_close_container(dict_iter, &entry_iter);
 }

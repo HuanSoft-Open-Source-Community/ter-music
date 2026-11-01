@@ -27,6 +27,7 @@
 #include "media/session.h"
 #include "ui/lyrics.h"
 #include "ui/keymap.h"
+#include "ui/vinyl.h"
 #include "ui/menus.h"
 #include "library/library.h"
 #include "library/browser/browser.h"
@@ -83,8 +84,11 @@ uint64_t get_ui_time_ms(void) {
  * ============================================================ */
 
 WINDOW *win_playlist;
+WINDOW *win_info;
 WINDOW *win_controls;
+WINDOW *win_spectrum;
 WINDOW *win_lyrics;
+WINDOW *win_vinyl;
 
 /* ── Control count ── */
 int g_control_count = CONTROL_COUNT;
@@ -106,34 +110,6 @@ ColorTheme g_saved_theme;
 int g_konami_input_pos = 0;
 uint64_t g_konami_last_time = 0;
 int g_rainbow_color_offset = 0;
-
-/* ── Braille album art buffer ── */
-char g_braille_art_buffer[8192] = "";
-int g_album_cover_size = 0;
-char g_braille_art_cover_path[MAX_PATH_LEN] = "";
-
-int braille_art_cache_matches(const char *cover_path, int cover_size)
-{
-    return cover_path && cover_path[0] &&
-           g_braille_art_buffer[0] != '\0' &&
-           g_album_cover_size == cover_size &&
-           strcmp(g_braille_art_cover_path, cover_path) == 0;
-}
-
-void braille_art_cache_begin(const char *cover_path, int cover_size)
-{
-    snprintf(g_braille_art_cover_path, sizeof(g_braille_art_cover_path), "%s",
-             cover_path ? cover_path : "");
-    g_album_cover_size = cover_size;
-    g_braille_art_buffer[0] = '\0';
-}
-
-void braille_art_cache_fail(void)
-{
-    g_braille_art_buffer[0] = '\0';
-    g_braille_art_cover_path[0] = '\0';
-    g_album_cover_size = 0;
-}
 
 /* ── Konami sequence ── */
 #define KONAMI_SEQ_LENGTH 12
@@ -249,8 +225,9 @@ void process_pending_ui_refresh(void)
     if (dirty_mask == 0 || g_current_view != VIEW_MAIN) return;
 
     if (dirty_mask & UI_DIRTY_PLAYLIST) render_playlist_content();
+    if (dirty_mask & UI_DIRTY_INFO)     render_info_bar();
     if (dirty_mask & UI_DIRTY_CONTROLS) render_controls();
-    if (dirty_mask & UI_DIRTY_LYRICS)   render_lyrics();
+    if (dirty_mask & UI_DIRTY_LYRICS)   { render_lyrics(); render_vinyl_pane(); }
 }
 
 /* ============================================================
@@ -451,9 +428,9 @@ static void sync_player_revisions(void)
     uint64_t now_config = player_config_revision();
 
     int dirty = 0;
-    if (now_playlist != playlist) dirty |= UI_DIRTY_PLAYLIST;
-    if (now_queue != queue)      dirty |= UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS;
-    if (now_state != state)      dirty |= UI_DIRTY_CONTROLS;
+    if (now_playlist != playlist) dirty |= UI_DIRTY_PLAYLIST | UI_DIRTY_INFO;
+    if (now_queue != queue)      dirty |= UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_INFO;
+    if (now_state != state)      dirty |= UI_DIRTY_CONTROLS | UI_DIRTY_INFO;
     if (now_lyrics != lyrics)    dirty |= UI_DIRTY_LYRICS;
     if (dirty) {
         request_ui_refresh(dirty);
@@ -463,7 +440,8 @@ static void sync_player_revisions(void)
          * 这里必须同步重建键位表，否则设置页显示已改而按键仍是旧语义。 */
         keymap_reload();
         apply_color_theme();
-        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                           UI_DIRTY_LYRICS | UI_DIRTY_INFO);
     }
 
     /* 按曲播放历史（Task 5.1）：本地与远程都在这一处统一检测核心快照的"当前曲目"
@@ -505,7 +483,8 @@ static void ui_on_config_reloaded(void)
     log_info("ui", "Applying UI-side config reload (theme + keymap + panel refresh)");
     keymap_reload();
     apply_color_theme();
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                       UI_DIRTY_LYRICS | UI_DIRTY_INFO);
     rerender_active_view();
 }
 
@@ -519,8 +498,11 @@ void run_event_loop(void)
     keymap_ensure_loaded();
 
     render_playlist_content();
+    render_info_bar();
     render_controls();
     render_lyrics();
+    render_vinyl_pane();
+    render_spectrum_pane();
 
     timeout(UI_INPUT_TIMEOUT_MS);
 
@@ -544,6 +526,12 @@ void run_event_loop(void)
         remote_view_tick();
         sync_player_revisions();
         process_pending_ui_refresh();
+
+        /* 频谱独立窗格按自己的 40ms 节拍刷新；无歌词黑胶动画 100ms。
+         * 二者都不再触发整块歌词/列表重绘。 */
+        spectrum_tick();
+        vinyl_tick();
+        lyrics_animation_tick();
 
         /* 断线浮层：不清空快照（保留最后一帧），提示自动重连与一键重启 */
         render_offline_overlay(connected);
@@ -666,15 +654,13 @@ void run_event_loop(void)
         }
 
         if (ch == KEY_RESIZE) {
-            delwin(win_playlist);
-            delwin(win_controls);
-            delwin(win_lyrics);
             clear();
             create_layout();
             if (g_current_view != VIEW_MAIN) {
                 rerender_active_view();
             } else {
-                request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+                request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                                   UI_DIRTY_LYRICS | UI_DIRTY_INFO);
             }
             continue;
         }
@@ -764,6 +750,10 @@ void run_event_loop(void)
                 render_playlist_content();
                 continue;
             case ACTION_LYRICS_SEEK_MODE: {
+                if (!win_lyrics) {
+                    update_controls_status(i18n_get("lyrics.pane_hidden"));
+                    continue;
+                }
                 int highlight = -1;
                 int has_lyrics = player_lyrics_highlight(&highlight, NULL, NULL);
                 if (has_lyrics && highlight >= 0) {
@@ -1123,7 +1113,8 @@ void run_event_loop(void)
                         }
                     }
                     delwin(win_win);
-                    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+                    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                                       UI_DIRTY_LYRICS | UI_DIRTY_INFO);
                 } else if (g_playlist_manager.count == 0) {
                     update_controls_status(ui_text("还没有歌单，请先到 F4 新建",
                                                    "No playlist yet. Create one in F4"));
@@ -1323,6 +1314,8 @@ void run_event_loop(void)
                 render_controls();
                 continue;
             }
+            default:
+                break;
         }
     }
 
@@ -1368,9 +1361,7 @@ void cleanup(void)
     media_session_shutdown();
     library_shutdown();
 
-    if (win_playlist) { delwin(win_playlist); win_playlist = NULL; }
-    if (win_controls) { delwin(win_controls); win_controls = NULL; }
-    if (win_lyrics)   { delwin(win_lyrics);   win_lyrics   = NULL; }
+    destroy_main_windows();
 
     endwin();
     ui_restore_stdio();  /* 恢复真实 stderr，随后的退出错误才能显示在终端 */
@@ -1405,7 +1396,8 @@ void update_rainbow_colors(void)
 
     apply_color_theme();
     if (g_current_view == VIEW_MAIN)
-        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                           UI_DIRTY_LYRICS | UI_DIRTY_INFO);
 }
 
 void check_konami_input(int ch)
@@ -1469,7 +1461,8 @@ void toggle_rainbow_mode(void)
 
     if (g_current_view == VIEW_MAIN) {
         create_layout();
-        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                           UI_DIRTY_LYRICS | UI_DIRTY_INFO);
     }
 
 }

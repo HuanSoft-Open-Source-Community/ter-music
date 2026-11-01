@@ -277,7 +277,8 @@ create_portable_package() {
 
     cp "${binary_source}/${binary_name}" "${portable_dir}/bin/"
 
-    mkdir -p "${portable_dir}/share/ter-music"
+    mkdir -p "${portable_dir}/share/ter-music/layouts"
+    cp "${SCRIPT_DIR}/data/layouts/layouts.json" "${portable_dir}/share/ter-music/layouts/layouts.json" 2>/dev/null || true
     cp "${SCRIPT_DIR}/data/help-quickstart-zh.txt" "${portable_dir}/share/ter-music/" 2>/dev/null || true
     cp "${SCRIPT_DIR}/data/help-quickstart-en.txt" "${portable_dir}/share/ter-music/" 2>/dev/null || true
 

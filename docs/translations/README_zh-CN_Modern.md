@@ -18,13 +18,14 @@
 - [中文（文言版）](README_zh-CN_Legacy.md)
 - [Lyrics API (English)](../API_LYRICS_en_US.md)
 - [D-Bus Info & Control API (English)](../API_DBUS_en_US.md)
+- [TUI 布局参考（English）](../UI_LAYOUTS_en_US.md)
 
 ## 第一章 产品概述
 ### 一 核心功能
 Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。它借助FFmpeg解码音频、支持PipeWire/PulseAudio/ALSA音频输出（运行时自动检测）、ncursesw构建终端界面，核心功能如下：
 - 支持多种音频格式，包括MP3、WAV、FLAC、OGG、M4A、AAC、WMA、APE、OPUS、**WV（WavPack）**等，均能完美解码
 - **CUE分轨支持**：支持FLAC/APE/WV的CUE分轨，自动检测编码（GBK/BIG5/Shift-JIS）
-- 兼容LRC格式歌词，可精准跟随音频进度同步显示；**内嵌歌词**（FFmpeg/APE标签）优先于外部.lrc文件。可在歌词定位模式中切换来源（Ctrl+L → Tab）
+- 兼容LRC格式歌词，可精准跟随音频进度同步显示并按字高亮（逐字标签、行首尾标签、相邻行时间戳插值三种写法都支持）；**内嵌歌词**（FFmpeg/APE标签）优先于外部.lrc文件。可在歌词定位模式中切换来源（Ctrl+L → Tab）
 - **10段图示均衡器**：ISO标准频段（31Hz-16kHz），双二阶IIR滤波器，±12dB调节范围，设置中可视化条形UI，支持**均衡器预设**和**软限幅**
 - **17种播放模式**：从基础（顺序、单曲循环、列表循环、随机一次、随机重复）到高级（按文件夹/专辑/艺术家分组）
 - 支持倍速播放，提供0.75x、1.0x、1.25x、1.5x、2.0x、3.0x六档速度调节，高效收听
@@ -35,8 +36,9 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - 自动记录播放历史，便于回顾听过的音乐
 - 保存最近访问的音乐目录，无需重复查找
 - **扩展调色板**：24套预设主题 + 1个自定义槽位，前后角色彩配对保护
+- **数据驱动布局**：8 个 JSON 预设定义每个窗格的位置、大小、比例与颜色；所有布局必须无缝铺满主区域，黑胶碟片可单独成格并接管歌词格
 - **持久化存储**：SQLite统一存储（收藏、历史、歌单），自动从v1 JSON迁移
-- 支持专辑封面显示，可在终端中渲染显示封面图片（设置中可开关）
+- 支持专辑封面显示，可在终端中以彩色半块字符渲染封面图片（256 色 → 8 色 → 黑白自动回退）。信息窗格/控制区的封面可在设置中开关；独立黑胶窗格会把当前封面裁成圆形中心标签并随唱片旋转
 - 🖥️ **CLI 模式与后台播放**：提供完整的命令行子命令（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），并可启动脱离终端的后台播放守护进程，关闭终端后音乐依旧继续播放——Linyaps 打包下同样可用，后台播放经 D-Bus 激活或随包提供的 systemd 用户服务启动
 - 📋 **可配置信息显示**：`ter-music show` 输出的基本信息块、盲文/ASCII 字符封面、进度行与两行歌词（当前行 + 下一行）均可在 TUI 设置中配置
 - **MPRIS 与歌词 API**：通过 D-Bus 提供桌面媒体控制、`mpris:artUrl` 专辑封面、供其他程序读取的开放歌词接口，以及供其他程序查询曲目、进度与字符封面的 `Info` 接口和驱动播放器的 `Control` 接口
@@ -56,7 +58,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | 优势 | 说明 |
 | --- | --- |
 | 🚀 资源占用极低 | 内存占用始终不超过10MB，CPU使用率几乎可以忽略不计 |
-| 🎨 界面美观 | 分栏布局，层次清晰，可自适应终端窗口大小 |
+| 🎨 界面美观 | JSON 定义窗格布局（8 个预设），严格无缝平铺，可自适应终端窗口大小 |
 | 🌍 多语言兼容 | 完美支持UTF-8编码，可正常显示中文等各类字符 |
 | 🔄 配置持久化 | 自定义设置、收藏内容、播放历史均自动保存至SQLite数据库，重启后仍保留 |
 | 🎯 多视图切换 | 通过F2至F8快捷键，可快速切换设置、历史、歌单、音乐库、语言等视图 |
@@ -65,9 +67,9 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | 🔊 音频后端 | 支持PipeWire、PulseAudio和ALSA输出。自动模式启动时逐个真实探测（PipeWire > Pulse > ALSA，ALSA 会实际打开默认设备并配置参数）；探测不通过的后端不会被自动选中、也不在设置界面列出。播放时若当前后端建流失败，会重新探测其余可用后端并回退，状态栏提示切换结果 |
 | 🎛️ 10段均衡器 | ISO标准图示均衡器，设置中可视化条形图界面 |
 | ⏩ 倍速播放控制 | 六档速度调节（0.75x-3.0x），播放中可随时切换 |
-| 📊 信息栏 | 实时显示当前音频的采样率、位深、比特率、编码格式 |
+| 📊 信息窗格 | 显示播放状态/模式、当前曲目元数据、彩色半块字符封面，以及采样率、位深、比特率、编码格式 |
 | 🌐 远程播放 | 支持SMB/SFTP/FTP/WebDAV/HTTP 音乐源；由**前端**列出并逐曲下载到本地缓存，再把本地文件交给核心播放 |
-| 🎨 专辑封面 | 终端专辑封面显示，可在设置中开关 |
+| 🎨 专辑封面 | 终端彩色半块专辑封面（256→8→黑白回退），信息/控制区封面可在设置中开关；黑胶窗格复用当前封面作旋转中心标签 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体控制、`mpris:artUrl` 封面，以及基于 D-Bus 的 JSON 歌词接口 |
 | 🖥️ CLI 模式 | `ter-music play/pause/next/seek/volume/speed/mode/show` 可直接控制正在运行的实例；`show` 打印可配置的信息块 |
 | 🌙 后台播放 | `ter-music daemon start` 以无界面方式播放；可从任意终端控制，无需 TUI |
@@ -558,35 +560,43 @@ Ctrl+C、SIGTERM、终端断开）都会发送 `Control.Quit`：核心先把会�
 断线状态，按指数退避重试（1/2/4/8/15/30 秒），一旦有核心应答就重新接入，并把
 自己的内容队列补推回去。在 TUI 里按 `R` 可以立即重启一个已死的核心并重推队列。
 
-**兼容性。** 总线接口面为 `api_version 4`。内容类接口（`Playlist`、`Library`、
+**兼容性。** 总线接口面为 `api_version 5`（在版本 4 基础上增量扩展，兼容 v4 前端/核心）。内容类接口（`Playlist`、`Library`、
 `Favorites`、`History`、`DirHistory`、`Remote`）已撤下：它们属于前端。第三方
 客户端请使用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五个接口，详见
 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
 
 ### 三 界面布局
-启动后界面分为三栏，布局如下：
-```
-┌────────────────────────────┬───────────────┐
-│  Play List                 │  [Spectrum]   │
-│                            ├───────────────┤
-│  歌曲列表区域                │  Lyrics       │
-│                            │               │
-│                            │ 歌词显示区域    │
-│                            │  (或黑胶唱片)   │
-│                            │               │
-├────────────────────────────┤               │
-│   Controls                 │               │
-│   [==========>-----]       │               │
-│  [<<] [Play/Pause] [>>]    │               │
-│  [Stop] [Loop:Off] [Volume]│               │
-└────────────────────────────┴───────────────┘
-Menu: 选项菜单
-```
 
-- **左上方**：歌单区域，显示当前目录下的所有音频文件
-- **左下方**：控制栏，包含播放控制按钮和音频进度条
-- **右侧**：歌词显示区域，同步显示当前播放歌曲的歌词；开启专辑封面后也在此显示点阵封面图
-- **底部**：选项菜单，包含设置、播放历史、收藏、关于、退出等选项
+主界面现在是**数据驱动**的：每个可见窗格都由 JSON 布局预设定义，且每个布局都必须严格铺满主区域（终端去掉底部菜单栏后的全部区域）——不允许空白、缝隙或重叠。坐标使用千分比矩形，终端缩放时按比例重算，视觉结构不漂移。
+
+可用窗格共 6 种：
+
+- `playlist`：歌曲列表 / 播放队列（Tab 切换视图）
+- `info`：播放状态、当前曲目元数据、音频参数与字符封面
+- `controls`：进度条与播放控制按钮
+- `spectrum`：音频柱状频谱
+- `lyrics`：当前歌词行
+- `vinyl`：彩色半块黑胶窗格——深色同心沟槽碟面、旋转的封面圆形中心标签与彩色频谱柱；标签沿用封面的 256→8 色回退，整体在无颜色/ASCII/色对预算不足时回退到原字符动画（从歌词窗格中拆出）
+
+黑胶窗格与歌词窗格有明确的回退关系：
+
+- 同一布局同时定义二者时，**隐藏歌词窗格**，显示黑胶窗格；
+- 布局只有 `lyrics` 时，无歌词的曲目仍在该窗格内回退显示黑胶动画；
+- 布局只有 `vinyl` 时，无论是否有歌词都显示黑胶窗格。
+
+彩色黑胶在终端支持颜色且色对预算足够时用半块色块绘制：碟面用固定的深色沟槽调色板，频谱柱按电平走绿/黄/红三档，中心标签是当前封面内切圆形裁剪并随唱片每 5 秒转一圈。封面读取失败时仍绘制彩色碟面与频谱柱，中心留作纯深色碟面。单色终端、ASCII 界面或可用色对低于彩色黑胶阈值时，保持原字符动画，信息/控制区封面也保持原色对预算。
+
+**选择布局**：`F2` → `界面外观` → `界面布局`（`←`/`→` 循环，`Enter` 打开完整列表）；`重新加载布局` 重新读取布局文件。选择结果保存在 `~/.config/ter-music/ui-layout`，属于前端本地偏好，不写入核心 `config.xml`，也不经 D-Bus 同步。
+
+**布局文件**：
+
+- 内置预设：`<prefix>/share/ter-music/layouts/layouts.json`（源码树为 `data/layouts/layouts.json`）
+- 用户覆盖：`~/.config/ter-music/layouts.json`（同 `id` 覆盖内置预设）
+- 开发覆盖：`TER_MUSIC_LAYOUTS=/path/to/layouts.json`
+
+内置 8 个预设：`classic`、`vinyl`、`dual`、`karaoke`、`visualizer`、`focus`、`stage`、`neon`。`classic` 为默认，保留熟悉的五窗格；`dual` 定义六格并演示隐藏歌词的规则；`neon` 演示逐窗格颜色覆盖。存在空洞、重叠或面积和不为 1,000,000 的布局会被整份拒绝。窗格内容（含信息窗格专辑封面）严格裁剪在边框以内（不会覆盖边框）；窗格小到放不下内容时只显示背景与边框。信息窗格还会按自身宽高自动排布：较宽时元数据与音频参数左右并列、封面居右；窄而高时封面在上，元数据与音频依次在下；封面与右边框之间始终留有空白，空间不足时自动隐藏封面。
+
+完整 schema、颜色规则与自定义示例见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)。
 
 ### 四 常用操作方法
 #### 焦点切换
@@ -735,7 +745,10 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - 示例：`song.mp3` 对应 `song.lrc`
 - **切换歌词来源**：按`Ctrl+L`进入歌词定位模式，再按`Tab`在内嵌/外置歌词间切换
 - 播放器会随播放进度自动高亮显示当前歌词行
-- 若未找到歌词文件，歌词区会显示"No lyrics loaded"
+- **逐字（卡拉OK）高亮**：LRC 带逐字/逐段标签时按字符点亮；一行有行首与行尾标签时在
+  `[行首, 行尾)` 内均分；旧式只有行首标签时按「本行起点 → 下一行起点」均分（最后一行
+  沿用前一段时长）。超长行放不下时保持整行高亮
+- 若未找到歌词文件，歌词区保留黑胶动画（颜色可用时为彩色块，否则为原字符动画）；独立频谱窗格仍显示音频柱状频谱
 
 其他程序可通过 D-Bus 歌词接口读取当前 A/B 两行歌词，详细说明见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
@@ -751,7 +764,10 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 
 同一 D-Bus 对象还提供开放歌词接口：接口 `org.yxzl.ter_music.Lyrics`，方法
 `GetLyrics`、`GetDocument` 与 `SetSource`（在内嵌歌词与外部歌词之间切换），
-信号 `LyricsChanged`。JSON 结构与调用示例见
+信号 `LyricsChanged`。自 `api_version 5` 起，A/B 快照增加
+`char_sung`/`char_total`，`GetDocument` 的每行增加 `end`、`timing`、
+`char_total` 与逐字 LRC 的 `chars`（相对行首的毫秒数组），第三方卡拉OK 客户端
+可据此渲染同样的逐字高亮。JSON 结构与调用示例见
 [Lyrics API (English)](../API_LYRICS_en_US.md)。
 
 同一对象路径上还额外发布了下列接口，便于其他应用程序读取曲目数据、字符封面与
@@ -771,11 +787,13 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
   ≤1000 条。
 - `org.yxzl.ter_music.Config`：核心配置的唯一写入口。远程服务器条目**不**在其中：
   它属于前端（见下文）。
-- `Info.GetInfo` 通过 `core.api_version`（当前为 `4`）与已实现方法清单做版本握手，
+- `Info.GetInfo` 通过 `core.api_version`（当前为 `5`）与已实现方法清单做版本握手，
   客户端可先校验兼容性再调用。版本 3 移除了 `Remote` 接口与 `track.is_remote`
   字段，并规定所有路径参数只接受本地路径；版本 4 用路径语义的 `Queue` 取代了
   内容接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`）——
-  内容归前端。
+  内容归前端。版本 5 增量增加歌词逐字时间（`char_sung`、`char_total`、`end`、
+  `timing`、`chars`）：新前端兼容 v4 核心（自动退化为整行高亮），v4 前端也能
+  接入 v5 核心。
 - 已实现 `org.freedesktop.DBus.Introspectable` 与 `org.freedesktop.DBus.Peer`，
   因此 `busctl --user introspect` / `gdbus introspect` 可直接使用。
 - MPRIS 元数据额外携带 `xesam:url`（恒为 `file://` URI，远程来源的曲目也是
@@ -799,8 +817,8 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `default_startup_path`：默认启动目录
 - `auto_play_on_start`：启动时自动播放（0/1，0为关闭，1为开启）
 - `remember_last_path`：记住上次访问的目录（0/1）
-- `show_album_cover`：显示专辑封面（0/1）
-- `show_lyrics_panel`：显示歌词面板（0/1）
+- `show_album_cover`：显示信息/控制区专辑封面（0/1；黑胶中心标签不受此开关影响）
+- `show_lyrics_panel`：TUI 中已**弃用**。窗格显隐改由布局预设决定；该键仅在 `~/.config/ter-music/ui-layout` 不存在时作为首次映射提示（`1` → `classic`，`0` → `focus`）。为兼容旧客户端仍保留在 `Config.GetAll` 中
 - `default_playback_speed`：默认播放速度（0.75、1.0、1.25、1.5、2.0、3.0）
 - `default_play_mode`：默认播放模式（0=顺序、1=单曲循环、2=列表循环、3=随机一次、4=随机重复……）
 - `advanced_play_modes_enabled`：启用高级文件夹/专辑/艺术家播放模式（0/1）
@@ -829,6 +847,7 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
   前端把它保存在同目录下自有的 `remote.xml`（服务器条目 + 密码密文，权限 0600），
   下载的曲目缓存在 `$XDG_CACHE_HOME/ter-music/remote/`
 - 颜色主题设置：24套预设主题 + 1个自定义槽位，所有界面元素的前景色、背景色
+- TUI 布局选择：`~/.config/ter-music/ui-layout`（前端写入的单行布局 id）；布局定义：内置 `layouts/layouts.json` 与可选的 `~/.config/ter-music/layouts.json`。布局选择不会写 `config.xml`
 - 均衡器设置：10段增益、前置放大、启用/禁用
 - 信息显示（CLI / D-Bus）设置，可在**设置 → 信息显示**中编辑：
   - `info_preset`：预设（0=完整、1=紧凑、2=自定义）
@@ -1122,7 +1141,7 @@ v1.0的JSON存储（config.json、独立的favorites、history、dir_history、p
 当前版本并在 v9 文件上保存。
 
 ### 十三 终端窗口大小调整
-本播放器支持终端窗口大小调整，修改窗口尺寸时，播放器会自动重置布局并重新绘制界面。
+本播放器支持终端窗口大小调整。修改窗口尺寸时，播放器会按当前布局的 1000×1000 千分比重新计算；新主区域的每个单元格仍恰好属于一个窗格，底部菜单栏最后重绘。
 
 ### 十四 退出播放器
 退出前端的方法有三种：
@@ -1163,10 +1182,12 @@ D-Bus 接口面相遇：
   元数据（路径、标题、艺术家、专辑、时长、CUE 偏移/轨号、歌词来源）。
   `audio/play_queue.c` 是进程内后端使用的轻量转发层，
   `playlist/playlist_queue.c` 是唯一的「内容 → 核心队列」桥。
-- **D-Bus 接口面，`api_version 4`**：`Queue.Set/Append/InsertAfter/RemoveAt/
+- **D-Bus 接口面，`api_version 5`**：`Queue.Set/Append/InsertAfter/RemoveAt/
   MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **只接受本地路径**（远程 URL 被拒绝），
   单次写入不超过 500 条，分页读取上限 `RPC_PAGE_MAX`（1000）条；`QueueChanged`
-  广播条目数/当前游标/版本号，任意多个前端因此保持一致。
+  广播条目数/当前游标/版本号，任意多个前端因此保持一致。歌词接口另带逐字时间
+  （`GetDocument` 的 `end`/`timing`/`chars`，`GetLyrics` 的
+  `char_sung`/`char_total`）。
 - **前端注册**：每个前端都要注册并心跳，`core_exit_when_no_frontend` 与
   `Info.GetInfo.frontends` 都基于它。断线不是致命的：前端按指数退避
   （1/2/4/8/15/30 秒）重连，并把内容队列补推回去——核心自己没有任何内容。
@@ -1182,7 +1203,8 @@ D-Bus 接口面相遇：
 | 配置归属 | `scripts/test/check-config-ownership.sh` | `config.xml` 归核心独有。前端**不得**出现 `save_config()` / `config_save_to_xml()`：它只改自己的配置镜像，再经门面 `player_config_persist()` 提交差异（远端模式下即 `Config.Set`） |
 
 与之配套的回归套件：`scripts/test/run-unit-tests.sh`（路径队列、播放队列契约、
-歌词解析、JSON 读取器、配置差异），以及端到端脚本 `dbus-rpc-check.sh`、
+歌词解析、JSON 读取器、配置差异、布局 schema/几何/状态，其中含逐格栅格化
+校验以证明每个预设无缝铺满），以及端到端脚本 `dbus-rpc-check.sh`、
 `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
 `multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`，
 还有性能探针 `perf-check.sh`（命令到可见状态的时延与空闲 CPU，均带阈值；
@@ -1212,8 +1234,10 @@ CI 只记录数值、不做判定）。
 - **lyrics/**: 核心歌词引擎——发现、内嵌（FFmpeg）与外部 `.lrc` 解析、来源偏好、
   时间轴与分页构建
 - **ui/**: **前端** ncurses 界面——事件循环、控制栏、设置、菜单、歌单/队列视图、
-  收藏、历史、浏览视图、布局、进度、可视化绘制、`lyrics.c`（只负责渲染，引擎在
-  核心里）、盲文点阵、图片加载、对话框、鼠标、滚动条与共享控件
+  收藏、历史、浏览视图、布局（`layout.c`、`layout_spec.c`、`layout_geometry.c`、
+  `layout_state.c`）、`vinyl.c`（共享彩色/字符黑胶动画与独立窗格）、进度、可视化绘制、
+  `lyrics.c`（只负责渲染，引擎在核心里）、盲文点阵、图片加载、对话框、鼠标、
+  滚动条与共享控件
 - **media/**: 核心 D-Bus 会话——`session.c`（总线名、自省、分发）、
   `rpc_common.c`（回复助手、分页）、`rpc_info.c`、`rpc_control.c`、
   `rpc_queue.c`、`rpc_lyrics.c`、`rpc_config.c`，以及 MPRIS 媒体播放器接口

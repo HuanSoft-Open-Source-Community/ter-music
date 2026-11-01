@@ -11,10 +11,10 @@
 #include "types.h"
 #include "player/player.h"
 #include "ui/ui.h"
+#include "ui/layout.h"
 #include "ui/menu_internal.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
-#include "ui/lyrics.h"
 #include <ncursesw/ncurses.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,6 +63,7 @@ void update_progress_bar(void)
     int h, w;
     getmaxyx(win_controls, h, w);
     if (h < 5 || w < 20) return;
+    wattrset(win_controls, ui_pane_body_attr(LAYOUT_PANE_CONTROLS));
 
     int current_pos = player_position_seconds();
     if (current_pos < 0) current_pos = 0;
@@ -70,7 +71,7 @@ void update_progress_bar(void)
 
     uint64_t now_ms = get_ui_time_ms();
     int position_changed = (current_pos != last_position);
-    int force_redraw = position_changed || player_duration_seconds() != last_duration || player_play_state() != last_state;
+    int force_redraw = position_changed || player_duration_seconds() != last_duration || (int)player_play_state() != (int)last_state;
     if (!force_redraw && (now_ms - last_refresh_ms) < UI_PROGRESS_REFRESH_MS) return;
 
     int progress_percent = (current_pos * 100) / player_duration_seconds();
@@ -94,16 +95,16 @@ void update_progress_bar(void)
     char time_str[32];
     snprintf(time_str, sizeof(time_str), "%02d:%02d / %02d:%02d",
              current_min, current_sec, total_min, total_sec);
-    mvwprintw(win_controls, progress_row, 2, "%s", time_str);
+    ui_pane_clip_printf(win_controls, progress_row, 2, "%s", time_str);
 
     int time_width = 13;
     int percent_width = 4;
     int padding = 6;
     int progress_bar_width = w - time_width - percent_width - padding - 4;
-    if (progress_bar_width < 10) progress_bar_width = 10;
+    if (progress_bar_width < 1) return;
     int progress_start_col = 2 + time_width + 1;
 
-    mvwprintw(win_controls, progress_row, progress_start_col, "[");
+    ui_pane_clip_printf(win_controls, progress_row, progress_start_col, "[");
 
     int filled_width = (progress_bar_width * progress_percent) / 100;
     if (filled_width > progress_bar_width) filled_width = progress_bar_width;
@@ -115,23 +116,13 @@ void update_progress_bar(void)
         mvwaddch(win_controls, progress_row, progress_start_col + 1 + i, c);
     }
 
-    mvwprintw(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
-    mvwprintw(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
+    ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
+    ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
 
     mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
     mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
 
     wrefresh(win_controls);
-
-    if (position_changed) {
-        render_lyrics();
-    }
-
-    static uint64_t last_spectrum_refresh_ms = 0;
-    if (g_current_view == VIEW_MAIN && (now_ms - last_spectrum_refresh_ms >= 150ULL)) {
-        request_ui_refresh(UI_DIRTY_LYRICS);
-        last_spectrum_refresh_ms = now_ms;
-    }
 
     last_refresh_ms = now_ms;
     last_position = current_pos;

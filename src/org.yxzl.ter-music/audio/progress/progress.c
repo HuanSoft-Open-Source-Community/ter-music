@@ -99,6 +99,40 @@ int progress_tracker_get_position_seconds(void) {
     return position;
 }
 
+/* 毫秒版：与上面的秒版同一套样本计数与正向 wall-clock 校准，只是不整除到秒。
+ * 歌词逐字高亮需要亚秒精度；把校准逻辑留在这里而不是在调用方用秒×1000，
+ * 才能让同一时刻的秒/毫秒读数来自同一份累计样本。 */
+int64_t progress_tracker_get_position_ms(void) {
+    pthread_mutex_lock(&g_tracker.lock);
+
+    int64_t position_ms = 0;
+
+    if (g_tracker.sample_rate > 0) {
+        position_ms = (g_tracker.total_samples_played * 1000) / g_tracker.sample_rate;
+
+        if (g_tracker.is_playing && g_tracker.play_start_time_us > 0) {
+            uint64_t current_time = get_current_time_us();
+            uint64_t elapsed = current_time - g_tracker.play_start_time_us;
+            elapsed -= g_tracker.pause_accumulated_us;
+            int64_t wallclock_ms = (int64_t)(elapsed / 1000);
+
+            int64_t diff = position_ms > wallclock_ms
+                ? position_ms - wallclock_ms : wallclock_ms - position_ms;
+            if (diff > 0 && wallclock_ms > position_ms) {
+                int64_t correction_samples =
+                    (wallclock_ms * (int64_t)g_tracker.sample_rate) / 1000;
+                if (correction_samples > g_tracker.total_samples_played) {
+                    g_tracker.total_samples_played = correction_samples;
+                    position_ms = wallclock_ms;
+                }
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&g_tracker.lock);
+    return position_ms;
+}
+
 void progress_tracker_seek(int position_seconds) {
     pthread_mutex_lock(&g_tracker.lock);
     

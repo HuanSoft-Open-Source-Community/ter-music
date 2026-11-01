@@ -34,6 +34,56 @@ debian/files
 debian/*.substvars
 debian/ter-music/
 
+# Packaging artifacts (never commit generated packages)
+*.AppImage
+*.AppImage.zsync
+*.snap
+*.flatpak
+*.rpm
+*.pkg.tar.*
+*.tar.zst
+*.tar.xz
+*.tar.gz
+*.tgz
+*.zsync
+*.dsc
+*.changes
+*.buildinfo
+AppDir/
+squashfs-root/
+dist/
+
+# Coverage / profiler output
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+coverage/
+lcov.info
+
+# Core dumps
+/core
+core.[0-9]*
+vgcore.*
+
+# Local scratch / editor files
+*.bak
+*.orig
+*.rej
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.clangd/
+.ccache/
+cmake-build-*/
+CMakeUserPresets.json
+build.ninja
+.ninja_deps
+.ninja_log
+
 # Object files
 *.o
 *.obj

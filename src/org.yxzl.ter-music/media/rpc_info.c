@@ -84,7 +84,7 @@ static void emit_info_changed(const char *json) {
         return;
     }
     const char *value = (json && json[0] != '\0') ? json : "{}";
-    dbus_message_append_args(signal, DBUS_TYPE_STRING, &value, DBUS_TYPE_INVALID);
+    rpc_append_string(signal, value);
     rpc_send(signal);
 }
 

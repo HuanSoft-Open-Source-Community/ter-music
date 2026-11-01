@@ -5,7 +5,7 @@
  * 进程模型：
  *  - TUI（无子命令）或 daemon（`daemon foreground`）作为**主实例**持有
  *    org.mpris.MediaPlayer2.ter_music 总线名，并对外提供
- *    Info/Control/Lyrics/Queue/Config 接口（api_version=4）；
+ *    Info/Control/Lyrics/Queue/Config 接口（当前 api_version=5，最低兼容 4）；
  *  - 其余子命令（play/pause/show/queue/config/lyrics/track/cover/...）是
  *    **纯 D-Bus 客户端**，不初始化 ffmpeg / 音频 / ncurses，把命令发给当前
  *    主实例；play 例外：它先在本进程扫描/装载内容（内容归前端），再把**本地
@@ -136,8 +136,8 @@ int cli_client_show(const char *bus, const char *options, int want_json,
 int cli_client_play(const char *bus, const char *path, int index, int mode);
 
 /* ── 握手（api_version 校验） ─────────────────────────────────────
- * 经 Info.GetInfo 取 core.api_version，< TER_MUSIC_API_VERSION 时打印“核心过旧”
- * 并返回 CLI_EXIT_REFUSED。同进程内按目标总线名缓存，避免重复往返。
+ * 经 Info.GetInfo 取 core.api_version，< TER_MUSIC_API_MIN_VERSION（4）时打印
+ * “核心过旧”并返回 CLI_EXIT_REFUSED。同进程内按目标总线名缓存，避免重复往返。
  * @return CLI_EXIT_OK（兼容）/CLI_EXIT_REFUSED（过旧）/CLI_EXIT_DBUS/NO_INSTANCE */
 int cli_client_check_api(const char *bus);
 

@@ -10,7 +10,7 @@ and change the configuration:
 | --------- | ------- |
 | `org.yxzl.ter_music.Info` | Read-only snapshots: track, progress, cover art, lyric lines, visualizer, last status message, rendered info block |
 | `org.yxzl.ter_music.Control` | Transport, seek, volume, speed, play mode, opening paths, front-end registration, quitting |
-| `org.yxzl.ter_music.Lyrics` | A/B lyric line snapshot (see [API_LYRICS_en_US.md](API_LYRICS_en_US.md)) |
+| `org.yxzl.ter_music.Lyrics` | A/B lyric line snapshot plus per-character timing (see [API_LYRICS_en_US.md](API_LYRICS_en_US.md)) |
 | `org.yxzl.ter_music.Queue` | Play queue contents and editing |
 | `org.yxzl.ter_music.Config` | Configuration read/write (the only writer) |
 
@@ -64,7 +64,12 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
   `org.freedesktop.DBus.Error.*` names.
 
 - **Handshake.** `Info.GetInfo` carries a `core` object. Read
-  `core.api_version` before using anything else; version 4 is described here.
+  `core.api_version` before using anything else; version 5 is described here.
+  The new front end accepts cores with `api_version >= 4`: version 4 cores lack
+  the per-character lyric fields, and those clients simply degrade to whole-line
+  highlighting. Version 5 added the lyric timing fields listed under
+  `org.yxzl.ter_music.Lyrics` (`end`, `timing`, `char_total`, `chars`,
+  `char_sung`); they are additive, so version 4 clients keep working unchanged.
   Version 4 handed **all content** to the front end: the `Playlist`, `Library`,
   `Favorites`, `History` and `DirHistory` interfaces, the background scan job and
   `Control.OpenPath`/`Control.PlayIndex`/`Control.GetPlaylist`/`Queue.Rebuild`
@@ -80,7 +85,7 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
 
   ```json
   "core": {
-    "api_version": 4, "payload_max": 262144,
+    "api_version": 5, "payload_max": 262144,
     "page_default": 200, "page_max": 1000,
     "methods": ["Info.GetInfo", "Control.Play", "Queue.Set", "…"]
   }
@@ -171,7 +176,7 @@ separated by `;`. Keys may be combined; later keys win:
   "running": true,
   "instance": { "mode": "daemon", "pid": 1234, "version": "v2.3.0",
                 "bus": "org.mpris.MediaPlayer2.ter_music", "has_primary_name": true },
-  "core": { "api_version": 4, "payload_max": 262144, "page_default": 200,
+  "core": { "api_version": 5, "payload_max": 262144, "page_default": 200,
             "page_max": 1000, "methods": ["Info.GetInfo", "…"] },
   "playback": {
     "state": "playing", "position_ms": 83400, "duration_ms": 296000,
@@ -193,7 +198,8 @@ separated by `;`. Keys may be combined; later keys win:
   "cover": { "available": true, "art_url": "file:///tmp/ter-music-cover-….jpg",
              "charset": "braille", "cols": 16, "rows": 8, "text": "⣿⣀…\n…" },
   "lyrics": {
-    "has_lyrics": true, "has_timestamps": true, "source": "embedded",
+    "has_lyrics": true, "has_timestamps": true, "source": "external",
+    "char_sung": 4, "char_total": 10,
     "current": { "index": 3, "timestamp": 12.34, "text": "Current line" },
     "next":    { "index": 4, "timestamp": 15.67, "text": "Next line" }
   },
@@ -224,6 +230,11 @@ Field notes:
   so asking for two different sizes never re-decodes the image twice per size.
 - `lyrics.current`/`lyrics.next` are computed from the playback position, so
   they stay correct even while the TUI shows another view.
+- `lyrics.char_sung`/`lyrics.char_total` are the current line's per-character
+  progress (`0`/`0` when the line has no timing information, e.g. plain embedded
+  lyrics or a version 4 core). They are the same values `Lyrics.GetLyrics`
+  returns, so a karaoke client can render a highlighted prefix without fetching
+  the whole document.
 - `revision` increases when the non-position part of the snapshot changes; use
   it to discard stale data. Missing values are `null`.
 
@@ -231,12 +242,32 @@ Field notes:
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
-| `GetLyrics` | `() -> s` | The A/B line snapshot: `{"active_line":"A"\|"B"\|null,"line_a":{…},"line_b":{…},"track_id":"…"\|null,"has_lyrics":b,"has_timestamps":b,"revision":n}`. See [API_LYRICS_en_US.md](API_LYRICS_en_US.md) |
-| `GetDocument` | `(i offset, i count) -> s` | A page of the whole lyric document: `{"revision":n,"track_id":"…","has_lyrics":b,"has_timestamps":b,"source":"embedded\|external\|none","total":n,"offset":n,"current_index":n\|null,"lines":[{"index":n,"timestamp":t\|null,"text":"…"}]}` — used by scrolling and karaoke views |
+| `GetLyrics` | `() -> s` | The A/B line snapshot: `{"active_line":"A"\|"B"\|null,"line_a":{…},"line_b":{…},"track_id":"…"\|null,"has_lyrics":b,"has_timestamps":b,"char_sung":n,"char_total":n,"revision":n}`. See [API_LYRICS_en_US.md](API_LYRICS_en_US.md) |
+| `GetDocument` | `(i offset, i count) -> s` | A page of the whole lyric document: `{"revision":n,"track_id":"…","has_lyrics":b,"has_timestamps":b,"source":"embedded\|external\|none","total":n,"offset":n,"current_index":n\|null,"lines":[{"index":n,"timestamp":t\|null,"end":t\|null,"timing":"none\|line\|chars","char_total":n,"text":"…"[, "chars":[ms…]]}]}` — used by scrolling and karaoke views; `chars` is present only for `timing="chars"` and lists each UTF-8 character's start offset in milliseconds relative to `timestamp` |
 | `SetSource` | `(i source) -> b` | Switch the lyric source of the current track and reload: `1` = embedded, `2` = external (same action as `Ctrl+L` → `Tab` in the TUI). `false` when there is no current track. The **preference belongs to the front end's content store**: the core only switches and reloads — a front end that changes it is expected to record it in its own library |
 
 Signal `LyricsChanged(s json)` carries the same payload as `GetLyrics` whenever
-the active lines or the lyric source change.
+the active lines, the lyric source or the per-character progress changes. The
+last case means karaoke playback can emit the signal at each character boundary
+(bounded by the core tick, roughly 20–50 Hz); clients may throttle or simply
+redraw on each revision.
+
+### Lyric timing modes
+
+Every `GetDocument` line reports `timing`:
+
+- `"chars"`: the LRC carried per-segment timestamps; `chars` contains one
+  relative-millisecond offset per UTF-8 character. A segment with several
+  characters distributes them evenly inside the segment.
+- `"line"`: only the line start (and possibly a line-end timestamp) is known.
+  Characters are spread evenly across `[timestamp, end)`.
+- `"none"`: no usable timing (plain embedded lyrics, or a start without a
+  derivable end).
+
+`char_total` is the number of UTF-8 code points in `text`. `end` is the line end
+in seconds, or `null` when it cannot be derived. `Lyrics.GetDocument` pages that
+would exceed the 256 KB payload cap fail with `Error.TooLarge`; request fewer
+lines when a document is unusually dense.
 
 ## org.yxzl.ter_music.Control
 
@@ -256,7 +287,7 @@ Transport methods return a boolean (`true` when the request was accepted).
 | `SetPlayMode` / `GetPlayMode` / `GetPlayModeName` | `(i mode) -> b` / `() -> i` / `() -> s` | Play mode (0-16, stable name, localized name) |
 | `ReloadConfig` | `() -> b` | Re-read `config.xml` (same as `SIGHUP`); `Config.Reload` is the newer equivalent |
 | `Quit` | `() -> b` | Gracefully stop this instance (persists the playback session) |
-| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":4,"ping_interval_ms":2000,"frontends":n}` |
+| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":5,"ping_interval_ms":2000,"frontends":n}` |
 | `Ping` | `(s token) -> b` | Keep the registration alive. `false` means the token is unknown or expired: attach again |
 | `Detach` | `(s token) -> b` | Leave explicitly |
 | `FrontendInfo` | `() -> s` | `{"frontends":[{"token":"…","role":"tui","pid":n,"last_ping_ms":n}],"count":n}` |
@@ -420,6 +451,7 @@ Notes:
   when the front end exits" to "an attached front-end exit stops the core" (see
   the Control section for the exit branching and the attach precondition; the
   switch is also on the settings page).
+- `preferences.show_lyrics_panel` is retained for compatibility but no longer controls the TUI layout. The TUI selects a JSON layout preset stored in the front end's local `~/.config/ter-music/ui-layout`; the key only seeds the initial choice when that state file does not exist (`1` → `classic`, `0` → `focus`).
 - `keybindings` is an object of **overrides only** (`{"action.id": "key"}`),
   added by contract version 9. Actions that are not present use their built-in
   defaults. In a `Set` patch, the value `"default"` removes that action's
@@ -574,10 +606,14 @@ scripts/test/rpc_client.py monitor 3                    # list signals seen
 - Interface name components cannot contain hyphens, hence the underscores in
   `org.yxzl.ter_music.*`.
 - `Info` JSON `schema` is `1`; the interface surface is versioned separately by
-  `core.api_version` (currently `4`). Consumers must ignore unknown fields.
-  Version 3 removed `org.yxzl.ter_music.Remote` and the `track.is_remote` field
-  and made every path argument local-only; version 2 added the `core` object and
-  the Playlist/Queue/Library/Favorites/History/DirHistory/Config interfaces.
+  `core.api_version` (currently `5`). Consumers must ignore unknown fields.
+  Version 5 added the lyric timing fields (`end`, `timing`, `char_total`,
+  `chars`, `char_sung`) additively; a front end built for version 4 still
+  attaches to a version 5 core, and the version 5 front end accepts a version 4
+  core (per-character highlighting degrades to whole-line). Version 3 removed
+  `org.yxzl.ter_music.Remote` and the `track.is_remote` field and made every
+  path argument local-only; version 2 added the `core` object and the
+  Playlist/Queue/Library/Favorites/History/DirHistory/Config interfaces.
 - The API shares the MPRIS lifecycle: it exists while the process owns the bus
   name and is torn down on shutdown.
 - Inside a Linyaps (如意玲珑) package the container joins the host session bus,

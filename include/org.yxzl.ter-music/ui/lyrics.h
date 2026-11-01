@@ -13,7 +13,7 @@
 #ifndef UI_LYRICS_H
 #define UI_LYRICS_H
 
-/* 把歌词面板画到 win_lyrics（无歌词时画频谱动画） */
+/* 把歌词画到 win_lyrics；无歌词时回退到共享黑胶动画 */
 void render_lyrics(void);
 
 #endif /* UI_LYRICS_H */

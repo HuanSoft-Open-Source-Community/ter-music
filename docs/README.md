@@ -19,6 +19,7 @@
 - [中文（文言版）](translations/README_zh-CN_Legacy.md)
 - [Lyrics API (English)](API_LYRICS_en_US.md)
 - [D-Bus Info & Control API (English)](API_DBUS_en_US.md)
+- [TUI Layout Reference (English)](UI_LAYOUTS_en_US.md)
 
 ## 1. Project Introduction
 
@@ -31,7 +32,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🌐 **Remote Music Playback**: SMB, SFTP, FTP, WebDAV and HTTP sources. The **front end** lists them and downloads each track into a local cache, then hands the local files to the core (which only ever plays local files)
 - 🎵 **Supports Multiple Audio Formats**: MP3, WAV, FLAC, OGG, M4A, AAC, WMA, APE, OPUS, **WV (WavPack)** and other popular formats
 - 🎼 **CUE Split-track Support**: CUE sheet parsing for FLAC/APE/WV, with auto-detect encoding (GBK/BIG5/Shift-JIS)
-- 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights current line with playback progress; **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files. Switch between embedded/external sources in lyric seek mode (Ctrl+L → Tab)
+- 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights the current line and, when the LRC carries timing, lights up each character karaoke-style (per-character tags, line start/end tags, or interpolation between consecutive line timestamps); **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files. Switch between embedded/external sources in lyric seek mode (Ctrl+L → Tab)
 - 🎛️ **10-band Graphic Equalizer**: ISO frequencies (31Hz-16kHz) with biquad IIR DSP, ±12dB range, visual bar UI in settings, with **EQ presets** and **soft-clip** support
 - 🎶 **17 Playback Modes**: From basic (Sequential, Single Repeat, List Repeat, Shuffle) to advanced (Folder/Album/Artist-based variants)
 - ⚡ **Playback Speed Control**: Supports 0.75x, 1.0x, 1.25x, 1.5x, 2.0x, 3.0x speed adjustment for efficient listening
@@ -42,10 +43,11 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🕒 **Playback History**: Automatically records playback history for easy review
 - 📂 **Directory History**: Records recently visited music directories
 - 🎨 **Expanded Color Palette**: 24 preset themes + 1 custom slot with paired-color guard
+- 🧩 **Data-driven Layouts**: 8 JSON layout presets define every pane's position, size, proportion and colours; all layouts tile the main area seamlessly, and a separate vinyl pane can replace or pre-empt the lyrics pane
 - 💾 **Persistent Storage**: SQLite-based storage (favorites, history, playlists) with automatic JSON migration from v1
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
-- 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG via braille art or chafa), can be toggled on/off in Settings
+- 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG as colored half-block character art with automatic 256→8→monochrome fallback; the CLI also supports braille/ASCII/half-block). The info/controls covers can be toggled in Settings, and the standalone vinyl pane reuses the current cover as a rotating circular center label
 - 🖥️ **CLI Mode & Background Playback**: Full command-line subcommands (`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`) with a detached background playback daemon that keeps playing after you close the terminal — including inside Linyaps packages, where background playback is started through D-Bus activation or the shipped systemd user service
 - 📋 **Configurable Info Display**: The basic info block, braille/ASCII text cover, progress line and two lyric lines (current + next) printed by `ter-music show` are configurable in the TUI settings
 - 🎵 **MPRIS & Lyrics API**: Desktop media controls with album art, an open D-Bus lyrics API, plus a `Info` interface (track / progress / text cover) and a `Control` interface for other programs
@@ -66,7 +68,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | Feature                                      | Description                                 |
 | ------------------------------------------ | ------------------------------------------- |
 | 🚀 **Low Resource Usage**                     | Memory usage usually < 10MB, extremely low CPU usage  |
-| 🎨 **Beautiful TUI**                         | Split-column layout, colored interface, supports terminal size adaptation |
+| 🎨 **Beautiful TUI**                         | JSON-defined pane layouts (8 presets), colored interface, strict seamless tiling and terminal size adaptation |
 | 🌍 **UTF-8 Chinese Support**                  | Perfect UTF-8 encoding support, correctly displays Chinese song metadata |
 | 🔄 **Persistent Storage**                     | SQLite-backed storage — configuration, library, favorites, playlists, and history, all in one database |
 | 🎯 **Multiple View Switching**: Quickly switch between settings, history, playlist, library, language and other views via F2-F8 function keys | <br /> |
@@ -75,9 +77,9 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🔊 **Audio Backend**: Supports PipeWire, PulseAudio and ALSA output. Auto mode probes each candidate at startup (PipeWire > Pulse > ALSA — service connectable, or for ALSA: the default device really opens and configures); a backend whose probe fails is neither auto-selected nor listed in Settings. If the chosen backend cannot open the stream at play time, the core re-probes the remaining candidates and falls back, announcing the switch in the status line | <br /> |
 | 🎛️ **10-band Equalizer**: ISO graphic equalizer with visual bar chart UI in settings | <br /> |
 | ⏩ **Playback Speed Control**: 6 levels of speed adjustment (0.75x-3.0x), switchable during playback | <br /> |
-| 📊 **Info Bar**: Displays sample rate, bit depth, bitrate and codec of current track | <br /> |
+| 📊 **Info Pane**: Displays state/mode, current-track metadata, sample rate, bit depth, bitrate and codec | <br /> |
 | 🌐 **Remote Playback**: SMB/SFTP/FTP/WebDAV/HTTP sources, browsed and downloaded by the front end into a local cache | <br /> |
-| 🎨 **Album Cover**: Terminal album art display, toggleable in Settings | <br /> |
+| 🎨 **Album Cover**: Colored half-block album art (256→8→mono fallback), toggleable in Settings | <br /> |
 | 🎵 **MPRIS / Lyrics API**: Desktop media controls, album art via `mpris:artUrl`, and a JSON lyrics API over D-Bus | <br /> |
 | 🖥️ **CLI Mode**: `ter-music play/pause/next/seek/volume/speed/mode/show` works against the running instance; `show` prints the configurable info block | <br /> |
 | 🌙 **Background Playback**: `ter-music daemon start` runs headless playback; control it from any terminal, no TUI needed | <br /> |
@@ -646,7 +648,7 @@ does not exit: it marks itself offline, retries with exponential backoff
 a core answers again. Pressing `R` in the TUI restarts a dead core and re-pushes
 the queue immediately.
 
-**Compatibility.** The bus surface is `api_version 4`. Content interfaces
+**Compatibility.** The bus surface is `api_version 5`; additive over version 4. Content interfaces
 (`Playlist`, `Library`, `Favorites`, `History`, `DirHistory`, `Remote`) are
 gone: they belong to the front end. Third-party clients should use the
 `Lyrics`, `Info`, `Control`, `Queue` and `Config` interfaces — see
@@ -654,30 +656,63 @@ gone: they belong to the front end. Third-party clients should use the
 
 ### 5.3 Interface Layout
 
-After launching, you will see a three-column layout:
+The main view is **data-driven**: every visible pane is defined by a JSON layout
+preset, and every layout must tile the whole main area (the terminal minus the
+bottom menu bar) exactly — no gaps, no overlaps, and no blank cells. Coordinates
+are per-mille rectangles, so a layout keeps its proportions when the terminal is
+resized.
 
-```
-┌────────────────────────────┬───────────────┐
-│  Play List                 │  [Spectrum]   │
-│                            ├───────────────┤
-│  Song List Area            │  Lyrics       │
-│                            │               │
-│                            │ Lyrics Display│
-│                            │  (Vinyl)      │
-│                            │               │
-├────────────────────────────┤               │
-│   Controls                 │               │
-│   [==========>-----]       │               │
-│  [<<] [Play/Pause] [>>]    │               │
-│  [Stop] [Loop:Off] [Volume]│               │
-└────────────────────────────┴───────────────┘
-Menu: Options Menu
-```
+Six pane kinds are available:
 
-- **Top Left**: Playlist area, displays audio files (use Tab to toggle between file browser and playback queue)
-- **Bottom Left**: Control bar, contains playback control buttons and progress bar
-- **Right**: Lyrics display area, synchronously displays lyrics for the currently playing song; also shows album cover (braille art) when enabled in Settings
-- **Bottom**: Options menu, includes settings, playback history, favorites, about, exit, etc.
+- `playlist`: the song list / play queue (Tab switches views)
+- `info`: playback state, current-track metadata, audio parameters and the colored half-block character cover (256→8→mono fallback)
+- `controls`: progress bar and transport buttons
+- `spectrum`: the audio-reactive bar spectrum
+- `lyrics`: the current lyric lines
+- `vinyl`: the colored half-block vinyl pane — dark concentric-groove disc, rotating album-cover center label and colored spectrum bars; the label follows the cover's 256→8 color fallback, and the whole animation falls back to the previous glyph animation when colors or the color-pair budget are unavailable (split out of the lyrics pane)
+
+The vinyl pane and the lyrics pane have a deliberate fallback relationship:
+
+- If a layout defines both, the **lyrics pane is hidden** and the vinyl pane is shown.
+- If a layout defines only `lyrics`, that pane still falls back to the vinyl animation whenever the current track has no lyrics.
+- If a layout defines only `vinyl`, the vinyl pane is shown whether or not the track has lyrics.
+
+The vinyl artwork is drawn with colored half-block cells when the terminal supports
+colors and has enough color pairs: the disc grooves use a fixed dark palette, the
+spectrum bars use a level-based green/yellow/red ramp, and the center label is the
+current album cover cropped to a circle and rotated with the disc (one revolution
+per five seconds). If the cover cannot be loaded the colored disc and bars are
+still drawn with a plain center. On a monochrome terminal, an ASCII UI, or a
+terminal whose color-pair budget is below the colored-vinyl threshold, the pane
+keeps the original glyph animation and the info/controls covers keep their
+previous pair budget.
+
+**Choosing a layout:** `F2` → `Appearance` → `UI Layout` (`←`/`→` cycles,
+`Enter` opens the full list). `Reload Layouts` re-reads the layout files. The
+choice is stored in `~/.config/ter-music/ui-layout`; it is a front-end local
+preference, not part of the core configuration and not sent over D-Bus.
+
+**Layout files:**
+
+- built-in presets: `<prefix>/share/ter-music/layouts/layouts.json` (source tree: `data/layouts/layouts.json`)
+- user overrides: `~/.config/ter-music/layouts.json` (same `id` overrides the built-in preset)
+- development override: `TER_MUSIC_LAYOUTS=/path/to/layouts.json`
+
+The eight built-in presets are `classic`, `vinyl`, `dual`, `karaoke`,
+`visualizer`, `focus`, `stage` and `neon`. `classic` is the default and keeps the
+familiar five-pane arrangement; `dual` defines all six panes and demonstrates the
+lyrics-hiding rule; `neon` demonstrates per-pane colour overrides. A layout with
+a hole, an overlap or an area sum other than 1,000,000 is rejected as a whole.
+Pane content, including the info-pane album cover, is clipped to the inside of
+its border (the border cells are never overwritten); a pane too small for its
+renderer shows only its background and border. The info pane adapts to its own
+size: wide panes keep metadata and audio parameters side by side with the cover
+on the right, while narrow-and-tall panes stack the cover above the metadata and
+audio blocks; the cover is hidden when it cannot keep a blank column before the
+border.
+
+See [UI_LAYOUTS_en_US.md](UI_LAYOUTS_en_US.md) for the complete schema, colour
+rules and a custom-layout example.
 
 ### 5.4 Basic Operations
 
@@ -849,8 +884,14 @@ Ter-Music supports automatic loading of LRC format lyrics files:
 - Lyrics filename should match the audio filename, with extension `.lrc`
 - Example: `song.mp3` → `song.lrc`
 - The program automatically highlights current lyrics based on playback time
+- **Per-character (karaoke) highlighting**: LRC files with per-character or
+  per-segment timestamps are sung character by character; a line with start and
+  end timestamps spreads its characters evenly across `[start, end)`; a legacy
+  line with only a start timestamp is spread up to the next line's start (the
+  last line reuses the previous line's duration). Long lines that do not fit the
+  pane keep the whole-line highlight instead
 - **Switch lyrics source**: Press `Ctrl+L` to enter lyric seek mode, then press `Tab` to switch between embedded/external lyrics
-- If no lyrics file is found, the lyrics area will display "No lyrics loaded"
+- If no lyrics file is found, the lyrics pane keeps the vinyl animation (colored blocks when colors are available, otherwise the original glyph animation); the separate spectrum pane keeps showing the audio-reactive bars
 
 Other applications can read the current A/B lyric lines through the D-Bus
 lyrics API; see [Lyrics API (English)](API_LYRICS_en_US.md).
@@ -874,8 +915,12 @@ session on the session bus:
 An open lyrics API is available on the same D-Bus object: interface
 `org.yxzl.ter_music.Lyrics` with the methods `GetLyrics`, `GetDocument` and
 `SetSource` (switch between embedded and external lyrics), and the signal
-`LyricsChanged`. See [Lyrics API (English)](API_LYRICS_en_US.md) for the JSON
-schema and examples.
+`LyricsChanged`. Since `api_version 5` the A/B snapshot carries
+`char_sung`/`char_total`, and each `GetDocument` line carries `end`, `timing`,
+`char_total` and (for per-character LRC) a `chars` array of relative
+millisecond offsets, so third-party karaoke clients can render the same
+highlight. See [Lyrics API (English)](API_LYRICS_en_US.md) for the JSON schema
+and examples.
 
 Four more interfaces are published on the same object path so that other
 applications can read track data, text cover art and progress, and drive the
@@ -897,13 +942,16 @@ player:
 - `org.yxzl.ter_music.Config`: read and patch the core configuration (the only
   writer). Remote server entries are **not** part of it: they belong to the
   front end (see below).
-- `Info.GetInfo` advertises `core.api_version` (currently `4`) plus the
+- `Info.GetInfo` advertises `core.api_version` (currently `5`) plus the
   implemented method list, so clients can check compatibility before using
   anything else. Version 3 removed the `Remote` interface and the
   `track.is_remote` field and made every path argument local-only; version 4
   replaced the content interfaces (`Playlist`, `Library`, `Favorites`,
   `History`, `DirHistory`) with the path-based `Queue` — content now lives in
-  the front end.
+  the front end. Version 5 added per-character lyric timing (`char_sung`,
+  `char_total`, `end`, `timing`, `chars`) additively: the new front end accepts
+  a version 4 core (whole-line fallback) and a version 4 front end accepts a
+  version 5 core.
 - `org.freedesktop.DBus.Introspectable` and `org.freedesktop.DBus.Peer` are
   implemented, so `busctl --user introspect` / `gdbus introspect` work.
 - MPRIS metadata additionally carries `xesam:url` (always a `file://` URI,
@@ -930,8 +978,8 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `default_startup_path`: Default startup directory
 - `auto_play_on_start`: Auto-play on startup (0/1)
 - `remember_last_path`: Remember last opened directory (0/1)
-- `show_album_cover`: Show album cover art in the lyrics panel (0/1)
-- `show_lyrics_panel`: Show lyrics panel (0/1)
+- `show_album_cover`: Show album cover art in the TUI info/control areas (0/1; the vinyl center label is independent)
+- `show_lyrics_panel`: **deprecated for the TUI**. Layout visibility now comes from the selected layout preset. This key is only used as a first-run hint when `~/.config/ter-music/ui-layout` does not exist (`1` → `classic`, `0` → `focus`). It remains in `Config.GetAll` for compatibility
 - `default_playback_speed`: Default playback speed (0.75, 1.0, 1.25, 1.5, 2.0, 3.0)
 - `default_play_mode`: Default play mode (0=Sequential, 1=Single Repeat, 2=List Repeat, 3=Shuffle Once, 4=Shuffle Repeat, ...)
 - `advanced_play_modes_enabled`: Enable advanced folder/album/artist play modes (0/1)
@@ -953,6 +1001,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
   (server entries plus password ciphertext, file mode 0600), and caches
   downloaded tracks under `$XDG_CACHE_HOME/ter-music/remote/`
 - Color theme configuration: 24 preset themes + 1 custom slot, foreground and background colors for all UI elements
+- TUI layout selection: `~/.config/ter-music/ui-layout` (one layout id written by the front end); layout definitions: built-in `layouts/layouts.json` plus optional `~/.config/ter-music/layouts.json`. Layout selection never writes `config.xml`
 - Equalizer configuration: 10-band gains, pre-amp, enable/disable
 - Info display (CLI / D-Bus) configuration, editable in **Settings → Info Display**:
   - `info_preset`: preset (0=Full, 1=Compact, 2=Custom)
@@ -1269,7 +1318,7 @@ file on v9 and using a current build preserves the overrides.
 
 ### 5.13 Terminal Resizing
 
-Ter-Music supports terminal window resizing. When you resize the terminal, the program will automatically readjust the layout and redraw the interface.
+Ter-Music supports terminal window resizing. The selected layout is recomputed from its 1000×1000 proportions; every cell of the new main area is still owned by exactly one pane, and the bottom menu bar is redrawn last.
 
 ### 5.14 Exit the Program
 
@@ -1356,11 +1405,13 @@ The seam is deliberately thin and testable:
   offset/track number, lyric source). `audio/play_queue.c` is a thin forwarder
   used by the in-process backend, and `playlist/playlist_queue.c` is the only
   bridge that renders front-end content into a core queue.
-- **D-Bus surface, `api_version 4`** — `Queue.Set/Append/InsertAfter/RemoveAt/
+- **D-Bus surface, `api_version 5`** — `Queue.Set/Append/InsertAfter/RemoveAt/
   MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` accept **local paths only** (remote
   URLs are rejected), batch at most 500 entries per call and page reads at
   `RPC_PAGE_MAX` (1000) entries; `QueueChanged` announces count / current
-  position / revision so any number of front ends stay in sync.
+  position / revision so any number of front ends stay in sync. The lyrics
+  interface additionally exposes per-character timing (`GetDocument`
+  `end`/`timing`/`chars`, `GetLyrics` `char_sung`/`char_total`).
 - **Front-end registration** — every front end registers and heartbeats, which
   is what feeds `core_exit_when_no_frontend` and `Info.GetInfo.frontends`.
   Disconnects are not fatal: the front end backs off (1/2/4/8/15/30 s),
@@ -1378,7 +1429,9 @@ Three scripts keep the split honest, and all of them run in CI:
 | Config ownership | `scripts/test/check-config-ownership.sh` | The core owns `config.xml`. The front end must not call `save_config()` / `config_save_to_xml()` at all: it changes its own mirror and persists the difference through the facade (`player_config_persist()`, which is `Config.Set` in remote mode) |
 
 Regression suites accompany them: `scripts/test/run-unit-tests.sh` (path queue,
-play-queue contract, lyrics parsing, JSON reader, configuration diff) plus the
+play-queue contract, lyrics parsing, JSON reader, configuration diff, layout
+schema/geometry/state, including a per-cell rasterisation check that every
+preset tiles without blanks) plus the
 end-to-end scripts `dbus-rpc-check.sh`, `config-migration-check.sh`,
 `lifecycle-e2e.sh`, `offline-reconnect-e2e.sh`, `multi-frontend-e2e.sh`,
 `paging-deepdir-e2e.sh` and `remote-frontend-e2e.sh`, and the performance probe
@@ -1413,7 +1466,9 @@ Ter-Music adopts a modular design, main modules include:
 - **lyrics/**: Core lyrics engine — discovery, embedded (FFmpeg) and external
   `.lrc` parsing, source preference, timeline and page building
 - **ui/**: **Front end** ncurses UI — event loop, controls, settings, menus,
-  playlist/queue views, favorites, history, browse views, layout, progress,
+  playlist/queue views, favorites, history, browse views, layout
+  (`layout.c`, `layout_spec.c`, `layout_geometry.c`, `layout_state.c`),
+  `vinyl.c` (shared colored/glyph vinyl animation and the standalone pane), progress,
   visualizer drawing, `lyrics.c` (rendering only — the engine lives in the
   core), braille art, image loader, dialogs, mouse, scrollbar, shared widgets
 - **media/**: Core D-Bus session — `session.c` (bus name, introspection,

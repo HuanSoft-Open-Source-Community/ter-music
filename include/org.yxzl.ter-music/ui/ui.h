@@ -29,17 +29,12 @@ extern uint64_t g_konami_last_time;
 extern int g_rainbow_color_offset;
 
 extern WINDOW *win_playlist;
+extern WINDOW *win_info;
 extern WINDOW *win_controls;
+extern WINDOW *win_spectrum;
 extern WINDOW *win_lyrics;
+extern WINDOW *win_vinyl;
 extern int g_ascii_fallback_ui;
-extern char g_braille_art_buffer[8192];
-extern int g_album_cover_size;
-extern char g_braille_art_cover_path[MAX_PATH_LEN];
-
-/* 字符画封面缓存：路径 + 尺寸 + 缓冲非空才算命中 */
-int  braille_art_cache_matches(const char *cover_path, int cover_size);
-void braille_art_cache_begin(const char *cover_path, int cover_size);
-void braille_art_cache_fail(void);
 
 /* ── Control index constants ── */
 enum {
@@ -62,8 +57,14 @@ void ui_restore_stdio(void);
 void run_event_loop(void);
 
 void create_layout(void);
+void destroy_main_windows(void);
 void render_playlist_content(void);
+void render_info_bar(void);
 void render_controls(void);
+void controls_reset_popup(void);
+void render_spectrum_pane(void);
+void spectrum_tick(void);
+void lyrics_animation_tick(void);
 
 void update_progress_bar(void);
 void update_controls_status(const char *msg);
@@ -96,7 +97,6 @@ int  get_controls_progress_row(int height);
 int  get_controls_button_row(int height);
 int  get_controls_visualizer_top(int height);
 int  get_controls_visualizer_bottom(int height);
-int  controls_need_second_row(int width);
 uint64_t get_ui_time_ms(void);
 void seek_relative_seconds(int delta_seconds);
 

@@ -363,7 +363,16 @@ void audio_set_initial_seek_position(int seconds)
 
 int audio_get_position_seconds(void)
 {
-    int position = g_current_position;
+    return (int)(audio_get_position_ms() / 1000);
+}
+
+int64_t audio_get_position_ms(void)
+{
+    int64_t position = progress_tracker_get_position_ms();
+    if (position <= 0 && g_current_position > 0) {
+        /* 跟踪器尚未就绪（刚切曲/刚恢复）时沿用播放线程写下的整秒位置 */
+        position = (int64_t)g_current_position * 1000;
+    }
 
     /* progress_tracker 统计的是“已写入后端”的样本：PipeWire 的 1MB 环形
      * 缓冲会先装下约 3 秒音频再由 process 回调消费，直接返回会把进度、
@@ -372,8 +381,7 @@ int audio_get_position_seconds(void)
     if (g_play_state != PLAY_STATE_STOPPED && g_output_sample_rate > 0) {
         int buffered_frames = audio_backend_buffered_frames();
         if (buffered_frames > 0) {
-            int buffered_seconds = buffered_frames / g_output_sample_rate;
-            position -= buffered_seconds;
+            position -= ((int64_t)buffered_frames * 1000) / g_output_sample_rate;
         }
     }
     return position > 0 ? position : 0;
@@ -874,7 +882,12 @@ start_playback:
     load_lyrics(track_path, lyrics_source);
     update_album_cover_for_track(track_path);
 
-    char msg[64];
+    /* 状态消息 = 本地化前缀 + 标题（缺失时退回路径） + " - " + 艺术家。
+     * 缓冲区必须按字段上限预留：曾用 char[64]，75 字节的
+     * “正在播放：四重罪孽 - 洛天依Official、言和、乐正绫、DELA”
+     * 会被 snprintf 切在“正”的 UTF-8 序列中间，最终让 libdbus 断言
+     * 失败并 abort 整个核心。真正的码点边界截断在 core_status_push()。 */
+    char msg[MAX_PATH_LEN + MAX_META_LEN * 2 + 64];
     snprintf(msg, sizeof(msg), "%s%s - %s",
              i18n_get("audio.status.playing"),
              entry.title[0] ? entry.title : entry.path,

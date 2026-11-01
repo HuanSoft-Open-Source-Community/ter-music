@@ -28,7 +28,7 @@ PASS=0
 FAIL=0
 
 # M2 完成后应存在的接口（随里程碑推进逐个加入本清单）
-# api_version 4：内容接口（Playlist/Library/Favorites/History/DirHistory）整体
+# api_version 5：内容接口（Playlist/Library/Favorites/History/DirHistory）整体
 # 撤下——曲库与播放列表内容归前端，核心只发布播放面。
 EXPECTED_INTERFACES=(
     "org.yxzl.ter_music.Lyrics"
@@ -50,6 +50,10 @@ usage() {
     sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
+# 解析循环会 shift 掉参数；重入私有总线时必须把原始参数带上，
+# 否则 --bin/--keep 会在 dbus-run-session 重入后丢失。
+ORIG_ARGS=("$@")
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --bin) TM_BIN="$2"; shift 2 ;;
@@ -69,7 +73,7 @@ if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
         echo "错误：没有会话总线，且未安装 dbus-run-session。" >&2
         exit 2
     fi
-    exec dbus-run-session -- "$0" "$@"
+    exec dbus-run-session -- "$0" "${ORIG_ARGS[@]}"
 fi
 
 cleanup() {
@@ -101,6 +105,13 @@ setup_fixtures() {
                 -i "sine=frequency=$((300 + i * 110)):duration=3" \
                 -c:a pcm_s16le -y "$WORK_DIR/music/tone$i.wav" 2>/dev/null
         done
+
+        # 逐字歌词夹具：第一行逐段标签 + 行首尾标签，第二行仅行首尾
+        cp "$WORK_DIR/music/tone1.wav" "$WORK_DIR/music/karaoke.wav"
+        cat > "$WORK_DIR/music/karaoke.lrc" <<'LRC'
+[00:00.00]甲[00:00.40]乙[00:00.80][00:01.20]丙[00:02.00]
+[00:02.00]丁戊[00:02.60]
+LRC
     fi
 
     export HOME="$WORK_DIR/home"
@@ -314,10 +325,10 @@ check_info_extensions() {
     local info api_version
     info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
     api_version="$(json_field "$info" 'doc["core"]["api_version"]')"
-    if [ "$api_version" = "4" ]; then
-        ok "core.api_version=4（内容接口已撤下，队列为路径语义）"
+    if [ "$api_version" = "5" ]; then
+        ok "core.api_version=5（歌词逐字时间；兼容 >=4）"
     else
-        bad "core.api_version 期望 4，实际 '$api_version'"
+        bad "core.api_version 期望 5，实际 '$api_version'"
     fi
 
     local methods
@@ -382,7 +393,7 @@ check_frontends() {
 
     local version
     version="$(json_field "$attached" 'doc["api_version"]')"
-    [ "$version" = "4" ] && ok "Attach 返回 api_version=4" || bad "Attach api_version=$version"
+    [ "$version" = "5" ] && ok "Attach 返回 api_version=5" || bad "Attach api_version=$version"
 
     # 第二个前端
     local attached2
@@ -576,6 +587,176 @@ check_queue() {
 }
 
 
+# ── 检查 5.5：歌词逐字时间（api_version 5） ─────────────────────────
+check_lyrics() {
+    local music="$WORK_DIR/music"
+    if [ ! -f "$music/karaoke.wav" ] || [ ! -f "$music/karaoke.lrc" ]; then
+        echo "  skip 无 karaoke 夹具（需要 ffmpeg 生成测试音频）"
+        return
+    fi
+
+    rpc_py call org.yxzl.ter_music.Queue.Clear >/dev/null 2>&1 || true
+    rpc_py call org.yxzl.ter_music.Queue.Set \
+        "json:{\"entries\":[{\"path\":\"$music/karaoke.wav\",\"title\":\"Karaoke\",\"artist\":\"T\"}]}" >/dev/null
+    rpc_py call org.yxzl.ter_music.Queue.PlayAt 0 >/dev/null
+
+    local doc="" loaded=0
+    for _ in $(seq 1 30); do
+        doc="$(rpc_py call org.yxzl.ter_music.Lyrics.GetDocument 0 10)"
+        if printf '%s' "$doc" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+raise SystemExit(0 if doc.get("has_lyrics") else 1)
+' 2>/dev/null; then
+            loaded=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "$loaded" -ne 1 ]; then
+        bad "karaoke 夹具未加载歌词：$(printf '%s' "$doc" | head -1)"
+        rpc_py call org.yxzl.ter_music.Control.Stop >/dev/null 2>&1 || true
+        return
+    fi
+    ok "Lyrics.GetDocument 加载逐字歌词"
+
+    if printf '%s' "$doc" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+a, b = doc["lines"][0], doc["lines"][1]
+assert a["timing"] == "chars", a
+assert a["char_total"] == 3, a
+assert len(a["chars"]) == 3, a
+assert abs(a["end"] - 2.0) < 0.01, a
+assert a["chars"][2] >= 1000, a
+assert b["timing"] == "line", b
+assert b["char_total"] == 2, b
+assert abs(b["end"] - 2.6) < 0.01, b
+'; then
+        ok "GetDocument 逐字/行级时间字段正确"
+    else
+        bad "GetDocument 逐字字段不符：$(printf '%s' "$doc" | head -1)"
+    fi
+
+    local snapshot
+    snapshot="$(rpc_py call org.yxzl.ter_music.Lyrics.GetLyrics)"
+    if printf '%s' "$snapshot" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert "char_sung" in doc and "char_total" in doc
+int(doc["char_sung"]); int(doc["char_total"])
+'; then
+        ok "GetLyrics 含 char_sung/char_total"
+    else
+        bad "GetLyrics 缺逐字字段：$(printf '%s' "$snapshot" | head -1)"
+    fi
+
+    local info
+    info="$(rpc_py call org.yxzl.ter_music.Info.GetInfo)"
+    if printf '%s' "$info" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert "char_sung" in doc["lyrics"] and "char_total" in doc["lyrics"]
+'; then
+        ok "Info.GetInfo lyrics 含 char_sung/char_total"
+    else
+        bad "Info.GetInfo lyrics 缺逐字字段"
+    fi
+
+    rpc_py call org.yxzl.ter_music.Control.Stop >/dev/null 2>&1 || true
+    rpc_py call org.yxzl.ter_music.Queue.Clear >/dev/null 2>&1 || true
+}
+
+
+# ── 检查 6：状态消息 / 元数据 UTF-8 安全 ───────────────────────────
+# libdbus 对 DBUS_TYPE_STRING 的非法 UTF-8 会断言并 abort 整个核心。
+# 这里用“前缀 + 中文标题 + 长中文 artist”的 75 字节状态消息复现现场：
+#   - 旧实现 char msg[64] 会把 artist 末尾的“正”切成半截；
+#   - 修复后消息必须完整、合法，且核心仍在线。
+# 再补一条超长/截断点落在多字节字符中间的载荷，覆盖状态消息、Info JSON
+# 与 MPRIS 元数据三条发送路径。
+check_utf8_status() {
+    local music="$WORK_DIR/music"
+    local title='四重罪孽'
+    local artist='洛天依Official、言和、乐正绫、DELA'
+    local payload
+    payload="{\"entries\":[{\"path\":\"$music/tone1.wav\",\"title\":\"$title\",\"artist\":\"$artist\"}]}"
+
+    if ! rpc_py call org.yxzl.ter_music.Queue.Set "json:$payload" >/dev/null; then
+        bad "UTF-8 回归：Queue.Set 失败（核心可能已被非法状态消息杀死）"
+    fi
+    if ! rpc_py call org.yxzl.ter_music.Queue.PlayAt 0 >/dev/null; then
+        bad "UTF-8 回归：Queue.PlayAt 失败"
+    fi
+    sleep 0.5
+
+    local status message
+    status="$(rpc_py call org.yxzl.ter_music.Info.GetStatus)"
+    if message="$(printf '%s' "$status" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+msg = doc["message"]
+msg.encode("utf-8")
+title = "四重罪孽"
+artist = "洛天依Official、言和、乐正绫、DELA"
+print(msg)
+sys.exit(0 if title in msg and artist in msg else 1)
+')"; then
+        ok "长中文状态消息完整保留且为合法 UTF-8"
+    else
+        bad "状态消息非法或不完整：${message:-$status}"
+    fi
+
+    # 超长 artist（200 个 CJK 字符）会超过队列字段 255 字节上限，且 "A"+3 字节
+    # 字符的布局会让截断点落在多字节字符中间；此路径必须被清洗而不是崩溃。
+    local long_artist
+    long_artist="$(python3 -c 'print("A" + "言" * 200)')"
+    payload="{\"entries\":[{\"path\":\"$music/tone2.wav\",\"title\":\"超长元数据\",\"artist\":\"$long_artist\"}]}"
+    if ! rpc_py call org.yxzl.ter_music.Queue.Set "json:$payload" >/dev/null; then
+        bad "超长元数据：Queue.Set 失败"
+    fi
+    if ! rpc_py call org.yxzl.ter_music.Queue.PlayAt 0 >/dev/null; then
+        bad "超长元数据：Queue.PlayAt 失败"
+    fi
+    sleep 0.5
+
+    status="$(rpc_py call org.yxzl.ter_music.Info.GetStatus)"
+    if printf '%s' "$status" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+doc["message"].encode("utf-8")
+'; then
+        ok "超长元数据下 StatusMessage 仍为合法 UTF-8"
+    else
+        bad "超长元数据下 StatusMessage 非法：$status"
+    fi
+
+    local info
+    info="$(rpc_py call org.yxzl.ter_music.Info.GetInfo)"
+    if printf '%s' "$info" | python3 -c 'import json, sys; json.load(sys.stdin)'; then
+        ok "超长/中间截断元数据下 Info.GetInfo JSON 可解析"
+    else
+        bad "超长/中间截断元数据下 Info.GetInfo 非法"
+    fi
+
+    if "$TM_BIN" daemon status >/dev/null 2>&1; then
+        ok "UTF-8 边界回归后核心仍在线"
+    else
+        bad "UTF-8 边界回归后核心已退出"
+    fi
+
+    local daemon_log="$HOME/.config/ter-music/daemon.log"
+    if [ -f "$daemon_log" ] && grep -q 'assertion "_dbus_check_is_valid_utf8' "$daemon_log"; then
+        bad "daemon.log 仍出现 libdbus UTF-8 断言"
+    else
+        ok "daemon.log 无 libdbus UTF-8 断言"
+    fi
+
+    rpc_py call org.yxzl.ter_music.Control.Stop >/dev/null 2>&1 || true
+    rpc_py call org.yxzl.ter_music.Queue.Clear >/dev/null 2>&1 || true
+}
+
+
 # ── 检查 7：Config / Remote ─────────────────────────────────────────
 check_config_remote() {
     local all volume
@@ -754,6 +935,12 @@ check_frontends
 
 info "检查 5：Queue（路径语义：内容由前端下发）"
 check_queue
+
+info "检查 5.5：歌词逐字时间（api_version 5）"
+check_lyrics
+
+info "检查 6：状态消息 / 元数据 UTF-8 安全"
+check_utf8_status
 
 info "检查 7：Config / Remote（M2.6）"
 check_config_remote

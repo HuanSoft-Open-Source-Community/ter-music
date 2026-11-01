@@ -27,6 +27,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/dict.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,15 +52,113 @@ Lyrics g_lyrics = {
 
 static void (*g_source_hook)(const char *track_path, int source) = NULL;
 static int (*g_position_source)(void) = NULL;
+static int64_t (*g_position_ms_source)(void) = NULL;
 
 void lyrics_set_position_source(int (*source)(void))
 {
     g_position_source = source;
 }
 
+void lyrics_set_position_ms_source(int64_t (*source)(void))
+{
+    g_position_ms_source = source;
+}
+
+int64_t lyrics_position_ms(void)
+{
+    if (g_position_ms_source) {
+        return g_position_ms_source();
+    }
+    if (g_position_source) {
+        /* 旧测试用秒注入：保留语义，换算成毫秒 */
+        return (int64_t)g_position_source() * 1000;
+    }
+    return audio_get_position_ms();
+}
+
 int lyrics_position_seconds(void)
 {
-    return g_position_source ? g_position_source() : audio_get_position_seconds();
+    return (int)(lyrics_position_ms() / 1000);
+}
+
+/* 秒 → 毫秒（四舍五入）。不引 libm：单测链接环境没有 -lm。 */
+static int64_t lyric_seconds_to_ms(double seconds)
+{
+    if (seconds <= 0.0) {
+        return 0;
+    }
+    return (int64_t)(seconds * 1000.0 + 0.5);
+}
+
+/* UTF-8 码点字节长度；非法/被截断的序列按 1 字节前进，保证扫描不会卡住。 */
+static size_t lyric_utf8_char_len(const char *src)
+{
+    if (!src || src[0] == '\0') {
+        return 0;
+    }
+    unsigned char c = (unsigned char)src[0];
+    size_t need = 1;
+    if ((c & 0xE0) == 0xC0) {
+        need = 2;
+    } else if ((c & 0xF0) == 0xE0) {
+        need = 3;
+    } else if ((c & 0xF8) == 0xF0) {
+        need = 4;
+    } else if (c >= 0x80) {
+        return 1;   /* 落单续字节/非法首字节 */
+    }
+    for (size_t i = 1; i < need; i++) {
+        unsigned char cc = (unsigned char)src[i];
+        if (cc == '\0' || (cc & 0xC0) != 0x80) {
+            return 1;
+        }
+    }
+    return need;
+}
+
+static int lyric_count_chars(const char *src)
+{
+    int count = 0;
+    if (!src) {
+        return 0;
+    }
+    while (*src) {
+        size_t len = lyric_utf8_char_len(src);
+        if (len == 0) {
+            break;
+        }
+        src += len;
+        count++;
+    }
+    return count;
+}
+
+/* 把 src 按完整 UTF-8 字符复制到 dest（最多 dest_size-1 字节），返回写入的
+ * 字符数。用于纯文本行/元数据头，避免截断点多字节字符。 */
+static int lyric_copy_text(char *dest, size_t dest_size, const char *src)
+{
+    if (!dest || dest_size == 0) {
+        return 0;
+    }
+    dest[0] = '\0';
+    if (!src) {
+        return 0;
+    }
+
+    size_t written = 0;
+    int chars = 0;
+    while (*src) {
+        size_t len = lyric_utf8_char_len(src);
+        if (len == 0 || written + len >= dest_size) {
+            break;
+        }
+        memcpy(dest + written, src, len);
+        written += len;
+        src += len;
+        chars++;
+    }
+    dest[written] = '\0';
+    return chars;
 }
 
 void lyrics_set_source_hook(void (*hook)(const char *track_path, int source))
@@ -88,7 +187,11 @@ int lyrics_source(void)
 }
 
 static void reset_loaded_lyrics(void) {
+    uint32_t *pool = NULL;
     pthread_mutex_lock(&g_lyrics.lock);
+    pool = g_lyrics.char_times_ms;
+    g_lyrics.char_times_ms = NULL;
+    g_lyrics.char_times_count = 0;
     g_lyrics.count = 0;
     g_lyrics.current_index = -1;
     g_lyrics.highlight_count = 0;
@@ -96,7 +199,10 @@ static void reset_loaded_lyrics(void) {
     g_lyrics.has_timestamps = 0;
     g_lyrics.cursor_index = -1;
     g_lyrics.source = LYRICS_SOURCE_AUTO;
+    g_lyrics.current_char_sung = 0;
+    g_lyrics.current_char_total = 0;
     pthread_mutex_unlock(&g_lyrics.lock);
+    free(pool);
 }
 
 static int duplicate_text_bytes(const unsigned char *data, size_t len, size_t skip, char **out_text) {
@@ -406,110 +512,499 @@ static int load_lyrics_text_utf8(const char *path, char **out_text) {
 }
 
 /**
- * 解析 LRC 时间戳字符串
- * 格式：[mm:ss.xx]
- * @param time_str 时间戳字符串（不包含方括号）
- * @return 时间戳（秒，包含毫秒）
+ * 解析 LRC 时间戳字符串（不含方括号）
+ * 支持 [mm:ss]、[mm:ss.x]、[mm:ss.xx]、[mm:ss.xxx]；小数位按实际位数缩放。
+ * @return 时间戳（秒，含毫秒）；-1 = 非法
  */
 static double parse_timestamp(const char *time_str) {
-    int mm, ss, xx;
-    if (sscanf(time_str, "%d:%d.%d", &mm, &ss, &xx) == 3) {
-        return mm * 60 + ss + xx / 100.0;  // 保留毫秒精度
+    if (!time_str || time_str[0] == '\0') {
+        return -1.0;
     }
-    return -1.0;
+
+    int mm = 0;
+    int ss = 0;
+    int consumed = 0;
+    if (sscanf(time_str, "%d:%d%n", &mm, &ss, &consumed) < 2) {
+        return -1.0;
+    }
+    if (mm < 0 || ss < 0) {
+        return -1.0;
+    }
+
+    double value = (double)mm * 60.0 + (double)ss;
+    const char *frac = time_str + consumed;
+    if (*frac == '.') {
+        frac++;
+        int digits = 0;
+        int frac_value = 0;
+        while (*frac >= '0' && *frac <= '9' && digits < 9) {
+            frac_value = frac_value * 10 + (*frac - '0');
+            digits++;
+            frac++;
+        }
+        if (digits == 0 || *frac != '\0') {
+            return -1.0;
+        }
+        int divisor = 1;
+        for (int i = 0; i < digits; i++) {
+            divisor *= 10;
+        }
+        value += (double)frac_value / (double)divisor;
+    } else if (*frac != '\0') {
+        return -1.0;
+    }
+
+    return value;
 }
-/**
- * 解析单行 LRC 内容
- * @param line LRC 文件的一行
- * @param timestamp 输出：时间戳（秒，包含毫秒）
- * @param text 输出：歌词文本
- * @return 1 表示成功，0 表示失败
+
+/* 尝试把 src 处的 [..] 解析成时间标签。
+ * @return 标签字节长度（含方括号）；0 = 不是时间标签
  */
-static int parse_lrc_line(const char *line, double *timestamp, char *text) {
-    if (!line || !timestamp || !text) {
+static int parse_time_tag(const char *src, int64_t *out_ms) {
+    if (!src || src[0] != '[') {
         return 0;
     }
-    
-    // 跳过空行
-    if (line[0] == '\0' || line[0] == '\n') {
-        return 0;
-    }
-    
-    // 查找第一个时间标签 [mm:ss.xx]
-    const char *start = strchr(line, '[');
-    if (!start) {
-        return 0;
-    }
-    
-    const char *end = strchr(start, ']');
+    const char *end = strchr(src, ']');
     if (!end) {
         return 0;
     }
-    
-    // 提取时间戳字符串（不包含方括号）
-    char time_str[16];
-    int len = end - start - 1;
-    if (len <= 0 || (size_t)len >= sizeof(time_str)) {
+    size_t len = (size_t)(end - src - 1);
+    if (len == 0 || len >= 24) {
         return 0;
     }
-    strncpy(time_str, start + 1, len);
-    time_str[len] = '\0';
-    
-    // 解析时间戳
-    double ts = parse_timestamp(time_str);
-    if (ts < 0) {
+
+    char buffer[24];
+    memcpy(buffer, src + 1, len);
+    buffer[len] = '\0';
+
+    double ts = parse_timestamp(buffer);
+    if (ts < 0.0) {
         return 0;
     }
-    *timestamp = ts;
-    
-    // 提取歌词文本（跳过所有时间标签）
-    const char *text_start = end + 1;
-    while (*text_start == '[') {
-        // 跳过连续的时间标签
-        const char *next_end = strchr(text_start, ']');
-        if (!next_end) {
+    if (out_ms) {
+        *out_ms = lyric_seconds_to_ms(ts);
+    }
+    return (int)(end - src + 1);
+}
+
+/* 一行内的逐段时间边界：(本段起始字符下标, 本段起始毫秒) */
+typedef struct {
+    int char_index;
+    int64_t time_ms;
+} LyricSegment;
+
+/* 解析中的临时歌词文档。逐字池与段表都是动态的，加载完成后一次性提交到
+ * g_lyrics，避免解析期占用固定大数组。 */
+typedef struct {
+    LyricLine lines[MAX_LYRIC_LINES];
+    int count;
+    LyricSegment *segments;
+    int segment_count;
+    int segment_capacity;
+    int line_segment_offset[MAX_LYRIC_LINES];
+    int line_segment_count[MAX_LYRIC_LINES];
+    int line_pool_offset[MAX_LYRIC_LINES];
+    int has_timestamps;
+    uint32_t *char_times;
+    int char_times_count;
+} ParsedLyrics;
+
+static void parsed_lyrics_free(ParsedLyrics *parsed)
+{
+    if (!parsed) {
+        return;
+    }
+    free(parsed->segments);
+    free(parsed->char_times);
+    parsed->segments = NULL;
+    parsed->char_times = NULL;
+    parsed->segment_count = 0;
+    parsed->segment_capacity = 0;
+    parsed->char_times_count = 0;
+}
+
+static int parsed_add_segment(ParsedLyrics *parsed, int char_index, int64_t time_ms)
+{
+    if (parsed->segment_count == parsed->segment_capacity) {
+        int capacity = parsed->segment_capacity > 0
+            ? parsed->segment_capacity * 2 : 128;
+        LyricSegment *grown = realloc(parsed->segments,
+                                      (size_t)capacity * sizeof(LyricSegment));
+        if (!grown) {
+            return -1;
+        }
+        parsed->segments = grown;
+        parsed->segment_capacity = capacity;
+    }
+    parsed->segments[parsed->segment_count].char_index = char_index;
+    parsed->segments[parsed->segment_count].time_ms = time_ms;
+    parsed->segment_count++;
+    return 0;
+}
+
+/* 解析单行。line 可被原地改写（解码实体、插入 NUL）。
+ * @return 1 = 收录一行；0 = 跳过；-1 = 内存不足 */
+static int parse_one_lyric_line(char *line, int keep_metadata, int keep_plain,
+                                ParsedLyrics *parsed)
+{
+    if (!line || line[0] == '\0' || parsed->count >= MAX_LYRIC_LINES) {
+        return 0;
+    }
+
+    /* 外部 LRC 的 [ti:] / [ar:] / [al:] 头：保留旧行为，作为无时间戳行收录 */
+    if (keep_metadata && line[0] == '[' &&
+        (line[1] == 't' || line[1] == 'a') && line[2] != '\0' && line[3] == ':') {
+        char *close = strchr(line + 4, ']');
+        if (close && close > line + 4) {
+            *close = '\0';
+            LyricLine *out = &parsed->lines[parsed->count];
+            memset(out, 0, sizeof(*out));
+            out->timing = LYRIC_TIMING_NONE;
+            out->char_count = lyric_copy_text(out->text, sizeof(out->text),
+                                               line + 4);
+            parsed->line_segment_offset[parsed->count] = parsed->segment_count;
+            parsed->line_segment_count[parsed->count] = 0;
+            parsed->line_pool_offset[parsed->count] = 0;
+            *close = ']';
+            parsed->count++;
+            return 1;
+        }
+    }
+
+    char *tag = strchr(line, '[');
+    int64_t start_ms = 0;
+    int tag_len = tag ? parse_time_tag(tag, &start_ms) : 0;
+
+    if (tag_len <= 0) {
+        if (!keep_plain) {
+            return 0;       /* 外部 LRC：没有时间戳的普通行不收录 */
+        }
+        /* 内嵌歌词：跳过 [xx:...] 元数据头，其余按无时间戳行收录 */
+        if (line[0] == '[') {
+            char *colon = strchr(line, ':');
+            char *close = strchr(line, ']');
+            if (colon && close && colon < close) {
+                return 0;
+            }
+        }
+        LyricLine *out = &parsed->lines[parsed->count];
+        memset(out, 0, sizeof(*out));
+        out->timing = LYRIC_TIMING_NONE;
+        out->char_count = lyric_copy_text(out->text, sizeof(out->text), line);
+        parsed->line_segment_offset[parsed->count] = parsed->segment_count;
+        parsed->line_segment_count[parsed->count] = 0;
+        parsed->line_pool_offset[parsed->count] = 0;
+        parsed->count++;
+        return 1;
+    }
+
+    LyricLine *out = &parsed->lines[parsed->count];
+    memset(out, 0, sizeof(*out));
+    out->timestamp = (double)start_ms / 1000.0;
+    out->has_timestamp = 1;
+    out->timing = LYRIC_TIMING_NONE;
+    parsed->has_timestamps = 1;
+
+    int segment_start = parsed->segment_count;
+    if (parsed_add_segment(parsed, 0, start_ms) != 0) {
+        return -1;
+    }
+
+    const char *scan = tag + tag_len;
+    char *dst = out->text;
+    int dst_bytes = 0;
+    int char_count = 0;
+    int text_started = 0;
+
+    while (*scan != '\0') {
+        if (*scan == '[') {
+            int64_t seg_ms = 0;
+            int seg_len = parse_time_tag(scan, &seg_ms);
+            if (seg_len > 0) {
+                if (text_started &&
+                    parsed_add_segment(parsed, char_count, seg_ms) != 0) {
+                    return -1;
+                }
+                scan += seg_len;
+                continue;
+            }
+        }
+
+        unsigned char c = (unsigned char)*scan;
+        if (!text_started && (c == ' ' || c == '\t')) {
+            scan++;
+            continue;
+        }
+
+        size_t char_len = lyric_utf8_char_len(scan);
+        if (char_len == 0) {
             break;
         }
-        text_start = next_end + 1;
+        if (dst_bytes + (int)char_len < (int)sizeof(out->text)) {
+            memcpy(dst + dst_bytes, scan, char_len);
+            dst_bytes += (int)char_len;
+            dst[dst_bytes] = '\0';
+            char_count++;
+        }
+        text_started = 1;
+        scan += char_len;
     }
-    
-    // 去除前导空格
-    while (*text_start == ' ' || *text_start == '\t') {
-        text_start++;
+
+    /* 去掉行尾空白并重算字符数（段下标随后统一钳制） */
+    while (dst_bytes > 0 && (dst[dst_bytes - 1] == ' ' || dst[dst_bytes - 1] == '\t')) {
+        dst_bytes--;
     }
-    
-    // 复制歌词文本，边复制边过滤嵌入的 [mm:ss.xx] 时间戳标签
-    // 这样 MAX_LYRIC_TEXT_LEN 限制只作用于真正的歌词内容，
-    // 避免卡拉OK式 LRC 因原始文本过长而把时间戳截断成碎片残留
-    int dst = 0;
-    const char *src = text_start;
-    while (*src && dst < MAX_LYRIC_TEXT_LEN - 1) {
-        if (*src == '[') {
-            const char *close = strchr(src, ']');
-            if (close) {
-                int mm, ss, xx;
-                if (sscanf(src + 1, "%d:%d.%d", &mm, &ss, &xx) == 3) {
-                    src = close + 1;
+    dst[dst_bytes] = '\0';
+    char_count = lyric_count_chars(dst);
+
+    double end_timestamp = 0.0;
+    int segment_count = parsed->segment_count - segment_start;
+    if (segment_count > 1) {
+        LyricSegment *last = &parsed->segments[parsed->segment_count - 1];
+        if (last->char_index == char_count) {
+            /* 正文之后紧跟的最后一个时间标签 = 行结束时间 */
+            end_timestamp = (double)last->time_ms / 1000.0;
+            parsed->segment_count--;
+            segment_count--;
+        }
+    }
+
+    if (char_count == 0) {
+        /* 没有正文（纯音乐/空行占位）：保留旧行为，但不参与逐字 */
+        (void)lyric_copy_text(out->text, sizeof(out->text),
+                              i18n_get("lyrics.instrumental"));
+        char_count = 0;
+    }
+
+    out->end_timestamp = end_timestamp;
+    out->char_count = char_count;
+    parsed->line_segment_offset[parsed->count] = segment_start;
+    parsed->line_segment_count[parsed->count] = segment_count;
+    parsed->line_pool_offset[parsed->count] = 0;
+    parsed->count++;
+    return 1;
+}
+
+/* 推导行结束时间、逐字时间池，并确定每行的 timing 模式。 */
+static int finalize_parsed_lyrics(ParsedLyrics *parsed)
+{
+    int total_chars = 0;
+
+    for (int i = 0; i < parsed->count; i++) {
+        LyricLine *line = &parsed->lines[i];
+        double explicit_end = line->end_timestamp;
+        line->timing = LYRIC_TIMING_NONE;
+        line->end_timestamp = 0.0;
+
+        if (!line->has_timestamp) {
+            continue;
+        }
+
+        int64_t start_ms = lyric_seconds_to_ms(line->timestamp);
+        int64_t end_ms = lyric_seconds_to_ms(explicit_end);
+        if (end_ms <= start_ms) {
+            end_ms = 0;
+            for (int j = i + 1; j < parsed->count; j++) {
+                if (!parsed->lines[j].has_timestamp) {
                     continue;
+                }
+                int64_t next_ms = lyric_seconds_to_ms(parsed->lines[j].timestamp);
+                if (next_ms > start_ms) {
+                    end_ms = next_ms;
+                    break;
                 }
             }
         }
-        text[dst++] = *src++;
-    }
-    text[dst] = '\0';
-    len = dst;
+        if (end_ms <= start_ms) {
+            /* 最后一行：沿用前一个有效行的时长，避免依赖尚未就绪的音频总时长 */
+            for (int j = i - 1; j >= 0; j--) {
+                if (!parsed->lines[j].has_timestamp) {
+                    continue;
+                }
+                int64_t prev_start = lyric_seconds_to_ms(parsed->lines[j].timestamp);
+                int64_t prev_end = lyric_seconds_to_ms(parsed->lines[j].end_timestamp);
+                if (prev_end > prev_start) {
+                    end_ms = start_ms + (prev_end - prev_start);
+                    break;
+                }
+            }
+        }
 
-    // 去除末尾换行符和空格
-    while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r' || text[len-1] == ' ')) {
-        text[--len] = '\0';
+        if (end_ms <= start_ms || line->char_count <= 0) {
+            continue;
+        }
+
+        line->end_timestamp = (double)end_ms / 1000.0;
+        if (parsed->line_segment_count[i] >= 2) {
+            line->timing = LYRIC_TIMING_CHARS;
+            total_chars += line->char_count;
+        } else {
+            line->timing = LYRIC_TIMING_LINE;
+        }
     }
 
-    // 如果歌词文本为空，使用占位符
-    if (len == 0) {
-        snprintf(text, MAX_LYRIC_TEXT_LEN, "%s", i18n_get("lyrics.instrumental"));
+    if (total_chars > 0) {
+        parsed->char_times = malloc((size_t)total_chars * sizeof(uint32_t));
+        if (!parsed->char_times) {
+            /* 内存不足：全部降级为行级插值，歌词仍然可用 */
+            for (int i = 0; i < parsed->count; i++) {
+                if (parsed->lines[i].timing == LYRIC_TIMING_CHARS) {
+                    parsed->lines[i].timing = LYRIC_TIMING_LINE;
+                }
+            }
+            total_chars = 0;
+        }
     }
-    
-    return 1;
+
+    int pool_pos = 0;
+    for (int i = 0; i < parsed->count; i++) {
+        LyricLine *line = &parsed->lines[i];
+        if (line->timing != LYRIC_TIMING_CHARS) {
+            parsed->line_pool_offset[i] = 0;
+            continue;
+        }
+
+        int offset = pool_pos;
+        int count = line->char_count;
+        int64_t start_ms = lyric_seconds_to_ms(line->timestamp);
+        int64_t end_ms = lyric_seconds_to_ms(line->end_timestamp);
+        for (int j = 0; j < count; j++) {
+            parsed->char_times[offset + j] =
+                (uint32_t)(start_ms > UINT32_MAX ? UINT32_MAX : start_ms);
+        }
+
+        int seg_offset = parsed->line_segment_offset[i];
+        int seg_count = parsed->line_segment_count[i];
+        for (int k = 0; k < seg_count; k++) {
+            LyricSegment *seg = &parsed->segments[seg_offset + k];
+            int c0 = seg->char_index;
+            if (c0 < 0) c0 = 0;
+            if (c0 > count) c0 = count;
+            int c1 = count;
+            if (k + 1 < seg_count) {
+                c1 = parsed->segments[seg_offset + k + 1].char_index;
+                if (c1 < c0) c1 = c0;
+                if (c1 > count) c1 = count;
+            }
+            if (c1 <= c0) {
+                continue;
+            }
+
+            int64_t t0 = seg->time_ms;
+            if (t0 < start_ms) t0 = start_ms;
+            if (t0 > end_ms) t0 = end_ms;
+            int64_t t1 = (k + 1 < seg_count)
+                ? parsed->segments[seg_offset + k + 1].time_ms : end_ms;
+            if (t1 < t0) t1 = t0;
+            if (t1 > end_ms) t1 = end_ms;
+
+            for (int j = c0; j < c1; j++) {
+                int64_t when = t0;
+                if (t1 > t0) {
+                    when = t0 + ((t1 - t0) * (int64_t)(j - c0)) / (int64_t)(c1 - c0);
+                    if (when < t0) when = t0;
+                    if (when > t1) when = t1;
+                }
+                if (when > UINT32_MAX) when = UINT32_MAX;
+                parsed->char_times[offset + j] = (uint32_t)when;
+            }
+        }
+
+        for (int j = 1; j < count; j++) {
+            if (parsed->char_times[offset + j] < parsed->char_times[offset + j - 1]) {
+                parsed->char_times[offset + j] = parsed->char_times[offset + j - 1];
+            }
+        }
+
+        parsed->line_pool_offset[i] = offset;
+        pool_pos += count;
+    }
+    parsed->char_times_count = pool_pos;
+    return 0;
+}
+
+/* 解析完整歌词文本（原地改写）。外部 .lrc 与内嵌 LRC 共用这一条路径。
+ * @return 收录行数；-1 = 解析失败（内存不足） */
+static int parse_lyrics_text(char *text, int keep_metadata, int keep_plain,
+                             ParsedLyrics *parsed)
+{
+    memset(parsed, 0, sizeof(*parsed));
+    if (!text) {
+        return 0;
+    }
+
+    char *cursor = text;
+    while (cursor && *cursor != '\0') {
+        char *line = cursor;
+        char *newline = strchr(cursor, '\n');
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor = line + strlen(line);
+        }
+
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\r' || line[len - 1] == ' ' ||
+                           line[len - 1] == '\t')) {
+            line[--len] = '\0';
+        }
+        if (line[0] == '\0') {
+            continue;
+        }
+
+        decode_html_entities(line);
+        int rc = parse_one_lyric_line(line, keep_metadata, keep_plain, parsed);
+        if (rc < 0) {
+            parsed_lyrics_free(parsed);
+            return -1;
+        }
+    }
+
+    if (finalize_parsed_lyrics(parsed) != 0) {
+        parsed_lyrics_free(parsed);
+        return -1;
+    }
+    return parsed->count;
+}
+
+/* 把解析结果一次性提交为全局歌词状态，并释放上一份逐字池。 */
+static void commit_parsed_lyrics(ParsedLyrics *parsed, int source,
+                                 int has_timestamps)
+{
+    uint32_t *old_pool = NULL;
+
+    pthread_mutex_lock(&g_lyrics.lock);
+    old_pool = g_lyrics.char_times_ms;
+
+    g_lyrics.count = parsed->count;
+    memcpy(g_lyrics.lines, parsed->lines,
+           sizeof(LyricLine) * (size_t)parsed->count);
+    for (int i = 0; i < parsed->count; i++) {
+        g_lyrics.line_char_offset[i] = parsed->line_pool_offset[i];
+    }
+    g_lyrics.char_times_ms = parsed->char_times;
+    g_lyrics.char_times_count = parsed->char_times_count;
+    parsed->char_times = NULL;
+    parsed->char_times_count = 0;
+
+    g_lyrics.has_lyrics = parsed->count > 0 ? 1 : 0;
+    g_lyrics.has_timestamps = has_timestamps ? 1 : 0;
+    g_lyrics.current_index = has_timestamps ? -1 : 0;
+    g_lyrics.highlight_count = 0;
+    g_lyrics.current_char_sung = 0;
+    g_lyrics.current_char_total = 0;
+    g_lyrics.cursor_index = -1;
+    g_lyrics.source = source;
+
+    pthread_mutex_unlock(&g_lyrics.lock);
+
+    free(old_pool);
+    /* 段表只服务解析期，提交后不再需要（逐字池已转交全局状态）。 */
+    free(parsed->segments);
+    parsed->segments = NULL;
+    parsed->segment_count = 0;
+    parsed->segment_capacity = 0;
 }
 
 static int extract_embedded_lyrics(const char *audio_path)
@@ -577,71 +1072,18 @@ static int extract_embedded_lyrics(const char *audio_path)
 
     if (!found) return -1;
 
-    /* ── Parse lyrics text into LyricLine[] ── */
-    LyricLine temp_lines[MAX_LYRIC_LINES];
-    int count = 0;
-    int has_timestamps = 0;
-
-    char *cursor = lyrics_text;
-    while (cursor && *cursor != '\0' && count < MAX_LYRIC_LINES) {
-        char *line = cursor;
-        char *newline = strchr(cursor, '\n');
-        if (newline) {
-            *newline = '\0';
-            cursor = newline + 1;
-        } else {
-            cursor = line + strlen(line);
-        }
-
-        /* Strip trailing \r */
-        size_t llen = strlen(line);
-        while (llen > 0 && (line[llen - 1] == '\r' || line[llen - 1] == ' '))
-            line[--llen] = '\0';
-
-        if (line[0] == '\0') continue;
-
-        /* Try LRC parsing */
-        double ts;
-        char lrc_text[MAX_LYRIC_TEXT_LEN];
-        if (parse_lrc_line(line, &ts, lrc_text)) {
-            temp_lines[count].timestamp = ts;
-            decode_html_entities(lrc_text);
-            strncpy(temp_lines[count].text, lrc_text, MAX_LYRIC_TEXT_LEN - 1);
-            temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-            has_timestamps = 1;
-            count++;
-        } else {
-            /* Skip LRC metadata headers like [ti:...], [ar:...], [by:...] */
-            if (line[0] == '[') {
-                const char *colon = strchr(line, ':');
-                const char *close_bracket = strchr(line, ']');
-                if (colon && close_bracket && colon < close_bracket) {
-                    continue;  /* metadata header — skip */
-                }
-            }
-            /* Plain text line */
-            temp_lines[count].timestamp = 0.0;
-            decode_html_entities(line);
-            strncpy(temp_lines[count].text, line, MAX_LYRIC_TEXT_LEN - 1);
-            temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-            count++;
-        }
-    }
-
+    /* ── Parse lyrics text（内嵌：保留纯文本行，跳过元数据头） ── */
+    ParsedLyrics parsed;
+    int count = parse_lyrics_text(lyrics_text, 0, 1, &parsed);
     free(lyrics_text);
 
-    if (count == 0) return -1;
+    if (count <= 0) {
+        parsed_lyrics_free(&parsed);
+        return -1;
+    }
 
-    /* Store parsed lyrics */
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = count;
-    memcpy(g_lyrics.lines, temp_lines, sizeof(LyricLine) * count);
-    g_lyrics.has_lyrics = 1;
-    g_lyrics.has_timestamps = has_timestamps;
-    g_lyrics.current_index = has_timestamps ? -1 : 0;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.source = LYRICS_SOURCE_EMBEDDED;
-    pthread_mutex_unlock(&g_lyrics.lock);
+    int has_timestamps = parsed.has_timestamps;
+    commit_parsed_lyrics(&parsed, LYRICS_SOURCE_EMBEDDED, has_timestamps);
 
     log_info("lyrics", "Loaded %d embedded lyric lines from '%s' (timestamps=%d)",
              count, audio_path, has_timestamps);
@@ -693,85 +1135,27 @@ void load_lyrics(const char *audio_path, int lyrics_source) {
         return;
     }
     
-    // 临时缓冲区存储解析后的歌词
-    LyricLine temp_lines[MAX_LYRIC_LINES];
-    int count = 0;
-
-    char *cursor = lyrics_text;
-    while (cursor && *cursor != '\0' && count < MAX_LYRIC_LINES) {
-        char *line = cursor;
-        char *newline = strchr(cursor, '\n');
-        if (newline) {
-            *newline = '\0';
-            cursor = newline + 1;
-        } else {
-            cursor = line + strlen(line);
-        }
-
-        if (line[0] == '\0') {
-            continue;
-        }
-
-        // 检测头部元数据行 [ti:曲名]、[ar:歌手]、[al:专辑]
-        if (line[0] == '[' &&
-            (line[1] == 't' || line[1] == 'a') && line[3] == ':') {
-            char *close = strchr(line + 4, ']');
-            if (close && close > line + 4) {
-                *close = '\0';
-                temp_lines[count].timestamp = 0.0;
-                strncpy(temp_lines[count].text, line + 4, MAX_LYRIC_TEXT_LEN - 1);
-                temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-                *close = ']';
-                count++;
-                continue;
-            }
-        }
-
-        double timestamp;
-        char text[MAX_LYRIC_TEXT_LEN];
-
-        if (parse_lrc_line(line, &timestamp, text)) {
-            temp_lines[count].timestamp = timestamp;
-            decode_html_entities(text);
-            strncpy(temp_lines[count].text, text, MAX_LYRIC_TEXT_LEN - 1);
-            temp_lines[count].text[MAX_LYRIC_TEXT_LEN - 1] = '\0';
-            count++;
-        }
-    }
-
+    /* ── Parse lyrics text（外部：保留 [ti:]/[ar:]/[al:] 头行，跳过普通无时间戳行） ── */
+    ParsedLyrics parsed;
+    int count = parse_lyrics_text(lyrics_text, 1, 0, &parsed);
     free(lyrics_text);
-    
+
     // 如果没有解析到任何歌词
-    if (count == 0) {
+    if (count <= 0) {
+        parsed_lyrics_free(&parsed);
         log_debug("lyrics", "No lyrics content in '%s'", lrc_path);
         reset_loaded_lyrics();
         return;
     }
 
-    // 锁定并更新全局歌词数据
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = count;
-    memcpy(g_lyrics.lines, temp_lines, sizeof(LyricLine) * count);
-    g_lyrics.has_lyrics = 1;
-    g_lyrics.has_timestamps = 1;
-    g_lyrics.current_index = -1;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.source = LYRICS_SOURCE_EXTERNAL;
-    pthread_mutex_unlock(&g_lyrics.lock);
+    commit_parsed_lyrics(&parsed, LYRICS_SOURCE_EXTERNAL, 1);
 
     log_info("lyrics", "Loaded %d lyric lines from '%s'", count, lrc_path);
 }
 
 void clear_lyrics(void) {
     log_debug("lyrics", "clear_lyrics() called");
-    pthread_mutex_lock(&g_lyrics.lock);
-    g_lyrics.count = 0;
-    g_lyrics.current_index = -1;
-    g_lyrics.highlight_count = 0;
-    g_lyrics.has_lyrics = 0;
-    g_lyrics.has_timestamps = 0;
-    g_lyrics.source = LYRICS_SOURCE_AUTO;
-    pthread_mutex_unlock(&g_lyrics.lock);
+    reset_loaded_lyrics();
 }
 
 /* ── UTF-16 → UTF-8（自实现，不用 iconv） ──────────────────────────
@@ -843,10 +1227,150 @@ static int utf16_to_utf8(const unsigned char *input, size_t input_len,
 }
 
 
+/* ── 逐字进度 ───────────────────────────────────────────────────
+ * 所有函数都要求调用方持有 g_lyrics.lock（或由下面的公开包装器加锁）。 */
+
+static int lyric_line_char_progress_locked(int index, int64_t position_ms,
+                                           int *out_sung, int *out_total)
+{
+    if (out_sung) *out_sung = 0;
+    if (out_total) *out_total = 0;
+
+    if (index < 0 || index >= g_lyrics.count) {
+        return 0;
+    }
+
+    const LyricLine *line = &g_lyrics.lines[index];
+    int total = line->char_count;
+    if (line->timing == LYRIC_TIMING_NONE || !line->has_timestamp || total <= 0) {
+        return 0;
+    }
+    if (out_total) {
+        *out_total = total;
+    }
+
+    int64_t start_ms = lyric_seconds_to_ms(line->timestamp);
+    int64_t end_ms = lyric_seconds_to_ms(line->end_timestamp);
+    if (end_ms <= start_ms) {
+        return 0;
+    }
+    if (position_ms < start_ms) {
+        return 1;                       /* 尚未到行首 */
+    }
+    if (position_ms >= end_ms) {
+        if (out_sung) *out_sung = total;
+        return 1;
+    }
+
+    if (line->timing == LYRIC_TIMING_CHARS) {
+        int offset = g_lyrics.line_char_offset[index];
+        if (g_lyrics.char_times_ms && offset >= 0 &&
+            offset + total <= g_lyrics.char_times_count) {
+            int sung = 0;
+            while (sung < total &&
+                   (int64_t)g_lyrics.char_times_ms[offset + sung] <= position_ms) {
+                sung++;
+            }
+            if (out_sung) *out_sung = sung;
+            return 1;
+        }
+        /* 池缺失/长度不符：回退到行级插值 */
+    }
+
+    int64_t span = end_ms - start_ms;
+    int64_t elapsed = position_ms - start_ms;
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > span) elapsed = span;
+    int sung = (int)((elapsed * (int64_t)total) / span);
+    if (sung < 0) sung = 0;
+    if (sung > total) sung = total;
+    if (out_sung) *out_sung = sung;
+    return 1;
+}
+
+int lyrics_char_progress_at(int line_index, int64_t position_ms,
+                            int *out_sung, int *out_total)
+{
+    if (out_sung) *out_sung = 0;
+    if (out_total) *out_total = 0;
+    pthread_mutex_lock(&g_lyrics.lock);
+    int rc = lyric_line_char_progress_locked(line_index, position_ms,
+                                             out_sung, out_total);
+    pthread_mutex_unlock(&g_lyrics.lock);
+    return rc;
+}
+
+int lyrics_char_progress(int *out_sung, int *out_total)
+{
+    if (out_sung) *out_sung = 0;
+    if (out_total) *out_total = 0;
+    int64_t position_ms = lyrics_position_ms();
+    pthread_mutex_lock(&g_lyrics.lock);
+    int rc = lyric_line_char_progress_locked(g_lyrics.current_index, position_ms,
+                                             out_sung, out_total);
+    pthread_mutex_unlock(&g_lyrics.lock);
+    return rc;
+}
+
+void lyrics_snapshot(LyricsSnapshot *out)
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->current_index = -1;
+    out->next_index = -1;
+
+    int64_t position_ms = lyrics_position_ms();
+
+    pthread_mutex_lock(&g_lyrics.lock);
+
+    out->has_lyrics = g_lyrics.has_lyrics;
+    out->has_timestamps = g_lyrics.has_timestamps;
+    out->source = g_lyrics.source;
+
+    int count = g_lyrics.count;
+    if (out->has_lyrics && count > 0) {
+        if (!out->has_timestamps) {
+            out->current_index = 0;
+            out->next_index = (count > 1) ? 1 : -1;
+        } else {
+            for (int i = 0; i < count; i++) {
+                if (lyric_seconds_to_ms(g_lyrics.lines[i].timestamp) <= position_ms) {
+                    out->current_index = i;
+                } else {
+                    break;
+                }
+            }
+            if (out->current_index >= 0 && out->current_index + 1 < count) {
+                out->next_index = out->current_index + 1;
+            }
+        }
+
+        if (out->current_index >= 0 && out->current_index < count) {
+            const LyricLine *line = &g_lyrics.lines[out->current_index];
+            out->current_timestamp = line->timestamp;
+            snprintf(out->current_text, sizeof(out->current_text), "%s", line->text);
+            (void)lyric_line_char_progress_locked(out->current_index, position_ms,
+                                                  &out->current_char_sung,
+                                                  &out->current_char_total);
+        }
+        if (out->next_index >= 0 && out->next_index < count) {
+            const LyricLine *line = &g_lyrics.lines[out->next_index];
+            out->next_timestamp = line->timestamp;
+            snprintf(out->next_text, sizeof(out->next_text), "%s", line->text);
+        }
+    }
+
+    pthread_mutex_unlock(&g_lyrics.lock);
+}
+
 /* ── 推进（由 core_tick 每轮调用） ─────────────────────────────── */
 
 int lyrics_tick(void)
 {
+    int64_t position_ms = lyrics_position_ms();
+
     pthread_mutex_lock(&g_lyrics.lock);
 
     if (!g_lyrics.has_lyrics || g_lyrics.count == 0) {
@@ -858,23 +1382,25 @@ int lyrics_tick(void)
 
     /* 无时间戳的纯文本内嵌歌词：固定停在第 0 行 */
     if (!g_lyrics.has_timestamps) {
-        if (g_lyrics.current_index != 0) {
+        if (g_lyrics.current_index != 0 || g_lyrics.current_char_sung != 0 ||
+            g_lyrics.current_char_total != 0) {
             g_lyrics.current_index = 0;
             g_lyrics.highlight_count = 0;
+            g_lyrics.current_char_sung = 0;
+            g_lyrics.current_char_total = 0;
             changed = 1;
         }
         pthread_mutex_unlock(&g_lyrics.lock);
         return changed;
     }
 
-    double position = (double)lyrics_position_seconds();
     int new_index = -1;
     int new_highlight_count = 0;
 
     /* 找到最后一个 timestamp <= 播放位置的行；该行之后若还有**同一时间戳**
      * 的行，则一起高亮（最多两行，与 LRC 里一行时间戳带多行文本的写法对应）。 */
     for (int i = 0; i < g_lyrics.count; i++) {
-        if (g_lyrics.lines[i].timestamp > position) {
+        if (lyric_seconds_to_ms(g_lyrics.lines[i].timestamp) > position_ms) {
             break;
         }
         new_index = i;
@@ -885,10 +1411,19 @@ int lyrics_tick(void)
         }
     }
 
+    int new_char_sung = 0;
+    int new_char_total = 0;
+    (void)lyric_line_char_progress_locked(new_index, position_ms,
+                                          &new_char_sung, &new_char_total);
+
     if (new_index != g_lyrics.current_index ||
-        new_highlight_count != g_lyrics.highlight_count) {
+        new_highlight_count != g_lyrics.highlight_count ||
+        new_char_sung != g_lyrics.current_char_sung ||
+        new_char_total != g_lyrics.current_char_total) {
         g_lyrics.current_index = new_index;
         g_lyrics.highlight_count = new_highlight_count;
+        g_lyrics.current_char_sung = new_char_sung;
+        g_lyrics.current_char_total = new_char_total;
         changed = 1;
     }
 

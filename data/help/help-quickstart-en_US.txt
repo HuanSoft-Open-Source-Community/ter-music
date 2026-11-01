@@ -33,16 +33,28 @@ ter-music Quick Start Guide
 
 2. Layout Overview
 ------------------
-  +---------------------------+-------------------+
-  | Playlist / Queue pane     | Lyrics Panel      |
-  | (Tab to toggle views)     | (Right, toggleable)|
-  |                           |                   |
-  | Control Bar (bottom)       |                   |
-  | [<<] [>||] [>>] [Stop]    |                   |
-  | [Mode] [Speed] [Vol] [Progress]                |
-  +---------------------------+-------------------+
-  | F1:Home F2:Settings ... F8:Help F9:Quit      |
-  +----------------------------------------------+
+  The main view is driven by JSON layout presets with six pane kinds:
+    playlist / info / controls / spectrum / lyrics / vinyl
+  Every layout must tile the whole main area (the terminal minus the bottom
+  menu bar) seamlessly: no gaps, no overlaps. Resizing recomputes the
+  per-mille rectangles. Pane content, including the info-pane album cover, is
+  clipped inside its border; a pane too small for its renderer shows only
+  background and border. The info pane rearranges itself by size: wide panes
+  keep metadata and audio parameters side by side with the cover on the right;
+  narrow-and-tall panes stack the cover above the metadata and audio blocks.
+  The cover keeps a blank column before the right border and is hidden when
+  the pane cannot give it that room.
+  If both lyrics and vinyl are defined, lyrics is hidden. A lyrics-only
+  layout still falls back to the vinyl animation (colored blocks when colors
+  are available; the original glyph animation otherwise) when the track has
+  no lyrics.
+  Choose: F2 -> Appearance -> UI Layout (←/→ cycles, ENTER opens the list);
+  "Reload Layouts" re-reads the files.
+  Presets: classic / vinyl / dual / karaoke / visualizer / focus /
+           stage / neon
+  Built-in: /usr/share/ter-music/layouts/layouts.json (source: data/layouts/)
+  User override: ~/.config/ter-music/layouts.json (same id overrides built-in)
+  Selection: ~/.config/ter-music/ui-layout (front-end local, not config.xml)
 
 3. Focus Switching
 ------------------
@@ -140,8 +152,8 @@ ter-music Quick Start Guide
 7. Function Keys (F1-F9)
 -------------------------
   F1  Home (return to the main view)
-  F2  Settings (theme, path, playback, play mode, hotkeys, remote devices,
-        equalizer, info display)
+  F2  Settings (appearance/layout, path, playback, play mode, hotkeys, remote
+        devices, equalizer, info display)
   F3  Folder history (music folders you opened: ENTER loads, A appends to the
         queue, D removes the entry, C clears all)
   F4  Playlists (manage and create playlists)
@@ -219,7 +231,9 @@ ter-music Quick Start Guide
 
 10. Lyrics
 -----------
-  Priority order: embedded lyrics (FFmpeg/APE) > .lrc file > vinyl + spectrum animation
+  Priority order: embedded lyrics (FFmpeg/APE) > .lrc file > no lyrics
+  (vinyl animation in the lyrics pane — colored blocks when colors are available;
+  the separate spectrum pane keeps showing the audio-reactive bars)
   .lrc files in the same directory are loaded automatically.
   Embedded lyrics (in ID3/APE tags) take priority when available.
   Ctrl+L enters/leaves lyric seek mode: ↑/↓ moves the cursor and seeks to that
@@ -228,7 +242,7 @@ ter-music Quick Start Guide
   the core instead of a local progress tracker.
   Switch between embedded/external: Ctrl+L then Tab (in lyric seek mode); the
   preference is recorded by the front end in its own library.
-  Toggle the lyrics panel in Settings; alignment can be left, center or right.
+  Lyrics visibility comes from the layout preset (not a config toggle); alignment can be left, center or right in Settings -> Appearance.
 
 11. CUE Split-track Support
 ----------------------------
@@ -272,9 +286,17 @@ ter-music Quick Start Guide
 
 16. Album Art
 -------------
-  Enable album cover display in Settings.
-  Covers are rendered as character art in the terminal (braille, ASCII or half
-  blocks).
+  Enable the info/controls album cover display in Settings.
+  The CLI/D-Bus text cover can be braille, ASCII or half blocks. The TUI
+  info/controls cover uses colored half-block characters (automatic 256→8→
+  monochrome fallback) so its glyph width matches the terminal cell grid.
+  Color mode composes the two halves with `▀` (foreground = upper half,
+  background = lower half); `█` is only used by the monochrome fallback.
+  The standalone vinyl pane draws a colored half-block disc, a rotating circular
+  album-cover center label and colored spectrum bars (the label follows the same
+  256→8 fallback). Without colors, ASCII, or with a tight color-pair budget it
+  keeps the original glyph animation; a missing cover leaves the disc and bars
+  colored with a plain center.
   Embedded artwork is preferred; otherwise common same-directory files are used
   (cover/folder/front/album with jpg/jpeg/png/webp extensions).
   The character art is generated on demand: on a track change the D-Bus
@@ -285,10 +307,17 @@ ter-music Quick Start Guide
   The CLI can print the current cover directly:
     ter-music cover [--width --height --charset]
 
-17. Info Bar & Audio Backend
-----------------------------
-  The bottom info bar shows technical info for the current track:
+17. Info Pane & Audio Backend
+-----------------------------
+  The info pane shows state/mode, current-track metadata, the character cover,
+  and the current audio technical info (its placement is defined by the layout
+  preset):
     Sample Rate, Bit Depth, Bitrate, Codec
+  It switches between a side-by-side arrangement and a stacked one (cover on
+  top) depending on the pane's own width and height. The TUI cover is drawn with
+  colored half-block characters (not braille; automatic 256→8→monochrome
+  fallback) to keep glyph widths aligned with the cell grid; `ter-music cover`/
+  Info.GetCoverArt still honour the configured charset.
 
   Audio backend auto-detection priority: PipeWire > PulseAudio > ALSA
   Switch it manually in the Settings -> Playback "Audio Backend" entry:
@@ -301,6 +330,11 @@ ter-music Quick Start Guide
 
 18. Configuration & Data
 -------------------------
+  Layouts:  built-in <prefix>/share/ter-music/layouts/layouts.json;
+            user override ~/.config/ter-music/layouts.json;
+            selection ~/.config/ter-music/ui-layout (front-end local).
+            show_lyrics_panel is deprecated and only seeds the first choice
+            when ui-layout does not exist.
   Config:   ~/.config/ter-music/config.xml, written only by the core (the XML
             root version attribute carries the config contract number,
             currently 9; legacy "2.2" files still load and are rewritten with
@@ -459,7 +493,8 @@ ter-music Quick Start Guide
   The core publishes /org/mpris/MediaPlayer2 on the session bus as
   org.mpris.MediaPlayer2.ter_music, with MPRIS plus the ter-music interfaces
   org.yxzl.ter_music.Info / Control / Lyrics / Queue / Config.
-  The handshake reads core.api_version from Info.GetInfo (currently 4).
+  The handshake reads core.api_version from Info.GetInfo (currently 5; clients
+  require at least 4, and a v4 core simply lacks the per-character fields).
 
   MPRIS: Rate is a real read/write playback rate (MinimumRate 0.5, MaximumRate
   3.0); LoopStatus and Shuffle perform full play-mode switching; OpenUri answers
@@ -470,6 +505,8 @@ ter-music Quick Start Guide
              GetDocument(offset, count) -> s (paged full document)
              SetSource(source) -> b (1 = embedded, 2 = external)
     Signal:  LyricsChanged(s)
+    Per-character timing: GetDocument lines carry end/timing/char_total and,
+    for karaoke LRCs, a chars[] array; GetLyrics carries char_sung/char_total.
 
   Read the current A/B lyric snapshot with:
     gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \

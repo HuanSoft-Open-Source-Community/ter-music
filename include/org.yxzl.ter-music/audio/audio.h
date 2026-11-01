@@ -63,6 +63,10 @@ void persist_playback_session_state(void);
 int audio_get_position_seconds(void);
 int audio_get_duration_seconds(void);
 
+/* 当前可听播放位置（毫秒）。语义与秒版一致（同样扣除后端未消费缓冲），
+ * 供歌词逐字高亮这类需要亚秒精度的读取方使用；无播放时返回 0。 */
+int64_t audio_get_position_ms(void);
+
 /* 正在出声的曲目路径（g_play_mutex 下的拷贝）。
  * @return 1 = 有当前曲目且 out 已填充；0 = 无。 */
 int audio_current_track_path(char *out, size_t out_size);

@@ -4,6 +4,7 @@
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "ui/ui.h"
+#include "ui/layout.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
@@ -305,6 +306,7 @@ int main(int argc, char *argv[]) {
     snprintf(effective_lang, sizeof(effective_lang), "%s",
              cli_lang_is_explicit() ? cli_lang_resolve() : g_app_config.ui_language);
     i18n_init(effective_lang);
+    ui_layout_init();
     if (frontend == PLAYER_BACKEND_LOCAL) {
         set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支）; config-ownership-allow: 仅 local 核心宿主 */
     }
@@ -541,10 +543,10 @@ int main(int argc, char *argv[]) {
          * 文案与返回值/退出码保持不变，同时补 log_error 便于事后追溯。 */
         if (frontend == PLAYER_BACKEND_REMOTE) {
             cleanup();
-            log_error("main", "Cannot connect to the playback service (core), api_version=%d",
-                      TER_MUSIC_API_VERSION);
+            log_error("main", "Cannot connect to the playback service (core), api_version>=%d required",
+                      TER_MUSIC_API_MIN_VERSION);
             fprintf(stderr, "%s\n", i18n_get("main.err.core_connect"));
-            fprintf(stderr, i18n_get("main.err.core_connect_hint"), TER_MUSIC_API_VERSION);
+            fprintf(stderr, i18n_get("main.err.core_connect_hint"), TER_MUSIC_API_MIN_VERSION);
             fputc('\n', stderr);
             /* 语义化退出码：名字不在线=无实例(3)，名字在线却连不上=总线不可用(4) */
             return cli_client_primary_available(bus_name[0] ? bus_name : NULL)

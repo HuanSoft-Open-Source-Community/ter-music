@@ -8,6 +8,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT" || exit 1
 OUT_DIR="${TMPDIR:-/tmp}/tm-unit-tests"
 CC="${CC:-gcc}"
 

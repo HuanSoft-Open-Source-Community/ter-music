@@ -46,8 +46,15 @@
  *     任务整体撤下，Control.OpenPath/PlayIndex 与 Queue.Rebuild（含自省段）
  *     一并撤下，队列内容只能经 Queue.Set/Append/InsertAfter 下发；单发条目数
  *     上限 BQ_SET_MAX，超出回 Error.InvalidArgs（前端须分块：先 Set 后 Append）。
- * 前端在接入时校验 core.api_version >= 4，不兼容则提示“核心过旧”并退出。 */
-#define TER_MUSIC_API_VERSION 4
+ * 5 = 歌词逐字时间：Lyrics.GetDocument 的行增加 end/timing/char_total/chars，
+ *     Lyrics.GetLyrics 与 Info 的 lyrics 对象增加 char_sung/char_total；
+ *     新增字段是**向后兼容**的：v4 客户端忽略它们即可，新前端接 v4 核心时
+ *     缺字段默认 0，逐字高亮自动降级为整行。
+ *
+ * 前端/CLI 接入时校验 core.api_version >= TER_MUSIC_API_MIN_VERSION，
+ * 不兼容则提示“核心过旧”并退出。 */
+#define TER_MUSIC_API_VERSION 5
+#define TER_MUSIC_API_MIN_VERSION 4
 
 /* 单响应硬上限（256 KB）：任何 JSON 回复超过它都返回 Error.TooLarge */
 #define RPC_PAYLOAD_MAX 262144
@@ -140,6 +147,13 @@ DBusMessage *rpc_error(DBusMessage *message, const char *error_name, const char 
 DBusMessage *rpc_reply_string(DBusMessage *message, const char *value);
 DBusMessage *rpc_reply_bool(DBusMessage *message, int ok);
 DBusMessage *rpc_reply_int(DBusMessage *message, int value);
+
+/* 追加一个 UTF-8 合法的 DBUS_TYPE_STRING 参数。
+ * 合法值零拷贝直接通过；非法序列替换为 U+FFFD，绝不把非法字节交给 libdbus
+ * （libdbus 会断言 abort 整个进程）。所有动态文本（状态/错误/元数据/JSON/歌词）
+ * 都应经这两个出口进入 D-Bus。 */
+void rpc_append_string(DBusMessage *message, const char *value);
+void rpc_iter_append_string(DBusMessageIter *iter, const char *value);
 
 /* ── 共享引擎动作（MPRIS 与 Control 复用） ──────────────────────── */
 int rpc_track_available(void);

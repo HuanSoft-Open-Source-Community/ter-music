@@ -106,6 +106,7 @@ typedef struct {
 #define UI_DIRTY_PLAYLIST 0x01
 #define UI_DIRTY_CONTROLS 0x02
 #define UI_DIRTY_LYRICS 0x04
+#define UI_DIRTY_INFO 0x08
 
 #define CONTROL_COUNT 8
 #define MAX_PATH_LEN 512

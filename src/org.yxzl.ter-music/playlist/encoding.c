@@ -1,5 +1,6 @@
 #include "types.h"
 #include "playlist/encoding.h"
+#include "util/utf8_safe.h"
 
 #include <iconv.h>
 #include <errno.h>
@@ -8,62 +9,13 @@
 
 /* ──────────────────────────────────────────────────────────────────────
  * UTF-8 validation
+ *
+ * 校验规则收敛到 util/utf8_safe.c：同一套规则既服务 CUE/歌词的编码探测，
+ * 也服务 D-Bus 边界，避免两处实现漂移出“这里合法、libdbus 却 abort”的
+ * 边界差异。
  * ────────────────────────────────────────────────────────────────────── */
 int encoding_is_valid_utf8(const unsigned char *data, size_t len) {
-    size_t i = 0;
-
-    while (i < len) {
-        unsigned char c = data[i];
-        if (c < 0x80) {
-            i++;
-            continue;
-        }
-
-        if ((c & 0xE0) == 0xC0) {
-            if (i + 1 >= len || (data[i + 1] & 0xC0) != 0x80 || c < 0xC2) {
-                return 0;
-            }
-            i += 2;
-            continue;
-        }
-
-        if ((c & 0xF0) == 0xE0) {
-            if (i + 2 >= len ||
-                (data[i + 1] & 0xC0) != 0x80 ||
-                (data[i + 2] & 0xC0) != 0x80) {
-                return 0;
-            }
-            if (c == 0xE0 && data[i + 1] < 0xA0) {
-                return 0;
-            }
-            if (c == 0xED && data[i + 1] >= 0xA0) {
-                return 0;
-            }
-            i += 3;
-            continue;
-        }
-
-        if ((c & 0xF8) == 0xF0) {
-            if (i + 3 >= len ||
-                (data[i + 1] & 0xC0) != 0x80 ||
-                (data[i + 2] & 0xC0) != 0x80 ||
-                (data[i + 3] & 0xC0) != 0x80) {
-                return 0;
-            }
-            if (c == 0xF0 && data[i + 1] < 0x90) {
-                return 0;
-            }
-            if (c > 0xF4 || (c == 0xF4 && data[i + 1] >= 0x90)) {
-                return 0;
-            }
-            i += 4;
-            continue;
-        }
-
-        return 0;
-    }
-
-    return 1;
+    return utf8_is_valid_bytes(data, len);
 }
 
 /* ──────────────────────────────────────────────────────────────────────

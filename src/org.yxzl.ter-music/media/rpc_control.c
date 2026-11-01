@@ -56,8 +56,8 @@ void rpc_control_emit_status(unsigned long long seq, const char *message)
     const char *value = message ? message : "";
     dbus_message_append_args(signal,
                              DBUS_TYPE_UINT32, &sequence,
-                             DBUS_TYPE_STRING, &value,
                              DBUS_TYPE_INVALID);
+    rpc_append_string(signal, value);
     rpc_send(signal);
 }
 
@@ -73,11 +73,9 @@ void rpc_control_emit_error(const char *source, const char *name, const char *me
     const char *safe_source = source ? source : "";
     const char *safe_name = name ? name : RPC_ERROR_FAILED;
     const char *safe_message = message ? message : "";
-    dbus_message_append_args(signal,
-                             DBUS_TYPE_STRING, &safe_source,
-                             DBUS_TYPE_STRING, &safe_name,
-                             DBUS_TYPE_STRING, &safe_message,
-                             DBUS_TYPE_INVALID);
+    rpc_append_string(signal, safe_source);
+    rpc_append_string(signal, safe_name);
+    rpc_append_string(signal, safe_message);
     rpc_send(signal);
 }
 

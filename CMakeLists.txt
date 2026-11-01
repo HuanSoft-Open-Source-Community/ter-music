@@ -145,8 +145,16 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/library/browser/browser.c
     src/org.yxzl.ter-music/ui/ui.c
     src/org.yxzl.ter-music/util/utf8.c
+    src/org.yxzl.ter-music/util/utf8_safe.c
     src/org.yxzl.ter-music/ui/dialog.c
     src/org.yxzl.ter-music/ui/layout.c
+    src/org.yxzl.ter-music/ui/layout_spec.c
+    src/org.yxzl.ter-music/ui/layout_geometry.c
+    src/org.yxzl.ter-music/ui/layout_state.c
+    src/org.yxzl.ter-music/ui/vinyl.c
+    src/org.yxzl.ter-music/ui/info_bar_layout.c
+    src/org.yxzl.ter-music/ui/cover_art_cells.c
+    src/org.yxzl.ter-music/ui/cover_art.c
     src/org.yxzl.ter-music/ui/visualizer.c
     src/org.yxzl.ter-music/ui/controls.c
     src/org.yxzl.ter-music/ui/progress_ui.c
@@ -176,6 +184,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/media/rpc_queue.c
     src/org.yxzl.ter-music/media/rpc_config.c
     src/org.yxzl.ter-music/info/info.c
+    src/org.yxzl.ter-music/info/info_format.c
     src/org.yxzl.ter-music/cli/cli.c
     src/org.yxzl.ter-music/cli/cli_client.c
     src/org.yxzl.ter-music/cli/help.c
@@ -315,6 +324,11 @@ install(FILES resources/icons/hicolor/scalable/apps/${PROJECT_NAME}.svg
 # 安装帮助文档
 install(FILES data/help/help-quickstart-zh_CN.txt data/help/help-quickstart-en_US.txt
         DESTINATION share/ter-music/help
+)
+
+# 安装 JSON 布局预设
+install(FILES data/layouts/layouts.json
+        DESTINATION share/ter-music/layouts
 )
 
 # Linyaps 集成（可选）：systemd 用户单元与 D-Bus 激活服务

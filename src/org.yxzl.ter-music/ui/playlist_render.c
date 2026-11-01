@@ -3,7 +3,7 @@
  * @brief 播放列表内容渲染
  *
  * 从 ui.c 拆分，负责播放列表窗口的内容绘制，包括歌曲列表、
- * 搜索结果显示、底部状态信息栏和专辑封面。
+ * 搜索结果显示，以及独立的底部信息窗格与专辑封面。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  * @date 2026-06-02
@@ -16,10 +16,13 @@
 #include "i18n/i18n.h"
 #include "ui/menu_internal.h"
 #include "ui/scrollbar.h"
-#include "ui/braille/braille_art.h"
+#include "ui/info_bar_layout.h"
+#include "ui/cover_art.h"
+#include "ui/layout.h"
 #include "playlist/playlist.h"
 #include "search/search.h"
 #include "config/config.h"
+#include "logger/logger.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "library/browser/browser.h"
@@ -31,6 +34,7 @@
 #include <pthread.h>
 
 extern WINDOW *win_playlist;
+extern WINDOW *win_info;
 
 /* ── 主视图播放列表标签模式（文件浏览 vs 播放队列） ── */
 int g_playlist_tab_mode = PLAYLIST_MODE_FILE_BROWSER;
@@ -51,12 +55,114 @@ void format_display_text(char *dest, size_t dest_size, const char *src, int widt
         sanitize_ascii_text(ascii_buf, sizeof(ascii_buf), input);
         input = ascii_buf;
     }
+    if (width < 0) {
+        width = 0;
+    }
+
+    /* 有界截断：既遵守终端列宽，也绝不超过 dest 的字节容量。
+     * util/utf8.c 的 utf8_str_truncate/utf8_str_pad 只按列宽工作、
+     * 不知道 dest 大小；窗格可以很宽，这里必须自己守容量。 */
+    size_t write = 0;
+    int cols = 0;
+    const char *cursor = input;
+    while (*cursor && cols < width) {
+        int char_width = 1;
+        size_t char_len = utf8_next_char(cursor, NULL, &char_width);
+        if (char_len == 0 || char_width < 0) {
+            break;
+        }
+        if (cols + char_width > width) {
+            break;
+        }
+        if (write + char_len + 1 > dest_size) {
+            break;
+        }
+        unsigned char first = (unsigned char)cursor[0];
+        if (char_len == 1 && (first < 0x20 || first == 0x7f)) {
+            dest[write++] = ' ';
+        } else {
+            memcpy(dest + write, cursor, char_len);
+            write += char_len;
+        }
+        cols += char_width;
+        cursor += char_len;
+    }
+
+    if (*cursor != '\0' && cols + 3 <= width && write + 3 + 1 <= dest_size) {
+        memcpy(dest + write, "...", 3);
+        write += 3;
+    }
+    dest[write] = '\0';
 
     if (pad) {
-        utf8_str_pad(dest, dest_size, input, width);
-    } else {
-        utf8_str_truncate(dest, input, width);
+        int current_width = utf8_str_width(dest);
+        while (current_width < width && write + 1 < dest_size) {
+            dest[write++] = ' ';
+            current_width++;
+        }
+        dest[write] = '\0';
     }
+}
+
+/* 信息栏单行文本的容量。需同时容纳 label + 元数据值，并为 UTF-8
+ * 裁剪和省略号留余量；实际可显示列数还会被 info_bar_layout 的列宽限制。 */
+#define INFO_BAR_LINE_MAX 1024
+
+/* 元数据可能含控制字符（例如标签里的换行）；信息栏是单行布局，
+ * 统一替换为空格，避免写穿到下一行/边框。 */
+static void info_bar_sanitize_controls(char *text)
+{
+    if (!text) return;
+    for (char *p = text; *p != '\0'; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7f) {
+            *p = ' ';
+        }
+    }
+}
+
+/* 在信息栏的一个分区矩形内输出一条 label+value：
+ *   - 先按矩形宽度裁剪（标签宽度也计入），再走 ui_pane_clip_print()
+ *     做窗口级兜底，任何情况下不触碰右边框；
+ *   - line 是分区内相对行号，必须落在 [0, region->h)；
+ *   - 分区矩形由 info_bar_layout_compute() 给出，已通过 validate。 */
+static void info_draw_field(const InfoBarRect *region, int line,
+                            const char *label, const char *value)
+{
+    if (!win_info || !region || region->w <= 0 ||
+        line < 0 || line >= region->h) {
+        return;
+    }
+
+    int row = region->y + line;
+    int x = region->x;
+    int width = region->w;
+
+    int h, w;
+    getmaxyx(win_info, h, w);
+    if (row < 1 || row >= h - 1) return;
+    if (x < 1 || x >= w - 1) return;
+
+    /* 最后一个可写列是 w-2；把区间右端严格限制在 w-1 之前。 */
+    if (x + width > w - 1) {
+        width = w - 1 - x;
+    }
+    if (width <= 0) return;
+
+    /* utf8_str_truncate 的列宽参数以字形列计，最坏每列 4 字节。 */
+    int max_columns = (int)((INFO_BAR_LINE_MAX - 8) / 4);
+    if (width > max_columns) {
+        width = max_columns;
+    }
+
+    char line_text[INFO_BAR_LINE_MAX];
+    snprintf(line_text, sizeof(line_text), "%s%s",
+             label ? label : "", value ? value : "");
+    info_bar_sanitize_controls(line_text);
+
+    char clipped[INFO_BAR_LINE_MAX];
+    format_display_text(clipped, sizeof(clipped), line_text, width, 0);
+    ui_pane_clip_print(win_info, row, x, clipped);
 }
 
 static const char *get_playlist_source_label(void)
@@ -155,7 +261,7 @@ int get_playlist_scroll_offset(void)
     (void)w;
 
     int content_height = h - 2;
-    int visible_lines = content_height - 6;
+    int visible_lines = content_height;
 
     if (g_search_state.active || g_search_state.in_progress) {
         int total = g_search_state.result_count;
@@ -172,6 +278,167 @@ int get_playlist_scroll_offset(void)
 /* ============================================================
  * Playlist content rendering
  * ============================================================ */
+
+void render_info_bar(void)
+{
+    if (!win_info || g_current_view != VIEW_MAIN) {
+        return;
+    }
+
+    int h, w;
+    getmaxyx(win_info, h, w);
+    if (h < 1 || w < 1) {
+        return;
+    }
+    ui_pane_begin(LAYOUT_PANE_INFO, win_info, i18n_get("hint.info"));
+    if (h < 3 || w < 6) {
+        wrefresh(win_info);
+        return;
+    }
+
+    char status_msg[MAX_META_LEN];
+    switch (player_play_state()) {
+        case PLAY_STATE_PLAYING: snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.playing")); break;
+        case PLAY_STATE_PAUSED:  snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.paused")); break;
+        case PLAY_STATE_STOPPED:
+        default:                 snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.stopped")); break;
+    }
+
+    int playlist_total = playlist_count();
+    int snap_active = g_search_state.active;
+    int snap_in_progress = g_search_state.in_progress;
+    int tree_active = playlist_tree_is_active() &&
+                      g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER &&
+                      !snap_active && !snap_in_progress;
+
+    Track t;
+    int have_track = 0;
+    if (playlist_total > 0) {
+        int index = player_track_index() >= 0 ? player_track_index() : g_selected_index;
+        if (g_sort_state.active && !snap_active && player_track_index() < 0) {
+            index = g_sort_state.sorted_indices[g_selected_index];
+        }
+        if (tree_active && player_track_index() < 0) {
+            int ti = get_visible_node_track_index(g_selected_index);
+            if (ti >= 0) index = ti;
+        }
+        if (index < 0) index = 0;
+        if (index >= playlist_total) index = playlist_total - 1;
+        get_track_metadata(index, &t);
+        have_track = 1;
+    }
+
+    char cover_path[MAX_PATH_LEN];
+    int want_cover = 0;
+    if (have_track && g_app_config.show_album_cover &&
+        player_cover_path(cover_path, sizeof(cover_path)) == 0) {
+        want_cover = 1;
+    }
+
+    /* 自适应分区：横向（元数据 | 音频 | 封面）或纵向（封面在上、元数据/
+     * 音频在下）。窗口太小时模型 valid=0，只保留边框/标题。 */
+    InfoBarLayout layout;
+    info_bar_layout_compute(w, h, want_cover, &layout);
+    if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
+        log_error("info_bar", "Invalid info-pane geometry (%dx%d); skipping content",
+                  w, h);
+        wrefresh(win_info);
+        return;
+    }
+
+    const CoverArtGrid *cover_grid = NULL;
+    if (want_cover && layout.cover.w > 0) {
+        cover_grid = cover_art_get(COVER_ART_SLOT_INFO, cover_path,
+                                   layout.cover.w, layout.cover.h);
+        if (!cover_grid) {
+            /* 解码失败：本帧退化为无封面布局，把封面空间还给文字。 */
+            info_bar_layout_compute(w, h, 0, &layout);
+            if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
+                wrefresh(win_info);
+                return;
+            }
+        }
+    }
+
+    // 元数据块：按模型给出的行数逐行绘制（极矮窗格只画前几行）
+    if (layout.metadata_rows > 0) {
+        info_draw_field(&layout.metadata, 0,
+                        i18n_get("player.state"), status_msg);
+    }
+    if (layout.metadata_rows > 1) {
+        info_draw_field(&layout.metadata, 1,
+                        i18n_get("player.mode"), player_play_mode_name(0));
+    }
+    if (layout.metadata_rows > 2) {
+        info_draw_field(&layout.metadata, 2,
+                        i18n_get("player.title"), have_track ? t.title : "--");
+    }
+    if (layout.metadata_rows > 3) {
+        info_draw_field(&layout.metadata, 3,
+                        i18n_get("player.artist"), have_track ? t.artist : "--");
+    }
+    if (layout.metadata_rows > 4) {
+        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
+            player_queue_count() > 0) {
+            char qbuf[64];
+            snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
+                     i18n_get("player.queue_label"),
+                     player_queue_position() + 1, player_queue_count());
+            info_draw_field(&layout.metadata, 4, "", qbuf);
+        } else {
+            info_draw_field(&layout.metadata, 4,
+                            i18n_get("player.album"), have_track ? t.album : "--");
+        }
+    }
+
+    // 音频块：来自 player 门面快照，远端前端也有效
+    char rate_str[32], depth_str[32], bitrate_str[32], codec_display[32];
+    const InfoTrack *current_track = player_track();
+    if (current_track && current_track->valid) {
+        info_format_audio_fields_from(current_track->sample_rate,
+                                      current_track->bit_depth,
+                                      current_track->bit_rate,
+                                      current_track->codec,
+                                      rate_str, sizeof(rate_str),
+                                      depth_str, sizeof(depth_str),
+                                      bitrate_str, sizeof(bitrate_str),
+                                      codec_display, sizeof(codec_display));
+    } else {
+        info_format_audio_fields_from(0, 0, 0, "",
+                                      rate_str, sizeof(rate_str),
+                                      depth_str, sizeof(depth_str),
+                                      bitrate_str, sizeof(bitrate_str),
+                                      codec_display, sizeof(codec_display));
+    }
+
+    if (layout.audio_rows > 0) {
+        info_draw_field(&layout.audio, 0,
+                        i18n_get("player.sample_rate"), rate_str);
+    }
+    if (layout.audio_rows > 1) {
+        info_draw_field(&layout.audio, 1,
+                        i18n_get("player.bit_depth"), depth_str);
+    }
+    if (layout.audio_rows > 2) {
+        info_draw_field(&layout.audio, 2,
+                        i18n_get("player.bitrate"), bitrate_str);
+    }
+    if (layout.audio_rows > 3) {
+        info_draw_field(&layout.audio, 3,
+                        i18n_get("player.codec"), codec_display);
+    }
+
+    // 专辑封面（彩色半块）：逐单元设置前景/背景颜色，绘制范围严格限制
+    // 在模型给出的封面矩形内，随后由边框重绘兜底。
+    if (cover_grid) {
+        cover_art_draw(win_info, layout.cover.x, layout.cover.y,
+                       cover_grid, ui_pane_body_attr(LAYOUT_PANE_INFO));
+    }
+
+    /* 内容画完后最后补一遍边框，防止任何字形溢出盖住边框。 */
+    ui_pane_repaint_border(LAYOUT_PANE_INFO, win_info);
+    wrefresh(win_info);
+}
 
 void render_playlist_content(void)
 {
@@ -198,33 +465,32 @@ void render_playlist_content(void)
     }
     pthread_mutex_unlock(&g_search_mutex);
 
-    werase(win_playlist);
-    wattron(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    rounded_box(win_playlist);
+    int h, w;
+    getmaxyx(win_playlist, h, w);
+    if (h < 1 || w < 1) {
+        return;
+    }
 
     char title_buf[128];
     if (snap_in_progress) {
-        snprintf(title_buf, sizeof(title_buf), "%s (%d/%d) ",
+        snprintf(title_buf, sizeof(title_buf), "%s (%d/%d)",
                  i18n_get("playlist.search_progress"), snap_progress, playlist_count());
-        mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else if (snap_active) {
-        snprintf(title_buf, sizeof(title_buf), "%s (%d %s) ",
+        snprintf(title_buf, sizeof(title_buf), "%s (%d %s)",
                  i18n_get("playlist.search_title"), snap_count,
                  i18n_get("playlist.results_unit"));
-        mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
         snprintf(title_buf, sizeof(title_buf), " %s [%s] ",
                  i18n_get("player.play_queue"),
                  player_play_mode_name(0));
-        mvwprintw(win_playlist, 0, 2, "%s", title_buf);
     } else {
-        mvwprintw(win_playlist, 0, 2, "%s", i18n_get("controls.playlist"));
+        snprintf(title_buf, sizeof(title_buf), "%s", i18n_get("controls.playlist"));
     }
-    wattroff(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    wbkgd(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-
-    int h, w;
-    getmaxyx(win_playlist, h, w);
+    ui_pane_begin(LAYOUT_PANE_PLAYLIST, win_playlist, title_buf);
+    if (h < 3 || w < 12) {
+        wrefresh(win_playlist);
+        return;
+    }
     int content_height = h - 2;
     int playlist_total = playlist_count();
     int playlist_loaded = playlist_is_loaded();
@@ -233,36 +499,32 @@ void render_playlist_content(void)
                       g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER &&
                       !snap_active && !snap_in_progress;
 
-    int total_tracks, current_selected;
+    int total_tracks;
     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
         total_tracks = player_queue_count();
-        current_selected = g_queue_selected_index;
     } else if ((snap_active || snap_in_progress) && snap_count > 0) {
         total_tracks = snap_count;
-        current_selected = snap_selected;
     } else if (snap_in_progress) {
         total_tracks = 0;
-        current_selected = 0;
     } else {
         if (tree_active) {
             total_tracks = playlist_visible_count();
         } else {
             total_tracks = playlist_total;
         }
-        current_selected = g_selected_index;
     }
 
     if (!playlist_loaded) {
         char display_path[MAX_PATH_LEN];
         format_display_text(display_path, sizeof(display_path), get_playlist_source_label(), w - 10, 0);
-        mvwprintw(win_playlist, h/2 - 1, 2, "%s", i18n_get("playlist.empty"));
-        mvwprintw(win_playlist, h/2, 2, "%s",
+        ui_pane_clip_printf(win_playlist, h/2 - 1, 2, "%s", i18n_get("playlist.empty"));
+        ui_pane_clip_printf(win_playlist, h/2, 2, "%s",
                   ui_text("按 'O' 打开目录，按 'I' 追加目录。",
                           "Press 'O' to open a folder, 'I' to append one."));
-        mvwprintw(win_playlist, h/2 + 1, 2, "%s%s", i18n_get("player.path"), display_path);
+        ui_pane_clip_printf(win_playlist, h/2 + 1, 2, "%s%s", i18n_get("player.path"), display_path);
     } else {
         int start_idx = 0;
-        int visible_lines = content_height - 6;
+        int visible_lines = content_height;
 
         if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
             if (total_tracks > 0 && g_queue_selected_index >= total_tracks)
@@ -361,7 +623,7 @@ void render_playlist_content(void)
                     int attrs = A_NORMAL;
                     if (is_selected) attrs |= A_REVERSE;
                     if (attrs != A_NORMAL) wattron(win_playlist, attrs);
-                    mvwprintw(win_playlist, i + 1, 2, "%s", truncated);
+                    ui_pane_clip_printf(win_playlist, i + 1, 2, "%s", truncated);
                     if (attrs != A_NORMAL) wattroff(win_playlist, attrs);
                 } else {
                     /* File node */
@@ -393,7 +655,7 @@ void render_playlist_content(void)
                     if (is_selected) attrs |= A_REVERSE;
                     if (is_now_playing) attrs |= A_BOLD;
                     if (attrs != A_NORMAL) wattron(win_playlist, attrs);
-                    mvwprintw(win_playlist, i + 1, 2, "%s %s %s",
+                    ui_pane_clip_printf(win_playlist, i + 1, 2, "%s %s %s",
                               indent, truncated_title, truncated_artist);
                     if (attrs != A_NORMAL) wattroff(win_playlist, attrs);
                 }
@@ -474,14 +736,14 @@ void render_playlist_content(void)
 
             if (attrs != A_NORMAL) wattron(win_playlist, attrs);
             if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-                mvwprintw(win_playlist, i + 1, 1, " %s %s %s ", prefix,
+                ui_pane_clip_printf(win_playlist, i + 1, 1, " %s %s %s ", prefix,
                           truncated_title, truncated_artist);
             } else {
                 if (is_selected || attrs != A_NORMAL)
-                    mvwprintw(win_playlist, i + 1, 1, " %s %s ",
+                    ui_pane_clip_printf(win_playlist, i + 1, 1, " %s %s ",
                               truncated_title, truncated_artist);
                 else
-                    mvwprintw(win_playlist, i + 1, 2, "%s %s",
+                    ui_pane_clip_printf(win_playlist, i + 1, 2, "%s %s",
                               truncated_title, truncated_artist);
             }
             if (attrs != A_NORMAL) wattroff(win_playlist, attrs);
@@ -492,14 +754,14 @@ void render_playlist_content(void)
         queue_page = NULL;
         if (total_tracks == 0) {
             if (snap_in_progress) {
-                mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.searching"));
+                ui_pane_clip_printf(win_playlist, 1, 2, "%s", i18n_get("playlist.searching"));
             } else if (snap_active) {
-                mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.no_match"));
+                ui_pane_clip_printf(win_playlist, 1, 2, "%s", i18n_get("playlist.no_match"));
             } else {
                 if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
-                    mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.queue_empty"));
+                    ui_pane_clip_printf(win_playlist, 1, 2, "%s", i18n_get("playlist.queue_empty"));
                 else
-                    mvwprintw(win_playlist, 1, 2, "%s", i18n_get("playlist.no_audio"));
+                    ui_pane_clip_printf(win_playlist, 1, 2, "%s", i18n_get("playlist.no_audio"));
             }
         }
 
@@ -509,144 +771,7 @@ void render_playlist_content(void)
             scrollbar_draw(win_playlist, 1, visible_lines, total_tracks, visible_lines, start_idx, sb_col);
         }
 
-        // Status bar
-        int status_line = h - 7;
-        for (int x = 1; x < w - 1; x++)
-            mvwaddstr(win_playlist, status_line, x, "\xe2\x94\x80"); /* ─ */
-
-        char status_msg[MAX_META_LEN];
-        switch (player_play_state()) {
-            case PLAY_STATE_PLAYING: snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.playing")); break;
-            case PLAY_STATE_PAUSED:  snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.paused")); break;
-            case PLAY_STATE_STOPPED:
-            default:                 snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.stopped")); break;
-        }
-
-        if (playlist_total > 0) {
-            Track t;
-            int index = player_track_index() >= 0 ? player_track_index() : g_selected_index;
-            if (g_sort_state.active && !snap_active && player_track_index() < 0) {
-                index = g_sort_state.sorted_indices[g_selected_index];
-            }
-            /* Tree mode: translate visible index to track index */
-            if (tree_active && player_track_index() < 0) {
-                int ti = get_visible_node_track_index(g_selected_index);
-                if (ti >= 0) index = ti;
-            }
-            if (index < 0) index = 0;
-            if (index >= playlist_total) index = playlist_total - 1;
-            get_track_metadata(index, &t);
-
-            int cover_start_col = w - 2;
-            int cover_char_width = 0;
-            int cover_lines = 0;
-            int show_cover = 0;
-
-            char cover_path[MAX_PATH_LEN];
-            static int g_album_cover_enabled = 1;
-            if (g_album_cover_enabled && g_app_config.show_album_cover &&
-                player_cover_path(cover_path, sizeof(cover_path)) == 0) {
-                int min_info_width = 52;
-                int max_cover_size = 12;
-                int min_cover_size = 5;
-                int available_width  = w - min_info_width - 4;
-                int available_height = 5;
-
-                int max_cover_width  = available_width / 2;
-                int max_cover_height = available_height;
-                int cover_size = max_cover_width < max_cover_height ? max_cover_width : max_cover_height;
-                if (cover_size > max_cover_size) cover_size = max_cover_size;
-                if (cover_size < min_cover_size) cover_size = min_cover_size;
-
-                cover_char_width = cover_size * 2;
-                cover_lines = cover_size;
-
-                if (w - cover_char_width - 4 >= min_info_width) {
-                    if (!braille_art_cache_matches(cover_path, cover_size)) {
-                        braille_art_cache_begin(cover_path, cover_size);
-                        if (generate_braille_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
-                                                          cover_char_width, cover_size,
-                                                          g_braille_art_buffer, sizeof(g_braille_art_buffer)) != 0) {
-                            braille_art_cache_fail();
-                        }
-                    }
-                    if (g_braille_art_buffer[0] != '\0') {
-                        show_cover = 1;
-                        cover_start_col = w - cover_char_width - 3;
-                    }
-                }
-            }
-
-            int info_width = show_cover ? cover_start_col - 4 : w - 4;
-            int col_width = info_width / 2;
-            int left_col_x   = 2;
-            int center_col_x = 2 + col_width;
-
-            char truncated_title[MAX_META_LEN];
-            char truncated_artist[MAX_META_LEN];
-            char truncated_album[MAX_META_LEN];
-            format_display_text(truncated_title, sizeof(truncated_title), t.title, col_width - 1, 0);
-            format_display_text(truncated_artist, sizeof(truncated_artist), t.artist, col_width - 1, 0);
-            format_display_text(truncated_album, sizeof(truncated_album), t.album, col_width - 1, 0);
-
-            // Left column: metadata
-            mvwprintw(win_playlist, status_line + 1, left_col_x, "%s%s", i18n_get("player.state"), status_msg);
-            mvwprintw(win_playlist, status_line + 2, left_col_x, "%s%s", i18n_get("player.mode"), player_play_mode_name(0));
-            mvwprintw(win_playlist, status_line + 3, left_col_x, "%s%s", i18n_get("player.title"), truncated_title);
-            mvwprintw(win_playlist, status_line + 4, left_col_x, "%s%s", i18n_get("player.artist"), truncated_artist);
-            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && player_queue_count() > 0) {
-                char qbuf[64];
-                snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
-                         i18n_get("player.queue_label"),
-                         player_queue_position() + 1, player_queue_count());
-                mvwprintw(win_playlist, status_line + 5, left_col_x, "%s", qbuf);
-            } else {
-                mvwprintw(win_playlist, status_line + 5, left_col_x, "%s%s", i18n_get("player.album"), truncated_album);
-            }
-
-            // Center column: audio technical info（与 CLI 信息块共用格式化实现）
-            char rate_str[32] = "--", depth_str[32] = "--", bitrate_str[32] = "--", codec_display[32] = "--";
-            info_format_audio_fields(rate_str, sizeof(rate_str),
-                                     depth_str, sizeof(depth_str),
-                                     bitrate_str, sizeof(bitrate_str),
-                                     codec_display, sizeof(codec_display));
-
-            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s%s", i18n_get("player.sample_rate"), rate_str);
-            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s%s", i18n_get("player.bit_depth"), depth_str);
-            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s%s", i18n_get("player.bitrate"), bitrate_str);
-            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s%s", i18n_get("player.codec"), codec_display);
-
-            // Album cover (braille art)
-            if (show_cover) {
-                char *lines[BRAILLE_MAX_SIZE];
-                int line_count = get_braille_art_lines(g_braille_art_buffer, lines, BRAILLE_MAX_SIZE);
-                int start_row = status_line + 1;
-                for (int i = 0; i < line_count && i < cover_lines; i++) {
-                    if (start_row + i < h - 1)
-                        mvwprintw(win_playlist, start_row + i, cover_start_col, "%s", lines[i]);
-                    free(lines[i]);
-                }
-            }
-        } else {
-            int col_width = (w - 4) / 2;
-            int center_col_x = 2 + col_width;
-            mvwprintw(win_playlist, status_line + 1, 2, "%s%s", i18n_get("player.state"), status_msg);
-            mvwprintw(win_playlist, status_line + 2, 2, "%s%s", i18n_get("player.mode"), player_play_mode_name(0));
-            mvwprintw(win_playlist, status_line + 3, 2, "%s--", i18n_get("player.title"));
-            mvwprintw(win_playlist, status_line + 4, 2, "%s--", i18n_get("player.artist"));
-            mvwprintw(win_playlist, status_line + 5, 2, "%s--", i18n_get("player.album"));
-            if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE && player_queue_count() > 0) {
-                char qbuf[64];
-                snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
-                         i18n_get("player.queue_label"),
-                         player_queue_position() + 1, player_queue_count());
-                mvwprintw(win_playlist, status_line + 5, 2, "%s", qbuf);
-            }
-            mvwprintw(win_playlist, status_line + 1, center_col_x, "%s--", i18n_get("player.sample_rate"));
-            mvwprintw(win_playlist, status_line + 2, center_col_x, "%s--", i18n_get("player.bit_depth"));
-            mvwprintw(win_playlist, status_line + 3, center_col_x, "%s--", i18n_get("player.bitrate"));
-            mvwprintw(win_playlist, status_line + 4, center_col_x, "%s--", i18n_get("player.codec"));
-        }
     }
     wrefresh(win_playlist);
+    render_info_bar();
 }

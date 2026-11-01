@@ -40,6 +40,8 @@ package() {
   # help
   install -Dm644 data/help/help-quickstart-zh_CN.txt "$pkgdir/usr/share/ter-music/help/help-quickstart-zh_CN.txt"
   install -Dm644 data/help/help-quickstart-en_US.txt "$pkgdir/usr/share/ter-music/help/help-quickstart-en_US.txt"
+  # layouts
+  install -Dm644 data/layouts/layouts.json "$pkgdir/usr/share/ter-music/layouts/layouts.json"
   # i18n
   install -Dm644 data/lang/zh_CN.xml "$pkgdir/usr/share/ter-music/lang/zh_CN.xml"
   install -Dm644 data/lang/en_US.xml "$pkgdir/usr/share/ter-music/lang/en_US.xml"

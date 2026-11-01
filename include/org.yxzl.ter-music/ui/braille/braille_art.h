@@ -8,8 +8,6 @@
 /* ── Extern globals ── */
 extern char g_current_album_cover_path[512];  // MAX_PATH_LEN
 extern int g_current_album_cover_valid;
-extern char g_braille_art_buffer[];
-extern int g_album_cover_size;
 
 #define BRAILLE_CELL_W 2
 #define BRAILLE_CELL_H 4
@@ -60,8 +58,6 @@ int generate_halfblock_art_dynamic(const char *image_path,
                                     size_t output_size);
 
 int calculate_optimal_cover_size(int controls_height);
-
-int get_braille_art_lines(const char *braille_art, char **lines, int max_lines);
 
 /* ── Album cover extraction ── */
 int extract_album_cover(const char *audio_path, char *output_path, size_t output_size);

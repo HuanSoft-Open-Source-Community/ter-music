@@ -11,6 +11,7 @@
 #include "audio/play_queue.h"
 #include "playlist/playlist_queue.h"
 #include "logger/logger.h"
+#include "util/utf8_safe.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -928,6 +929,22 @@ int playlist_reveal_track(int track_idx) {
 
 void decode_html_entities(char *str);
 
+/* 原地清洗元数据文本：先复制到临时缓冲区，避免“非法字节 → U+FFFD”的
+ * 扩张覆盖尚未读取的源字节。所有进入队列 JSON / 曲库 / D-Bus 的曲目字段
+ * 都必须是合法 UTF-8，否则 libdbus 会在发送字符串参数时 abort 整个进程。 */
+static void sanitize_metadata_text(char *text, size_t text_size)
+{
+    if (!text || text_size == 0) {
+        return;
+    }
+
+    char tmp[MAX_META_LEN];
+    size_t size = (text_size < sizeof(tmp)) ? text_size : sizeof(tmp);
+    utf8_sanitize_copy(tmp, size, text);
+    memcpy(text, tmp, size);
+    text[size - 1] = '\0';
+}
+
 static void copy_metadata_field(char *dest, size_t dest_size, const char *value) {
     if (!dest || dest_size == 0) {
         return;
@@ -938,7 +955,9 @@ static void copy_metadata_field(char *dest, size_t dest_size, const char *value)
         return;
     }
 
-    snprintf(dest, dest_size, "%s", value);
+    /* 不能用 snprintf：多字节中文在 dest_size-1 字节处会被切成半截，
+     * 产生的非法 UTF-8 会一路带到 queue JSON、MPRIS 元数据与状态消息。 */
+    utf8_sanitize_copy(dest, dest_size, value);
     decode_html_entities(dest);
 }
 
@@ -990,6 +1009,12 @@ static void fill_metadata_from_filename(const char *path, char *title, char *art
     decode_html_entities(title);
     decode_html_entities(artist);
     decode_html_entities(album);
+
+    /* 文件名本身可能不是合法 UTF-8（Linux 路径允许任意字节）；早退路径也要
+     * 在返回前清洗，避免非法文本进入后续队列/显示。 */
+    sanitize_metadata_text(title, MAX_META_LEN);
+    sanitize_metadata_text(artist, MAX_META_LEN);
+    sanitize_metadata_text(album, MAX_META_LEN);
 }
 
 void decode_html_entities(char *str) {
@@ -1200,8 +1225,9 @@ static int gbk_to_utf8(const char *input, size_t input_len,
     if (ret == (size_t)-1) return -1;
 
     *out_ptr = '\0';
-    strncpy(output, tmp, output_size - 1);
-    output[output_size - 1] = '\0';
+    /* iconv 输出本身是合法 UTF-8，但输出缓冲区可能比转换结果小；按完整
+     * 码点截断，不能把最后一个多字节字符切成半截。 */
+    utf8_sanitize_copy(output, output_size, tmp);
     return 0;
 }
 
@@ -1372,6 +1398,12 @@ void get_audio_metadata(const char *path, char *title, char *artist, char *album
         if (artist[0]) try_gbk_fixup(artist, MAX_META_LEN);
         if (album[0]) try_gbk_fixup(album, MAX_META_LEN);
     }
+
+    /* GBK 修正失败时原非法字节仍可能留在字段里；所有来源（FFmpeg 标签、
+     * APEv2、文件名、GBK 修正）最终都从这里进入前端缓存与队列。 */
+    sanitize_metadata_text(title, MAX_META_LEN);
+    sanitize_metadata_text(artist, MAX_META_LEN);
+    sanitize_metadata_text(album, MAX_META_LEN);
 }
 
 /**
@@ -1675,7 +1707,8 @@ void playlist_install(Playlist *built)
     playlist_queue_sync();
     playlist_bump_content_revision();
 
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                       UI_DIRTY_LYRICS | UI_DIRTY_INFO);
 }
 
 int load_playlist(const char *path) {
@@ -1990,6 +2023,12 @@ int get_track_metadata(int index, Track *out) {
         /* Normal track: existing behavior */
         get_audio_metadata(path, title, artist, album);
     }
+
+    /* CUE 解析结果覆盖了文件标签；CUE 编码探测失败时会保留原始字节，
+     * 因此在写入缓存/输出前统一清洗。 */
+    sanitize_metadata_text(title, MAX_META_LEN);
+    sanitize_metadata_text(artist, MAX_META_LEN);
+    sanitize_metadata_text(album, MAX_META_LEN);
 
     build_search_key(title, title_search, sizeof(title_search));
     build_search_key(artist, artist_search, sizeof(artist_search));
@@ -2679,10 +2718,6 @@ void update_album_cover_for_track(const char *track_path) {
     if (!track_path || track_path[0] == '\0') {
         return;
     }
-
-    // 清空字符画缓存，以便新歌曲加载时重新生成
-    g_braille_art_buffer[0] = '\0';
-    g_album_cover_size = 0;
 
     pthread_mutex_lock(&g_album_cover_mutex);
     int existing = album_cover_find_source_locked(track_path);

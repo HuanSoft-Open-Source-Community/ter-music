@@ -29,16 +29,23 @@ ter-music 快速上手
 
 2. 界面布局
 -----------
-  +---------------------------+-------------------+
-  | 播放列表/队列窗格          | 歌词显示面板      |
-  | (按Tab切换视图)            | (右侧，可开关)    |
-  |                           |                   |
-  | 控制栏（底部）             |                   |
-  | [<<] [>||] [>>] [停止]    |                   |
-  | [模式] [速度] [音量] [进度] |                   |
-  +---------------------------+-------------------+
-  | F1:主页 F2:设置 ... F8:帮助 F9:退出          |
-  +----------------------------------------------+
+  主界面由 JSON 布局预设驱动，共 6 种窗格：
+    playlist / info / controls / spectrum / lyrics / vinyl
+  所有布局必须严格无缝铺满主区域（终端除底部菜单栏外的全部区域），
+  不允许空白、缝隙或重叠；终端缩放时按千分比比例重算。
+  窗格内容（含信息窗格专辑封面）裁剪在边框以内；窗格过小时只显示背景与边框，不覆盖边框。
+  信息窗格按自身宽高自动排布：较宽时元数据与音频参数左右并列、封面居右；
+  窄而高时封面在上，元数据与音频依次在下。封面与右边框之间始终留有空列，
+  空间不足时自动隐藏封面。
+  同时定义 lyrics 与 vinyl 时隐藏 lyrics；只有 lyrics 时，无歌词的曲目
+  仍在该窗格内回退显示黑胶动画（彩色可用时为色块，否则为字符）。
+  选择布局：F2 -> 界面外观 -> 界面布局（←/→ 循环，ENTER 开列表）；
+  “重新加载布局”可重读布局文件。
+  预设：classic / vinyl / dual / karaoke / visualizer / focus /
+        stage / neon
+  内置文件：/usr/share/ter-music/layouts/layouts.json（源码树 data/layouts/）
+  用户覆盖：~/.config/ter-music/layouts.json（同 id 覆盖内置）
+  选中状态：~/.config/ter-music/ui-layout（前端本地，不写入 config.xml）
 
 3. 焦点切换
 -----------
@@ -129,7 +136,7 @@ ter-music 快速上手
 7. 功能键（F1-F9）
 -------------------
   F1  主页（返回主界面）
-  F2  设置（主题、路径、播放、播放模式、快捷键、远程设备、均衡器、信息显示）
+  F2  设置（界面外观/布局、路径、播放、播放模式、快捷键、远程设备、均衡器、信息显示）
   F3  目录历史（打开过的音乐目录：ENTER 载入、A 追加到队列、D 删除当前项、C 清空）
   F4  歌单（管理和创建播放列表）
   F5  收藏（查看和管理收藏的歌曲）
@@ -200,13 +207,13 @@ ter-music 快速上手
 
 10. 歌词显示
 ------------
-  优先级：内嵌歌词（FFmpeg/APE 标签）> .lrc 文件 > 黑胶+频谱动画
+  优先级：内嵌歌词（FFmpeg/APE 标签）> .lrc 文件 > 无歌词（歌词栏显示黑胶动画：颜色可用时为彩色块，否则为原字符动画；频谱在独立的频谱窗格中始终显示）
   自动加载同目录下的 .lrc 文件。
   内嵌歌词优先显示（ID3/APE 标签中的歌词）。
   Ctrl+L 进入/退出歌词定位模式：↑/↓ 逐行移动光标并跳到该句时间点。
   本地与远端前端都生效——跳转经播放器门面下发给核心，不再依赖本地进度追踪。
   切换歌词来源：Ctrl+L → Tab（歌词定位模式中）；来源偏好由前端记进曲库。
-  设置中可开关歌词面板，设置歌词对齐：居左 / 居中 / 居右。
+  歌词窗格显隐由布局预设决定（不是配置项开关）；歌词对齐可在 设置 -> 界面外观 中调整：居左 / 居中 / 居右。
 
 11. CUE 分轨支持
 -----------------
@@ -246,8 +253,13 @@ ter-music 快速上手
 
 16. 专辑封面
 ------------
-  设置中可开关专辑封面显示。
-  封面以点阵字符画形式绘制在终端中（盲文 / ASCII / 半块字符集）。
+  设置中可开关信息窗格/控制区的专辑封面显示。
+  CLI/D-Bus 的字符封面可为盲文 / ASCII / 半块字符集；TUI 信息窗格与控制区的封面
+  使用彩色半块字符绘制（256 色 → 8 色 → 黑白自动回退），以保证字宽与终端
+  单元格网格一致。彩色模式用 ▀ 合成两层（前景=上半、背景=下半），█ 仅用于单色回退。
+  独立黑胶窗格绘制彩色半块碟面、旋转的封面圆形中心标签与彩色频谱柱
+  （标签沿用同一套 256→8→黑白回退）。无颜色、ASCII 或色对预算不足时
+  保持原字符动画；封面读取失败时仍绘制彩色碟面与频谱柱，中心为纯深色碟面。
   优先读取音频内嵌封面；否则查找同目录常见封面文件
   （cover/folder/front/album，扩展名支持 jpg/jpeg/png/webp）。
   字符画按需生成：换曲时 D-Bus 的 CoverChanged 信号只通知“封面变了”，
@@ -255,10 +267,14 @@ ter-music 快速上手
   启用 D-Bus 时，封面还会以 mpris:artUrl 发布，供桌面媒体组件显示。
   CLI 可直接输出当前曲目封面字符画：ter-music cover [--width --height --charset]
 
-17. 信息栏与音频后端
----------------------
-  底部信息栏显示当前音频的技术参数：
+17. 信息窗格与音频后端
+-----------------------
+  信息窗格显示播放状态/模式、当前曲目元数据、字符封面，
+  以及当前音频的技术参数（窗格位置由布局预设决定）：
     采样率、位深、比特率、编码格式
+  信息窗格会根据自身宽高在“左右并列”和“封面在上、文字在下”两种排布间切换。
+  TUI 封面使用彩色半块字符（非盲文；256→8→黑白自动回退）绘制；
+  `ter-music cover`/Info.GetCoverArt 仍按配置的盲文 / ASCII / 半块字符集输出。
 
   音频后端自动检测优先级：PipeWire > PulseAudio > ALSA
   在 设置 → 播放设置 的“音频后端”中手动切换：
@@ -270,6 +286,10 @@ ter-music 快速上手
 
 18. 配置与数据
 --------------
+  布局：  内置 <prefix>/share/ter-music/layouts/layouts.json；
+          用户覆盖 ~/.config/ter-music/layouts.json；
+          选中状态 ~/.config/ter-music/ui-layout（前端本地）。
+          show_lyrics_panel 已弃用，仅在没有 ui-layout 时作为首次映射提示。
   配置：  ~/.config/ter-music/config.xml   由核心独占写盘（XML 根版本属性写配置
           契约号，当前为 9；历史 "2.2" 文件仍可加载，升级首启迁移后改写为数字）。
           前端只修改自己的配置镜像，再把差异经 Config.Set 交给核心落盘。
@@ -401,7 +421,8 @@ ter-music 快速上手
   核心在会话总线上以 org.mpris.MediaPlayer2.ter_music 发布对象
   /org/mpris/MediaPlayer2，同时提供 MPRIS 与 ter-music 自有接口：
     org.yxzl.ter_music.Info / Control / Lyrics / Queue / Config
-  握手看 Info.GetInfo 里的 core.api_version（当前 4）。
+  握手看 Info.GetInfo 里的 core.api_version（当前 5；客户端最低要求 4，
+  v4 核心只是缺少逐字字段）。
 
   MPRIS 侧：Rate 是可读写的真实倍速（MinimumRate 0.5 / MaximumRate 3.0），
   LoopStatus 与 Shuffle 会做完整的播放模式切换；OpenUri 明确回 NotSupported
@@ -412,6 +433,8 @@ ter-music 快速上手
              GetDocument(offset, count) -> s（分页全文）
              SetSource(source) -> b（1=内嵌，2=外置）
     信号：   LyricsChanged(s)
+    逐字时间：GetDocument 每行带 end/timing/char_total，逐字 LRC 另有
+    chars[] 数组；GetLyrics 带 char_sung/char_total。
 
   读取当前 A/B 歌词快照：
     gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \

@@ -22,7 +22,7 @@
   <string key="app.exit_clean">ter-music exited cleanly.</string>
 
   <!-- ===== Sidebar items ===== -->
-  <string key="sidebar.settings.theme">Theme</string>
+  <string key="sidebar.settings.theme">Appearance</string>
   <string key="sidebar.settings.default_path">Default Path</string>
   <string key="sidebar.settings.playback">Playback</string>
   <string key="sidebar.settings.play_mode">Play Mode</string>
@@ -63,6 +63,12 @@
   <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
   <string key="settings.color.select_hint">Theme: ↑/↓ select, → or ENTER adjust, ←/TAB back</string>
   <string key="settings.color.auto_avoid_same">Foreground and background colors will automatically avoid being the same</string>
+  <string key="settings.layout.hint">Layout: ←/→ switch, ENTER choose; a custom layout must tile the main area seamlessly or it is rejected</string>
+  <string key="settings.layout.saved">Layout switched</string>
+  <string key="settings.layout.save_failed">Layout applied, but the selection state could not be saved</string>
+  <string key="settings.layout.reload_ok">Reloaded %d layouts</string>
+  <string key="settings.layout.reload_failed">Layout reload failed; keeping the previous contents</string>
+  <string key="settings.layout.fallback">The selected layout is unavailable; using the default</string>
   <string key="settings.path.hint">Default Path: ENTER to edit, ←/TAB back</string>
   <string key="settings.path.tilde_hint">Supports paths starting with ~ for home directory</string>
   <string key="settings.playback.hint">Playback: ↑/↓ select, ENTER to expand, ←/TAB back</string>
@@ -114,7 +120,8 @@
   <string key="settings.opt.language">Language</string>
   <string key="settings.opt.volume">Volume</string>
   <string key="settings.opt.latency">Latency</string>
-  <string key="settings.opt.show_lyrics">Show Lyrics</string>
+  <string key="settings.opt.ui_layout">UI Layout</string>
+  <string key="settings.opt.layout_reload">Reload Layouts</string>
   <string key="settings.opt.lyrics_align">Lyrics Align</string>
   <string key="settings.opt.play_mode">Play Mode</string>
   <string key="settings.opt.default_speed">Default Speed</string>
@@ -234,6 +241,8 @@
   <!-- ===== Controls ===== -->
   <string key="controls.playlist"> Playlist </string>
   <string key="controls.lyrics"> Lyrics </string>
+  <string key="controls.spectrum">Spectrum</string>
+  <string key="controls.vinyl">Vinyl</string>
   <string key="controls.lyrics_seek"> [Seek] Lyrics </string>
   <string key="controls.controls_area">Controls</string>
   <string key="controls.ctrl_focus">[Ctrl Focus]</string>
@@ -453,6 +462,7 @@
   <string key="lyrics.seek_disabled">Lyric seek disabled</string>
   <string key="lyrics.no_position">No lyric position available</string>
   <string key="lyrics.not_available">No lyrics available</string>
+  <string key="lyrics.pane_hidden">This layout does not show the lyrics pane</string>
   <string key="lyrics.no_lyrics_emoji">🎵 No Lyrics 🎶</string>
   <string key="lyrics.no_lyrics">No Lyrics</string>
   <string key="lyrics.particle_emoji">Letters · Symbols · Emoji</string>
@@ -1210,4 +1220,14 @@
   <string key="cli.keys.msg.shadow_oom">Out of memory; cannot collect shadows</string>
   <string key="cli.keys.err.unknown_option">Error: unknown keys option '%s'.</string>
   <string key="cli.keys.err.unknown_subcommand">Error: unknown keys subcommand '%s'.</string>
+
+  <!-- ===== Layout presets ===== -->
+  <string key="layout.preset.classic">Classic</string>
+  <string key="layout.preset.vinyl">Vinyl</string>
+  <string key="layout.preset.dual">Six-pane Fallback</string>
+  <string key="layout.preset.karaoke">Karaoke</string>
+  <string key="layout.preset.visualizer">Visualizer</string>
+  <string key="layout.preset.focus">Focus</string>
+  <string key="layout.preset.stage">Stage</string>
+  <string key="layout.preset.neon">Neon</string>
 </lang>

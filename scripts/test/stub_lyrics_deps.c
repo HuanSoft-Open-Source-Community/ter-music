@@ -2,19 +2,25 @@
  * 歌词解析单测的链接桩：把引擎依赖的外部模块替换成最小实现。
  *
  * 引擎（lyrics/lyrics.c）依赖：
- *   - audio_get_position_seconds()：播放位置（推进的输入），本桩可控；
+ *   - audio_get_position_seconds()/audio_get_position_ms()：播放位置，本桩可控；
  *   - i18n_get()：仅用于“纯音乐”占位文本；
  *   - decode_html_entities()：内容层的文本工具；
  *   - 日志：见 stub_logger.c。
  */
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 /* 引擎默认的播放位置来源是音频层；单测里没有音频栈，故给一个返回 0 的
  * 替代（真正要驱动推进时用 lyrics_set_position_source() 注入）。 */
 int audio_get_position_seconds(void)
+{
+    return 0;
+}
+
+int64_t audio_get_position_ms(void)
 {
     return 0;
 }

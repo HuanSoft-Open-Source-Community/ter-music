@@ -16,6 +16,7 @@
 #include "media/rpc.h"
 #include "media/session.h"
 #include "logger/logger.h"
+#include "util/utf8_safe.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -99,14 +100,18 @@ void core_status_push(const char *message)
         return;
     }
 
+    /* 状态文本可能来自本地化字符串 + 曲目标签/文件路径。有界复制必须在
+     * 完整 UTF-8 码点处停止：半截序列进入 D-Bus 会让 libdbus 断言 abort。 */
+    char sanitized[CORE_STATUS_MAX];
+    utf8_sanitize_copy(sanitized, sizeof(sanitized), message);
+
     pthread_mutex_lock(&g_status_mutex);
-    strncpy(g_status_last, message, sizeof(g_status_last) - 1);
-    g_status_last[sizeof(g_status_last) - 1] = '\0';
+    memcpy(g_status_last, sanitized, sizeof(g_status_last));
     g_status_seq++;
     pthread_mutex_unlock(&g_status_mutex);
 
     if (g_status_listener) {
-        g_status_listener(message);
+        g_status_listener(sanitized);
     }
 }
 

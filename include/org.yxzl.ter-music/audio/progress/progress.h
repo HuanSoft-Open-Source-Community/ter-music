@@ -48,6 +48,15 @@ void progress_tracker_add_samples(int num_samples);
 int progress_tracker_get_position_seconds(void);
 
 /**
+ * 获取当前播放位置（毫秒）
+ *
+ * 与秒版共用同一份样本计数与 wall-clock 校准，只是不整除到秒：
+ * 歌词逐字高亮需要亚秒精度（整秒跳变不足以驱动 100–300ms 粒度的字符切换）。
+ * @return 当前位置（毫秒，>=0）
+ */
+int64_t progress_tracker_get_position_ms(void);
+
+/**
  * 跳转到指定位置
  * @param position_seconds 目标位置（秒）
  */

@@ -20,6 +20,8 @@
 #include "ui/dialog.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "ui/layout.h"
+#include "ui/vinyl.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
 #include "player/player.h"
@@ -81,6 +83,7 @@ void apply_color_theme(void)
     init_pair(COLOR_PAIR_SIDEBAR,   CLR(g_app_config.theme.sidebar_fg),   CLR(g_app_config.theme.sidebar_bg));
     init_pair(COLOR_PAIR_HIGHLIGHT, CLR(g_app_config.theme.highlight_fg), CLR(g_app_config.theme.highlight_bg));
     init_pair(COLOR_PAIR_BORDER,    CLR(g_app_config.theme.border_fg),    CLR(g_app_config.theme.border_bg));
+    ui_layout_apply_colors();
 
 #undef CLR
 }
@@ -582,7 +585,7 @@ void try_migrate_from_json(void)
         }
     }
 
-    /* playlists/*.json → playlists */
+    /* playlists/ *.json -> playlists */
     if (has_playlists) {
         snprintf(path, sizeof(path), "%s/playlists", cfg);
         DIR *dir = opendir(path);
@@ -903,16 +906,22 @@ void exit_current_view(void)
     clear();
     create_layout();
     render_playlist_content();
+    render_info_bar();
     render_controls();
     render_lyrics();
+    render_vinyl_pane();
+    render_spectrum_pane();
 }
 
 void rerender_active_view(void)
 {
     if (g_current_view == VIEW_MAIN) {
         render_playlist_content();
+        render_info_bar();
         render_controls();
         render_lyrics();
+        render_vinyl_pane();
+        render_spectrum_pane();
         render_menu_hint_bar();
         return;
     }
