@@ -1707,7 +1707,8 @@ void playlist_install(Playlist *built)
     playlist_queue_sync();
     playlist_bump_content_revision();
 
-    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS | UI_DIRTY_LYRICS);
+    request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                       UI_DIRTY_LYRICS | UI_DIRTY_INFO);
 }
 
 int load_playlist(const char *path) {
@@ -2717,10 +2718,6 @@ void update_album_cover_for_track(const char *track_path) {
     if (!track_path || track_path[0] == '\0') {
         return;
     }
-
-    // 清空字符画缓存，以便新歌曲加载时重新生成
-    g_braille_art_buffer[0] = '\0';
-    g_album_cover_size = 0;
 
     pthread_mutex_lock(&g_album_cover_mutex);
     int existing = album_cover_find_source_locked(track_path);

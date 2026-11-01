@@ -33,7 +33,6 @@ extern int g_playlist_tab_mode;
 extern int g_queue_selected_index;
 
 /* Layout helpers (defined in layout.c) */
-extern int calculate_lyrics_content_top(int h, int w);
 extern int get_controls_button_row(int height);
 
 /* ============================================================
@@ -74,7 +73,7 @@ int get_playlist_index_from_window_row(int window_y, int *display_index, int *ac
     (void)w;
 
     int content_height = h - 2;
-    int visible_lines = content_height - 6;
+    int visible_lines = content_height;
     if (visible_lines <= 0 || window_y < 1 || window_y >= 1 + visible_lines) return 0;
 
     int clicked_display_index = get_playlist_scroll_offset() + (window_y - 1);
@@ -189,10 +188,11 @@ int get_control_index_from_window_point(int window_y, int window_x)
 
 int get_lyric_index_from_window_row(int window_y, int *lyric_index, double *timestamp)
 {
-    if (!win_lyrics || !g_app_config.show_lyrics_panel) return 0;
+    if (!win_lyrics) return 0;
 
     int h, w;
     getmaxyx(win_lyrics, h, w);
+    (void)w;
 
     /* 歌词行与高亮行归后端（门面只读）；跳转光标属界面私有 */
     int highlight = -1;
@@ -201,7 +201,7 @@ int get_lyric_index_from_window_row(int window_y, int *lyric_index, double *time
         return 0;
     }
 
-    int content_top = calculate_lyrics_content_top(h, w);
+    int content_top = 1;
     int visible_lines = h - content_top - 1;
     if (visible_lines <= 0 || window_y < content_top || window_y >= content_top + visible_lines) {
         return 0;

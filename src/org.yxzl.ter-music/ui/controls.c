@@ -11,6 +11,7 @@
 #include "types.h"
 #include "player/player.h"
 #include "ui/ui.h"
+#include "ui/layout.h"
 #include "ui/keymap.h"
 #include "i18n/i18n.h"
 #include "ui/menu_internal.h"
@@ -26,6 +27,35 @@
 #include <string.h>
 
 extern WINDOW *win_controls;
+
+/* ── Controls 窗格内部坐标（不参与主布局） ── */
+
+int get_controls_progress_row(int height)
+{
+    if (height >= 9) return 1;
+    int row = height / 2 - 2;
+    if (row < 1) row = 1;
+    return row;
+}
+
+int get_controls_button_row(int height)
+{
+    if (height >= 9) return 2;
+    int row = height / 2;
+    if (row < 2) row = 2;
+    return row;
+}
+
+int get_controls_visualizer_top(int height)
+{
+    if (height >= 9) return 4;
+    return get_controls_button_row(height) + 1;
+}
+
+int get_controls_visualizer_bottom(int height)
+{
+    return height - 3;
+}
 
 /* ── Control label i18n keys ── */
 static const char *control_label_keys[] = {
@@ -62,20 +92,6 @@ static const char *get_control_label(int index)
     return i18n_get(control_label_keys[index]);
 }
 
-/* 判断控制按钮是否需要在两行显示：
- * 与 render_controls() 的换行预判逻辑一致（按钮总宽超过可用宽度即换行）。 */
-int controls_need_second_row(int width)
-{
-    if (width < 1) return 0;
-    int total_width = 0;
-    for (int i = 0; i < CONTROL_COUNT - 1; i++) {
-        char label[32];
-        build_control_label(i, label, sizeof(label));
-        total_width += utf8_str_width(label) + 4;
-    }
-    return total_width > width;
-}
-
 void build_control_label(int index, char *dest, size_t dest_size)
 {
     if (!dest || dest_size == 0) return;
@@ -94,7 +110,8 @@ void build_control_label(int index, char *dest, size_t dest_size)
         snprintf(dest, dest_size, "%s:%d%%", get_control_label(index), player_volume_percent());
         return;
     }
-    utf8_str_truncate(dest, get_control_label(index), (int)dest_size - 1);
+    format_display_text(dest, dest_size, get_control_label(index),
+                        (int)dest_size - 1, 0);
 }
 
 /* ============================================================
@@ -137,9 +154,7 @@ void render_controls_status_line(void)
     mvwhline(win_controls, status_row, 1, ' ', w - 2);
 
     if (status_msg[0] != '\0' && (time(NULL) - status_time) < 3) {
-        char display_msg[sizeof(g_controls_status_message)];
-        format_display_text(display_msg, sizeof(display_msg), status_msg, w - 4, 0);
-        mvwprintw(win_controls, status_row, 2, "%s", display_msg);
+        ui_pane_clip_printf(win_controls, status_row, 2, "%s", status_msg);
     }
 }
 
@@ -207,6 +222,7 @@ static void calculate_popup_dimensions(PopupState *popup, WINDOW *parent)
     /* Clamp bottom edge so the popup doesn't overflow the screen */
     int screen_h, screen_w;
     getmaxyx(stdscr, screen_h, screen_w);
+    (void)screen_w;
     if (popup->start_row + popup->height > screen_h)
         popup->start_row = screen_h - popup->height;
     if (popup->start_row < 1) popup->start_row = 1;
@@ -497,11 +513,18 @@ static void popup_dismiss(void)
 
     /* Step 2 — force full re-render of playlist and controls so
      * their sub-window content overwrites the remaining areas. */
-    redrawwin(win_playlist);
-    redrawwin(win_controls);
+    if (win_playlist) redrawwin(win_playlist);
+    if (win_controls) redrawwin(win_controls);
     render_playlist_content();
     render_controls();
     render_menu_hint_bar();
+}
+
+/* 布局重建时丢弃残留弹窗：只销毁窗口，不触发旧窗口重绘。 */
+void controls_reset_popup(void)
+{
+    destroy_popup_window(&g_popup);
+    g_popup.active = 0;
 }
 
 /* ============================================================
@@ -553,12 +576,9 @@ void render_controls(void)
 {
     if (!win_controls) return;
 
-    werase(win_controls);
-    wattron(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
-    rounded_box(win_controls);
-
     int h, w;
     getmaxyx(win_controls, h, w);
+    if (h < 1 || w < 1) return;
 
     const char *focus_hint = g_control_focus
         ? i18n_get("controls.ctrl_focus")
@@ -574,24 +594,14 @@ void render_controls(void)
              i18n_get("controls.l_list"),
              i18n_get("controls.tab_view"),
              focus_hint);
-    /* 单行显示：按窗口宽度截断 header，避免 ncurses 换行覆盖
-     * 进度条行（窗口 row 1）与右侧边框，导致边框错位。 */
-    int header_max_cols = w - 6;
-    if (header_max_cols < 8) header_max_cols = 8;
-    /* 极端窄窗口（w 接近 10）时 clamp 下限可能越过右边界，联动收窄 */
-    if (header_max_cols > w - 3) header_max_cols = w - 3;
-    if (header_max_cols < 1) header_max_cols = 1;
-    /* 上限 254 列：配合 utf8_str_truncate 无容量参数的追加 "..." 分支，
-     * 保证复制量 + 4 + NUL ≤ 1024（254 列 × 4 字节/列 = 1016 + 4 + 1） */
-    if (header_max_cols > 254) header_max_cols = 254;
     char header_line[1024];
     snprintf(header_line, sizeof(header_line), " %s %s", controls_header, lyric_hint);
-    char header_display[1024];
-    utf8_str_truncate(header_display, header_line, header_max_cols);
-    mvwprintw(win_controls, 0, 2, "%s", header_display);
 
-    wattroff(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
-    wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
+    ui_pane_begin(LAYOUT_PANE_CONTROLS, win_controls, header_line);
+    if (h < 4 || w < 10) {
+        wrefresh(win_controls);
+        return;
+    }
 
     // Progress bar
     if (player_play_state() != PLAY_STATE_STOPPED && player_duration_seconds() > 0) {
@@ -615,30 +625,30 @@ void render_controls(void)
             char time_str[32];
             snprintf(time_str, sizeof(time_str), "%02d:%02d / %02d:%02d",
                      current_min, current_sec, total_min, total_sec);
-            mvwprintw(win_controls, progress_row, 2, "%s", time_str);
+            ui_pane_clip_printf(win_controls, progress_row, 2, "%s", time_str);
 
             int time_width = 13;
             int percent_width = 4;
             int padding = 6;
             int progress_bar_width = w - time_width - percent_width - padding - 4;
-            if (progress_bar_width < 10) progress_bar_width = 10;
+            if (progress_bar_width >= 1) {
+                int progress_start_col = 2 + time_width + 1;
 
-            int progress_start_col = 2 + time_width + 1;
+                ui_pane_clip_printf(win_controls, progress_row, progress_start_col, "[");
 
-            mvwprintw(win_controls, progress_row, progress_start_col, "[");
+                int filled_width = (progress_bar_width * progress_percent) / 100;
+                if (filled_width > progress_bar_width) filled_width = progress_bar_width;
 
-            int filled_width = (progress_bar_width * progress_percent) / 100;
-            if (filled_width > progress_bar_width) filled_width = progress_bar_width;
+                for (int i = 0; i < progress_bar_width && (progress_start_col + 1 + i) < w - 2; i++) {
+                    char c = '-';
+                    if (i < filled_width) c = '=';
+                    else if (i == filled_width && progress_percent < 100) c = '>';
+                    mvwaddch(win_controls, progress_row, progress_start_col + 1 + i, c);
+                }
 
-            for (int i = 0; i < progress_bar_width && (progress_start_col + 1 + i) < w - 2; i++) {
-                char c = '-';
-                if (i < filled_width) c = '=';
-                else if (i == filled_width && progress_percent < 100) c = '>';
-                mvwaddch(win_controls, progress_row, progress_start_col + 1 + i, c);
+                ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
+                ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
             }
-
-            mvwprintw(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
-            mvwprintw(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
 
             mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
             mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
@@ -652,9 +662,16 @@ void render_controls(void)
     int current_col = 0;
     int is_first_in_row = 1;
 
+    int max_label_cols = w - 6;
     for (int i = 0; i < CONTROL_COUNT - 1; i++) {
-        char display_label[32];
-        build_control_label(i, display_label, sizeof(display_label));
+        char raw_label[128];
+        char display_label[128];
+        build_control_label(i, raw_label, sizeof(raw_label));
+        if (max_label_cols < 1) {
+            break;
+        }
+        format_display_text(display_label, sizeof(display_label),
+                            raw_label, max_label_cols, 0);
         int len = utf8_str_width(display_label);
         int button_width = len + 4;
 
@@ -694,6 +711,10 @@ void render_controls(void)
             if (current_col < 1) current_col = 1;
         }
 
+        if (current_row < 1 || current_row >= h - 1 ||
+            current_col < 1 || current_col + button_width > w - 1) {
+            break;
+        }
         if (i == g_current_control_idx && g_control_focus == 1) {
             wattron(win_controls, A_REVERSE | A_BOLD);
             mvwprintw(win_controls, current_row, current_col, " [%s] ", display_label);
@@ -706,6 +727,8 @@ void render_controls(void)
 
     render_controls_status_line();
     render_visualizer_with_album_cover();
+    /* 封面/可视化之后补边框，防止字形溢出盖住边框。 */
+    ui_pane_repaint_border(LAYOUT_PANE_CONTROLS, win_controls);
 
     /* Refresh controls base window first, then overlay popup on top */
     wnoutrefresh(win_controls);

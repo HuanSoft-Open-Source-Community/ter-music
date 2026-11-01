@@ -4,6 +4,7 @@
 #include "audio/audio.h"
 #include "audio/play_queue.h"
 #include "ui/ui.h"
+#include "ui/layout.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
 #include "logger/logger.h"
@@ -305,6 +306,7 @@ int main(int argc, char *argv[]) {
     snprintf(effective_lang, sizeof(effective_lang), "%s",
              cli_lang_is_explicit() ? cli_lang_resolve() : g_app_config.ui_language);
     i18n_init(effective_lang);
+    ui_layout_init();
     if (frontend == PLAYER_BACKEND_LOCAL) {
         set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支）; config-ownership-allow: 仅 local 核心宿主 */
     }

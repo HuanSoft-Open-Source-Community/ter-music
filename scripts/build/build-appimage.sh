@@ -301,7 +301,8 @@ create_appdir() {
 
     cp "${binary_source}/${binary_name}" "${appdir}/usr/bin/"
 
-    mkdir -p "${appdir}/usr/share/ter-music"
+    mkdir -p "${appdir}/usr/share/ter-music/layouts"
+    cp "${SCRIPT_DIR}/data/layouts/layouts.json" "${appdir}/usr/share/ter-music/layouts/layouts.json" 2>/dev/null || true
     cp "${SCRIPT_DIR}/data/help-quickstart-zh.txt" "${appdir}/usr/share/ter-music/" 2>/dev/null || true
     cp "${SCRIPT_DIR}/data/help-quickstart-en.txt" "${appdir}/usr/share/ter-music/" 2>/dev/null || true
 

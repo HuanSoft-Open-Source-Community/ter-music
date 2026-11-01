@@ -1,231 +1,734 @@
 /**
  * @file layout.c
- * @brief 窗口布局创建及辅助布局计算
+ * @brief TUI 主界面运行时布局管理
  *
- * 从 ui.c 拆分，负责主视图三个子窗口的创建、尺寸计算和分隔线绘制。
+ * 布局规范由 ui/layout_spec.c 解析并做严格平铺校验；本文件负责加载
+ * 内置/用户布局、保存本地选中状态、映射为窗口矩形、建窗、分配颜色，
+ * 以及统一的窗格背景/边框/标题绘制。
+ *
+ * 主区域 = 终端去掉底部菜单提示条后的全部区域。布局校验保证所有可见
+ * 窗格严格铺满该区域，因此这里不对窗格做间距或空白补偿。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
- * @date 2026-06-02
  */
 
 #include "types.h"
-#include "ui/ui.h"
-#include "i18n/i18n.h"
-#include "ui/menus.h"
-#include "ui/menu_internal.h"
 #include "config/config.h"
-#include <ncursesw/ncurses.h>
-#include <stdio.h>
-#include <string.h>
+#include "i18n/i18n.h"
+#include "logger/logger.h"
+#include "ui/layout.h"
+#include "ui/layout_state.h"
+#include "ui/menu_internal.h"
+#include "ui/menus.h"
+#include "ui/ui.h"
 
-extern WINDOW *win_playlist;
-extern WINDOW *win_controls;
-extern WINDOW *win_lyrics;
+#include <ncursesw/ncurses.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#define LAYOUT_STATE_FILE "ui-layout"
+#define LAYOUT_USER_FILE  "layouts.json"
+
+#define LAYOUT_BODY_PAIR_BASE   10
+#define LAYOUT_BORDER_PAIR_BASE 20
+#define LAYOUT_PAIR_LIMIT       26
+
+static LayoutCatalog g_catalog;
+static LayoutSpec g_current;
+static char g_current_id[LAYOUT_ID_MAX];
+static int g_initialized = 0;
+
+static int g_body_pair[LAYOUT_PANE_COUNT];
+static int g_border_pair[LAYOUT_PANE_COUNT];
 
 /* ============================================================
- * Layout coordinate helpers
+ * 路径与文件加载
  * ============================================================ */
 
-int get_controls_progress_row(int height)
+static int layout_state_path(char *path, size_t path_size)
 {
-    if (height >= 9) return 1;
-    int row = height / 2 - 2;
-    if (row < 1) row = 1;
-    return row;
+    const char *dir = app_config_dir(1);
+    if (!dir || !dir[0]) {
+        return -1;
+    }
+    int written = snprintf(path, path_size, "%s/%s", dir, LAYOUT_STATE_FILE);
+    return (written > 0 && (size_t)written < path_size) ? 0 : -1;
 }
 
-int get_controls_button_row(int height)
+static int layout_user_path(char *path, size_t path_size)
 {
-    if (height >= 9) return 2;
-    int row = height / 2;
-    if (row < 2) row = 2;
-    return row;
+    const char *dir = app_config_dir(0);
+    if (!dir || !dir[0]) {
+        return -1;
+    }
+    int written = snprintf(path, path_size, "%s/%s", dir, LAYOUT_USER_FILE);
+    return (written > 0 && (size_t)written < path_size) ? 0 : -1;
 }
 
-int get_controls_visualizer_top(int height)
+static int catalog_add_fallback(LayoutCatalog *catalog)
 {
-    if (height >= 9) return 4;
-    return get_controls_button_row(height) + 1;
+    LayoutSpec fallback;
+    if (layout_spec_build_fallback(&fallback) != 0) {
+        return -1;
+    }
+    LayoutCatalog one;
+    layout_catalog_init(&one);
+    one.layouts[0] = fallback;
+    one.count = 1;
+    snprintf(one.default_id, sizeof(one.default_id), "%s", fallback.id);
+    layout_catalog_merge(catalog, &one);
+    return 0;
 }
 
-int get_controls_visualizer_bottom(int height)
+static void merge_catalog_file(const char *path, LayoutCatalog *catalog)
 {
-    return height - 3;
+    if (!path || !path[0] || access(path, R_OK) != 0) {
+        return;
+    }
+    LayoutCatalog parsed;
+    char err[192] = "";
+    if (layout_spec_parse_file(path, &parsed, err, sizeof(err)) != 0) {
+        log_warn("layout", "Ignoring layout file '%s': %s", path, err);
+        return;
+    }
+    layout_catalog_merge(catalog, &parsed);
+    log_info("layout", "Loaded %d layout(s) from '%s' (total %d, rejected %d)",
+             parsed.count, path, catalog->count, parsed.rejected);
 }
 
-int get_corner_spectrum_height(int h)
+static void load_builtin_catalog(LayoutCatalog *catalog)
 {
-    if (h >= 28) return 5;
-    if (h >= 22) return 4;
-    if (h >= 17) return 3;
-    if (h >= 13) return 2;
-    return 1;
+    static const char *const candidates[] = {
+        TER_MUSIC_DATA_DIR "/layouts/layouts.json",
+        "/usr/share/ter-music/layouts/layouts.json",
+        "data/layouts/layouts.json",
+        TER_MUSIC_SOURCE_DIR "/data/layouts/layouts.json",
+    };
+
+    char executable_path[MAX_PATH_LEN];
+    char executable_relative[MAX_PATH_LEN];
+    executable_path[0] = '\0';
+    executable_relative[0] = '\0';
+    ssize_t link_len = readlink("/proc/self/exe", executable_path,
+                                sizeof(executable_path) - 1);
+    if (link_len > 0) {
+        executable_path[link_len] = '\0';
+        char *slash = strrchr(executable_path, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(executable_relative, sizeof(executable_relative),
+                     "%s/../share/ter-music/layouts/layouts.json",
+                     executable_path);
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        if (catalog->count > 0) {
+            break;
+        }
+        merge_catalog_file(candidates[i], catalog);
+    }
+    if (catalog->count == 0 && executable_relative[0] != '\0') {
+        merge_catalog_file(executable_relative, catalog);
+    }
+    if (catalog->count == 0) {
+        log_warn("layout", "No built-in layout file found; using compiled fallback");
+        catalog_add_fallback(catalog);
+    }
 }
 
-int calculate_lyrics_content_top(int h, int w)
+static int load_full_catalog(LayoutCatalog *catalog)
 {
-    int spectrum_height = get_corner_spectrum_height(h);
-    int graph_top = 1;
-    int graph_bottom = graph_top + spectrum_height - 1;
-    if (graph_bottom >= h - 2 || w < 16) return 1;
-    return graph_bottom + 1;
+    layout_catalog_init(catalog);
+    load_builtin_catalog(catalog);
+
+    char user_path[MAX_PATH_LEN];
+    if (layout_user_path(user_path, sizeof(user_path)) == 0) {
+        merge_catalog_file(user_path, catalog);
+    }
+
+    const char *env_path = getenv("TER_MUSIC_LAYOUTS");
+    if (env_path && env_path[0]) {
+        merge_catalog_file(env_path, catalog);
+    }
+
+    if (catalog->count == 0) {
+        catalog_add_fallback(catalog);
+    }
+    if (catalog->default_id[0] == '\0' ||
+        !layout_catalog_find(catalog, catalog->default_id)) {
+        snprintf(catalog->default_id, sizeof(catalog->default_id), "%s",
+                 catalog->layouts[0].id);
+    }
+    return catalog->count;
 }
 
 /* ============================================================
- * Main layout creation
+ * 选中状态
+ * ============================================================ */
+
+static void select_layout_from_state_or_default(const char *preferred_id)
+{
+    char path[MAX_PATH_LEN];
+    char state_id[LAYOUT_ID_MAX] = "";
+
+    const LayoutSpec *selected = NULL;
+    if (layout_state_path(path, sizeof(path)) == 0 &&
+        layout_state_read(path, state_id, sizeof(state_id)) == 0) {
+        selected = layout_catalog_find(&g_catalog, state_id);
+        if (!selected) {
+            log_warn("layout", "Saved layout '%s' is no longer available", state_id);
+            state_id[0] = '\0';
+        }
+    }
+
+    if (!selected && preferred_id && preferred_id[0]) {
+        selected = layout_catalog_find(&g_catalog, preferred_id);
+    }
+
+    if (!selected && state_id[0] == '\0' &&
+        !g_app_config.show_lyrics_panel) {
+        selected = layout_catalog_find(&g_catalog, "focus");
+    }
+
+    if (!selected) {
+        selected = layout_catalog_find(&g_catalog, g_catalog.default_id);
+    }
+    if (!selected) {
+        selected = &g_catalog.layouts[0];
+    }
+
+    g_current = *selected;
+    snprintf(g_current_id, sizeof(g_current_id), "%s", selected->id);
+}
+
+/* ============================================================
+ * 窗格窗口槽位
+ * ============================================================ */
+
+static WINDOW **pane_slot(LayoutPaneKind kind)
+{
+    switch (kind) {
+        case LAYOUT_PANE_PLAYLIST: return &win_playlist;
+        case LAYOUT_PANE_INFO:     return &win_info;
+        case LAYOUT_PANE_CONTROLS: return &win_controls;
+        case LAYOUT_PANE_SPECTRUM: return &win_spectrum;
+        case LAYOUT_PANE_LYRICS:   return &win_lyrics;
+        case LAYOUT_PANE_VINYL:    return &win_vinyl;
+        default:                   return NULL;
+    }
+}
+
+static const char *pane_title(LayoutPaneKind kind)
+{
+    switch (kind) {
+        case LAYOUT_PANE_PLAYLIST: return i18n_get("controls.playlist");
+        case LAYOUT_PANE_INFO:     return i18n_get("hint.info");
+        case LAYOUT_PANE_CONTROLS: return i18n_get("controls.controls_area");
+        case LAYOUT_PANE_SPECTRUM: return i18n_get("controls.spectrum");
+        case LAYOUT_PANE_LYRICS:   return i18n_get("controls.lyrics");
+        case LAYOUT_PANE_VINYL:    return i18n_get("controls.vinyl");
+        default:                   return "";
+    }
+}
+
+/* ============================================================
+ * 颜色
+ * ============================================================ */
+
+static int role_pair(LayoutPaneKind kind)
+{
+    switch (kind) {
+        case LAYOUT_PANE_PLAYLIST:
+        case LAYOUT_PANE_INFO:
+            return COLOR_PAIR_PLAYLIST;
+        case LAYOUT_PANE_CONTROLS:
+            return COLOR_PAIR_CONTROLS;
+        case LAYOUT_PANE_SPECTRUM:
+        case LAYOUT_PANE_LYRICS:
+        case LAYOUT_PANE_VINYL:
+            return COLOR_PAIR_LYRICS;
+        default:
+            return 0;
+    }
+}
+
+static void role_colors(LayoutPaneKind kind, int *fg, int *bg)
+{
+    switch (kind) {
+        case LAYOUT_PANE_PLAYLIST:
+        case LAYOUT_PANE_INFO:
+            *fg = g_app_config.theme.playlist_fg;
+            *bg = g_app_config.theme.playlist_bg;
+            break;
+        case LAYOUT_PANE_CONTROLS:
+            *fg = g_app_config.theme.controls_fg;
+            *bg = g_app_config.theme.controls_bg;
+            break;
+        case LAYOUT_PANE_SPECTRUM:
+        case LAYOUT_PANE_LYRICS:
+        case LAYOUT_PANE_VINYL:
+            *fg = g_app_config.theme.lyrics_fg;
+            *bg = g_app_config.theme.lyrics_bg;
+            break;
+        default:
+            *fg = COLOR_WHITE;
+            *bg = -1;
+            break;
+    }
+}
+
+static int clamp_color(int value)
+{
+    int max_color = COLORS - 1;
+    if (max_color < 0) {
+        max_color = 0;
+    }
+    if (value < -1) {
+        return -1;
+    }
+    if (value > max_color) {
+        return max_color;
+    }
+    return value;
+}
+
+static const LayoutPaneSpec *find_pane_spec(const LayoutSpec *spec,
+                                            LayoutPaneKind kind)
+{
+    if (!spec) {
+        return NULL;
+    }
+    for (int i = 0; i < spec->pane_count; i++) {
+        if (spec->panes[i].kind == kind) {
+            return &spec->panes[i];
+        }
+    }
+    return NULL;
+}
+
+void ui_layout_apply_colors(void)
+{
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        g_body_pair[i] = role_pair((LayoutPaneKind)i);
+        g_border_pair[i] = g_body_pair[i];
+    }
+
+    if (!has_colors() || COLOR_PAIRS <= LAYOUT_PAIR_LIMIT) {
+        return;
+    }
+
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        LayoutPaneKind kind = (LayoutPaneKind)i;
+        const LayoutPaneSpec *pane = find_pane_spec(&g_current, kind);
+        if (!pane) {
+            continue;
+        }
+        int has_override = pane->fg != LAYOUT_COLOR_INHERIT ||
+                           pane->bg != LAYOUT_COLOR_INHERIT ||
+                           pane->border_fg != LAYOUT_COLOR_INHERIT ||
+                           pane->border_bg != LAYOUT_COLOR_INHERIT;
+        if (!has_override || g_rainbow_mode_enabled) {
+            continue;
+        }
+
+        int role_fg, role_bg;
+        role_colors(kind, &role_fg, &role_bg);
+        int fg = pane->fg == LAYOUT_COLOR_INHERIT ? role_fg : clamp_color(pane->fg);
+        int bg = pane->bg == LAYOUT_COLOR_INHERIT ? role_bg : clamp_color(pane->bg);
+
+        int body = LAYOUT_BODY_PAIR_BASE + i;
+        if (init_pair((short)body, (short)fg, (short)bg) != OK) {
+            continue;
+        }
+        g_body_pair[i] = body;
+
+        if (pane->border_fg == LAYOUT_COLOR_INHERIT &&
+            pane->border_bg == LAYOUT_COLOR_INHERIT) {
+            g_border_pair[i] = body;
+            continue;
+        }
+        int border_fg = pane->border_fg == LAYOUT_COLOR_INHERIT
+                            ? fg : clamp_color(pane->border_fg);
+        int border_bg = pane->border_bg == LAYOUT_COLOR_INHERIT
+                            ? bg : clamp_color(pane->border_bg);
+        int border = LAYOUT_BORDER_PAIR_BASE + i;
+        if (init_pair((short)border, (short)border_fg, (short)border_bg) == OK) {
+            g_border_pair[i] = border;
+        } else {
+            g_border_pair[i] = body;
+        }
+    }
+}
+
+int ui_pane_body_attr(LayoutPaneKind kind)
+{
+    if (kind < 0 || kind >= LAYOUT_PANE_COUNT || !has_colors()) {
+        return 0;
+    }
+    int pair = g_body_pair[kind] > 0 ? g_body_pair[kind] : role_pair(kind);
+    return pair > 0 ? COLOR_PAIR(pair) : 0;
+}
+
+int ui_pane_border_attr(LayoutPaneKind kind)
+{
+    if (kind < 0 || kind >= LAYOUT_PANE_COUNT || !has_colors()) {
+        return 0;
+    }
+    int pair = g_border_pair[kind] > 0 ? g_border_pair[kind] : role_pair(kind);
+    return pair > 0 ? COLOR_PAIR(pair) : 0;
+}
+
+/* ============================================================
+ * 统一窗格绘制
+ * ============================================================ */
+
+void ui_pane_begin(LayoutPaneKind kind, WINDOW *win, const char *title)
+{
+    if (!win) {
+        return;
+    }
+
+    int body = ui_pane_body_attr(kind);
+    int border = ui_pane_border_attr(kind);
+
+    wbkgd(win, (chtype)body);
+    werase(win);
+
+    int h, w;
+    getmaxyx(win, h, w);
+    if (h >= 2 && w >= 2) {
+        wattrset(win, border);
+        rounded_box(win);
+    }
+    wattrset(win, body);
+
+    if (title && title[0] && h >= 1 && w >= 5) {
+        int max_width = w - 4;
+        if (max_width < 1) {
+            max_width = 1;
+        }
+        char display[128];
+        format_display_text(display, sizeof(display), title, max_width, 0);
+        mvwprintw(win, 0, 2, "%s", display);
+    }
+}
+
+void ui_pane_clip_print(WINDOW *win, int row, int col, const char *text)
+{
+    if (!win || !text) {
+        return;
+    }
+    int h, w;
+    getmaxyx(win, h, w);
+    if (row < 1 || row >= h - 1 || col < 1 || col >= w - 1) {
+        return;
+    }
+    int max_cols = (w - 1) - col;
+    if (max_cols <= 0) {
+        return;
+    }
+    char display[1024];
+    /* format_display_text 的裁剪函数按列计，最坏每列 4 字节；限制到
+     * 缓冲区安全范围，超宽终端也不会写穿本地缓冲。 */
+    int safe_cols = (int)(sizeof(display) / 4) - 4;
+    if (max_cols > safe_cols) {
+        max_cols = safe_cols;
+    }
+    format_display_text(display, sizeof(display), text, max_cols, 0);
+    mvwprintw(win, row, col, "%s", display);
+}
+
+void ui_pane_clip_printf(WINDOW *win, int row, int col,
+                         const char *fmt, ...)
+{
+    if (!win || !fmt) {
+        return;
+    }
+    char text[2048];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(text, sizeof(text), fmt, args);
+    va_end(args);
+    ui_pane_clip_print(win, row, col, text);
+}
+
+int ui_pane_is_visible(LayoutPaneKind kind)
+{
+    WINDOW **slot = pane_slot(kind);
+    return slot && *slot;
+}
+
+void ui_pane_repaint_border(LayoutPaneKind kind, WINDOW *win)
+{
+    if (!win) {
+        return;
+    }
+
+    int h, w;
+    getmaxyx(win, h, w);
+    if (h < 2 || w < 2) {
+        return;
+    }
+
+    wattrset(win, ui_pane_border_attr(kind));
+
+    /* 左右竖边：第 0 行是标题，不能整行重画，只补竖边。 */
+    for (int y = 1; y < h - 1; y++) {
+        mvwaddstr(win, y, 0, "\xe2\x94\x82");          /* │ */
+        mvwaddstr(win, y, w - 1, "\xe2\x94\x82");      /* │ */
+    }
+
+    /* 底边（含圆角）；顶边与标题保持 ui_pane_begin() 的绘制结果。 */
+    mvwaddstr(win, h - 1, 0, "\xe2\x95\xb0");          /* ╰ */
+    for (int x = 1; x < w - 1; x++) {
+        mvwaddstr(win, h - 1, x, "\xe2\x94\x80");      /* ─ */
+    }
+    mvwaddstr(win, h - 1, w - 1, "\xe2\x95\xaf");      /* ╯ */
+}
+
+/* ============================================================
+ * 建窗
+ * ============================================================ */
+
+static void clear_pane_windows(void)
+{
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        WINDOW **slot = pane_slot((LayoutPaneKind)i);
+        if (slot) {
+            *slot = NULL;
+        }
+    }
+}
+
+void destroy_main_windows(void)
+{
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        WINDOW **slot = pane_slot((LayoutPaneKind)i);
+        if (slot && *slot) {
+            delwin(*slot);
+            *slot = NULL;
+        }
+    }
+    clear_pane_windows();
+}
+
+static int create_windows(const LayoutGeometry *geometry)
+{
+    if (!geometry || !geometry->valid) {
+        return -1;
+    }
+
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        const LayoutPaneRect *rect = &geometry->panes[i];
+        if (!rect->visible || !rect->has_cells) {
+            continue;
+        }
+        if (rect->w <= 0 || rect->h <= 0) {
+            continue;
+        }
+        WINDOW *win = newwin(rect->h, rect->w, rect->y, rect->x);
+        if (!win) {
+            log_error("layout", "newwin failed for pane %s (%dx%d at %d,%d)",
+                      layout_pane_id_name((LayoutPaneKind)i),
+                      rect->w, rect->h, rect->x, rect->y);
+            return -1;
+        }
+        WINDOW **slot = pane_slot((LayoutPaneKind)i);
+        if (!slot) {
+            delwin(win);
+            continue;
+        }
+        *slot = win;
+        ui_pane_begin((LayoutPaneKind)i, win, pane_title((LayoutPaneKind)i));
+        wrefresh(win);
+    }
+    return 0;
+}
+
+static void reset_focus_for_layout(void)
+{
+    if (!ui_pane_is_visible(LAYOUT_PANE_LYRICS)) {
+        g_lyric_cursor_mode = 0;
+        g_lyric_cursor_index = -1;
+    }
+    if (!ui_pane_is_visible(LAYOUT_PANE_CONTROLS)) {
+        g_control_focus = 0;
+    }
+}
+
+/* ============================================================
+ * 加载与选择 API
+ * ============================================================ */
+
+int ui_layout_init(void)
+{
+    if (g_initialized) {
+        return 0;
+    }
+    load_full_catalog(&g_catalog);
+    select_layout_from_state_or_default(NULL);
+    g_initialized = 1;
+    log_info("layout", "Selected layout '%s' (%d available)", g_current_id,
+             g_catalog.count);
+    return 0;
+}
+
+int ui_layout_reload(void)
+{
+    LayoutCatalog fresh;
+    if (load_full_catalog(&fresh) <= 0) {
+        return -1;
+    }
+    g_catalog = fresh;
+
+    char previous[LAYOUT_ID_MAX];
+    snprintf(previous, sizeof(previous), "%s", g_current_id);
+    select_layout_from_state_or_default(previous);
+    g_initialized = 1;
+    log_info("layout", "Reloaded %d layout(s); selected '%s'",
+             g_catalog.count, g_current_id);
+    return g_catalog.count;
+}
+
+int ui_layout_count(void)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    return g_catalog.count;
+}
+
+const char *ui_layout_id_at(int index)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    if (index < 0 || index >= g_catalog.count) {
+        return NULL;
+    }
+    return g_catalog.layouts[index].id;
+}
+
+const char *ui_layout_name_at(int index)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    if (index < 0 || index >= g_catalog.count) {
+        return "";
+    }
+    const LayoutSpec *layout = &g_catalog.layouts[index];
+    if (layout->name_key[0]) {
+        const char *translated = i18n_get(layout->name_key);
+        if (translated && strcmp(translated, layout->name_key) != 0) {
+            return translated;
+        }
+    }
+    if (layout->name[0]) {
+        return layout->name;
+    }
+    return layout->id;
+}
+
+int ui_layout_current_index(void)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    for (int i = 0; i < g_catalog.count; i++) {
+        if (strcmp(g_catalog.layouts[i].id, g_current_id) == 0) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+const char *ui_layout_current_id(void)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    return g_current_id;
+}
+
+const char *ui_layout_current_name(void)
+{
+    int index = ui_layout_current_index();
+    return ui_layout_name_at(index);
+}
+
+int ui_layout_select(const char *id)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    const LayoutSpec *layout = layout_catalog_find(&g_catalog, id);
+    if (!layout) {
+        return -1;
+    }
+    g_current = *layout;
+    snprintf(g_current_id, sizeof(g_current_id), "%s", layout->id);
+
+    char path[MAX_PATH_LEN];
+    if (layout_state_path(path, sizeof(path)) != 0) {
+        return -1;
+    }
+    return layout_state_write(path, g_current_id);
+}
+
+/* ============================================================
+ * 主布局创建
  * ============================================================ */
 
 void create_layout(void)
 {
-    // 初始化视图状态（仅在第一次调用时）
-    static int initialized = 0;
-    if (!initialized) {
+    static int view_initialized = 0;
+    if (!view_initialized) {
         g_current_view = VIEW_MAIN;
         g_menu_selected_idx = 0;
-        initialized = 1;
+        view_initialized = 1;
     }
 
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
-
-    // 边界检查
-    if (max_y < 8) max_y = 8;
-    if (max_x < 20) max_x = 20;
-
-    int lyrics_width;
-    if (max_x >= 160) {
-        lyrics_width = max_x / 3;
-    } else if (max_x >= 120) {
-        lyrics_width = (max_x * 3) / 8;
-    } else {
-        lyrics_width = (max_x * 2) / 5;
+    if (!g_initialized) {
+        ui_layout_init();
     }
-    if (lyrics_width < 28) lyrics_width = 28;
-    if (lyrics_width > max_x - 44) lyrics_width = max_x - 44;
-    if (lyrics_width < 10) lyrics_width = 10;
 
-    int main_width;
-    if (g_app_config.show_lyrics_panel) {
-        main_width = max_x - lyrics_width - 1;
-    } else {
-        lyrics_width = 0;
-        main_width = max_x - 1;
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
+
+    LayoutSpec resolved;
+    layout_spec_resolve(&g_current, &resolved);
+
+    LayoutGeometry geometry;
+    layout_geometry_compute(&resolved, rows, cols, &geometry);
+
+    destroy_main_windows();
+    controls_reset_popup();
+    ui_layout_apply_colors();
+
+    if (!geometry.valid) {
+        refresh();
+        render_menu_hint_bar();
+        return;
     }
-    if (main_width < 10) main_width = 10;
 
-    int total_inner_height = max_y - 3;
-    if (total_inner_height < 3) total_inner_height = 3;
-
-    // 控制区域高度
-    int controls_height;
-    if (max_y >= 34)       controls_height = 7;
-    else if (max_y >= 24)  controls_height = 6;
-    else                   controls_height = 5;
-
-    int min_controls      = 4;
-    int min_playlist_info = 2;
-    int min_playlist      = 1;
-
-    int playlist_height = total_inner_height - controls_height;
-
-    if (playlist_height < min_playlist_info) {
-        playlist_height = min_playlist_info;
-        controls_height = total_inner_height - playlist_height;
-    }
-    if (controls_height < min_controls) {
-        controls_height = min_controls;
-        playlist_height = total_inner_height - controls_height;
-    }
-    if (playlist_height < min_playlist) {
-        playlist_height = min_playlist;
-        controls_height = total_inner_height - playlist_height;
-    }
-    if (controls_height < 1) controls_height = 1;
-    if (playlist_height < 1) playlist_height = 1;
-
-    int total_used = controls_height + playlist_height;
-    if (total_used > total_inner_height) {
-        playlist_height = total_inner_height - controls_height;
-        if (playlist_height < 1) {
-            playlist_height = 1;
-            controls_height = total_inner_height - playlist_height;
+    if (create_windows(&geometry) != 0) {
+        destroy_main_windows();
+        layout_geometry_rescue(rows, cols, &geometry);
+        if (create_windows(&geometry) != 0) {
+            destroy_main_windows();
+            refresh();
+            render_menu_hint_bar();
+            return;
         }
+        log_warn("layout", "Fell back to full-screen playlist rescue layout");
     }
 
-    // 宽度不足时控制按钮会换行成两行：控件区加高直至第二行可见
-    // （第二行行号 = button_row+1，需小于 h-2 才不被截断），
-    // 播放列表窗格同步减矮（至少保留 1 行）。
-    if (controls_need_second_row(main_width - 2)) {
-        while (get_controls_button_row(controls_height) + 1 >= controls_height - 2 &&
-               playlist_height > 1) {
-            controls_height++;
-            playlist_height--;
-        }
-    }
-
-    // 1. 播放列表窗口 (左上)
-    win_playlist = newwin(playlist_height, main_width, 1, 1);
-    wattron(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    rounded_box(win_playlist);
-    wattroff(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    wbkgd(win_playlist, COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    mvwprintw(win_playlist, 0, 2, "%s", i18n_get("controls.playlist"));
-    wrefresh(win_playlist);
-
-    // 2. 控制栏窗口 (左下)
-    win_controls = newwin(controls_height, main_width, 1 + playlist_height, 1);
-    wattron(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
-    rounded_box(win_controls);
-    const char *focus_hint = g_control_focus
-        ? i18n_get("controls.ctrl_focus")
-        : i18n_get("controls.list_focus");
-    const char *lyric_hint = g_lyric_cursor_mode
-        ? i18n_get("controls.ctrl_l_exit_seek")
-        : i18n_get("controls.ctrl_l_lyric_seek");
-    char controls_header[160];
-    snprintf(controls_header, sizeof(controls_header), "%s %s %s %s %s",
-             i18n_get("controls.controls_area"),
-             i18n_get("controls.space_run"),
-             i18n_get("controls.c_ctrl"),
-             i18n_get("controls.l_list"),
-             focus_hint);
-    wattroff(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
-    wbkgd(win_controls, COLOR_PAIR(COLOR_PAIR_CONTROLS));
-    mvwprintw(win_controls, 0, 2, " %s %s", controls_header, lyric_hint);
-    wrefresh(win_controls);
-
-    // 3. 歌词侧栏窗口 (右侧)
-    if (g_app_config.show_lyrics_panel && lyrics_width > 0) {
-        int lyrics_height = max_y - 3;
-        if (lyrics_height < 3) lyrics_height = 3;
-        win_lyrics = newwin(lyrics_height, lyrics_width, 1, 1 + main_width);
-        wattron(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
-        rounded_box(win_lyrics);
-        wattroff(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
-        wbkgd(win_lyrics, COLOR_PAIR(COLOR_PAIR_LYRICS));
-        mvwprintw(win_lyrics, 0, 2, "%s", i18n_get("controls.lyrics"));
-        mvwprintw(win_lyrics, 2, 2, "%s", i18n_get("lyrics.not_loaded"));
-        wrefresh(win_lyrics);
-    } else {
-        win_lyrics = NULL;
-    }
-
-    // 绘制分隔线
-    if (g_app_config.show_lyrics_panel && lyrics_width > 0) {
-        int vline_len = max_y - 3;
-        if (vline_len < 1) vline_len = 1;
-        for (int i = 0; i < vline_len; i++)
-            mvaddstr(1 + i, 1 + main_width, "\xe2\x94\x82"); /* │ */
-    }
-
-    int hline_len = main_width;
-    if (hline_len < 1) hline_len = 1;
-    for (int i = 0; i < hline_len; i++)
-        mvaddstr(1 + playlist_height, 1 + i, "\xe2\x94\x80"); /* ─ */
-
-    if (g_app_config.show_lyrics_panel && lyrics_width > 0) {
-        mvaddstr(1 + playlist_height, 1 + main_width, "\xe2\x94\xbc"); /* ┼ */
-    }
+    reset_focus_for_layout();
 
     refresh();
     render_menu_hint_bar();

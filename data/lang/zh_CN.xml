@@ -22,7 +22,7 @@
   <string key="app.exit_clean">ter-music 已正常退出。</string>
 
   <!-- ===== Sidebar items ===== -->
-  <string key="sidebar.settings.theme">颜色主题</string>
+  <string key="sidebar.settings.theme">界面外观</string>
   <string key="sidebar.settings.default_path">默认路径</string>
   <string key="sidebar.settings.playback">播放设置</string>
   <string key="sidebar.settings.play_mode">播放模式</string>
@@ -63,6 +63,12 @@
   <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
   <string key="settings.color.select_hint">颜色主题：↑/↓ 选择，→或 ENTER 调整，←/TAB 返回菜单</string>
   <string key="settings.color.auto_avoid_same">前景色和背景色会自动避免使用相同颜色</string>
+  <string key="settings.layout.hint">界面布局：←/→ 切换，ENTER 选择；自定义布局必须无缝铺满主区域，否则整份布局被拒绝</string>
+  <string key="settings.layout.saved">布局已切换</string>
+  <string key="settings.layout.save_failed">布局已应用，但选中状态保存失败</string>
+  <string key="settings.layout.reload_ok">已重新加载 %d 个布局</string>
+  <string key="settings.layout.reload_failed">重新加载布局失败，保留原有布局</string>
+  <string key="settings.layout.fallback">当前布局已不可用，已回退到默认布局</string>
   <string key="settings.path.hint">默认路径：ENTER 编辑，←/TAB 返回菜单</string>
   <string key="settings.path.tilde_hint">支持使用 ~ 开头的用户目录路径</string>
   <string key="settings.playback.hint">播放设置：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单</string>
@@ -114,7 +120,8 @@
   <string key="settings.opt.language">语言</string>
   <string key="settings.opt.volume">音量</string>
   <string key="settings.opt.latency">时延</string>
-  <string key="settings.opt.show_lyrics">显示歌词</string>
+  <string key="settings.opt.ui_layout">界面布局</string>
+  <string key="settings.opt.layout_reload">重新加载布局</string>
   <string key="settings.opt.lyrics_align">歌词对齐</string>
   <string key="settings.opt.play_mode">播放模式</string>
   <string key="settings.opt.default_speed">默认倍速</string>
@@ -234,6 +241,8 @@
   <!-- ===== Controls ===== -->
   <string key="controls.playlist">播放列表</string>
   <string key="controls.lyrics">歌词</string>
+  <string key="controls.spectrum">频谱</string>
+  <string key="controls.vinyl">黑胶碟片</string>
   <string key="controls.lyrics_seek">[定位] 歌词</string>
   <string key="controls.controls_area">控制区</string>
   <string key="controls.ctrl_focus">[控件焦点]</string>
@@ -453,6 +462,7 @@
   <string key="lyrics.seek_disabled">已退出歌词定位模式</string>
   <string key="lyrics.no_position">当前没有可定位的歌词</string>
   <string key="lyrics.not_available">没有可用歌词</string>
+  <string key="lyrics.pane_hidden">当前布局未显示歌词窗格</string>
   <string key="lyrics.no_lyrics_emoji">🎵 暂无歌词 🎶</string>
   <string key="lyrics.no_lyrics">暂无歌词</string>
   <string key="lyrics.particle_emoji">字母 · 符号 · Emoji</string>
@@ -1210,4 +1220,14 @@
   <string key="cli.keys.msg.shadow_oom">内存不足，无法收集遮蔽关系</string>
   <string key="cli.keys.err.unknown_option">错误：未知的 keys 选项 '%s'。</string>
   <string key="cli.keys.err.unknown_subcommand">错误：未知 keys 子命令 '%s'。</string>
+
+  <!-- ===== Layout presets ===== -->
+  <string key="layout.preset.classic">经典</string>
+  <string key="layout.preset.vinyl">黑胶</string>
+  <string key="layout.preset.dual">六格回退</string>
+  <string key="layout.preset.karaoke">歌词优先</string>
+  <string key="layout.preset.visualizer">频谱黑胶</string>
+  <string key="layout.preset.focus">专注</string>
+  <string key="layout.preset.stage">舞台</string>
+  <string key="layout.preset.neon">霓虹</string>
 </lang>
