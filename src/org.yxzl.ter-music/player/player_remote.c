@@ -454,10 +454,14 @@ static int remote_handshake(void)
     if (json_get_path(&reader, "core.api_version", &value) == 0) {
         version = json_value_int(&value, 0);
     }
-    if (version < TER_MUSIC_API_VERSION) {
+    if (version < TER_MUSIC_API_MIN_VERSION) {
         log_error("player_remote_remote", "Core is too old: api_version=%ld, need >= %d",
-                  version, TER_MUSIC_API_VERSION);
+                  version, TER_MUSIC_API_MIN_VERSION);
         return -1;
+    }
+    if (version < TER_MUSIC_API_VERSION) {
+        log_debug("player_remote", "Core api_version=%ld: per-character lyrics unavailable",
+                  version);
     }
 
     /* core.methods 必须包含所需方法（缺失即核心过旧）。
@@ -633,6 +637,26 @@ static void remote_store_track(const char *json)
         json_value_string(&value, track.album, sizeof(track.album));
     }
 
+    /* 核心 Info.GetInfo 的 track.format：远端前端不解码音频，格式只能
+     * 从这里取；缺失/null 保持 0/空，UI 显示 "--"。 */
+    json_reader_init(&reader, json, strlen(json));
+    if (json_get_path(&reader, "track.format.sample_rate", &value) == 0 &&
+        value.type == JSON_VALUE_NUMBER) {
+        track.sample_rate = (int)json_value_int(&value, 0);
+    }
+    if (json_get_path(&reader, "track.format.bit_depth", &value) == 0 &&
+        value.type == JSON_VALUE_NUMBER) {
+        track.bit_depth = (int)json_value_int(&value, 0);
+    }
+    if (json_get_path(&reader, "track.format.bit_rate", &value) == 0 &&
+        value.type == JSON_VALUE_NUMBER) {
+        track.bit_rate = (int)json_value_int(&value, 0);
+    }
+    if (json_get_path(&reader, "track.format.codec", &value) == 0 &&
+        value.type == JSON_VALUE_STRING) {
+        json_value_string(&value, track.codec, sizeof(track.codec));
+    }
+
     /* 有效性判定：核心不给 track.valid 键（见 info_append_track_object，键集只有
      * id/index/number/...），改用真实字段——track.index 非 null 或 track.id 非 null
      * 即存在当前曲目。这两个键只在核心侧 t->valid 时才写成非 null。 */
@@ -669,14 +693,21 @@ static void remote_store_track(const char *json)
         g_remote.queue_revision++;
     }
 
-    /* 曲目标识变化才重算：否则每轮都会把 state_revision 顶上去 */
-    if (track.valid != g_remote.track.valid ||
+    /* 曲目标识变化才重算封面/歌词；音频格式晚到只推动 state_revision，
+     * 让信息窗格第二栏刷新，但不重载封面与歌词。 */
+    int track_identity_changed =
+        track.valid != g_remote.track.valid ||
         strcmp(track.track_id, g_remote.track.track_id) != 0 ||
-        track.index != g_remote.track.index) {
+        track.index != g_remote.track.index;
+    int track_format_changed = info_track_format_changed(&g_remote.track, &track);
+
+    if (track_identity_changed) {
         g_remote.cover_valid = 0;
         g_remote.lyrics_page_valid = 0;
         g_remote.state_revision++;
         g_remote.lyrics_revision++;
+    } else if (track_format_changed) {
+        g_remote.state_revision++;
     }
 
     g_remote.track = track;
@@ -774,6 +805,16 @@ static void remote_store_lyrics(const char *json)
         value.type == JSON_VALUE_STRING) {
         json_value_string(&value, lyrics.next_text, sizeof(lyrics.next_text));
     }
+    /* 逐字进度（api_version 5 新增）：旧核心没有这些字段，默认 0 即降级为
+     * 整行高亮，不影响接入。 */
+    if (json_get_path(&reader, "lyrics.char_sung", &value) == 0 &&
+        value.type == JSON_VALUE_NUMBER) {
+        lyrics.current_char_sung = (int)json_value_int(&value, 0);
+    }
+    if (json_get_path(&reader, "lyrics.char_total", &value) == 0 &&
+        value.type == JSON_VALUE_NUMBER) {
+        lyrics.current_char_total = (int)json_value_int(&value, 0);
+    }
     char source[32];
     /* json_value_string 返回**写入字节数**：写成 `== 0` 会让映射永不执行，
      * 于是界面的 Ctrl+L → Tab 根据 `player_lyrics_source()` 判断时永远看到
@@ -792,6 +833,8 @@ static void remote_store_lyrics(const char *json)
     if (lyrics.current_index != g_remote.lyrics.current_index ||
         lyrics.has_lyrics != g_remote.lyrics.has_lyrics ||
         lyrics.source != g_remote.lyrics.source ||
+        lyrics.current_char_sung != g_remote.lyrics.current_char_sung ||
+        lyrics.current_char_total != g_remote.lyrics.current_char_total ||
         strcmp(lyrics.current_text, g_remote.lyrics.current_text) != 0) {
         g_remote.lyrics_revision++;
     }
@@ -1725,6 +1768,11 @@ int player_remote_queue_page(int offset, int count, BackendQueueEntry *out, int 
 
 /* ── 歌词 / 封面 / 可视化 ───────────────────────────────────────── */
 
+/* 一次拉取的行数：逐字文档每行可能带 chars 数组，200 行的极端载荷会接近
+ * RPC_PAYLOAD_MAX，而前端接收缓冲只有 RPC_PAYLOAD_MAX/2。50 行在任何合法
+ * 行（≤255 字节）下都远低于这两个上限；分页次数只在换曲时发生一次。 */
+#define REMOTE_LYRIC_FETCH_PAGE 50
+
 /* 拉取一页歌词文档到 out（绝对下标 offset 起），并带回整篇元信息。
  * @return 本页行数；-1 = 调用或解析失败 */
 static int remote_lyrics_fetch_page(int offset, LyricLine *out, int out_cap,
@@ -1735,7 +1783,7 @@ static int remote_lyrics_fetch_page(int offset, LyricLine *out, int out_cap,
      * 与 player_remote_queue_find 一样用接收缓冲，不在栈上开 256 KB。 */
     char json[RPC_PAYLOAD_MAX / 2];
     DBusMessage *reply = remote_call_ii(REMOTE_IFACE_LYRICS, "GetDocument", 3000,
-                                        offset, PLAYER_LYRIC_PAGE_MAX);
+                                        offset, REMOTE_LYRIC_FETCH_PAGE);
     if (!reply) {
         return -1;
     }
@@ -1792,6 +1840,26 @@ static int remote_lyrics_fetch_page(int offset, LyricLine *out, int out_cap,
         if (json_get_path(&row_reader, "timestamp", &field) == 0) {
             /* 纯文本歌词的 timestamp 是 null：json_value_double 回落 0.0 */
             line.timestamp = json_value_double(&field, 0.0);
+            if (field.type == JSON_VALUE_NUMBER) {
+                line.has_timestamp = 1;
+            }
+        }
+        if (json_get_path(&row_reader, "end", &field) == 0) {
+            line.end_timestamp = json_value_double(&field, 0.0);
+        }
+        if (json_get_path(&row_reader, "char_total", &field) == 0) {
+            line.char_count = (int)json_value_int(&field, 0);
+        }
+        if (json_get_path(&row_reader, "timing", &field) == 0 &&
+            field.type == JSON_VALUE_STRING) {
+            char timing[16] = "";
+            if (json_value_string(&field, timing, sizeof(timing)) > 0) {
+                if (strcmp(timing, "chars") == 0) {
+                    line.timing = LYRIC_TIMING_CHARS;
+                } else if (strcmp(timing, "line") == 0) {
+                    line.timing = LYRIC_TIMING_LINE;
+                }
+            }
         }
         if (json_get_path(&row_reader, "text", &field) == 0 &&
             field.type == JSON_VALUE_STRING) {
@@ -1826,8 +1894,8 @@ static int remote_lyrics_ensure_loaded(void)
         return -1;      /* 失败退避：核心挂死时不让渲染路径每帧阻塞 */
     }
 
-    /* 页数护栏：核心的 count 不会超过 MAX_LYRIC_LINES，多给一轮余量防呆 */
-    const int max_pages = (MAX_LYRIC_LINES / PLAYER_LYRIC_PAGE_MAX) + 2;
+    /* 页数护栏：核心的行数上限是 MAX_LYRIC_LINES，多给一轮余量防呆 */
+    const int max_pages = (MAX_LYRIC_LINES / REMOTE_LYRIC_FETCH_PAGE) + 2;
     int offset = 0;
     int loaded = 0;
     int total = 0;

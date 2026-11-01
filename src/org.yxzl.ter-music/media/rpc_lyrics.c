@@ -137,6 +137,17 @@ static void lyrics_api_prepare(char *out, size_t out_size, uint64_t revision) {
     }
     pthread_mutex_unlock(&g_lyrics.lock);
 
+    /* 逐字进度（api_version 5）：活动行当前唱到第几个字。取锁外计算，
+     * 使用与 TUI 相同的引擎口径；旧客户端忽略这两个字段即可。 */
+    int active_line = (g_lyrics_api.active_slot == 0) ? line_a
+                     : (g_lyrics_api.active_slot == 1) ? line_b : -1;
+    int char_sung = 0;
+    int char_total = 0;
+    if (has_lyrics && active_line >= 0) {
+        (void)lyrics_char_progress_at(active_line, lyrics_position_ms(),
+                                      &char_sung, &char_total);
+    }
+
     snprintf(g_lyrics_api.track_id, sizeof(g_lyrics_api.track_id), "%s",
              track_id);
 
@@ -164,6 +175,10 @@ static void lyrics_api_prepare(char *out, size_t out_size, uint64_t revision) {
     pos = json_append_raw(out, out_size, pos, ",\"has_timestamps\":");
     pos = json_append_raw(out, out_size, pos,
                           has_timestamps ? "true" : "false");
+    pos = json_append_raw(out, out_size, pos, ",\"char_sung\":");
+    pos = json_append_int(out, out_size, pos, char_sung);
+    pos = json_append_raw(out, out_size, pos, ",\"char_total\":");
+    pos = json_append_int(out, out_size, pos, char_total);
     pos = json_append_raw(out, out_size, pos, ",\"revision\":");
 
     char revision_text[32];
@@ -183,9 +198,7 @@ static void emit_lyrics_changed(const char *json) {
     }
 
     const char *value = (json && json[0] != '\0') ? json : "{}";
-    dbus_message_append_args(signal,
-                             DBUS_TYPE_STRING, &value,
-                             DBUS_TYPE_INVALID);
+    rpc_append_string(signal, value);
     rpc_send(signal);
 }
 
@@ -201,6 +214,88 @@ const char *rpc_lyrics_sync(void) {
         emit_lyrics_changed(next_json);
     }
     return g_lyrics_api.last_json;
+}
+
+/* GetDocument 的 timing 字符串（api_version 5） */
+static const char *lyric_timing_id(unsigned char timing)
+{
+    switch (timing) {
+        case LYRIC_TIMING_CHARS: return "chars";
+        case LYRIC_TIMING_LINE:  return "line";
+        default:                 return "none";
+    }
+}
+
+/* 追加一行逐字文档。调用方必须持有 g_lyrics.lock。
+ *
+ * 行对象：
+ *   {"index":n,"timestamp":t|null,"end":t|null,"timing":"chars|line|none",
+ *    "char_total":n,"text":"…"[,"chars":[相对行首毫秒…]]}
+ * 只有 timing="chars" 才附 chars；timing="line" 的客户端可用
+ * timestamp/end 自行按字符数插值。 */
+static size_t append_document_line(char *out, size_t out_size, size_t pos,
+                                   int index)
+{
+    const LyricLine *line = &g_lyrics.lines[index];
+
+    pos = json_append_char(out, out_size, pos, '{');
+
+    pos = json_append_key(out, out_size, pos, "index");
+    pos = json_append_int(out, out_size, pos, index);
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "timestamp");
+    if (line->has_timestamp) {
+        pos = json_append_double(out, out_size, pos, line->timestamp, 3);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "end");
+    if (line->has_timestamp && line->end_timestamp > line->timestamp) {
+        pos = json_append_double(out, out_size, pos, line->end_timestamp, 3);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "timing");
+    pos = json_append_escaped(out, out_size, pos, lyric_timing_id(line->timing));
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "char_total");
+    pos = json_append_int(out, out_size, pos, line->char_count);
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "text");
+    pos = json_append_string_or_null(out, out_size, pos, line->text);
+
+    if (line->timing == LYRIC_TIMING_CHARS && line->char_count > 0 &&
+        g_lyrics.char_times_ms) {
+        int offset = g_lyrics.line_char_offset[index];
+        int count = line->char_count;
+        if (offset >= 0 && offset + count <= g_lyrics.char_times_count) {
+            int64_t start_ms = (int64_t)(line->timestamp * 1000.0 + 0.5);
+            pos = json_append_raw(out, out_size, pos, ",");
+            pos = json_append_key(out, out_size, pos, "chars");
+            pos = json_append_char(out, out_size, pos, '[');
+            for (int j = 0; j < count; j++) {
+                if (j > 0) {
+                    pos = json_append_char(out, out_size, pos, ',');
+                }
+                int64_t relative = (int64_t)g_lyrics.char_times_ms[offset + j]
+                                   - start_ms;
+                if (relative < 0) {
+                    relative = 0;
+                }
+                pos = json_append_int(out, out_size, pos, relative);
+            }
+            pos = json_append_char(out, out_size, pos, ']');
+        }
+    }
+
+    return json_append_char(out, out_size, pos, '}');
 }
 
 DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
@@ -222,9 +317,7 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
         }
 
         const char *value = (json && json[0] != '\0') ? json : "{}";
-        dbus_message_append_args(reply,
-                                 DBUS_TYPE_STRING, &value,
-                                 DBUS_TYPE_INVALID);
+        rpc_append_string(reply, value);
         return reply;
     }
 
@@ -258,12 +351,14 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
             info_build_track_id(track_id, sizeof(track_id), current_path);
         }
 
-        /* 单页最多 1000 行 × 每行 ~512 字节，堆分配（避免大栈帧） */
-        size_t capacity = RPC_PAYLOAD_MAX / 2;
+        /* 逐字文档（chars 数组）会显著增大单页体积：按硬上限分配，
+         * 渲染结束后用 json_writer_overflowed() 判定，绝不再返回半截 JSON。 */
+        size_t capacity = RPC_PAYLOAD_MAX;
         char *json = malloc(capacity);
         if (!json) {
             return rpc_error(message, DBUS_ERROR_NO_MEMORY, "Out of memory");
         }
+        json[0] = '\0';
 
         int total = 0;
         int has_lyrics = 0;
@@ -316,19 +411,18 @@ DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
             if (written > 0) {
                 pos = json_append_char(json, capacity, pos, ',');
             }
-            pos = json_append_line_object(json, capacity, pos, i, has_timestamps,
-                                          g_lyrics.lines[i].timestamp,
-                                          g_lyrics.lines[i].text);
+            pos = append_document_line(json, capacity, pos, i);
             written++;
         }
 
         pos = json_append_char(json, capacity, pos, ']');
         pos = json_append_char(json, capacity, pos, '}');
-        json[pos] = '\0';
+        json[pos < capacity ? pos : capacity - 1] = '\0';
+        int overflowed = json_writer_overflowed(capacity, pos);
         pthread_mutex_unlock(&g_lyrics.lock);
 
         DBusMessage *reply;
-        if (pos + 1 > RPC_PAYLOAD_MAX) {
+        if (overflowed) {
             reply = rpc_error(message, RPC_ERROR_TOO_LARGE,
                               "lyrics page exceeds the payload limit; request fewer lines");
         } else {

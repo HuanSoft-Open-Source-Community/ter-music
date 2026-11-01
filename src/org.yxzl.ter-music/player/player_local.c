@@ -120,6 +120,8 @@ static int lyrics_changed(const InfoLyrics *lhs, const InfoLyrics *rhs)
            lhs->source != rhs->source ||
            lhs->current_index != rhs->current_index ||
            lhs->next_index != rhs->next_index ||
+           lhs->current_char_sung != rhs->current_char_sung ||
+           lhs->current_char_total != rhs->current_char_total ||
            strcmp(lhs->current_text, rhs->current_text) != 0 ||
            strcmp(lhs->next_text, rhs->next_text) != 0;
 }
@@ -134,11 +136,15 @@ static void refresh_snapshot(void)
     info_playback_snapshot(&playback);
     info_lyrics_snapshot(&lyrics);
 
-    if (track_changed(&g_local.track, &track)) {
+    int track_identity_changed = track_changed(&g_local.track, &track);
+    int track_format_changed = info_track_format_changed(&g_local.track, &track);
+    if (track_identity_changed || track_format_changed) {
+        if (track_identity_changed) {
+            /* 曲目变化时封面缓存失效；格式晚到不应重载封面/歌词。 */
+            g_local.cover_valid = 0;
+        }
         g_local.track = track;
         g_local.state_revision++;
-        /* 曲目变化时封面缓存失效 */
-        g_local.cover_valid = 0;
     }
     if (playback_changed(&g_local.playback, &playback)) {
         g_local.playback = playback;

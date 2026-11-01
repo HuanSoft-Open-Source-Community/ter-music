@@ -108,6 +108,12 @@ typedef struct {
     char title[MAX_META_LEN];
     char artist[MAX_META_LEN];
     char album[MAX_META_LEN];
+    /* 当前曲目的音频格式；解码器尚未给出时为 0/空。远端前端由
+     * Info.GetInfo 的 track.format 填充，本地由 info_track_snapshot 填充。 */
+    int sample_rate;               /* Hz */
+    int bit_depth;                 /* bit */
+    int bit_rate;                  /* bps */
+    char codec[32];
     int has_cover;
     char cover_path[MAX_PATH_LEN];
 } InfoTrack;
@@ -130,6 +136,8 @@ typedef struct {
     int next_index;                /* -1 = 无下一行 */
     double current_timestamp;
     double next_timestamp;
+    int current_char_sung;         /* 当前行已唱字数（0 = 无逐字信息） */
+    int current_char_total;        /* 当前行总字数（0 = 无逐字信息） */
     char current_text[MAX_LYRIC_TEXT_LEN];
     char next_text[MAX_LYRIC_TEXT_LEN];
 } InfoLyrics;
@@ -191,10 +199,22 @@ void info_build_file_uri(const char *path, char *uri, size_t uri_size);
 int  info_uri_to_path(const char *uri, char *path, size_t path_size);
 
 /* ── 音频技术信息（TUI 信息栏与 CLI 信息块共用） ────────────────── */
+/* 从核心当前音频全局量格式化（CLI/核心内部用）。 */
 void info_format_audio_fields(char *rate, size_t rate_size,
                               char *depth, size_t depth_size,
                               char *bitrate, size_t bitrate_size,
                               char *codec, size_t codec_size);
+/* 从任意 InfoTrack 快照字段格式化（UI/远端前端用；0/空输出 "--"）。 */
+void info_format_audio_fields_from(int sample_rate,
+                                   int bit_depth,
+                                   int bit_rate,
+                                   const char *codec_name,
+                                   char *rate, size_t rate_size,
+                                   char *depth, size_t depth_size,
+                                   char *bitrate, size_t bitrate_size,
+                                   char *codec, size_t codec_size);
+/* 两个 InfoTrack 的音频格式字段是否不同（用于 revision 判定）。 */
+int info_track_format_changed(const InfoTrack *lhs, const InfoTrack *rhs);
 int  info_format_audio_summary(char *out, size_t out_size);
 
 /* ── 封面文本 ───────────────────────────────────────────────────── */

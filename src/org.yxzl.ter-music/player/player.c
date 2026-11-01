@@ -413,6 +413,21 @@ int player_lyrics_total(void)
 {
     return use_remote() ? player_remote_lyrics_total() : player_local_lyrics_total();
 }
+int player_lyrics_char_progress(int *out_sung, int *out_total)
+{
+    if (out_sung) *out_sung = 0;
+    if (out_total) *out_total = 0;
+
+    /* 本地/远端后端都把逐字进度放在同一份 InfoLyrics 快照里，
+     * 这里直接复用快照，不再为两个后端各加一套转发函数。 */
+    const InfoLyrics *lyrics = player_lyrics();
+    if (!lyrics || !lyrics->has_lyrics || lyrics->current_char_total <= 0) {
+        return 0;
+    }
+    if (out_sung) *out_sung = lyrics->current_char_sung;
+    if (out_total) *out_total = lyrics->current_char_total;
+    return 1;
+}
 int player_lyrics_line_at(int index, LyricLine *out)
 {
     return use_remote() ? player_remote_lyrics_line_at(index, out)

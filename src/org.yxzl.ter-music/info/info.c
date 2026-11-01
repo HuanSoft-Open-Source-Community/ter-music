@@ -17,11 +17,11 @@
 #include "util/utf8.h"
 #include "util/json.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 #include <unistd.h>
 
 #define INFO_MAX_LINES 24
@@ -604,6 +604,10 @@ void info_track_snapshot(InfoTrack *out)
     snprintf(out->title, sizeof(out->title), "%s", entry.title);
     snprintf(out->artist, sizeof(out->artist), "%s", entry.artist);
     snprintf(out->album, sizeof(out->album), "%s", entry.album);
+    out->sample_rate = g_audio_sample_rate > 0 ? g_audio_sample_rate : 0;
+    out->bit_depth = g_audio_bit_depth > 0 ? g_audio_bit_depth : 0;
+    out->bit_rate = g_audio_bit_rate > 0 ? g_audio_bit_rate : 0;
+    snprintf(out->codec, sizeof(out->codec), "%s", g_audio_codec_name);
 
     info_build_file_uri(entry.path, out->uri, sizeof(out->uri));
 
@@ -645,46 +649,24 @@ void info_lyrics_snapshot(InfoLyrics *out)
     out->current_index = -1;
     out->next_index = -1;
 
-    pthread_mutex_lock(&g_lyrics.lock);
+    /* 歌词引擎负责“按播放位置定位当前行 + 逐字进度”，这里只做字段映射。
+     * 这样 Info、D-Bus 与 TUI 看到的是同一份定位结果，不再各自按秒循环。 */
+    LyricsSnapshot snapshot;
+    lyrics_snapshot(&snapshot);
 
-    out->has_lyrics = g_lyrics.has_lyrics;
-    out->has_timestamps = g_lyrics.has_timestamps;
-    out->source = g_lyrics.source;
-
-    int count = g_lyrics.count;
-    if (out->has_lyrics && count > 0) {
-        if (!out->has_timestamps) {
-            /* 无时间戳的纯文本歌词：固定取前两行 */
-            out->current_index = 0;
-            out->next_index = (count > 1) ? 1 : -1;
-        } else {
-            /* 直接按播放位置定位，避免依赖仅由 TUI 主视图推进的 current_index */
-            double position = (double)audio_get_position_seconds();
-            for (int i = 0; i < count; i++) {
-                if (g_lyrics.lines[i].timestamp <= position) {
-                    out->current_index = i;
-                } else {
-                    break;
-                }
-            }
-            if (out->current_index >= 0 && out->current_index + 1 < count) {
-                out->next_index = out->current_index + 1;
-            }
-        }
-
-        if (out->current_index >= 0 && out->current_index < count) {
-            out->current_timestamp = g_lyrics.lines[out->current_index].timestamp;
-            snprintf(out->current_text, sizeof(out->current_text), "%s",
-                     g_lyrics.lines[out->current_index].text);
-        }
-        if (out->next_index >= 0 && out->next_index < count) {
-            out->next_timestamp = g_lyrics.lines[out->next_index].timestamp;
-            snprintf(out->next_text, sizeof(out->next_text), "%s",
-                     g_lyrics.lines[out->next_index].text);
-        }
-    }
-
-    pthread_mutex_unlock(&g_lyrics.lock);
+    out->has_lyrics = snapshot.has_lyrics;
+    out->has_timestamps = snapshot.has_timestamps;
+    out->source = snapshot.source;
+    out->current_index = snapshot.current_index;
+    out->next_index = snapshot.next_index;
+    out->current_timestamp = snapshot.current_timestamp;
+    out->next_timestamp = snapshot.next_timestamp;
+    out->current_char_sung = snapshot.current_char_sung;
+    out->current_char_total = snapshot.current_char_total;
+    snprintf(out->current_text, sizeof(out->current_text), "%s",
+             snapshot.current_text);
+    snprintf(out->next_text, sizeof(out->next_text), "%s",
+             snapshot.next_text);
 }
 
 /* ── 音频技术信息 ───────────────────────────────────────────────── */
@@ -694,42 +676,14 @@ void info_format_audio_fields(char *rate, size_t rate_size,
                               char *bitrate, size_t bitrate_size,
                               char *codec, size_t codec_size)
 {
-    if (rate && rate_size) {
-        if (g_audio_sample_rate > 0) {
-            snprintf(rate, rate_size, "%dHz", g_audio_sample_rate);
-        } else {
-            snprintf(rate, rate_size, "--");
-        }
-    }
-    if (depth && depth_size) {
-        if (g_audio_bit_depth > 0) {
-            snprintf(depth, depth_size, "%dbit", g_audio_bit_depth);
-        } else {
-            snprintf(depth, depth_size, "--");
-        }
-    }
-    if (bitrate && bitrate_size) {
-        if (g_audio_bit_rate > 0) {
-            snprintf(bitrate, bitrate_size, "%dkbps", g_audio_bit_rate / 1000);
-        } else {
-            snprintf(bitrate, bitrate_size, "--");
-        }
-    }
-    if (codec && codec_size) {
-        if (g_audio_codec_name[0] != '\0') {
-            char upper[32];
-            int i;
-            for (i = 0; g_audio_codec_name[i] && i < (int)sizeof(upper) - 1; i++) {
-                upper[i] = (i == 0)
-                    ? (char)toupper((unsigned char)g_audio_codec_name[i])
-                    : g_audio_codec_name[i];
-            }
-            upper[i] = '\0';
-            snprintf(codec, codec_size, "%s", upper);
-        } else {
-            snprintf(codec, codec_size, "--");
-        }
-    }
+    info_format_audio_fields_from(g_audio_sample_rate,
+                                  g_audio_bit_depth,
+                                  g_audio_bit_rate,
+                                  g_audio_codec_name,
+                                  rate, rate_size,
+                                  depth, depth_size,
+                                  bitrate, bitrate_size,
+                                  codec, codec_size);
 }
 
 int info_format_audio_summary(char *out, size_t out_size)
@@ -1449,35 +1403,42 @@ static size_t info_append_track_object(char *out, size_t out_size, size_t pos,
     pos = json_append_key(out, out_size, pos, "cue_track_number");
     pos = json_append_int(out, out_size, pos, t->cue_track_number);
 
-    /* format */
+    /* format：统一使用 InfoTrack 快照字段，避免 Core JSON 与前端快照
+     * 从两个不同来源取格式信息。 */
     char rate[32], depth[32], bitrate[32], codec[32];
-    info_format_audio_fields(rate, sizeof(rate), depth, sizeof(depth),
-                             bitrate, sizeof(bitrate), codec, sizeof(codec));
+    info_format_audio_fields_from(t->sample_rate,
+                                  t->bit_depth,
+                                  t->bit_rate,
+                                  t->codec,
+                                  rate, sizeof(rate),
+                                  depth, sizeof(depth),
+                                  bitrate, sizeof(bitrate),
+                                  codec, sizeof(codec));
 
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "format");
     pos = json_append_char(out, out_size, pos, '{');
     pos = json_append_key(out, out_size, pos, "codec");
     pos = json_append_string_or_null(out, out_size, pos,
-                                     g_audio_codec_name[0] ? g_audio_codec_name : NULL);
+                                     t->codec[0] ? t->codec : NULL);
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "sample_rate");
-    if (g_audio_sample_rate > 0) {
-        pos = json_append_int(out, out_size, pos, g_audio_sample_rate);
+    if (t->sample_rate > 0) {
+        pos = json_append_int(out, out_size, pos, t->sample_rate);
     } else {
         pos = json_append_raw(out, out_size, pos, "null");
     }
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "bit_depth");
-    if (g_audio_bit_depth > 0) {
-        pos = json_append_int(out, out_size, pos, g_audio_bit_depth);
+    if (t->bit_depth > 0) {
+        pos = json_append_int(out, out_size, pos, t->bit_depth);
     } else {
         pos = json_append_raw(out, out_size, pos, "null");
     }
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "bit_rate");
-    if (g_audio_bit_rate > 0) {
-        pos = json_append_int(out, out_size, pos, g_audio_bit_rate);
+    if (t->bit_rate > 0) {
+        pos = json_append_int(out, out_size, pos, t->bit_rate);
     } else {
         pos = json_append_raw(out, out_size, pos, "null");
     }
@@ -1615,6 +1576,16 @@ static size_t info_append_lyrics_object(char *out, size_t out_size, size_t pos,
     pos = json_append_key(out, out_size, pos, "source");
     pos = json_append_escaped(out, out_size, pos,
                               ly->has_lyrics ? info_lyrics_source_id(ly->source) : "none");
+
+    /* 当前行逐字进度：0/0 表示没有逐字信息（纯文本 / v4 核心 / 无时间戳），
+     * 客户端据此降级为整行高亮。 */
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "char_sung");
+    pos = json_append_int(out, out_size, pos, ly->current_char_sung);
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "char_total");
+    pos = json_append_int(out, out_size, pos, ly->current_char_total);
 
     pos = json_append_raw(out, out_size, pos, ",");
     pos = json_append_key(out, out_size, pos, "current");

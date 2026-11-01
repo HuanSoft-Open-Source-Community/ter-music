@@ -46,8 +46,15 @@
  *     任务整体撤下，Control.OpenPath/PlayIndex 与 Queue.Rebuild（含自省段）
  *     一并撤下，队列内容只能经 Queue.Set/Append/InsertAfter 下发；单发条目数
  *     上限 BQ_SET_MAX，超出回 Error.InvalidArgs（前端须分块：先 Set 后 Append）。
- * 前端在接入时校验 core.api_version >= 4，不兼容则提示“核心过旧”并退出。 */
-#define TER_MUSIC_API_VERSION 4
+ * 5 = 歌词逐字时间：Lyrics.GetDocument 的行增加 end/timing/char_total/chars，
+ *     Lyrics.GetLyrics 与 Info 的 lyrics 对象增加 char_sung/char_total；
+ *     新增字段是**向后兼容**的：v4 客户端忽略它们即可，新前端接 v4 核心时
+ *     缺字段默认 0，逐字高亮自动降级为整行。
+ *
+ * 前端/CLI 接入时校验 core.api_version >= TER_MUSIC_API_MIN_VERSION，
+ * 不兼容则提示“核心过旧”并退出。 */
+#define TER_MUSIC_API_VERSION 5
+#define TER_MUSIC_API_MIN_VERSION 4
 
 /* 单响应硬上限（256 KB）：任何 JSON 回复超过它都返回 Error.TooLarge */
 #define RPC_PAYLOAD_MAX 262144

@@ -42,6 +42,19 @@ static int test_position_source(void)
     return g_test_position;
 }
 
+static int64_t g_test_position_ms = 0;
+
+static int64_t test_position_ms_source(void)
+{
+    return g_test_position_ms;
+}
+
+static int near_seconds(double lhs, double rhs)
+{
+    double diff = lhs - rhs;
+    return diff < 0.001 && diff > -0.001;
+}
+
 static void write_file(const char *name, const void *data, size_t size)
 {
     char path[512];
@@ -295,6 +308,189 @@ static void test_tick_and_highlight(void)
     CHECK(g_lyrics.highlight_count == 1, "a distinct timestamp highlights one line");
 }
 
+static void test_per_char_timings(void)
+{
+    /* 逐字/逐段标签：正文后的每个标签开启下一段；最后一个标签是行结束 */
+    static const char *k_lrc =
+        "[00:01.00]梦[00:01.50]回[00:02.00]还[00:03.00]\n";
+    write_lrc("karaoke", k_lrc, strlen(k_lrc));
+
+    char audio[512];
+    path_of("karaoke.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+
+    CHECK(g_lyrics.count == 1, "per-char fixture loaded");
+    CHECK(g_lyrics.lines[0].timing == LYRIC_TIMING_CHARS, "per-char line marked CHARS");
+    CHECK(g_lyrics.lines[0].char_count == 3, "per-char char_count=3");
+    CHECK(near_seconds(g_lyrics.lines[0].end_timestamp, 3.0), "per-char end=3.0");
+
+    lyrics_set_position_ms_source(test_position_ms_source);
+    int sung = 0;
+    int total = 0;
+
+    CHECK(lyrics_char_progress_at(0, 1000, &sung, &total) == 1, "per-char progress available");
+    CHECK(total == 3 && sung == 1, "at 1000ms one char sung");
+    (void)lyrics_char_progress_at(0, 1499, &sung, &total);
+    CHECK(sung == 1, "before the second tag still one char");
+    (void)lyrics_char_progress_at(0, 1500, &sung, &total);
+    CHECK(sung == 2, "at the second tag two chars");
+    (void)lyrics_char_progress_at(0, 2000, &sung, &total);
+    CHECK(sung == 3, "at the third tag all chars");
+    (void)lyrics_char_progress_at(0, 2999, &sung, &total);
+    CHECK(sung == 3, "after the last char stays complete");
+
+    g_test_position_ms = 1500;
+    CHECK(lyrics_tick() == 1, "tick reports per-char progress change");
+    CHECK(g_lyrics.current_char_sung == 2 && g_lyrics.current_char_total == 3,
+          "tick stores per-char progress");
+
+    LyricsSnapshot snapshot;
+    lyrics_snapshot(&snapshot);
+    CHECK(snapshot.current_index == 0 && snapshot.current_char_sung == 2 &&
+          snapshot.current_char_total == 3,
+          "snapshot carries per-char progress");
+
+    lyrics_set_position_ms_source(NULL);
+}
+
+static void test_line_timings_and_old_style(void)
+{
+    /* 行首 + 行尾标签：整行按区间均分 */
+    static const char *k_line =
+        "[00:01.00]abcd[00:03.00]\n";
+    write_lrc("lineend", k_line, strlen(k_line));
+
+    char audio[512];
+    path_of("lineend.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+
+    CHECK(g_lyrics.count == 1, "line-end fixture loaded");
+    CHECK(g_lyrics.lines[0].timing == LYRIC_TIMING_LINE, "line-end marked LINE");
+    CHECK(g_lyrics.lines[0].char_count == 4, "line-end char_count=4");
+    CHECK(near_seconds(g_lyrics.lines[0].end_timestamp, 3.0), "line-end end=3.0");
+
+    lyrics_set_position_ms_source(test_position_ms_source);
+    int sung = 0;
+    int total = 0;
+    (void)lyrics_char_progress_at(0, 1500, &sung, &total);
+    CHECK(total == 4 && sung == 1, "line interpolation at 1500ms = 1 char");
+    (void)lyrics_char_progress_at(0, 2000, &sung, &total);
+    CHECK(sung == 2, "line interpolation at 2000ms = 2 chars");
+    (void)lyrics_char_progress_at(0, 2999, &sung, &total);
+    CHECK(sung == 3, "line interpolation near the end = 3 chars");
+    (void)lyrics_char_progress_at(0, 3000, &sung, &total);
+    CHECK(sung == 4, "line interpolation at end = all chars");
+
+    /* 旧式：只有行首。第 0 行终点 = 第 1 行起点；最后一行沿用前一段时长 */
+    static const char *k_old =
+        "[00:01.00]ab\n"
+        "[00:03.00]cd\n";
+    write_lrc("oldstyle", k_old, strlen(k_old));
+    path_of("oldstyle.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+
+    CHECK(g_lyrics.count == 2, "old-style fixture loaded");
+    CHECK(g_lyrics.lines[0].timing == LYRIC_TIMING_LINE, "old-style first line marked LINE");
+    CHECK(near_seconds(g_lyrics.lines[0].end_timestamp, 3.0),
+          "old-style first line end = next line start");
+    CHECK(near_seconds(g_lyrics.lines[1].end_timestamp, 5.0),
+          "last line reuses the previous duration");
+
+    (void)lyrics_char_progress_at(0, 2000, &sung, &total);
+    CHECK(sung == 1, "old-style first line halfway = 1/2 chars");
+    (void)lyrics_char_progress_at(1, 4000, &sung, &total);
+    CHECK(sung == 1, "old-style last line halfway = 1/2 chars");
+
+    /* 单行且无法推导行时长：timing=NONE，逐字进度必须报告 0/0（界面走整行高亮） */
+    static const char *k_single = "[00:01.00]abc\n";
+    write_lrc("single", k_single, strlen(k_single));
+    path_of("single.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+    CHECK(g_lyrics.count == 1, "single-line fixture loaded");
+    CHECK(g_lyrics.lines[0].timing == LYRIC_TIMING_NONE,
+          "single line without a derivable end is timing NONE");
+    sung = 99;
+    total = 99;
+    CHECK(lyrics_char_progress_at(0, 2000, &sung, &total) == 0,
+          "timing NONE reports no per-char progress");
+    CHECK(sung == 0 && total == 0, "timing NONE zeroes sung/total");
+
+    lyrics_set_position_ms_source(NULL);
+}
+
+static void test_consecutive_tags_and_entities(void)
+{
+    /* 连续标签：前一个是上一段结束，后一个才是下一段文本起点 */
+    static const char *k_lrc =
+        "[00:01.00]a[00:02.00][00:03.00]b[00:04.00]\n";
+    write_lrc("tags", k_lrc, strlen(k_lrc));
+
+    char audio[512];
+    path_of("tags.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+
+    CHECK(g_lyrics.count == 1, "consecutive-tag fixture loaded");
+    CHECK(g_lyrics.lines[0].timing == LYRIC_TIMING_CHARS,
+          "consecutive tags keep per-char timing");
+    CHECK(g_lyrics.lines[0].char_count == 2, "consecutive tags text has 2 chars");
+
+    lyrics_set_position_ms_source(test_position_ms_source);
+    int sung = 0;
+    int total = 0;
+    (void)lyrics_char_progress_at(0, 2500, &sung, &total);
+    CHECK(sung == 1, "consecutive tags: first char only before the second start");
+    (void)lyrics_char_progress_at(0, 3000, &sung, &total);
+    CHECK(sung == 2, "consecutive tags: second char starts at the later tag");
+
+    /* HTML 实体在逐字映射前解码，字符数与时间段保持一致 */
+    static const char *k_entity =
+        "[00:01.00]&amp;\xe4\xbd\xa0[00:02.00]\n";
+    write_lrc("entity", k_entity, strlen(k_entity));
+    path_of("entity.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+    CHECK(g_lyrics.count == 1, "entity fixture loaded");
+    CHECK(strcmp(g_lyrics.lines[0].text, "&你") == 0, "entity decoded");
+    CHECK(g_lyrics.lines[0].char_count == 2, "decoded entity counts as one char");
+
+    lyrics_set_position_ms_source(NULL);
+}
+
+static void test_timestamp_precision_and_utf8_truncation(void)
+{
+    static const char *k_lrc =
+        "[00:01.500]x[00:02.250]\n";
+    write_lrc("fraction", k_lrc, strlen(k_lrc));
+
+    char audio[512];
+    path_of("fraction.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+
+    CHECK(g_lyrics.count == 1, "fraction fixture loaded");
+    CHECK(near_seconds(g_lyrics.lines[0].timestamp, 1.5),
+          "three-digit fraction parsed as 1.5s");
+    CHECK(near_seconds(g_lyrics.lines[0].end_timestamp, 2.25),
+          "three-digit end fraction parsed as 2.25s");
+
+    /* 超长多字节文本按完整 UTF-8 字符截断（255 字节 = 85 个汉字） */
+    char long_lrc[640];
+    size_t used = (size_t)snprintf(long_lrc, sizeof(long_lrc), "[00:01.00]");
+    for (int i = 0; i < 100 && used + 3 < sizeof(long_lrc); i++) {
+        memcpy(long_lrc + used, "\xe4\xbd\xa0", 3);  /* 你 */
+        used += 3;
+    }
+    long_lrc[used++] = '\n';
+    long_lrc[used] = '\0';
+    write_lrc("longline", long_lrc, used);
+
+    path_of("longline.mp3", audio, sizeof(audio));
+    load_lyrics(audio, LYRICS_SOURCE_EXTERNAL);
+    CHECK(g_lyrics.count == 1, "long line fixture loaded");
+    CHECK(g_lyrics.lines[0].char_count == 85,
+          "long line truncated to 85 whole UTF-8 chars");
+    CHECK(strlen(g_lyrics.lines[0].text) == 255,
+          "long line text is exactly 255 bytes");
+}
+
 static void test_page_and_clear(void)
 {
     static const char *lrc =
@@ -352,6 +548,10 @@ int main(void)
     test_plain_text_embedded();
     test_utf16_sniffing();
     test_tick_and_highlight();
+    test_per_char_timings();
+    test_line_timings_and_old_style();
+    test_consecutive_tags_and_entities();
+    test_timestamp_precision_and_utf8_truncation();
     test_page_and_clear();
     test_source_switch_without_track();
 

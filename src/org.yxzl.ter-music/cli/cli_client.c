@@ -822,8 +822,8 @@ int cli_client_check_api(const char *bus) {
         snprintf(g_api_checked_bus, sizeof(g_api_checked_bus), "%s", name);
         return rc;
     }
-    if (api < TER_MUSIC_API_VERSION) {
-        cli_client_err("cli.err.core_too_old_fmt", TER_MUSIC_API_VERSION, api);
+    if (api < TER_MUSIC_API_MIN_VERSION) {
+        cli_client_err("cli.err.core_too_old_fmt", TER_MUSIC_API_MIN_VERSION, api);
         fprintf(stderr, "%s\n", i18n_get("cli.err.core_too_old_hint"));
         g_api_checked_rc = CLI_EXIT_REFUSED;
         snprintf(g_api_checked_bus, sizeof(g_api_checked_bus), "%s", name);

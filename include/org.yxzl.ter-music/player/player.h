@@ -229,6 +229,10 @@ int player_lyrics_source(void);
 int player_lyrics_total(void);               /* 歌词总行数 */
 int player_lyrics_line_at(int index, LyricLine *out);   /* 取某一行（-1 = 越界） */
 
+/* 当前行逐字进度（卡拉OK 高亮）。
+ * @return 1 = 当前行有逐字信息；0 = 无（纯文本歌词 / 旧核心 / 无当前行） */
+int player_lyrics_char_progress(int *out_sung, int *out_total);
+
 /* 取当前曲目的字符封面（按尺寸与字符集缓存）；返回是否有内容。
  * 远程后端首次调用会触发异步获取，未就绪时返回 0。 */
 int player_cover_rows(int cols, int rows, int charset, char *out, size_t out_size);
