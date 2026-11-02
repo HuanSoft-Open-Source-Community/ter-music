@@ -25,7 +25,7 @@ static int edge(int origin, int units, int extent)
     return origin + (int)(scaled / LAYOUT_AREA_UNITS);
 }
 
-void layout_geometry_compute(const LayoutSpec *resolved, int rows, int cols,
+void layout_geometry_compute(const LayoutResolved *resolved, int rows, int cols,
                              LayoutGeometry *out)
 {
     if (!out) {
@@ -47,12 +47,9 @@ void layout_geometry_compute(const LayoutSpec *resolved, int rows, int cols,
     out->pane_count = LAYOUT_PANE_COUNT;
 
     for (int i = 0; i < resolved->pane_count && i < LAYOUT_MAX_PANES; i++) {
-        const LayoutPaneSpec *pane = &resolved->panes[i];
+        const LayoutResolvedPane *pane = &resolved->panes[i];
         LayoutPaneRect *rect = &out->panes[pane->kind];
-        rect->visible = pane->visible ? 1 : 0;
-        if (!rect->visible) {
-            continue;
-        }
+        rect->visible = 1;
 
         int sx = edge(area_x, pane->x, area_w);
         int ex = edge(area_x, pane->x + pane->w, area_w);

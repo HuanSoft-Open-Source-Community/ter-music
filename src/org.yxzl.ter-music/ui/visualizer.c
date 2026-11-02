@@ -67,8 +67,11 @@ static void render_album_cover(void)
     int h, w;
     getmaxyx(win_controls, h, w);
 
-    int viz_top    = get_controls_visualizer_top(h);
-    int viz_bottom = get_controls_visualizer_bottom(h);
+    ControlsLayout layout;
+    controls_compute_layout(h, w, &layout);
+    int viz_top = layout.visualizer_top;
+    int viz_bottom = layout.visualizer_bottom;
+    if (viz_top < 0 || viz_bottom < viz_top) return;
     int viz_height = viz_bottom - viz_top + 1;
 
     if (viz_height < BRAILLE_MIN_SIZE * BRAILLE_CELL_H) return;
@@ -115,12 +118,14 @@ static void clear_visualizer_area(void)
     int h, w;
     getmaxyx(win_controls, h, w);
 
-    int button_row = get_controls_button_row(h);
-    int viz_top    = get_controls_visualizer_top(h);
-    int viz_bottom = get_controls_visualizer_bottom(h);
+    ControlsLayout layout;
+    controls_compute_layout(h, w, &layout);
+    int viz_top = layout.visualizer_top;
+    int viz_bottom = layout.visualizer_bottom;
+    if (viz_top < 0 || viz_bottom < viz_top) return;
 
     int separator_row = viz_top - 1;
-    if (separator_row > button_row && separator_row < h - 1) {
+    if (separator_row > 0 && separator_row < h - 1) {
         for (int x = 1; x < w - 1; x++)
             mvwaddstr(win_controls, separator_row, x, "\xe2\x94\x80"); /* ─ */
         mvwaddstr(win_controls, separator_row, 0, "\xe2\x94\x82");     /* │ */
@@ -144,8 +149,11 @@ static void render_wave_particle_visualizer(int start_col, int graph_width)
     getmaxyx(win_controls, h, w);
     if (h < 7 || w < 24) return;
 
-    int viz_top    = get_controls_visualizer_top(h);
-    int viz_bottom = get_controls_visualizer_bottom(h);
+    ControlsLayout layout;
+    controls_compute_layout(h, w, &layout);
+    int viz_top = layout.visualizer_top;
+    int viz_bottom = layout.visualizer_bottom;
+    if (viz_top < 0 || viz_bottom < viz_top) return;
     int viz_height = viz_bottom - viz_top + 1;
     if (viz_height < 2) return;
 

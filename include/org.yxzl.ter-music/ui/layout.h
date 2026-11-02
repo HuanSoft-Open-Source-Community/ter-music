@@ -2,7 +2,7 @@
  * @file layout.h
  * @brief TUI 主界面运行时布局管理
  *
- * 负责加载布局目录、读取/保存前端本地选中状态、把布局解析为窗口矩形、
+ * 负责加载布局目录、读取/保存前端本地选中状态、展开强制平铺分栏树、
  * 建窗、按窗格分配颜色，并提供统一的窗格边框/标题/背景绘制入口。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
@@ -28,6 +28,13 @@ int ui_layout_init(void);
  */
 int ui_layout_reload(void);
 
+/**
+ * @brief 最近一次 init/reload 中自动适配（旧几何被改为强制平铺）的布局数。
+ *
+ * 用于设置页重载提示；解析层不再因几何问题拒绝布局。
+ */
+int ui_layout_last_adjusted(void);
+
 int ui_layout_count(void);
 const char *ui_layout_id_at(int index);
 const char *ui_layout_name_at(int index);
@@ -46,6 +53,9 @@ int ui_layout_current_spec(LayoutSpec *out);
  * @return 0 成功；-1 未找到或状态写失败（内存中仍已应用）。
  */
 int ui_layout_select(const char *id);
+
+/** @brief 窗格的本地化显示名（布局编辑器与窗格标题共用）。 */
+const char *ui_layout_pane_title(LayoutPaneKind kind);
 
 /* ============================================================
  * 用户布局文件（~/.config/ter-music/layouts.json，供布局编辑器）

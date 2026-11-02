@@ -2,10 +2,12 @@
  * @file layout_editor.c
  * @brief TUI 布局编辑器实现
  *
- * 全屏编辑一份布局的工作副本：窗格可见性/几何（千分比）/逐面板颜色，
- * 右侧实时缩放预览与严格平铺校验状态。保存经 layout_user_save_layout()
- * 写入用户布局文件并热重载目录；Esc 丢弃工作副本。
- * 编辑器激活期间由 settings.c 的输入分发拦截全部按键（见 handle_settings_input）。
+ * 编辑器只操作分栏树：分栏、删除、调比例、均分、换类型、交换都通过
+ * layout_spec 的事务式操作完成，因此工作副本始终是强制平铺的。
+ * 右侧实时预览与运行时使用同一套 resolve 结果，保存不再有几何校验门槛。
+ *
+ * 交互：方向键按预览几何选择相邻窗格，Tab 按树序循环；Enter 打开操作
+ * 菜单，? 打开完整帮助，底部常驻上下文化按键提示。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -13,60 +15,131 @@
 #include "ui/layout_editor.h"
 
 #include "i18n/i18n.h"
+#include "logger/logger.h"
 #include "ui/dialog.h"
 #include "ui/layout.h"
 #include "ui/menu_internal.h"
+#include "ui/ui.h"
 
 #include <ncursesw/ncurses.h>
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>     /* getpid()：id 生成兜底 */
+#include <unistd.h>
 
-/* ── 字段与列布局 ────────────────────────────────────────────────
- * 面板清单为定宽单元格：字段列位置同时用于渲染与选中高亮。
- * 颜色单元格用 ASCII 记号（inh=继承主题 / def=终端默认 / 数字=调色板号），
- * 避免在定宽列里做 CJK 宽度换算。
- */
+#define ED_MIN_COLS 60
+#define ED_MIN_ROWS 16
+
 typedef enum {
-    ED_F_VISIBLE = 0,
-    ED_F_X,
-    ED_F_Y,
-    ED_F_W,
-    ED_F_H,
-    ED_F_FG,
-    ED_F_BG,
-    ED_F_BFG,
-    ED_F_BBG,
-    ED_FIELD_COUNT
-} EdField;
+    ED_MODE_MAIN = 0,
+    ED_MODE_ACTIONS,
+    ED_MODE_KINDS,
+    ED_MODE_COLORS,
+    ED_MODE_HELP
+} EdMode;
 
-/* 每个字段在行内的起始列与宽度（含一个空格间隔） */
-static const int k_field_col[ED_FIELD_COUNT] = {
-    13, 17, 23, 29, 35, 41, 47, 53, 59
-};
-static const int k_field_width[ED_FIELD_COUNT] = {
-    3, 5, 5, 5, 5, 5, 5, 5, 5
-};
-#define ED_LIST_WIDTH 65
+typedef enum {
+    ED_PENDING_SPLIT = 0,
+    ED_PENDING_CHANGE
+} EdPending;
 
 typedef struct {
-    LayoutSpec spec;        /* 工作副本 */
-    int active;             /* 编辑器是否打开 */
-    int is_new;             /* 新建模式（id/名已生成） */
-    int dirty;              /* 有未保存更改 */
-    int sel_pane;           /* 选中窗格行 */
-    int sel_field;          /* 选中字段（EdField） */
-    int esc_confirm;        /* Esc 放弃确认标记 */
-    char err[192];          /* 最近一次校验错误（空 = 通过） */
+    LayoutSpec spec;
+    int active;
+    int is_new;
+    int dirty;
+    int sel;                 /* 树序选中的窗格 */
+    int esc_confirm;
+    EdMode mode;
+    int action_sel;
+    EdPending pending;
+    LayoutSplitDir pending_dir;
+    int kind_sel;
+    int color_field;
+    char status[192];
+    int status_error;
 } LayoutEditorState;
 
 static LayoutEditorState g_ed;
 
+static const char *const k_action_keys[] = {
+    "layout.editor.action_split_row",
+    "layout.editor.action_split_col",
+    "layout.editor.action_kind",
+    "layout.editor.action_colors",
+    "layout.editor.action_equalize",
+    "layout.editor.action_swap",
+    "layout.editor.action_remove",
+    "layout.editor.action_rename",
+};
+#define ED_ACTION_COUNT ((int)(sizeof(k_action_keys) / sizeof(k_action_keys[0])))
+
+static const char *const k_help_keys[] = {
+    "layout.editor.help_nav",
+    "layout.editor.help_ratio",
+    "layout.editor.help_split",
+    "layout.editor.help_edit",
+    "layout.editor.help_colors",
+    "layout.editor.help_save",
+};
+#define ED_HELP_COUNT ((int)(sizeof(k_help_keys) / sizeof(k_help_keys[0])))
+
 /* ── 小工具 ────────────────────────────────────────────────────── */
 
-/** 颜色值在 -2(继承) → -1(终端默认) → 0..255 循环里的序号 */
+static void editor_status_text(const char *text, int is_error)
+{
+    snprintf(g_ed.status, sizeof(g_ed.status), "%s", text ? text : "");
+    g_ed.status_error = is_error ? 1 : 0;
+}
+
+static void editor_status_key(const char *key)
+{
+    editor_status_text(i18n_get(key), 0);
+}
+
+static void editor_status_error_key(const char *key)
+{
+    editor_status_text(i18n_get(key), 1);
+}
+
+static int editor_selected_kind(void)
+{
+    return layout_spec_pane_at(&g_ed.spec, g_ed.sel);
+}
+
+static int editor_kind_index(LayoutPaneKind kind)
+{
+    int count = layout_spec_pane_count(&g_ed.spec);
+    for (int i = 0; i < count; i++) {
+        if (layout_spec_pane_at(&g_ed.spec, i) == (int)kind) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int editor_find_parent(int target, int *parent_out, int *slot_out)
+{
+    if (target == g_ed.spec.root) {
+        return 0;
+    }
+    for (int i = 0; i < g_ed.spec.node_count; i++) {
+        const LayoutNode *node = &g_ed.spec.nodes[i];
+        if (node->is_leaf) {
+            continue;
+        }
+        for (int slot = 0; slot < 2; slot++) {
+            if (node->child[slot] == target) {
+                if (parent_out) *parent_out = i;
+                if (slot_out) *slot_out = slot;
+                return 1;
+            }
+        }
+    }
+    return -1;
+}
+
 static int color_cycle_index(int value)
 {
     if (value <= -2) return 0;
@@ -86,139 +159,282 @@ static int color_cycle_value(int index)
 
 static void format_color(char *buf, size_t size, int value)
 {
-    if (value <= -2) snprintf(buf, size, "inh");
-    else if (value == -1) snprintf(buf, size, "def");
-    else snprintf(buf, size, "%d", value);
+    if (value <= -2) {
+        snprintf(buf, size, "%s", i18n_get("layout.editor.color_inherit"));
+    } else if (value == -1) {
+        snprintf(buf, size, "%s", i18n_get("layout.editor.color_terminal"));
+    } else {
+        snprintf(buf, size, "%d", value);
+    }
 }
 
-static void editor_set_status(const char *fmt, ...)
+static int *color_field_ptr(LayoutPaneSpec *pane, int field)
 {
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(g_ed.err, sizeof(g_ed.err), fmt, args);
-    va_end(args);
+    switch (field) {
+        case 0: return &pane->fg;
+        case 1: return &pane->bg;
+        case 2: return &pane->border_fg;
+        case 3: return &pane->border_bg;
+        default: return NULL;
+    }
 }
 
-/** 每次修改后重跑校验；通过时清空错误状态 */
-static void editor_refresh_validation(void)
+static const char *color_field_name(int field)
 {
-    g_ed.err[0] = '\0';
-    layout_spec_validate(&g_ed.spec, g_ed.err, sizeof(g_ed.err));
-    g_ed.dirty = 1;
+    switch (field) {
+        case 0: return "fg";
+        case 1: return "bg";
+        case 2: return "border_fg";
+        case 3: return "border_bg";
+        default: return "";
+    }
 }
 
-/* ── 编辑动作 ──────────────────────────────────────────────────── */
-
-static void editor_adjust_field(int delta)
+static void editor_draw_text(int row, int col, int width, const char *text,
+                             int selected)
 {
-    if (g_ed.sel_pane < 0 || g_ed.sel_pane >= g_ed.spec.pane_count) {
+    if (width <= 0 || row < 0 || col < 0) {
         return;
     }
-    LayoutPaneSpec *pane = &g_ed.spec.panes[g_ed.sel_pane];
-    switch (g_ed.sel_field) {
-        case ED_F_VISIBLE:
-            pane->visible = !pane->visible;
-            break;
-        case ED_F_X:
-        case ED_F_Y:
-        case ED_F_W:
-        case ED_F_H: {
-            int *target = (g_ed.sel_field == ED_F_X) ? &pane->x
-                        : (g_ed.sel_field == ED_F_Y) ? &pane->y
-                        : (g_ed.sel_field == ED_F_W) ? &pane->w
-                        : &pane->h;
-            *target += delta;
-            if (*target < 0) *target = 0;
-            if (*target > LAYOUT_AREA_UNITS) *target = LAYOUT_AREA_UNITS;
-            break;
+    char buffer[256];
+    format_display_text(buffer, sizeof(buffer), text ? text : "", width, 1);
+    if (selected) {
+        attron(A_REVERSE);
+    }
+    mvaddstr(row, col, buffer);
+    if (selected) {
+        attroff(A_REVERSE);
+    }
+}
+
+static void editor_draw_box(int row, int col, int h, int w, const char *title)
+{
+    if (h < 3 || w < 4) {
+        return;
+    }
+    for (int r = 0; r < h; r++) {
+        for (int c = 0; c < w; c++) {
+            mvaddch(row + r, col + c, ' ');
         }
-        case ED_F_FG:
-            pane->fg = color_cycle_value(color_cycle_index(pane->fg) + delta);
-            break;
-        case ED_F_BG:
-            pane->bg = color_cycle_value(color_cycle_index(pane->bg) + delta);
-            break;
-        case ED_F_BFG:
-            pane->border_fg = color_cycle_value(color_cycle_index(pane->border_fg) + delta);
-            break;
-        case ED_F_BBG:
-            pane->border_bg = color_cycle_value(color_cycle_index(pane->border_bg) + delta);
-            break;
-        default:
-            break;
     }
-    editor_refresh_validation();
+    mvaddch(row, col, ACS_ULCORNER);
+    mvaddch(row, col + w - 1, ACS_URCORNER);
+    mvaddch(row + h - 1, col, ACS_LLCORNER);
+    mvaddch(row + h - 1, col + w - 1, ACS_LRCORNER);
+    for (int c = 1; c < w - 1; c++) {
+        mvaddch(row, col + c, ACS_HLINE);
+        mvaddch(row + h - 1, col + c, ACS_HLINE);
+    }
+    for (int r = 1; r < h - 1; r++) {
+        mvaddch(row + r, col, ACS_VLINE);
+        mvaddch(row + r, col + w - 1, ACS_VLINE);
+    }
+    if (title && title[0]) {
+        char buffer[128];
+        format_display_text(buffer, sizeof(buffer), title, w - 4, 0);
+        attron(A_BOLD);
+        mvaddstr(row, col + 2, buffer);
+        attroff(A_BOLD);
+    }
 }
 
-static void editor_reset_pane_colors(void)
-{
-    if (g_ed.sel_pane < 0 || g_ed.sel_pane >= g_ed.spec.pane_count) {
-        return;
-    }
-    LayoutPaneSpec *pane = &g_ed.spec.panes[g_ed.sel_pane];
-    pane->fg = LAYOUT_COLOR_INHERIT;
-    pane->bg = LAYOUT_COLOR_INHERIT;
-    pane->border_fg = LAYOUT_COLOR_INHERIT;
-    pane->border_bg = LAYOUT_COLOR_INHERIT;
-    editor_refresh_validation();
-}
+/* ── 预览 ──────────────────────────────────────────────────────── */
 
-static void editor_add_pane(void)
+static void editor_draw_preview(int base_row, int base_col, int pw, int ph)
 {
-    if (g_ed.spec.pane_count >= LAYOUT_PANE_COUNT) {
-        editor_set_status("%s", i18n_get("layout.editor.add_full"));
+    if (pw < 8 || ph < 4) {
         return;
     }
-    /* 按固定顺序挑第一个未使用的窗格种类 */
-    for (int kind = 0; kind < LAYOUT_PANE_COUNT; kind++) {
-        int used = 0;
-        for (int i = 0; i < g_ed.spec.pane_count; i++) {
-            if (g_ed.spec.panes[i].kind == (LayoutPaneKind)kind) {
-                used = 1;
-                break;
-            }
-        }
-        if (used) {
+    editor_draw_box(base_row, base_col, ph, pw, NULL);
+
+    LayoutResolved resolved;
+    if (layout_spec_resolve(&g_ed.spec, &resolved) != 0) {
+        return;
+    }
+    int inner_w = pw - 2;
+    int inner_h = ph - 2;
+    int current_kind = editor_selected_kind();
+
+    for (int i = 0; i < resolved.pane_count; i++) {
+        const LayoutResolvedPane *pane = &resolved.panes[i];
+        int c0 = base_col + 1 + pane->x * inner_w / LAYOUT_AREA_UNITS;
+        int c1 = base_col + 1 +
+                 (pane->x + pane->w) * inner_w / LAYOUT_AREA_UNITS;
+        int r0 = base_row + 1 + pane->y * inner_h / LAYOUT_AREA_UNITS;
+        int r1 = base_row + 1 +
+                 (pane->y + pane->h) * inner_h / LAYOUT_AREA_UNITS;
+        if (c1 <= c0) c1 = c0 + 1;
+        if (r1 <= r0) r1 = r0 + 1;
+        if (c1 > base_col + pw - 1) c1 = base_col + pw - 1;
+        if (r1 > base_row + ph - 1) r1 = base_row + ph - 1;
+        if (c0 >= c1 || r0 >= r1) {
             continue;
         }
-        LayoutPaneSpec *pane = &g_ed.spec.panes[g_ed.spec.pane_count++];
-        memset(pane, 0, sizeof(*pane));
-        pane->kind = (LayoutPaneKind)kind;
-        pane->visible = 1;
-        /* 起始几何取左上 500×500，多半与现有窗格重叠——交给校验状态提示 */
-        pane->x = 0;
-        pane->y = 0;
-        pane->w = 500;
-        pane->h = 500;
-        pane->fg = LAYOUT_COLOR_INHERIT;
-        pane->bg = LAYOUT_COLOR_INHERIT;
-        pane->border_fg = LAYOUT_COLOR_INHERIT;
-        pane->border_bg = LAYOUT_COLOR_INHERIT;
-        g_ed.sel_pane = g_ed.spec.pane_count - 1;
-        g_ed.sel_field = ED_F_X;
-        editor_refresh_validation();
-        return;
+
+        int selected = (int)pane->kind == current_kind;
+        attr_t attr = selected ? A_BOLD : A_DIM;
+        attron(attr);
+        for (int c = c0; c < c1; c++) {
+            mvaddch(r0, c, ACS_HLINE);
+        }
+        for (int r = r0; r < r1; r++) {
+            mvaddch(r, c0, ACS_VLINE);
+        }
+        if (pane->y + pane->h >= LAYOUT_AREA_UNITS) {
+            for (int c = c0; c < c1; c++) {
+                mvaddch(r1 - 1, c, ACS_HLINE);
+            }
+        }
+        if (pane->x + pane->w >= LAYOUT_AREA_UNITS) {
+            for (int r = r0; r < r1; r++) {
+                mvaddch(r, c1 - 1, ACS_VLINE);
+            }
+        }
+        attroff(attr);
+
+        if (r1 - r0 >= 3 && c1 - c0 >= 4) {
+            char label[64];
+            format_display_text(label, sizeof(label),
+                                layout_pane_id_name(pane->kind),
+                                c1 - c0 - 2, 0);
+            if (selected) {
+                attron(A_REVERSE | A_BOLD);
+            }
+            mvaddstr(r0 + 1, c0 + 1, label);
+            if (selected) {
+                attroff(A_REVERSE | A_BOLD);
+            }
+        }
     }
-    editor_set_status("%s", i18n_get("layout.editor.add_full"));
 }
 
-static void editor_delete_pane(void)
+/* ── 动作 ──────────────────────────────────────────────────────── */
+
+static void editor_refresh_sel(void)
 {
-    if (g_ed.spec.pane_count <= 1) {
-        editor_set_status("%s", i18n_get("layout.editor.min_pane"));
+    int count = layout_spec_pane_count(&g_ed.spec);
+    if (count <= 0) {
+        g_ed.sel = 0;
+    } else if (g_ed.sel >= count) {
+        g_ed.sel = count - 1;
+    }
+}
+
+static void editor_after_change(const char *status_key)
+{
+    g_ed.dirty = 1;
+    g_ed.esc_confirm = 0;
+    editor_refresh_sel();
+    editor_status_key(status_key);
+}
+
+static void editor_adjust_ratio(int delta)
+{
+    int kind = editor_selected_kind();
+    if (kind < 0) {
         return;
     }
-    if (g_ed.sel_pane < 0 || g_ed.sel_pane >= g_ed.spec.pane_count) {
+    if (layout_spec_adjust_ratio(&g_ed.spec, (LayoutPaneKind)kind, delta) != 0) {
+        int index = layout_spec_find_pane(&g_ed.spec, (LayoutPaneKind)kind);
+        int parent = -1;
+        int slot = 0;
+        if (editor_find_parent(index, &parent, &slot) != 1) {
+            editor_status_error_key("layout.editor.no_parent_split");
+        } else {
+            editor_status_error_key("layout.editor.too_small_pane");
+        }
         return;
     }
-    for (int i = g_ed.sel_pane; i < g_ed.spec.pane_count - 1; i++) {
-        g_ed.spec.panes[i] = g_ed.spec.panes[i + 1];
+    editor_after_change("layout.editor.status_ratio");
+}
+
+static void editor_equalize(void)
+{
+    int kind = editor_selected_kind();
+    if (kind < 0) {
+        return;
     }
-    g_ed.spec.pane_count--;
-    if (g_ed.sel_pane >= g_ed.spec.pane_count) {
-        g_ed.sel_pane = g_ed.spec.pane_count - 1;
+    if (layout_spec_equalize_pane(&g_ed.spec, (LayoutPaneKind)kind) != 0) {
+        editor_status_error_key("layout.editor.no_parent_split");
+        return;
     }
-    editor_refresh_validation();
+    editor_after_change("layout.editor.status_equalized");
+}
+
+static void editor_remove(void)
+{
+    int kind = editor_selected_kind();
+    if (kind < 0) {
+        return;
+    }
+    if (layout_spec_remove_pane(&g_ed.spec, (LayoutPaneKind)kind) != 0) {
+        editor_status_error_key("layout.editor.min_pane");
+        return;
+    }
+    editor_after_change("layout.editor.status_removed");
+}
+
+static void editor_swap(void)
+{
+    int count = layout_spec_pane_count(&g_ed.spec);
+    if (count < 2 || g_ed.sel < 0 || g_ed.sel >= count) {
+        editor_status_error_key("layout.editor.status_swap_none");
+        return;
+    }
+    int a = layout_spec_pane_at(&g_ed.spec, g_ed.sel);
+    int next = (g_ed.sel + 1) % count;
+    int b = layout_spec_pane_at(&g_ed.spec, next);
+    if (a < 0 || b < 0 ||
+        layout_spec_swap_panes(&g_ed.spec, (LayoutPaneKind)a,
+                               (LayoutPaneKind)b) != 0) {
+        editor_status_error_key("layout.editor.status_swap_none");
+        return;
+    }
+    editor_after_change("layout.editor.status_swapped");
+}
+
+static void editor_open_kind_picker(EdPending pending, LayoutSplitDir dir)
+{
+    g_ed.pending = pending;
+    g_ed.pending_dir = dir;
+    g_ed.kind_sel = 0;
+    g_ed.mode = ED_MODE_KINDS;
+    g_ed.esc_confirm = 0;
+}
+
+static void editor_apply_kind_pick(LayoutPaneKind new_kind)
+{
+    int selected = editor_selected_kind();
+    if (selected < 0) {
+        return;
+    }
+    int rc;
+    if (g_ed.pending == ED_PENDING_SPLIT) {
+        rc = layout_spec_split_pane(&g_ed.spec, (LayoutPaneKind)selected,
+                                    g_ed.pending_dir, new_kind);
+    } else {
+        rc = layout_spec_change_pane_kind(&g_ed.spec, (LayoutPaneKind)selected,
+                                          new_kind);
+    }
+    if (rc != 0) {
+        editor_status_error_key("layout.editor.too_small_pane");
+        return;
+    }
+    g_ed.mode = ED_MODE_MAIN;
+    int index = editor_kind_index(new_kind);
+    if (index >= 0) {
+        g_ed.sel = index;
+    }
+    editor_after_change(g_ed.pending == ED_PENDING_SPLIT
+                            ? "layout.editor.status_added"
+                            : "layout.editor.status_kind");
+}
+
+static void editor_open_colors(void)
+{
+    g_ed.color_field = 0;
+    g_ed.mode = ED_MODE_COLORS;
+    g_ed.esc_confirm = 0;
 }
 
 static void editor_rename(void)
@@ -228,124 +444,293 @@ static void editor_rename(void)
     int rows = 0;
     int cols = 0;
     getmaxyx(stdscr, rows, cols);
-    (void)cols;    /* 只用行号定位输入框 */
+    (void)cols;
     if (prompt_text_input(stdscr, rows - 2, 2,
                           i18n_get("layout.editor.rename_prompt"),
                           name, sizeof(name), 1, 0, 1) == 0) {
         snprintf(g_ed.spec.name, sizeof(g_ed.spec.name), "%s", name);
+        g_ed.spec.name_key[0] = '\0';
         g_ed.dirty = 1;
     }
-    editor_refresh_validation();
+    g_ed.mode = ED_MODE_MAIN;
+    layout_editor_render();
 }
 
 static void editor_save(void)
 {
-    char err[256];
-    err[0] = '\0';
+    log_debug("layout_editor", "Save requested for '%s' (%d panes)",
+              g_ed.spec.id, layout_spec_pane_count(&g_ed.spec));
+    char err[192] = "";
     if (layout_spec_validate(&g_ed.spec, err, sizeof(err)) != 0) {
-        editor_set_status("%s", err[0] ? err : i18n_get("layout.editor.save_failed"));
+        /* 正常编辑不可能触发；保留错误而不是静默保存坏树。 */
+        log_warn("layout_editor", "Refusing to save invalid layout: %s",
+                 err[0] ? err : "unknown");
+        editor_status_text(err[0] ? err
+                                  : i18n_get("layout.editor.internal_error"), 1);
         return;
     }
-    char save_err[256];
-    save_err[0] = '\0';
+    char save_err[256] = "";
     if (layout_user_save_layout(&g_ed.spec, save_err, sizeof(save_err)) != 0) {
-        editor_set_status("%s", save_err[0] ? save_err : i18n_get("layout.editor.save_failed"));
+        log_warn("layout_editor", "Save failed: %s",
+                 save_err[0] ? save_err : "unknown");
+        editor_status_text(save_err[0] ? save_err
+                                       : i18n_get("layout.editor.save_failed"), 1);
         return;
     }
-    /* 热重载目录并选中刚保存的布局，主界面立即按新几何重建窗口 */
     ui_layout_reload();
     ui_layout_select(g_ed.spec.id);
     g_ed.active = 0;
     show_status_message(i18n_get("layout.editor.saved"));
 }
 
-/* ── 渲染 ──────────────────────────────────────────────────────── */
-
-static const char *pane_kind_short(LayoutPaneKind kind)
+static void editor_request_close(void)
 {
-    switch (kind) {
-        case LAYOUT_PANE_PLAYLIST: return "playlist";
-        case LAYOUT_PANE_INFO:     return "info";
-        case LAYOUT_PANE_CONTROLS: return "controls";
-        case LAYOUT_PANE_SPECTRUM: return "spectrum";
-        case LAYOUT_PANE_LYRICS:   return "lyrics";
-        case LAYOUT_PANE_VINYL:    return "vinyl";
-        default:                   return "?";
-    }
-}
-
-/** 在 (row, col) 打印宽 width 的单元格，选中时反显 */
-static void editor_print_cell(int row, int col, int width, int selected,
-                              const char *fmt, ...)
-{
-    char buf[32];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    if (selected) {
-        attron(A_REVERSE);
-    }
-    mvprintw(row, col, "%-*.*s", width, width, buf);
-    if (selected) {
-        attroff(A_REVERSE);
-    }
-}
-
-/**
- * 缩放预览：把主区域（1000×1000 千分比）映射进 pw×ph 的单元格框，
- * 按 resolve 后的可见窗格画矩形边框 + 种类缩写（示意，非等比像素）。
- */
-static void editor_draw_preview(int base_row, int base_col, int pw, int ph)
-{
-    if (pw < 8 || ph < 4) {
+    if (g_ed.dirty && !g_ed.esc_confirm) {
+        g_ed.esc_confirm = 1;
+        editor_status_error_key("layout.editor.dirty_exit");
         return;
     }
-    /* 外框 */
-    mvaddch(base_row, base_col, ACS_ULCORNER);
-    mvaddch(base_row, base_col + pw - 1, ACS_URCORNER);
-    mvaddch(base_row + ph - 1, base_col, ACS_LLCORNER);
-    mvaddch(base_row + ph - 1, base_col + pw - 1, ACS_LRCORNER);
-    for (int c = 1; c < pw - 1; c++) {
-        mvaddch(base_row, base_col + c, ACS_HLINE);
-        mvaddch(base_row + ph - 1, base_col + c, ACS_HLINE);
+    g_ed.active = 0;
+}
+
+/* ── 空间导航 ──────────────────────────────────────────────────── */
+
+static void editor_move_focus(int dx, int dy)
+{
+    LayoutResolved resolved;
+    if (layout_spec_resolve(&g_ed.spec, &resolved) != 0) {
+        return;
     }
-    for (int r = 1; r < ph - 1; r++) {
-        mvaddch(base_row + r, base_col, ACS_VLINE);
-        mvaddch(base_row + r, base_col + pw - 1, ACS_VLINE);
+    int current_kind = editor_selected_kind();
+    const LayoutResolvedPane *cur = NULL;
+    for (int i = 0; i < resolved.pane_count; i++) {
+        if ((int)resolved.panes[i].kind == current_kind) {
+            cur = &resolved.panes[i];
+            break;
+        }
+    }
+    if (!cur) {
+        return;
     }
 
-    LayoutSpec resolved;
-    layout_spec_resolve(&g_ed.spec, &resolved);
+    int best = -1;
+    long best_score = 0;
     for (int i = 0; i < resolved.pane_count; i++) {
-        const LayoutPaneSpec *pane = &resolved.panes[i];
-        if (!pane->visible) {
+        const LayoutResolvedPane *pane = &resolved.panes[i];
+        if ((int)pane->kind == current_kind) {
             continue;
         }
-        int c0 = base_col + 1 + (int)((long long)pane->x * (pw - 2) / LAYOUT_AREA_UNITS);
-        int c1 = base_col + 1 + (int)((long long)(pane->x + pane->w) * (pw - 2) / LAYOUT_AREA_UNITS);
-        int r0 = base_row + 1 + (int)((long long)pane->y * (ph - 2) / LAYOUT_AREA_UNITS);
-        int r1 = base_row + 1 + (int)((long long)(pane->y + pane->h) * (ph - 2) / LAYOUT_AREA_UNITS);
-        if (c1 <= c0 || r1 <= r0) {
-            continue;   /* 该窗格在预览分辨率下不可见 */
+        int overlap = 0;
+        int distance = 0;
+        if (dy < 0) {
+            if (pane->y + pane->h > cur->y) continue;
+            distance = cur->y - (pane->y + pane->h);
+            int left = cur->x > pane->x ? cur->x : pane->x;
+            int right = (cur->x + cur->w) < (pane->x + pane->w)
+                            ? (cur->x + cur->w) : (pane->x + pane->w);
+            overlap = right - left;
+        } else if (dy > 0) {
+            if (pane->y < cur->y + cur->h) continue;
+            distance = pane->y - (cur->y + cur->h);
+            int left = cur->x > pane->x ? cur->x : pane->x;
+            int right = (cur->x + cur->w) < (pane->x + pane->w)
+                            ? (cur->x + cur->w) : (pane->x + pane->w);
+            overlap = right - left;
+        } else if (dx < 0) {
+            if (pane->x + pane->w > cur->x) continue;
+            distance = cur->x - (pane->x + pane->w);
+            int top = cur->y > pane->y ? cur->y : pane->y;
+            int bottom = (cur->y + cur->h) < (pane->y + pane->h)
+                             ? (cur->y + cur->h) : (pane->y + pane->h);
+            overlap = bottom - top;
+        } else {
+            if (pane->x < cur->x + cur->w) continue;
+            distance = pane->x - (cur->x + cur->w);
+            int top = cur->y > pane->y ? cur->y : pane->y;
+            int bottom = (cur->y + cur->h) < (pane->y + pane->h)
+                             ? (cur->y + cur->h) : (pane->y + pane->h);
+            overlap = bottom - top;
         }
-        if (c1 > base_col + pw - 1) c1 = base_col + pw - 1;
-        if (r1 > base_row + ph - 1) r1 = base_row + ph - 1;
-        for (int c = c0; c < c1; c++) {
-            mvaddch(r0, c, '-');
-            mvaddch(r1 - 1, c, '-');
+        if (overlap <= 0) {
+            continue;
         }
-        for (int r = r0; r < r1; r++) {
-            mvaddch(r, c0, '|');
-            mvaddch(r, c1 - 1, '|');
-        }
-        const char *label = pane_kind_short(pane->kind);
-        int label_row = r0 + (r1 - r0) / 2;
-        int label_col = c0 + 1;
-        if (label_row > r0 && label_row < r1 - 1 && label_col < c1 - 2) {
-            mvprintw(label_row, label_col, "%.4s", label);
+        long score = (long)distance * 10000L - (long)overlap;
+        if (best < 0 || score < best_score) {
+            best = i;
+            best_score = score;
         }
     }
+    if (best >= 0) {
+        int index = editor_kind_index((LayoutPaneKind)resolved.panes[best].kind);
+        if (index >= 0) {
+            g_ed.sel = index;
+        }
+    }
+}
+
+/* ── 模态渲染 ──────────────────────────────────────────────────── */
+
+static void editor_draw_actions(int rows, int cols)
+{
+    int w = 44;
+    int h = ED_ACTION_COUNT + 4;
+    if (w > cols - 4) w = cols - 4;
+    if (h > rows - 4) h = rows - 4;
+    int row = (rows - h) / 2;
+    int col = (cols - w) / 2;
+    editor_draw_box(row, col, h, w, i18n_get("layout.editor.actions_title"));
+    for (int i = 0; i < ED_ACTION_COUNT; i++) {
+        if (row + 1 + i >= row + h - 1) break;
+        editor_draw_text(row + 1 + i, col + 2, w - 4,
+                         i18n_get(k_action_keys[i]), i == g_ed.action_sel);
+    }
+    if (row + h - 2 > row + 1 + ED_ACTION_COUNT) {
+        editor_draw_text(row + h - 2, col + 2, w - 4,
+                         i18n_get("layout.editor.hint_menu"), 0);
+    }
+}
+
+static int editor_kind_allowed(LayoutPaneKind kind)
+{
+    if (layout_spec_pane_available(&g_ed.spec, kind)) {
+        return 1;
+    }
+    if (g_ed.pending == ED_PENDING_CHANGE) {
+        int selected = editor_selected_kind();
+        if ((selected == LAYOUT_PANE_LYRICS && kind == LAYOUT_PANE_VINYL) ||
+            (selected == LAYOUT_PANE_VINYL && kind == LAYOUT_PANE_LYRICS)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int editor_available_kinds(LayoutPaneKind *out, int capacity)
+{
+    int count = 0;
+    for (int i = 0; i < LAYOUT_PANE_COUNT && count < capacity; i++) {
+        if (editor_kind_allowed((LayoutPaneKind)i)) {
+            out[count++] = (LayoutPaneKind)i;
+        }
+    }
+    return count;
+}
+
+static void editor_draw_kinds(int rows, int cols)
+{
+    LayoutPaneKind kinds[LAYOUT_PANE_COUNT];
+    int count = editor_available_kinds(kinds, LAYOUT_PANE_COUNT);
+    int w = 40;
+    int h = count + 5;
+    if (h < 6) h = 6;
+    if (w > cols - 4) w = cols - 4;
+    if (h > rows - 4) h = rows - 4;
+    int row = (rows - h) / 2;
+    int col = (cols - w) / 2;
+    editor_draw_box(row, col, h, w, i18n_get("layout.editor.pick_kind"));
+    if (count == 0) {
+        editor_draw_text(row + 2, col + 2, w - 4,
+                         i18n_get("layout.editor.no_kind"), 0);
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        int pane_row = row + 1 + i;
+        if (pane_row >= row + h - 1) break;
+        editor_draw_text(pane_row, col + 2, w - 4,
+                         ui_layout_pane_title(kinds[i]), i == g_ed.kind_sel);
+    }
+    editor_draw_text(row + h - 2, col + 2, w - 4,
+                     i18n_get("layout.editor.hint_pick"), 0);
+}
+
+static void editor_draw_colors(int rows, int cols)
+{
+    int w = 44;
+    int h = 10;
+    if (w > cols - 4) w = cols - 4;
+    if (h > rows - 4) h = rows - 4;
+    int row = (rows - h) / 2;
+    int col = (cols - w) / 2;
+    editor_draw_box(row, col, h, w, i18n_get("layout.editor.colors_title"));
+
+    int kind = editor_selected_kind();
+    if (kind < 0) {
+        return;
+    }
+    const LayoutPaneSpec *pane = layout_spec_pane_config(
+        &g_ed.spec, (LayoutPaneKind)kind);
+    if (!pane) {
+        return;
+    }
+    const int values[4] = { pane->fg, pane->bg, pane->border_fg,
+                            pane->border_bg };
+    for (int i = 0; i < 4; i++) {
+        char color[32];
+        char line[96];
+        format_color(color, sizeof(color), values[i]);
+        snprintf(line, sizeof(line), "%-10s %s", color_field_name(i), color);
+        editor_draw_text(row + 1 + i, col + 2, w - 4, line,
+                         i == g_ed.color_field);
+    }
+    editor_draw_text(row + h - 2, col + 2, w - 4,
+                     i18n_get("layout.editor.hint_colors"), 0);
+}
+
+static void editor_draw_help(int rows, int cols)
+{
+    int w = 62;
+    int h = ED_HELP_COUNT + 4;
+    if (w > cols - 4) w = cols - 4;
+    if (h > rows - 4) h = rows - 4;
+    int row = (rows - h) / 2;
+    int col = (cols - w) / 2;
+    editor_draw_box(row, col, h, w, i18n_get("layout.editor.help_title"));
+    for (int i = 0; i < ED_HELP_COUNT; i++) {
+        if (row + 1 + i >= row + h - 1) break;
+        editor_draw_text(row + 1 + i, col + 2, w - 4,
+                         i18n_get(k_help_keys[i]), 0);
+    }
+    if (row + h - 2 > row + 1 + ED_HELP_COUNT) {
+        editor_draw_text(row + h - 2, col + 2, w - 4,
+                         i18n_get("layout.editor.help_tip"), 0);
+    }
+}
+
+/* ── 主界面 ────────────────────────────────────────────────────── */
+
+static void editor_right_text(int row, int cols, const char *text)
+{
+    int width = utf8_str_width(text);
+    if (width > 0 && width < cols) {
+        mvaddstr(row, cols - width, text);
+    }
+}
+
+static void editor_draw_detail(int row, int col, int width)
+{
+    int kind = editor_selected_kind();
+    if (kind < 0) {
+        return;
+    }
+    int index = layout_spec_find_pane(&g_ed.spec, (LayoutPaneKind)kind);
+    int parent = -1;
+    int slot = 0;
+    if (index < 0 || editor_find_parent(index, &parent, &slot) != 1) {
+        editor_draw_text(row, col, width,
+                         i18n_get("layout.editor.root_pane"), 0);
+        return;
+    }
+    const LayoutNode *node = &g_ed.spec.nodes[parent];
+    int first = node->ratio;
+    int selected_pct = slot == 0 ? first : 1000 - first;
+    char text[128];
+    snprintf(text, sizeof(text),
+             i18n_get("layout.editor.split_fmt"),
+             i18n_get(node->dir == LAYOUT_SPLIT_ROW
+                          ? "layout.editor.split_row"
+                          : "layout.editor.split_col"),
+             (selected_pct + 5) / 10, (1000 - selected_pct + 5) / 10);
+    editor_draw_text(row, col, width, text, 0);
 }
 
 void layout_editor_render(void)
@@ -359,115 +744,409 @@ void layout_editor_render(void)
     getmaxyx(stdscr, rows, cols);
     erase();
 
-    /* 标题行 */
-    attron(A_BOLD);
-    mvprintw(0, 0, "%s — %s [%s]%s", i18n_get("layout.editor.title"),
+    char title[128];
+    snprintf(title, sizeof(title), "%s — %s [%s]%s",
+             i18n_get("layout.editor.title"),
              g_ed.spec.name[0] ? g_ed.spec.name : g_ed.spec.id,
              g_ed.spec.id, g_ed.dirty ? " *" : "");
+    attron(A_BOLD);
+    editor_draw_text(0, 0, cols - 12, title, 0);
     attroff(A_BOLD);
+    editor_right_text(0, cols, i18n_get("layout.editor.forced_ok"));
 
-    if (rows < 14 || cols < ED_LIST_WIDTH + 4) {
-        mvprintw(rows / 2, 2, "%s", i18n_get("layout.editor.too_small"));
+    if (rows < ED_MIN_ROWS || cols < ED_MIN_COLS) {
+        editor_draw_text(rows / 2, 2, cols - 4,
+                         i18n_get("layout.editor.too_small"), 0);
+        editor_draw_text(rows - 1, 0, cols,
+                         i18n_get("layout.editor.hint_global"), 0);
         refresh();
         return;
     }
 
-    /* 列表：表头 + 每窗格一行 */
-    int list_row = 2;
+    int list_w = cols >= 88 ? 40 : cols / 2;
+    if (list_w < 30) list_w = cols - 4;
+
+    char header[64];
+    snprintf(header, sizeof(header), "%s (%d/%d)",
+             i18n_get("layout.editor.panes"),
+             layout_spec_pane_count(&g_ed.spec), LAYOUT_MAX_PANES);
     attron(A_BOLD);
-    mvprintw(list_row, 0, "  %-10s %-3s %-5s %-5s %-5s %-5s %-5s %-5s %-5s %-5s",
-             i18n_get("layout.editor.col_kind"),
-             i18n_get("layout.editor.col_vis"),
-             "X", "Y", "W", "H",
-             i18n_get("layout.editor.col_fg"),
-             i18n_get("layout.editor.col_bg"),
-             i18n_get("layout.editor.col_bfg"),
-             i18n_get("layout.editor.col_bbg"));
+    editor_draw_text(1, 0, list_w, header, 0);
+    editor_draw_text(1, list_w + 2, cols - list_w - 2,
+                     i18n_get("layout.editor.preview"), 0);
     attroff(A_BOLD);
 
-    for (int i = 0; i < g_ed.spec.pane_count; i++) {
-        int row = list_row + 1 + i;
-        const LayoutPaneSpec *pane = &g_ed.spec.panes[i];
-        int selected = (i == g_ed.sel_pane);
-
-        mvprintw(row, 0, "%c", selected ? '>' : ' ');
-        editor_print_cell(row, 2, 10, 0, "%s", pane_kind_short(pane->kind));
-
-        char color_buf[16];
-        editor_print_cell(row, k_field_col[ED_F_VISIBLE],
-                          k_field_width[ED_F_VISIBLE],
-                          selected && g_ed.sel_field == ED_F_VISIBLE,
-                          pane->visible ? "[v]" : "[x]");
-        editor_print_cell(row, k_field_col[ED_F_X], k_field_width[ED_F_X],
-                          selected && g_ed.sel_field == ED_F_X, "%d", pane->x);
-        editor_print_cell(row, k_field_col[ED_F_Y], k_field_width[ED_F_Y],
-                          selected && g_ed.sel_field == ED_F_Y, "%d", pane->y);
-        editor_print_cell(row, k_field_col[ED_F_W], k_field_width[ED_F_W],
-                          selected && g_ed.sel_field == ED_F_W, "%d", pane->w);
-        editor_print_cell(row, k_field_col[ED_F_H], k_field_width[ED_F_H],
-                          selected && g_ed.sel_field == ED_F_H, "%d", pane->h);
-        format_color(color_buf, sizeof(color_buf), pane->fg);
-        editor_print_cell(row, k_field_col[ED_F_FG], k_field_width[ED_F_FG],
-                          selected && g_ed.sel_field == ED_F_FG, "%s", color_buf);
-        format_color(color_buf, sizeof(color_buf), pane->bg);
-        editor_print_cell(row, k_field_col[ED_F_BG], k_field_width[ED_F_BG],
-                          selected && g_ed.sel_field == ED_F_BG, "%s", color_buf);
-        format_color(color_buf, sizeof(color_buf), pane->border_fg);
-        editor_print_cell(row, k_field_col[ED_F_BFG], k_field_width[ED_F_BFG],
-                          selected && g_ed.sel_field == ED_F_BFG, "%s", color_buf);
-        format_color(color_buf, sizeof(color_buf), pane->border_bg);
-        editor_print_cell(row, k_field_col[ED_F_BBG], k_field_width[ED_F_BBG],
-                          selected && g_ed.sel_field == ED_F_BBG, "%s", color_buf);
+    LayoutResolved resolved;
+    int have_resolved = layout_spec_resolve(&g_ed.spec, &resolved) == 0;
+    int count = layout_spec_pane_count(&g_ed.spec);
+    for (int i = 0; i < count && i < LAYOUT_MAX_PANES; i++) {
+        int row = 2 + i;
+        if (row >= rows - 5) break;
+        int kind = layout_spec_pane_at(&g_ed.spec, i);
+        if (kind < 0) continue;
+        char line[128];
+        int pct_w = 0;
+        int pct_h = 0;
+        if (have_resolved) {
+            for (int j = 0; j < resolved.pane_count; j++) {
+                if ((int)resolved.panes[j].kind == kind) {
+                    pct_w = (resolved.panes[j].w + 5) / 10;
+                    pct_h = (resolved.panes[j].h + 5) / 10;
+                    break;
+                }
+            }
+        }
+        snprintf(line, sizeof(line), "%s  %3d%% × %3d%%",
+                 ui_layout_pane_title((LayoutPaneKind)kind), pct_w, pct_h);
+        editor_draw_text(row, 0, list_w, line, i == g_ed.sel);
     }
 
-    /* 预览：宽终端放右侧，窄终端放列表下方 */
+    int detail_row = 2 + LAYOUT_MAX_PANES;
+    if (detail_row < rows - 5) {
+        editor_draw_detail(detail_row, 0, list_w);
+    }
+
     int preview_row = 2;
-    int preview_col = ED_LIST_WIDTH + 2;
-    int preview_h = rows - 4;
+    int preview_col = list_w + 2;
     int preview_w = cols - preview_col - 2;
-    if (cols < ED_LIST_WIDTH + 26) {
-        preview_row = list_row + g_ed.spec.pane_count + 2;
-        preview_col = 2;
-        preview_h = rows - preview_row - 3;
-        preview_w = cols - 4;
-    }
-    if (preview_h >= 4 && preview_w >= 8) {
+    int preview_h = rows - 6;
+    if (preview_w >= 8 && preview_h >= 4) {
         editor_draw_preview(preview_row, preview_col, preview_w, preview_h);
     }
 
-    /* 校验状态行 */
-    int status_row = rows - 2;
-    if (g_ed.err[0] != '\0') {
-        attron(A_BOLD);
-        mvprintw(status_row, 2, "%s", g_ed.err);
-        attroff(A_BOLD);
+    int status_row = rows - 4;
+    if (g_ed.status[0]) {
+        if (g_ed.status_error) {
+            attron(A_BOLD);
+        }
+        editor_draw_text(status_row, 2, cols - 4, g_ed.status, 0);
+        if (g_ed.status_error) {
+            attroff(A_BOLD);
+        }
     } else {
-        mvprintw(status_row, 2, "%s", i18n_get("layout.editor.valid_ok"));
+        editor_draw_text(status_row, 2, cols - 4,
+                         i18n_get("layout.editor.forced_ok"), 0);
     }
 
-    /* 底部按键提示 */
     attron(A_DIM);
-    mvprintw(rows - 1, 0, "%s", i18n_get("layout.editor.hint"));
+    editor_draw_text(rows - 3, 0, cols, i18n_get("layout.editor.hint_nav"), 0);
+    editor_draw_text(rows - 2, 0, cols, i18n_get("layout.editor.hint_edit"), 0);
+    editor_draw_text(rows - 1, 0, cols, i18n_get("layout.editor.hint_global"), 0);
     attroff(A_DIM);
 
+    switch (g_ed.mode) {
+        case ED_MODE_ACTIONS:
+            editor_draw_actions(rows, cols);
+            break;
+        case ED_MODE_KINDS:
+            editor_draw_kinds(rows, cols);
+            break;
+        case ED_MODE_COLORS:
+            editor_draw_colors(rows, cols);
+            break;
+        case ED_MODE_HELP:
+            editor_draw_help(rows, cols);
+            break;
+        default:
+            break;
+    }
     refresh();
 }
 
 /* ── 按键处理 ──────────────────────────────────────────────────── */
 
-/** 选中字段按 delta 调整；颜色字段 PAGE 键与 +/- 等价（循环） */
-static void editor_step_value(int delta)
+static int editor_handle_main(int ch)
 {
-    EdField field = (EdField)g_ed.sel_field;
-    if (field == ED_F_VISIBLE) {
-        editor_adjust_field(0);    /* 可见性只有开关一种调整 */
-        return;
+    if (ch != 27 && ch != 'q' && ch != 'Q') {
+        g_ed.esc_confirm = 0;
     }
-    if (field >= ED_F_FG) {
-        editor_adjust_field(delta == 0 ? 1 : (delta > 0 ? 1 : -1));
-        return;
+    switch (ch) {
+        case KEY_UP:
+            editor_move_focus(0, -1);
+            break;
+        case KEY_DOWN:
+            editor_move_focus(0, 1);
+            break;
+        case KEY_LEFT:
+            editor_move_focus(-1, 0);
+            break;
+        case KEY_RIGHT:
+            editor_move_focus(1, 0);
+            break;
+        case '\t':
+            if (layout_spec_pane_count(&g_ed.spec) > 0) {
+                g_ed.sel = (g_ed.sel + 1) %
+                           layout_spec_pane_count(&g_ed.spec);
+            }
+            break;
+        case KEY_BTAB:
+            if (layout_spec_pane_count(&g_ed.spec) > 0) {
+                g_ed.sel = (g_ed.sel + layout_spec_pane_count(&g_ed.spec) - 1) %
+                           layout_spec_pane_count(&g_ed.spec);
+            }
+            break;
+        case '[':
+            editor_adjust_ratio(-10);
+            break;
+        case ']':
+            editor_adjust_ratio(10);
+            break;
+        case KEY_PPAGE:
+            editor_adjust_ratio(50);
+            break;
+        case KEY_NPAGE:
+            editor_adjust_ratio(-50);
+            break;
+        case '=':
+            editor_equalize();
+            break;
+        case '|':
+            editor_open_kind_picker(ED_PENDING_SPLIT, LAYOUT_SPLIT_ROW);
+            break;
+        case '-':
+            editor_open_kind_picker(ED_PENDING_SPLIT, LAYOUT_SPLIT_COL);
+            break;
+        case 'x':
+        case 'X':
+            editor_remove();
+            break;
+        case 't':
+        case 'T':
+            editor_open_kind_picker(ED_PENDING_CHANGE, LAYOUT_SPLIT_ROW);
+            break;
+        case 'w':
+        case 'W':
+            editor_swap();
+            break;
+        case 'c':
+        case 'C':
+            editor_open_colors();
+            break;
+        case 'n':
+        case 'N':
+            editor_rename();
+            return 1;
+        case '?':
+        case KEY_F(1):
+            g_ed.mode = ED_MODE_HELP;
+            g_ed.esc_confirm = 0;
+            break;
+        case '\n':
+        case '\r':
+        case KEY_ENTER:
+            g_ed.mode = ED_MODE_ACTIONS;
+            g_ed.action_sel = 0;
+            g_ed.esc_confirm = 0;
+            break;
+        case 's':
+        case 'S':
+        case 19:    /* Ctrl+S */
+            editor_save();
+            layout_editor_render();
+            return 1;
+        case 'q':
+        case 'Q':
+        case 27:
+            editor_request_close();
+            if (!g_ed.active) {
+                return 1;
+            }
+            break;
+        default:
+            g_ed.esc_confirm = 0;
+            break;
     }
-    editor_adjust_field(delta);    /* 几何：±1 / ±10 */
+    layout_editor_render();
+    return 1;
+}
+
+static void editor_action_execute(int index)
+{
+    switch (index) {
+        case 0:
+            editor_open_kind_picker(ED_PENDING_SPLIT, LAYOUT_SPLIT_ROW);
+            return;
+        case 1:
+            editor_open_kind_picker(ED_PENDING_SPLIT, LAYOUT_SPLIT_COL);
+            return;
+        case 2:
+            editor_open_kind_picker(ED_PENDING_CHANGE, LAYOUT_SPLIT_ROW);
+            return;
+        case 3:
+            editor_open_colors();
+            return;
+        case 4:
+            editor_equalize();
+            break;
+        case 5:
+            editor_swap();
+            break;
+        case 6:
+            editor_remove();
+            break;
+        case 7:
+            editor_rename();
+            return;
+        default:
+            break;
+    }
+    g_ed.mode = ED_MODE_MAIN;
+}
+
+static int editor_handle_actions(int ch)
+{
+    switch (ch) {
+        case KEY_UP:
+            g_ed.action_sel = (g_ed.action_sel + ED_ACTION_COUNT - 1) %
+                              ED_ACTION_COUNT;
+            break;
+        case KEY_DOWN:
+            g_ed.action_sel = (g_ed.action_sel + 1) % ED_ACTION_COUNT;
+            break;
+        case '\n':
+        case '\r':
+        case KEY_ENTER:
+            editor_action_execute(g_ed.action_sel);
+            break;
+        case 27:
+        case 'q':
+        case 'Q':
+            g_ed.mode = ED_MODE_MAIN;
+            break;
+        default:
+            g_ed.esc_confirm = 0;
+            break;
+    }
+    layout_editor_render();
+    return 1;
+}
+
+static int editor_handle_kinds(int ch)
+{
+    LayoutPaneKind kinds[LAYOUT_PANE_COUNT];
+    int count = editor_available_kinds(kinds, LAYOUT_PANE_COUNT);
+    switch (ch) {
+        case KEY_UP:
+            if (count > 0) {
+                g_ed.kind_sel = (g_ed.kind_sel + count - 1) % count;
+            }
+            break;
+        case KEY_DOWN:
+            if (count > 0) {
+                g_ed.kind_sel = (g_ed.kind_sel + 1) % count;
+            }
+            break;
+        case '\n':
+        case '\r':
+        case KEY_ENTER:
+            if (count > 0 && g_ed.kind_sel < count) {
+                editor_apply_kind_pick(kinds[g_ed.kind_sel]);
+            } else {
+                g_ed.mode = ED_MODE_MAIN;
+                editor_status_error_key("layout.editor.no_kind");
+            }
+            break;
+        case 27:
+        case 'q':
+        case 'Q':
+            g_ed.mode = ED_MODE_MAIN;
+            break;
+        default:
+            break;
+    }
+    layout_editor_render();
+    return 1;
+}
+
+static int editor_handle_colors(int ch)
+{
+    int kind = editor_selected_kind();
+    if (kind < 0) {
+        g_ed.mode = ED_MODE_MAIN;
+        return 1;
+    }
+    LayoutPaneSpec *pane = &g_ed.spec.panes[kind];
+    int *field = color_field_ptr(pane, g_ed.color_field);
+    if (!field) {
+        g_ed.mode = ED_MODE_MAIN;
+        return 1;
+    }
+
+    switch (ch) {
+        case KEY_UP:
+            g_ed.color_field = (g_ed.color_field + 3) % 4;
+            break;
+        case KEY_DOWN:
+            g_ed.color_field = (g_ed.color_field + 1) % 4;
+            break;
+        case KEY_LEFT:
+            *field = color_cycle_value(color_cycle_index(*field) - 1);
+            g_ed.dirty = 1;
+            break;
+        case KEY_RIGHT:
+            *field = color_cycle_value(color_cycle_index(*field) + 1);
+            g_ed.dirty = 1;
+            break;
+        case KEY_PPAGE:
+            *field = color_cycle_value(color_cycle_index(*field) + 10);
+            g_ed.dirty = 1;
+            break;
+        case KEY_NPAGE:
+            *field = color_cycle_value(color_cycle_index(*field) - 10);
+            g_ed.dirty = 1;
+            break;
+        case KEY_HOME:
+            *field = LAYOUT_COLOR_INHERIT;
+            g_ed.dirty = 1;
+            break;
+        case KEY_END:
+            *field = -1;
+            g_ed.dirty = 1;
+            break;
+        case 'r':
+            *field = LAYOUT_COLOR_INHERIT;
+            g_ed.dirty = 1;
+            break;
+        case 'R':
+            pane->fg = LAYOUT_COLOR_INHERIT;
+            pane->bg = LAYOUT_COLOR_INHERIT;
+            pane->border_fg = LAYOUT_COLOR_INHERIT;
+            pane->border_bg = LAYOUT_COLOR_INHERIT;
+            g_ed.dirty = 1;
+            break;
+        case '\n':
+        case '\r':
+        case KEY_ENTER:
+        case 27:
+        case 'q':
+        case 'Q':
+            g_ed.mode = ED_MODE_MAIN;
+            break;
+        default:
+            break;
+    }
+    layout_editor_render();
+    return 1;
+}
+
+static int editor_handle_help(int ch)
+{
+    switch (ch) {
+        case 27:
+        case '?':
+        case KEY_F(1):
+        case 'q':
+        case 'Q':
+        case '\n':
+        case '\r':
+        case KEY_ENTER:
+            g_ed.mode = ED_MODE_MAIN;
+            break;
+        default:
+            break;
+    }
+    layout_editor_render();
+    return 1;
 }
 
 int layout_editor_handle_key(int ch)
@@ -475,88 +1154,26 @@ int layout_editor_handle_key(int ch)
     if (!g_ed.active) {
         return 0;
     }
-
-    switch (ch) {
-        case KEY_UP:
-        case 'k':
-            if (g_ed.sel_pane > 0) {
-                g_ed.sel_pane--;
-            }
-            break;
-        case KEY_DOWN:
-        case 'j':
-            if (g_ed.sel_pane < g_ed.spec.pane_count - 1) {
-                g_ed.sel_pane++;
-            }
-            break;
-        case KEY_LEFT:
-        case 'h':
-            g_ed.sel_field = (g_ed.sel_field + ED_FIELD_COUNT - 1) % ED_FIELD_COUNT;
-            break;
-        case KEY_RIGHT:
-        case 'l':
-            g_ed.sel_field = (g_ed.sel_field + 1) % ED_FIELD_COUNT;
-            break;
-        case '+':
-        case '=':
-            editor_step_value(1);
-            break;
-        case '-':
-        case '_':
-            editor_step_value(-1);
-            break;
-        case KEY_PPAGE:
-            editor_step_value(10);
-            break;
-        case KEY_NPAGE:
-            editor_step_value(-10);
-            break;
-        case 'v':
-        case ' ':
-            if (g_ed.sel_field == ED_F_VISIBLE) {
-                editor_adjust_field(0);
-            } else {
-                editor_set_status("%s", i18n_get("layout.editor.hint_visible"));
-            }
-            break;
-        case 'a':
-            editor_add_pane();
-            break;
-        case 'd':
-            editor_delete_pane();
-            break;
-        case 'r':
-            editor_reset_pane_colors();
-            break;
-        case 'n':
-            editor_rename();
-            break;
-        case 's':
-        case 'S':
-            editor_save();
-            break;
-        case 27:    /* Esc：有更改时先确认再放弃 */
-            if (g_ed.dirty && !g_ed.esc_confirm) {
-                g_ed.esc_confirm = 1;
-                editor_set_status("%s", i18n_get("layout.editor.dirty_exit"));
-                layout_editor_render();
-                return 1;
-            }
-            g_ed.active = 0;
-            return 1;
-        default:
-            layout_editor_render();
-            return 1;
+    if (ch == KEY_RESIZE) {
+        layout_editor_render();
+        return 1;
     }
-
-    g_ed.esc_confirm = 0;
-    layout_editor_render();
-    return 1;
+    switch (g_ed.mode) {
+        case ED_MODE_ACTIONS:
+            return editor_handle_actions(ch);
+        case ED_MODE_KINDS:
+            return editor_handle_kinds(ch);
+        case ED_MODE_COLORS:
+            return editor_handle_colors(ch);
+        case ED_MODE_HELP:
+            return editor_handle_help(ch);
+        default:
+            return editor_handle_main(ch);
+    }
 }
 
 /* ── 生命周期 ──────────────────────────────────────────────────── */
 
-/** 为新建布局生成目录内唯一的 user_N id 与默认名 */
 static void editor_generate_identity(void)
 {
     for (int n = 1; n <= 999; n++) {
@@ -577,7 +1194,6 @@ static void editor_generate_identity(void)
             return;
         }
     }
-    /* 999 个都撞了（理论不可能）：退化用时间戳 */
     snprintf(g_ed.spec.id, sizeof(g_ed.spec.id), "user_%ld", (long)getpid());
 }
 
@@ -586,16 +1202,29 @@ void layout_editor_open(const LayoutSpec *base, int is_new)
     memset(&g_ed, 0, sizeof(g_ed));
     if (base) {
         g_ed.spec = *base;
+    } else {
+        layout_spec_build_fallback(&g_ed.spec);
     }
+    if (g_ed.spec.root < 0) {
+        layout_spec_build_fallback(&g_ed.spec);
+    }
+
+    int was_normalized = g_ed.spec.normalized;
+    g_ed.spec.normalized = 0;
     g_ed.is_new = is_new ? 1 : 0;
     if (g_ed.is_new) {
         editor_generate_identity();
-        /* 用户覆盖不应带着内置预设的 i18n 名字键，否则显示回译名 */
         g_ed.spec.name_key[0] = '\0';
     }
-    g_ed.sel_pane = 0;
-    g_ed.sel_field = ED_F_X;
+    g_ed.sel = 0;
+    g_ed.mode = ED_MODE_MAIN;
     g_ed.active = 1;
+    log_debug("layout_editor", "Opened layout '%s' (%d panes, new=%d, normalized=%d)",
+              g_ed.spec.id, layout_spec_pane_count(&g_ed.spec), g_ed.is_new,
+              was_normalized);
+    if (was_normalized && !g_ed.is_new) {
+        editor_status_key("layout.editor.normalized_notice");
+    }
     layout_editor_render();
 }
 

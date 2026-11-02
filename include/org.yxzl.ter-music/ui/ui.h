@@ -92,11 +92,23 @@ void render_visualizer_with_album_cover(void);
 void build_control_label(int index, char *dest, size_t dest_size);
 void activate_current_control(void);
 void render_controls_status_line(void);
+void controls_status_tick(void);
+
+/* 控制区内容坐标。渲染、进度增量刷新、鼠标命中和可视化共用同一份
+ * 结果，避免各自换行/居中导致画面与点击错位。 */
+typedef struct {
+    int progress_row;                 /* -1 = 不显示 */
+    int status_row;
+    int button_row[CONTROL_COUNT];    /* -1 = 未显示 */
+    int button_col[CONTROL_COUNT];
+    int button_width[CONTROL_COUNT];
+    int visualizer_top;               /* -1 = 无空间 */
+    int visualizer_bottom;
+} ControlsLayout;
+
+void controls_compute_layout(int height, int width, ControlsLayout *out);
+
 int  get_playlist_scroll_offset(void);
-int  get_controls_progress_row(int height);
-int  get_controls_button_row(int height);
-int  get_controls_visualizer_top(int height);
-int  get_controls_visualizer_bottom(int height);
 uint64_t get_ui_time_ms(void);
 void seek_relative_seconds(int delta_seconds);
 

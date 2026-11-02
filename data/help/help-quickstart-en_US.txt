@@ -33,30 +33,37 @@ ter-music Quick Start Guide
 
 2. Layout Overview
 ------------------
-  The main view is driven by JSON layout presets with six pane kinds:
+  The main view is driven by JSON split trees with six pane kinds:
     playlist / info / controls / spectrum / lyrics / vinyl
-  Every layout must tile the whole main area (the terminal minus the bottom
-  menu bar) seamlessly: no gaps, no overlaps. Resizing recomputes the
-  per-mille rectangles. Pane content, including the info-pane album cover, is
-  clipped inside its border; a pane too small for its renderer shows only
-  background and border. The info pane rearranges itself by size: wide panes
-  keep metadata and audio parameters side by side with the cover on the right;
-  narrow-and-tall panes stack the cover above the metadata and audio blocks.
-  The cover keeps a blank column before the right border and is hidden when
-  the pane cannot give it that room.
-  If both lyrics and vinyl are defined, lyrics is hidden. A lyrics-only
-  layout still falls back to the vinyl animation (colored blocks when colors
-  are available; the original glyph animation otherwise) when the track has
-  no lyrics; the fallback skips its spectrum bars when the layout already
-  has a dedicated spectrum pane.
+  Each layout is a binary split tree: a split cuts its rectangle into two
+  children by row (left/right) or col (top/bottom), and a leaf names a pane
+  kind. Layouts therefore force-tile the whole main area (the terminal minus the
+  bottom menu bar): no gaps, no overlaps. Resizing recomputes the per-mille
+  ratios. Old flat-rectangle layouts are still read: guillotine arrangements
+  convert exactly; holes, overlaps, out-of-bounds rects and non-guillotine
+  arrangements are reflowed in reading order and reported in the reload message
+  or the editor instead of being rejected.
+  lyrics and vinyl are mutually exclusive: a legacy file that defines both keeps
+  vinyl; a lyrics-only layout still falls back to the vinyl animation (colored
+  blocks when colors are available; the original glyph animation otherwise)
+  when the track has no lyrics; the fallback skips its spectrum bars when the
+  layout already has a dedicated spectrum pane.
+  Pane content, including the info-pane album cover, is clipped inside its
+  border; a pane too small for its renderer shows only background and border.
+  The info pane rearranges itself by size: wide panes keep metadata and audio
+  parameters side by side with the cover on the right; narrow-and-tall panes
+  stack the cover above the metadata and audio blocks. The cover keeps a blank
+  column before the right border and is hidden when the pane cannot give it
+  that room.
   Choose: F2 -> Appearance -> UI Layout (←/→ cycles, ENTER opens the list);
-  "Reload Layouts" re-reads the files.
-  Layout editor: F2 -> Appearance -> Edit Layout / New Layout (visual pane
-  geometry, visibility and per-pane colors with a live preview and strict
-  tiling validation; saving writes the user override file — editing a preset
-  overrides it by the same id, N renames).
-  Presets: classic / vinyl / karaoke / visualizer / focus /
-           stage / neon
+  "Reload Layouts" re-reads the files and reports auto-fitted layouts.
+  Layout editor: F2 -> Appearance -> Edit Layout / New Layout (edits the split
+  tree directly with a live preview; arrows select, Tab cycles, [ ] adjust
+  ratios, | / - split, x remove, t change type, c colors, w swap, Enter actions,
+  ? help, S save, Esc/q back). Saving writes the user override file — editing a
+  preset overrides it by the same id; n renames.
+  Presets (7): classic / vinyl / karaoke / visualizer / focus /
+               stage / neon
   Built-in: /usr/share/ter-music/layouts/layouts.json (source: data/layouts/)
   User override: ~/.config/ter-music/layouts.json (same id overrides built-in)
   Selection: ~/.config/ter-music/ui-layout (front-end local, not config.xml)

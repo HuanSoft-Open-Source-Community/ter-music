@@ -38,6 +38,7 @@
 #include "logger/logger.h"
 #include "audio/play_queue.h"
 #include "ui/menu_internal.h"
+#include "ui/layout_editor.h"
 #include "ui/remote_view.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -526,6 +527,7 @@ void run_event_loop(void)
         remote_view_tick();
         sync_player_revisions();
         process_pending_ui_refresh();
+        controls_status_tick();
 
         /* 频谱独立窗格按自己的 40ms 节拍刷新；无歌词黑胶动画 100ms。
          * 二者都不再触发整块歌词/列表重绘。 */
@@ -656,7 +658,9 @@ void run_event_loop(void)
         if (ch == KEY_RESIZE) {
             clear();
             create_layout();
-            if (g_current_view != VIEW_MAIN) {
+            if (layout_editor_active()) {
+                layout_editor_render();
+            } else if (g_current_view != VIEW_MAIN) {
                 rerender_active_view();
             } else {
                 request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
@@ -666,6 +670,12 @@ void run_event_loop(void)
         }
 
         if (g_current_view != VIEW_MAIN) {
+            /* 布局编辑器是模态的：除 Ctrl+C 外，所有键先交给它。
+             * 否则 q 会在编辑器看到之前退出整个程序。 */
+            if (layout_editor_active() && ch != 3) {
+                handle_menu_input(ch);
+                continue;
+            }
             /* 退出是全局动作，必须在视图分发之前生效（原 q/Q 分支位置）。 */
             if (keymap_resolve(CTX_GLOBAL, ch) == ACTION_APP_QUIT) {
                 log_info("ui", "Event loop exiting on quit action");

@@ -1,10 +1,10 @@
 # TUI Layout Reference (English)
 
-Ter-Music's main view is data-driven. A layout preset lists the panes that should
-appear and gives each of them a per-mille rectangle. Every layout must **tile the
-main area exactly**: the visible panes must not overlap, and their combined area
-must be `1000 × 1000 = 1,000,000`. A layout with a hole, an overlap, or a wrong
-area sum is rejected as a whole.
+Ter-Music's main view is data-driven. A layout is a **binary split tree**: each
+split cuts its rectangle into two children, so the result is always a forced
+tiling with no gaps and no overlaps. A leaf names one pane kind. The tree is the
+authoritative model; the old flat rectangle list is still accepted and converted
+automatically.
 
 The main area is the terminal **minus the bottom menu bar**:
 
@@ -25,18 +25,16 @@ The bottom row (`LINES - 1`) is reserved for the `F1:... F9:...` hint bar.
 | `lyrics` | Current lyric lines |
 | `vinyl` | Colored half-block vinyl disc with a rotating album-cover center label and colored spectrum bars (falls back to the glyph animation when colors are unavailable; split out of the lyrics pane) |
 
-`lyrics` and `vinyl` have a special relationship:
+`lyrics` and `vinyl` are **mutually exclusive** in one layout:
 
-- both visible in a layout → `lyrics` is hidden at runtime; `vinyl` is shown;
-- `lyrics` only → a track without lyrics still gets the vinyl animation inside
-  the lyrics pane; the fallback skips its spectrum bars when the layout
-  already has a dedicated `spectrum` pane, so one screen never paints the
-  spectrum twice;
-- `vinyl` only → the vinyl pane is shown whether or not the track has lyrics.
-
-The fallback happens **before** the tiling check. Therefore a layout that defines
-both panes must give them suitable rectangles: after `lyrics` is hidden, the
-remaining panes must still tile the whole main area.
+- a split never offers `lyrics` while `vinyl` is present (or the reverse);
+- changing type with `t` replaces the old leaf, so `lyrics` ↔ `vinyl` is allowed;
+- when a legacy file contains both, `vinyl` wins and `lyrics` is dropped
+  (this matches the old runtime's visible result);
+- a `lyrics`-only layout still falls back to the vinyl animation inside the
+  lyrics pane for a track without lyrics; the fallback skips its spectrum bars
+  when the layout already has a dedicated `spectrum` pane;
+- a `vinyl`-only layout always shows the vinyl pane.
 
 ## File locations
 
@@ -51,17 +49,46 @@ remaining panes must still tile the whole main area.
 
 Load order: built-in → user → `TER_MUSIC_LAYOUTS`.
 
-## Top-level JSON
+## v2 JSON schema
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "default": "classic",
   "layouts": [
     {
       "id": "classic",
       "name": "Classic",
       "name_key": "layout.preset.classic",
+      "tree": {
+        "split": "row",
+        "ratio": 680,
+        "children": [
+          {
+            "split": "col",
+            "ratio": 520,
+            "children": [
+              { "pane": "playlist" },
+              {
+                "split": "col",
+                "ratio": 542,
+                "children": [
+                  { "pane": "info" },
+                  { "pane": "controls" }
+                ]
+              }
+            ]
+          },
+          {
+            "split": "col",
+            "ratio": 200,
+            "children": [
+              { "pane": "spectrum" },
+              { "pane": "lyrics" }
+            ]
+          }
+        ]
+      },
       "panes": [
         { "id": "playlist", "x": 0,   "y": 0,   "w": 680, "h": 520 },
         { "id": "info",     "x": 0,   "y": 520, "w": 680, "h": 260 },
@@ -74,24 +101,35 @@ Load order: built-in → user → `TER_MUSIC_LAYOUTS`.
 }
 ```
 
-## Fields
-
-### Layout
+### Layout object
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `id` | yes | `[A-Za-z0-9_-]`, max 31 chars; unique within a catalog |
 | `name` | no | display name, max 63 chars; falls back to `id` |
 | `name_key` | no | i18n key; used when a translation exists, otherwise `name` |
-| `panes` | yes | 1–6 unique pane objects |
+| `tree` | v2 yes | one split/leaf tree with 1–5 unique pane leaves |
+| `panes` | v2 mirror | derived per-mille rectangles; kept so older builds can read v2 files |
 
-### Pane
+`tree` is authoritative. Hand-editing `panes` without changing `tree` has no
+effect. The serializer always writes both.
+
+### Split node
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | `playlist`, `info`, `controls`, `spectrum`, `lyrics`, `vinyl` |
-| `x`, `y`, `w`, `h` | yes | per-mille integers (0–1000); `w > 0`, `h > 0`; `x+w <= 1000`, `y+h <= 1000` |
-| `visible` | no | `true`/`false` or `1`/`0`, default `true` |
+| `split` | yes | `row` = children side by side (left/right); `col` = stacked (top/bottom) |
+| `ratio` | no | first child's share of this node's axis, per-mille `1..999`; default `500` |
+| `children` | yes | array of exactly two nodes; extra nodes are ignored and the layout is auto-fitted |
+
+A split's two children share the same cut coordinate, so they cannot overlap or
+leave a gap.
+
+### Leaf node
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `pane` | yes | `playlist`, `info`, `controls`, `spectrum`, `lyrics`, `vinyl` |
 | `fg`, `bg` | no | pane text/background colour |
 | `border_fg`, `border_bg` | no | border colour; when omitted, it follows the body colour |
 
@@ -104,22 +142,61 @@ Colour values:
 - `0..255`: terminal palette index (values above the terminal's `COLORS-1` are
   clamped)
 
-Unknown fields are ignored, which keeps older builds able to read newer files.
-`version > 1` is accepted and known fields are still parsed.
+Out-of-range values are clamped, not rejected. Unknown fields are ignored.
 
-## Tiling rules
+## Auto-fitting (no more whole-layout rejection)
 
-A layout is accepted only when all of the following hold after the
-lyrics/vinyl fallback:
+The parser only skips data it cannot interpret structurally (broken top-level
+JSON, missing layout array, layout without a valid `id`). Everything else is
+fitted to a valid tree:
 
-1. at least one visible pane;
-2. no two visible rectangles overlap (touching edges is allowed);
-3. `Σ (w × h)` of all visible panes equals `1,000,000`.
+| Input problem | Result |
+| --- | --- |
+| v1 `panes` with a guillotine cut | converted to an exact split tree; geometry preserved |
+| v1 `panes` with a hole, overlap, or out-of-bounds rect | rects clamped/filled and the layout is marked auto-fitted |
+| v1 layout with no full guillotine cut (e.g. a windmill) | panes reflowed in reading order, marked auto-fitted |
+| `tree` with an unknown `split` | treated as `row`, marked auto-fitted |
+| `ratio` outside `1..999` | clamped, marked auto-fitted |
+| unknown / duplicate leaf, extra children | leaf/children ignored, marked auto-fitted |
+| `tree` empty or unusable | falls back to the v1 `panes` mirror; if that is unusable, classic geometry is used while preserving `id`/`name` |
+| both `lyrics` and `vinyl` | `vinyl` kept, `lyrics` dropped, marked auto-fitted |
+| a normalized tree that still fails the tiling invariant (defensive; e.g. duplicate leaves) | the smallest pane is dropped until the tree validates; if nothing works, classic geometry is used |
 
-Because non-overlapping rectangles have an area equal to their union, condition
-3 means the union is the whole main area. There is no gutter and no padding.
+A layout that was auto-fitted has `LayoutSpec.normalized = 1` internally. The
+settings reload message reports how many layouts were auto-fitted, and the
+editor shows a notice when it opens such a layout. Saving writes the canonical
+v2 tree, so the notice disappears next time.
 
-At runtime the per-mille edges are rounded with one shared boundary formula:
+## v1 compatibility
+
+Old files keep working:
+
+```json
+{
+  "version": 1,
+  "layouts": [
+    {
+      "id": "split",
+      "name": "My Split",
+      "panes": [
+        { "id": "playlist", "x": 0,   "y": 0, "w": 500, "h": 1000 },
+        { "id": "info",     "x": 500, "y": 0, "w": 500, "h": 1000 }
+      ]
+    }
+  ]
+}
+```
+
+The parser looks for a full guillotine cut, choosing the most balanced one and
+preferring a vertical cut on ties. It encodes the cut as
+`ceil(offset * 1000 / span)`, which reproduces the original edge under the
+runtime's floor formula. If no cut exists, panes are reflowed in reading order.
+The next editor save rewrites the file as v2 with a `tree` and a `panes` mirror.
+
+## Runtime geometry
+
+The per-mille rectangles are expanded from the tree, then mapped to terminal
+cells with one shared boundary formula:
 
 ```
 start = origin + units * extent / 1000
@@ -135,6 +212,145 @@ sub-pixel strips, so no blank cell appears.
 
 If a positive-area window cannot be created, the runtime falls back to a
 single full-screen `playlist` rescue layout, so the main area remains filled.
+If the selected tree somehow fails validation, the compiled-in classic tree is
+used; this is a defensive fallback, not a user-facing rejection.
+
+## Built-in presets
+
+| id | Panes | Tree (first child share) |
+| --- | --- | --- |
+| `classic` | playlist, info, controls, spectrum, lyrics | `row 680 [ col 520 [playlist, col 542 [info, controls]], col 200 [spectrum, lyrics] ]` |
+| `vinyl` | playlist, info, controls, spectrum, vinyl | classic tree with `vinyl` in place of `lyrics` |
+| `karaoke` | playlist, info, controls, lyrics | `row 600 [ col 560 [playlist, col 546 [info, controls]], lyrics ]` |
+| `visualizer` | playlist, info, controls, spectrum, vinyl | `row 560 [ col 600 [playlist, col 500 [info, controls]], col 640 [spectrum, vinyl] ]` |
+| `focus` | playlist, info, controls | `col 520 [playlist, col 542 [info, controls]]` |
+| `stage` | playlist, info, spectrum, lyrics, controls | `col 450 [playlist, col 637 [row 500 [info, col 429 [spectrum, lyrics]], controls]]` |
+| `neon` | classic geometry + explicit per-pane colours | classic tree with colours on the leaves |
+
+`classic` is the default. `neon` demonstrates colour overrides and clamps on
+8-colour terminals.
+
+## Custom tree example
+
+Two panes side by side, with a coloured playlist pane:
+
+```json
+{
+  "version": 2,
+  "default": "split",
+  "layouts": [
+    {
+      "id": "split",
+      "name": "My Split",
+      "name_key": "",
+      "tree": {
+        "split": "row",
+        "ratio": 500,
+        "children": [
+          { "pane": "playlist", "fg": 51, "border_fg": 45 },
+          { "pane": "info" }
+        ]
+      },
+      "panes": [
+        { "id": "playlist", "x": 0,   "y": 0, "w": 500, "h": 1000,
+          "fg": 51, "border_fg": 45 },
+        { "id": "info",     "x": 500, "y": 0, "w": 500, "h": 1000 }
+      ]
+    }
+  ]
+}
+```
+
+Save it to `~/.config/ter-music/layouts.json`, choose
+`F2 → Appearance → UI Layout → My Split`, or `Reload Layouts` after editing.
+
+## Layout editor
+
+Settings → Appearance offers two action items:
+
+- **Edit Layout** (`settings.opt.layout_edit`): opens the editor on the current
+  layout. Editing a built-in preset keeps its `id`; saving writes a user
+  override file that shadows the preset by the same id.
+- **New Layout** (`settings.opt.layout_new`): seeds the editor with the current
+  layout as a template and generates a unique `user_N` id.
+
+The editor always works on a split tree, so every operation produces a valid
+forced tiling. The left side lists the panes (localized name + share of the main
+area); the right side is a live schematic preview; the bottom shows the current
+split and three lines of key hints.
+
+### Main keys
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓`/`←`/`→` | select the adjacent pane by geometry |
+| `Tab` / `Shift+Tab` | cycle panes in tree order |
+| `[` / `]` | shrink/grow the selected pane's parent split by 1% |
+| `PgUp` / `PgDn` | adjust the same ratio by 5% |
+| `=` | restore the parent split to 50/50 |
+| `|` | split side by side; then choose the new pane type |
+| `-` | split stacked; then choose the new pane type |
+| `x` | remove the selected pane (at least one remains; the sibling takes over) |
+| `t` | change the selected pane's type (unused kinds; `lyrics` and `vinyl` may replace each other) |
+| `w` | swap types with the next pane in tree order |
+| `c` | open the colour panel |
+| `n` | rename the layout |
+| `Enter` | open the action menu |
+| `?` / `F1` | open the full key help |
+| `S` / `Ctrl+S` | save |
+| `Esc` / `q` | back/close (press twice when changes are unsaved) |
+
+`Esc` and `q` are handled by the editor itself; they do not exit the settings
+view or the application while the editor is open. `Ctrl+C` remains the
+emergency quit.
+
+### Action menu
+
+`Enter` opens: split side by side, split stacked, change pane type, edit
+colours, restore 50/50, swap with next pane, remove pane, rename layout.
+`↑`/`↓` select, `Enter` runs, `Esc` returns.
+
+### Colour panel
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓` | select fg / bg / border_fg / border_bg |
+| `←`/`→` | cycle `-2 (inherit) → -1 (terminal default) → 0..255` |
+| `PgUp`/`PgDn` | cycle by 10 |
+| `Home` / `End` | set inherit / terminal default |
+| `r` | reset the current field to inherit |
+| `R` | reset all four fields to inherit |
+| `Enter` / `Esc` | back to the main screen |
+
+### Limits and feedback
+
+- The editor needs at least 60 columns × 16 rows.
+- A pane must keep at least 1% of each axis (`LAYOUT_MIN_PANE_UNITS = 10`
+  per-mille). Operations that would violate this are refused with a status
+  message and the layout is unchanged.
+- A split never offers a kind that is already used or would create a
+  lyrics/vinyl conflict. Changing type with `t` may replace `lyrics` with
+  `vinyl` (or the reverse), because the old leaf disappears in the same
+  transaction.
+- The footer status line reports the last action or error. There is no
+  "validation failed, cannot save" path for normal edits; `S` saves directly.
+- Saving writes the user file atomically, reloads the catalog, selects the
+  saved layout immediately and closes the editor.
+
+### User file management
+
+The user file `~/.config/ter-music/layouts.json` is rewritten atomically
+(write-to-temp + rename) and preserves the other user layouts it contains.
+Notes:
+
+- Up to `LAYOUT_MAX_CATALOG` (24) user layouts; beyond that the save fails
+  with a message.
+- The file is re-serialized from the parsed catalog, so hand-added unknown
+  fields are dropped by an editor save (the parser itself ignores them too).
+- If the file exists but is unreadable/corrupt, an editor save rebuilds it
+  from scratch (a warning is logged).
+- Deleting the user file (or removing a layout from it) restores the built-in
+  preset's original definition.
 
 ## Content bounds
 
@@ -158,116 +374,29 @@ cover still honours the configured braille/ASCII/half-block charset. The control
 content rectangle, so no cover paints on a pane border. This keeps small or
 unusually proportioned layouts visually intact.
 
-The vinyl pane uses the same color tiers and pair-budget discipline. When
-colored vinyl is enabled the remaining cover pairs are split between the info
-cover, the controls cover and the vinyl label as 2:1:1, and 12 fixed pairs are
-reserved for the disc's three shades and the bar ramp. The center label is the
-current cover cropped to a circle and rotated with the disc. When the UI is
-ASCII, colors are unavailable, or the usable pair budget is below the
-colored-vinyl threshold, the whole vinyl animation stays on the original glyph
-rendering and the info/controls budgets keep their old 2:1 split. A missing
-cover keeps the colored disc and bars and leaves the center as a plain dark
-disc.
+## Colour precedence
 
-## Built-in presets
-
-| id | Panes | Notes |
-| --- | --- | --- |
-| `classic` | playlist, info, controls, spectrum, lyrics | default, familiar five-pane arrangement |
-| `vinyl` | playlist, info, controls, spectrum, vinyl | lyrics replaced by the standalone vinyl pane |
-| `karaoke` | playlist, info, controls, lyrics | lyrics column dominates; no spectrum/vinyl |
-| `visualizer` | playlist, info, controls, spectrum, vinyl | large spectrum + vinyl, no lyrics pane |
-| `focus` | playlist, info, controls | full-width rows; maps the old `show_lyrics_panel=0` default |
-| `stage` | playlist, info, spectrum, lyrics, controls | top row + bottom control row + split middle; T-junctions but no gaps |
-| `neon` | classic geometry + explicit per-pane colours | demonstrates colour overrides; clamps on 8-colour terminals |
-
-## Custom layout example
-
-Two panes side by side, with a coloured playlist pane:
-
-```json
-{
-  "version": 1,
-  "default": "split",
-  "layouts": [
-    {
-      "id": "split",
-      "name": "My Split",
-      "panes": [
-        { "id": "playlist", "x": 0,   "y": 0, "w": 500, "h": 1000,
-          "fg": 51, "border_fg": 45 },
-        { "id": "info",     "x": 500, "y": 0, "w": 500, "h": 1000 }
-      ]
-    }
-  ]
-}
-```
-
-Save it to `~/.config/ter-music/layouts.json`, choose
-`F2 → Appearance → UI Layout → My Split`, or `Reload Layouts` after editing.
-
-## Layout editor
-
-Settings → Appearance offers two action items:
-
-- **Edit Layout** (`settings.opt.layout_edit`): opens the editor on the current
-  layout. Editing a built-in preset keeps its `id`; saving writes a user
-  override file that shadows the preset by the same id. The preset's i18n
-  `name_key` is dropped so your own name is displayed.
-- **New Layout** (`settings.opt.layout_new`): seeds the editor with the current
-  layout as a template and generates a unique `user_N` id.
-
-The editor shows a list of panes with a live, schematic preview on the right
-(and below the list on narrow terminals). Keys:
-
-| Key | Action |
-| --- | --- |
-| `↑`/`↓` | select pane row (each row is one pane kind) |
-| `←`/`→` | select field: visibility, x, y, w, h, fg, bg, border fg, border bg |
-| `+`/`-` | adjust by 1 (visibility toggles; colours cycle `-2 → -1 → 0..255`) |
-| `PgUp`/`PgDn` | adjust geometry by 10 |
-| `v`/`Space` | toggle visibility when the visibility field is selected |
-| `a` | add the next unused pane kind (up to 6) |
-| `d` | delete the selected pane (at least one must remain) |
-| `r` | reset the pane's colours to inherit (`-2`), i.e. follow the theme |
-| `n` | rename the layout |
-| `S` | validate and save |
-| `Esc` | discard the working copy (press twice when changes are unsaved) |
-
-The validation status line re-runs the strict tiling check after every edit
-(after the lyrics/vinyl fallback). Saving is refused while the check fails.
-A successful save writes the user file, reloads the catalog and selects the
-saved layout immediately.
-
-### User file management
-
-The user file `~/.config/ter-music/layouts.json` is rewritten atomically
-(write-to-temp + rename) and preserves the other user layouts it contains.
-Notes:
-
-- Up to `LAYOUT_MAX_CATALOG` (24) user layouts; beyond that the save fails
-  with a message.
-- The file is re-serialized from the parsed catalog, so hand-added unknown
-  fields are dropped by an editor save (the parser itself ignores them too).
-- If the file exists but is unreadable/corrupt, an editor save rebuilds it
-  from scratch (a warning is logged).
-- Deleting the user file (or removing a layout from it) restores the built-in
-  preset's original definition.
+Rainbow mode → per-pane explicit colours (tree leaves / user file) →
+theme colours from Settings (`playlist`/`controls`/`lyrics` fg+bg). To hand a
+pane back to the theme, open the layout editor, select the pane, press `c`,
+select each field and press `r`, then save. Rainbow mode still ignores explicit
+layout colours.
 
 ## Troubleshooting
 
-- **My layout is missing from the list**: it was rejected. Check the log
-  (`--debug`) for messages such as “does not tile the main area” or “overlap”.
-- **I changed a pane width and the layout disappeared**: update the adjacent
-  pane(s) so the area sum stays at 1,000,000.
+- **My old layout has a different shape after upgrading**: it contained a gap,
+  overlap, out-of-bounds rect, or a non-guillotine arrangement and was
+  auto-fitted. The reload message reports the count; open the editor to see the
+  notice and adjust the split tree. It is no longer removed from the list.
+- **The editor refuses a split / ratio change**: the result would make a pane
+  smaller than 1% of an axis. The status line says so and the layout is
+  unchanged. A split also cannot add `lyrics` while `vinyl` exists (or the
+  reverse); use `t` to replace the existing one instead.
+- **I edited `panes` by hand and nothing changed**: `tree` is authoritative.
+  Edit `tree`, or use the editor and let it write both.
 - **Colours do not follow the theme**: the pane carries explicit `fg`/`bg`
-  values, which take precedence over the theme. Colour precedence is:
-  rainbow mode → per-pane explicit colours (layout JSON / user file) →
-  theme colours from Settings (`playlist`/`controls`/`lyrics` fg+bg).
-  To hand a pane back to the theme, open the layout editor, select the pane,
-  press `r` (reset colours to inherit) and save. Rainbow mode still ignores
-  explicit layout colours.
+  values, which take precedence over the theme. Reset them with `c` → `r`/`R`.
 - **I selected a layout but the list is still the old one**: press
   `Reload Layouts` in Settings.
-- **No layout files are installed**: the compiled-in `classic` rescue layout is
-  used and the TUI still works.
+- **No layout files are installed**: the compiled-in `classic` tree is used and
+  the TUI still works.
