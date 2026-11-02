@@ -78,8 +78,11 @@ static int pane_covers(const LayoutPaneRect *rect, int x, int y)
 static void check_tiling(const LayoutSpec *spec, int rows, int cols,
                          const char *label)
 {
-    LayoutSpec resolved;
-    layout_spec_resolve(spec, &resolved);
+    LayoutResolved resolved;
+    if (layout_spec_resolve(spec, &resolved) != 0) {
+        CHECK(0, "layout resolves");
+        return;
+    }
 
     LayoutGeometry geometry;
     layout_geometry_compute(&resolved, rows, cols, &geometry);
@@ -126,9 +129,9 @@ static void test_classic_exact(void)
     LayoutSpec classic;
     CHECK(layout_spec_build_fallback(&classic) == 0, "fallback builds");
 
-    LayoutSpec resolved;
-    layout_spec_resolve(&classic, &resolved);
-
+    LayoutResolved resolved;
+    CHECK(layout_spec_resolve(&classic, &resolved) == 0,
+          "classic resolves");
     LayoutGeometry geometry;
     layout_geometry_compute(&resolved, 30, 100, &geometry);
     CHECK(geometry.valid, "classic geometry valid at 100x30");

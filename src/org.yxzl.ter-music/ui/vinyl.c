@@ -287,6 +287,22 @@ static void vinyl_prepare_animation(VinylAnimation *anim)
                     anim->stopped;
 }
 
+/* 两个角度之间的最短距离，结果范围为 [0, π]。
+ * highlight_angle 会超过 π，而 atan2 的结果在 [-π, π]；若直接相减后只做
+ * 一次 2π - diff，差值超过 2π 时会得到负数，左上象限的分界处就会被
+ * 误判为高光。先取模再归一化可避免这块虚假的扇形。 */
+static double vinyl_angle_distance(double a, double b)
+{
+    double diff = fmod(a - b, M_PI * 2.0);
+    if (diff < 0.0) {
+        diff += M_PI * 2.0;
+    }
+    if (diff > M_PI) {
+        diff = (M_PI * 2.0) - diff;
+    }
+    return diff;
+}
+
 static int vinyl_band_count(const VinylGeometry *geo)
 {
     int band_count = VISUALIZER_BAND_COUNT;
@@ -447,10 +463,7 @@ static void vinyl_draw_color_disc(WINDOW *win, const VinylGeometry *geo,
             }
 
             double angle = atan2(dy, dx);
-            double diff = fabs(angle - anim->highlight_angle);
-            if (diff > M_PI) {
-                diff = (2.0 * M_PI) - diff;
-            }
+            double diff = vinyl_angle_distance(angle, anim->highlight_angle);
 
             double top_dy = ((double)row - 0.25) - (double)geo->center_y;
             double bottom_dy = ((double)row + 0.25) - (double)geo->center_y;
@@ -564,10 +577,7 @@ static void render_vinyl_disc_chars(WINDOW *win, int show_messages,
             if (dist > (double)geo.disc_inner &&
                 dist <= (double)geo.disc_outer) {
                 double angle = atan2(dy, dx);
-                double diff = fabs(angle - anim.highlight_angle);
-                if (diff > M_PI) {
-                    diff = (2.0 * M_PI) - diff;
-                }
+                double diff = vinyl_angle_distance(angle, anim.highlight_angle);
                 draw_vinyl_glyph(win, row, col,
                                  pick_disc_glyph(diff, angle, anim.pulse_phase),
                                  diff < 0.18 ? A_BOLD : 0);

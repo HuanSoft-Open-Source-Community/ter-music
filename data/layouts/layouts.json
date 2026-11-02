@@ -1,86 +1,544 @@
 {
-  "version": 1,
+  "version": 2,
   "default": "classic",
   "layouts": [
     {
       "id": "classic",
       "name": "Classic",
       "name_key": "layout.preset.classic",
+      "tree": {
+        "split": "row",
+        "ratio": 680,
+        "children": [
+          {
+            "split": "col",
+            "ratio": 520,
+            "children": [
+              {
+                "pane": "playlist"
+              },
+              {
+                "split": "col",
+                "ratio": 542,
+                "children": [
+                  {
+                    "pane": "info"
+                  },
+                  {
+                    "pane": "controls"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "split": "col",
+            "ratio": 200,
+            "children": [
+              {
+                "pane": "spectrum"
+              },
+              {
+                "pane": "lyrics"
+              }
+            ]
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 680, "h": 520 },
-        { "id": "info", "x": 0, "y": 520, "w": 680, "h": 260 },
-        { "id": "controls", "x": 0, "y": 780, "w": 680, "h": 220 },
-        { "id": "spectrum", "x": 680, "y": 0, "w": 320, "h": 200 },
-        { "id": "lyrics", "x": 680, "y": 200, "w": 320, "h": 800 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 680,
+          "h": 520
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 520,
+          "w": 680,
+          "h": 260
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 780,
+          "w": 680,
+          "h": 220
+        },
+        {
+          "id": "spectrum",
+          "x": 680,
+          "y": 0,
+          "w": 320,
+          "h": 200
+        },
+        {
+          "id": "lyrics",
+          "x": 680,
+          "y": 200,
+          "w": 320,
+          "h": 800
+        }
       ]
     },
     {
       "id": "vinyl",
       "name": "Vinyl",
       "name_key": "layout.preset.vinyl",
+      "tree": {
+        "split": "row",
+        "ratio": 680,
+        "children": [
+          {
+            "split": "col",
+            "ratio": 520,
+            "children": [
+              {
+                "pane": "playlist"
+              },
+              {
+                "split": "col",
+                "ratio": 542,
+                "children": [
+                  {
+                    "pane": "info"
+                  },
+                  {
+                    "pane": "controls"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "split": "col",
+            "ratio": 200,
+            "children": [
+              {
+                "pane": "spectrum"
+              },
+              {
+                "pane": "vinyl"
+              }
+            ]
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 680, "h": 520 },
-        { "id": "info", "x": 0, "y": 520, "w": 680, "h": 260 },
-        { "id": "controls", "x": 0, "y": 780, "w": 680, "h": 220 },
-        { "id": "spectrum", "x": 680, "y": 0, "w": 320, "h": 200 },
-        { "id": "vinyl", "x": 680, "y": 200, "w": 320, "h": 800 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 680,
+          "h": 520
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 520,
+          "w": 680,
+          "h": 260
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 780,
+          "w": 680,
+          "h": 220
+        },
+        {
+          "id": "spectrum",
+          "x": 680,
+          "y": 0,
+          "w": 320,
+          "h": 200
+        },
+        {
+          "id": "vinyl",
+          "x": 680,
+          "y": 200,
+          "w": 320,
+          "h": 800
+        }
       ]
     },
     {
       "id": "karaoke",
       "name": "Karaoke",
       "name_key": "layout.preset.karaoke",
+      "tree": {
+        "split": "row",
+        "ratio": 600,
+        "children": [
+          {
+            "split": "col",
+            "ratio": 560,
+            "children": [
+              {
+                "pane": "playlist"
+              },
+              {
+                "split": "col",
+                "ratio": 546,
+                "children": [
+                  {
+                    "pane": "info"
+                  },
+                  {
+                    "pane": "controls"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "pane": "lyrics"
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 600, "h": 560 },
-        { "id": "info", "x": 0, "y": 560, "w": 600, "h": 240 },
-        { "id": "controls", "x": 0, "y": 800, "w": 600, "h": 200 },
-        { "id": "lyrics", "x": 600, "y": 0, "w": 400, "h": 1000 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 600,
+          "h": 560
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 560,
+          "w": 600,
+          "h": 240
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 800,
+          "w": 600,
+          "h": 200
+        },
+        {
+          "id": "lyrics",
+          "x": 600,
+          "y": 0,
+          "w": 400,
+          "h": 1000
+        }
       ]
     },
     {
       "id": "visualizer",
       "name": "Visualizer",
       "name_key": "layout.preset.visualizer",
+      "tree": {
+        "split": "row",
+        "ratio": 560,
+        "children": [
+          {
+            "split": "col",
+            "ratio": 600,
+            "children": [
+              {
+                "pane": "playlist"
+              },
+              {
+                "split": "col",
+                "ratio": 500,
+                "children": [
+                  {
+                    "pane": "info"
+                  },
+                  {
+                    "pane": "controls"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "split": "col",
+            "ratio": 640,
+            "children": [
+              {
+                "pane": "spectrum"
+              },
+              {
+                "pane": "vinyl"
+              }
+            ]
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 560, "h": 600 },
-        { "id": "info", "x": 0, "y": 600, "w": 560, "h": 200 },
-        { "id": "controls", "x": 0, "y": 800, "w": 560, "h": 200 },
-        { "id": "spectrum", "x": 560, "y": 0, "w": 440, "h": 640 },
-        { "id": "vinyl", "x": 560, "y": 640, "w": 440, "h": 360 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 560,
+          "h": 600
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 600,
+          "w": 560,
+          "h": 200
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 800,
+          "w": 560,
+          "h": 200
+        },
+        {
+          "id": "spectrum",
+          "x": 560,
+          "y": 0,
+          "w": 440,
+          "h": 640
+        },
+        {
+          "id": "vinyl",
+          "x": 560,
+          "y": 640,
+          "w": 440,
+          "h": 360
+        }
       ]
     },
     {
       "id": "focus",
       "name": "Focus",
       "name_key": "layout.preset.focus",
+      "tree": {
+        "split": "col",
+        "ratio": 520,
+        "children": [
+          {
+            "pane": "playlist"
+          },
+          {
+            "split": "col",
+            "ratio": 542,
+            "children": [
+              {
+                "pane": "info"
+              },
+              {
+                "pane": "controls"
+              }
+            ]
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 1000, "h": 520 },
-        { "id": "info", "x": 0, "y": 520, "w": 1000, "h": 260 },
-        { "id": "controls", "x": 0, "y": 780, "w": 1000, "h": 220 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 1000,
+          "h": 520
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 520,
+          "w": 1000,
+          "h": 260
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 780,
+          "w": 1000,
+          "h": 220
+        }
       ]
     },
     {
       "id": "stage",
       "name": "Stage",
       "name_key": "layout.preset.stage",
+      "tree": {
+        "split": "col",
+        "ratio": 450,
+        "children": [
+          {
+            "pane": "playlist"
+          },
+          {
+            "split": "col",
+            "ratio": 637,
+            "children": [
+              {
+                "split": "row",
+                "ratio": 500,
+                "children": [
+                  {
+                    "pane": "info"
+                  },
+                  {
+                    "split": "col",
+                    "ratio": 429,
+                    "children": [
+                      {
+                        "pane": "spectrum"
+                      },
+                      {
+                        "pane": "lyrics"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "pane": "controls"
+              }
+            ]
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 1000, "h": 450 },
-        { "id": "info", "x": 0, "y": 450, "w": 500, "h": 350 },
-        { "id": "spectrum", "x": 500, "y": 450, "w": 500, "h": 150 },
-        { "id": "lyrics", "x": 500, "y": 600, "w": 500, "h": 200 },
-        { "id": "controls", "x": 0, "y": 800, "w": 1000, "h": 200 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 1000,
+          "h": 450
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 450,
+          "w": 500,
+          "h": 350
+        },
+        {
+          "id": "spectrum",
+          "x": 500,
+          "y": 450,
+          "w": 500,
+          "h": 150
+        },
+        {
+          "id": "lyrics",
+          "x": 500,
+          "y": 600,
+          "w": 500,
+          "h": 200
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 800,
+          "w": 1000,
+          "h": 200
+        }
       ]
     },
     {
       "id": "neon",
       "name": "Neon",
       "name_key": "layout.preset.neon",
+      "tree": {
+        "split": "row",
+        "ratio": 680,
+        "children": [
+          {
+            "split": "col",
+            "ratio": 520,
+            "children": [
+              {
+                "pane": "playlist",
+                "fg": 51,
+                "border_fg": 45
+              },
+              {
+                "split": "col",
+                "ratio": 542,
+                "children": [
+                  {
+                    "pane": "info",
+                    "fg": 45,
+                    "border_fg": 39
+                  },
+                  {
+                    "pane": "controls",
+                    "fg": 214,
+                    "border_fg": 208
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "split": "col",
+            "ratio": 200,
+            "children": [
+              {
+                "pane": "spectrum",
+                "fg": 39,
+                "border_fg": 51
+              },
+              {
+                "pane": "lyrics",
+                "fg": 207,
+                "border_fg": 201
+              }
+            ]
+          }
+        ]
+      },
       "panes": [
-        { "id": "playlist", "x": 0, "y": 0, "w": 680, "h": 520, "fg": 51, "border_fg": 45 },
-        { "id": "info", "x": 0, "y": 520, "w": 680, "h": 260, "fg": 45, "border_fg": 39 },
-        { "id": "controls", "x": 0, "y": 780, "w": 680, "h": 220, "fg": 214, "border_fg": 208 },
-        { "id": "spectrum", "x": 680, "y": 0, "w": 320, "h": 200, "fg": 39, "border_fg": 51 },
-        { "id": "lyrics", "x": 680, "y": 200, "w": 320, "h": 800, "fg": 207, "border_fg": 201 }
+        {
+          "id": "playlist",
+          "x": 0,
+          "y": 0,
+          "w": 680,
+          "h": 520,
+          "fg": 51,
+          "border_fg": 45
+        },
+        {
+          "id": "info",
+          "x": 0,
+          "y": 520,
+          "w": 680,
+          "h": 260,
+          "fg": 45,
+          "border_fg": 39
+        },
+        {
+          "id": "controls",
+          "x": 0,
+          "y": 780,
+          "w": 680,
+          "h": 220,
+          "fg": 214,
+          "border_fg": 208
+        },
+        {
+          "id": "spectrum",
+          "x": 680,
+          "y": 0,
+          "w": 320,
+          "h": 200,
+          "fg": 39,
+          "border_fg": 51
+        },
+        {
+          "id": "lyrics",
+          "x": 680,
+          "y": 200,
+          "w": 320,
+          "h": 800,
+          "fg": 207,
+          "border_fg": 201
+        }
       ]
     }
   ]

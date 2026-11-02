@@ -32,9 +32,6 @@ extern WINDOW *win_lyrics;
 extern int g_playlist_tab_mode;
 extern int g_queue_selected_index;
 
-/* Layout helpers (defined in layout.c) */
-extern int get_controls_button_row(int height);
-
 /* ============================================================
  * Mouse event helpers
  * ============================================================ */
@@ -122,61 +119,16 @@ int get_control_index_from_window_point(int window_y, int window_x)
     int h, w;
     getmaxyx(win_controls, h, w);
 
-    int button_start_row = get_controls_button_row(h);
-    int button_end_row = h - 2;
-
-    if (window_y < button_start_row || window_y > button_end_row) return -1;
-
-    int available_width = w - 2;
-    int current_col = 0;
-    int is_first_in_row = 1;
-    int current_row = button_start_row;
+    ControlsLayout layout;
+    controls_compute_layout(h, w, &layout);
 
     for (int i = 0; i < CONTROL_COUNT - 1; i++) {
-        char display_label[32];
-        build_control_label(i, display_label, sizeof(display_label));
-        int button_width = utf8_str_width(display_label) + 4;
-
-        if (is_first_in_row) {
-            int row_button_count = 0;
-            int row_width = 0;
-            for (int j = i; j < CONTROL_COUNT - 1; j++) {
-                char temp_label[32];
-                build_control_label(j, temp_label, sizeof(temp_label));
-                int temp_len = utf8_str_width(temp_label);
-                int temp_button_width = temp_len + 4;
-                if (row_width + temp_button_width > available_width && row_button_count > 0) break;
-                row_width += temp_button_width;
-                row_button_count++;
-            }
-            current_col = (available_width - row_width) / 2 + 1;
-            if (current_col < 1) current_col = 1;
-            is_first_in_row = 0;
-        }
-
-        if (!is_first_in_row && current_col + button_width > w - 1) {
-            current_row++;
-            if (current_row > button_end_row) break;
-
-            int row_button_count = 0;
-            int row_width = 0;
-            for (int j = i; j < CONTROL_COUNT - 1; j++) {
-                char temp_label[32];
-                build_control_label(j, temp_label, sizeof(temp_label));
-                int temp_len = utf8_str_width(temp_label);
-                int temp_button_width = temp_len + 4;
-                if (row_width + temp_button_width > available_width && row_button_count > 0) break;
-                row_width += temp_button_width;
-                row_button_count++;
-            }
-            current_col = (available_width - row_width) / 2 + 1;
-            if (current_col < 1) current_col = 1;
-        }
-
-        if (window_y == current_row && window_x >= current_col && window_x < current_col + button_width)
+        if (layout.button_row[i] < 0 || layout.button_width[i] <= 0) continue;
+        if (window_y == layout.button_row[i] &&
+            window_x >= layout.button_col[i] &&
+            window_x < layout.button_col[i] + layout.button_width[i]) {
             return i;
-
-        current_col += button_width;
+        }
     }
 
     return -1;

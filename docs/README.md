@@ -43,7 +43,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🕒 **Playback History**: Automatically records playback history for easy review
 - 📂 **Directory History**: Records recently visited music directories
 - 🎨 **Expanded Color Palette**: 24 preset themes + 1 custom slot with paired-color guard
-- 🧩 **Data-driven Layouts**: 8 JSON layout presets define every pane's position, size, proportion and colours; all layouts tile the main area seamlessly, and a separate vinyl pane can replace or pre-empt the lyrics pane
+- 🧩 **Data-driven Layouts**: 7 JSON layout presets expressed as split trees; forced tiling is structural, old flat geometry is auto-fitted instead of rejected, and a separate vinyl pane is mutually exclusive with the lyrics pane
 - 💾 **Persistent Storage**: SQLite-based storage (favorites, history, playlists) with automatic JSON migration from v1
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
@@ -68,7 +68,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | Feature                                      | Description                                 |
 | ------------------------------------------ | ------------------------------------------- |
 | 🚀 **Low Resource Usage**                     | Memory usage usually < 10MB, extremely low CPU usage  |
-| 🎨 **Beautiful TUI**                         | JSON-defined pane layouts (8 presets), colored interface, strict seamless tiling and terminal size adaptation |
+| 🎨 **Beautiful TUI**                         | JSON-defined split-tree layouts (7 presets), colored interface, structural forced tiling and terminal size adaptation |
 | 🌍 **UTF-8 Chinese Support**                  | Perfect UTF-8 encoding support, correctly displays Chinese song metadata |
 | 🔄 **Persistent Storage**                     | SQLite-backed storage — configuration, library, favorites, playlists, and history, all in one database |
 | 🎯 **Multiple View Switching**: Quickly switch between settings, history, playlist, library, language and other views via F2-F8 function keys | <br /> |
@@ -656,11 +656,12 @@ gone: they belong to the front end. Third-party clients should use the
 
 ### 5.3 Interface Layout
 
-The main view is **data-driven**: every visible pane is defined by a JSON layout
-preset, and every layout must tile the whole main area (the terminal minus the
-bottom menu bar) exactly — no gaps, no overlaps, and no blank cells. Coordinates
-are per-mille rectangles, so a layout keeps its proportions when the terminal is
-resized.
+The main view is **data-driven**: every layout is a binary split tree whose
+leaves name pane kinds. A split cuts its rectangle into two children, so every
+layout is a forced tiling of the whole main area (the terminal minus the bottom
+menu bar) — no gaps, no overlaps, and no blank cells. Ratios are per-mille, so a
+layout keeps its proportions when the terminal is resized. Old flat-rectangle
+files are still read and auto-fitted instead of being rejected.
 
 Six pane kinds are available:
 
@@ -673,9 +674,12 @@ Six pane kinds are available:
 
 The vinyl pane and the lyrics pane have a deliberate fallback relationship:
 
-- If a layout defines both, the **lyrics pane is hidden** and the vinyl pane is shown.
-- If a layout defines only `lyrics`, that pane still falls back to the vinyl animation whenever the current track has no lyrics.
-- If a layout defines only `vinyl`, the vinyl pane is shown whether or not the track has lyrics.
+- `lyrics` and `vinyl` are mutually exclusive: a legacy file that defines both
+  keeps `vinyl` and drops `lyrics` (the old runtime's visible result); the editor
+  prevents the conflict and explains it.
+- A `lyrics`-only layout still falls back to the vinyl animation whenever the
+  current track has no lyrics.
+- A `vinyl`-only layout shows the vinyl pane whether or not the track has lyrics.
 
 The vinyl artwork is drawn with colored half-block cells when the terminal supports
 colors and has enough color pairs: the disc grooves use a fixed dark palette, the
@@ -698,11 +702,12 @@ preference, not part of the core configuration and not sent over D-Bus.
 - user overrides: `~/.config/ter-music/layouts.json` (same `id` overrides the built-in preset)
 - development override: `TER_MUSIC_LAYOUTS=/path/to/layouts.json`
 
-The eight built-in presets are `classic`, `vinyl`, `dual`, `karaoke`,
-`visualizer`, `focus`, `stage` and `neon`. `classic` is the default and keeps the
-familiar five-pane arrangement; `dual` defines all six panes and demonstrates the
-lyrics-hiding rule; `neon` demonstrates per-pane colour overrides. A layout with
-a hole, an overlap or an area sum other than 1,000,000 is rejected as a whole.
+The seven built-in presets are `classic`, `vinyl`, `karaoke`, `visualizer`,
+`focus`, `stage` and `neon`. `classic` is the default and keeps the familiar
+five-pane arrangement; `neon` demonstrates per-pane colour overrides. Geometry,
+colours, unknown panes, gaps, overlaps and non-guillotine old layouts are
+auto-fitted to a forced tiling instead of being rejected; the reload message
+reports how many layouts were adjusted.
 Pane content, including the info-pane album cover, is clipped to the inside of
 its border (the border cells are never overwritten); a pane too small for its
 renderer shows only its background and border. The info pane adapts to its own
@@ -710,6 +715,13 @@ size: wide panes keep metadata and audio parameters side by side with the cover
 on the right, while narrow-and-tall panes stack the cover above the metadata and
 audio blocks; the cover is hidden when it cannot keep a blank column before the
 border.
+
+The layout editor (`F2 → Appearance → Edit Layout / New Layout`) edits the split
+tree directly: arrows select by geometry, Tab cycles, `[`/`]` and PgUp/PgDn
+adjust ratios, `|`/`-` split, `x` removes, `t` changes type, `c` edits colours,
+`w` swaps, `Enter` opens the action menu, `?` shows help, `S` saves, and
+`Esc`/`q` closes. Every operation preserves forced tiling; there is no
+save-time geometry rejection.
 
 See [UI_LAYOUTS_en_US.md](UI_LAYOUTS_en_US.md) for the complete schema, colour
 rules and a custom-layout example.

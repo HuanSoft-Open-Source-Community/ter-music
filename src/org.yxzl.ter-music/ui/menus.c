@@ -32,6 +32,7 @@
 #include "ui/lyrics.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/layout_editor.h"
 #include "ui/keymap.h"
 #include "library/browser/browser.h"
 #include "remote/remote.h"
@@ -1039,6 +1040,12 @@ void handle_menu_input(int ch)
     if (g_current_view == VIEW_INFO) {
         extern void check_konami_input(int);
         check_konami_input(ch);
+    }
+
+    /* 编辑器激活时先接管全部按键（含 Esc），避免被设置页/全局退出截走。 */
+    if (layout_editor_active()) {
+        handle_settings_input(ch);
+        return;
     }
 
     if (ch == 27) {

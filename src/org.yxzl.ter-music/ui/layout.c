@@ -2,12 +2,12 @@
  * @file layout.c
  * @brief TUI 主界面运行时布局管理
  *
- * 布局规范由 ui/layout_spec.c 解析并做严格平铺校验；本文件负责加载
- * 内置/用户布局、保存本地选中状态、映射为窗口矩形、建窗、分配颜色，
- * 以及统一的窗格背景/边框/标题绘制。
+ * 布局规范由 ui/layout_spec.c 解析为强制平铺的分栏树；本文件负责加载
+ * 内置/用户布局、保存本地选中状态、展开分栏树、映射为窗口矩形、建窗、
+ * 分配颜色，以及统一的窗格背景/边框/标题绘制。
  *
- * 主区域 = 终端去掉底部菜单提示条后的全部区域。布局校验保证所有可见
- * 窗格严格铺满该区域，因此这里不对窗格做间距或空白补偿。
+ * 主区域 = 终端去掉底部菜单提示条后的全部区域。分栏树保证所有窗格严格
+ * 铺满该区域，因此这里不对窗格做间距或空白补偿。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -40,6 +40,7 @@ static LayoutCatalog g_catalog;
 static LayoutSpec g_current;
 static char g_current_id[LAYOUT_ID_MAX];
 static int g_initialized = 0;
+static int g_last_adjusted = 0;
 
 static int g_body_pair[LAYOUT_PANE_COUNT];
 static int g_border_pair[LAYOUT_PANE_COUNT];
@@ -95,8 +96,11 @@ static void merge_catalog_file(const char *path, LayoutCatalog *catalog)
         return;
     }
     layout_catalog_merge(catalog, &parsed);
-    log_info("layout", "Loaded %d layout(s) from '%s' (total %d, rejected %d)",
-             parsed.count, path, catalog->count, parsed.rejected);
+    g_last_adjusted += parsed.adjusted;
+    log_info("layout",
+             "Loaded %d layout(s) from '%s' (total %d, adjusted %d, skipped %d)",
+             parsed.count, path, catalog->count, parsed.adjusted,
+             parsed.skipped);
 }
 
 static void load_builtin_catalog(LayoutCatalog *catalog)
@@ -143,6 +147,7 @@ static void load_builtin_catalog(LayoutCatalog *catalog)
 static int load_full_catalog(LayoutCatalog *catalog)
 {
     layout_catalog_init(catalog);
+    g_last_adjusted = 0;
     load_builtin_catalog(catalog);
 
     char user_path[MAX_PATH_LEN];
@@ -222,7 +227,7 @@ static WINDOW **pane_slot(LayoutPaneKind kind)
     }
 }
 
-static const char *pane_title(LayoutPaneKind kind)
+const char *ui_layout_pane_title(LayoutPaneKind kind)
 {
     switch (kind) {
         case LAYOUT_PANE_PLAYLIST: return i18n_get("controls.playlist");
@@ -296,20 +301,6 @@ static int clamp_color(int value)
     return value;
 }
 
-static const LayoutPaneSpec *find_pane_spec(const LayoutSpec *spec,
-                                            LayoutPaneKind kind)
-{
-    if (!spec) {
-        return NULL;
-    }
-    for (int i = 0; i < spec->pane_count; i++) {
-        if (spec->panes[i].kind == kind) {
-            return &spec->panes[i];
-        }
-    }
-    return NULL;
-}
-
 void ui_layout_apply_colors(void)
 {
     for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
@@ -323,7 +314,7 @@ void ui_layout_apply_colors(void)
 
     for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
         LayoutPaneKind kind = (LayoutPaneKind)i;
-        const LayoutPaneSpec *pane = find_pane_spec(&g_current, kind);
+        const LayoutPaneSpec *pane = layout_spec_pane_config(&g_current, kind);
         if (!pane) {
             continue;
         }
@@ -543,7 +534,8 @@ static int create_windows(const LayoutGeometry *geometry)
             continue;
         }
         *slot = win;
-        ui_pane_begin((LayoutPaneKind)i, win, pane_title((LayoutPaneKind)i));
+        ui_pane_begin((LayoutPaneKind)i, win,
+                      ui_layout_pane_title((LayoutPaneKind)i));
         wrefresh(win);
     }
     return 0;
@@ -575,6 +567,11 @@ int ui_layout_init(void)
     log_info("layout", "Selected layout '%s' (%d available)", g_current_id,
              g_catalog.count);
     return 0;
+}
+
+int ui_layout_last_adjusted(void)
+{
+    return g_last_adjusted;
 }
 
 int ui_layout_reload(void)
@@ -810,8 +807,23 @@ void create_layout(void)
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
 
-    LayoutSpec resolved;
-    layout_spec_resolve(&g_current, &resolved);
+    LayoutResolved resolved;
+    char layout_err[192] = "";
+    if (layout_spec_resolve(&g_current, &resolved) != 0 ||
+        layout_spec_validate(&g_current, layout_err, sizeof(layout_err)) != 0) {
+        LayoutSpec fallback;
+        if (layout_spec_build_fallback(&fallback) == 0 &&
+            layout_spec_resolve(&fallback, &resolved) == 0) {
+            log_warn("layout",
+                     "Layout '%s' failed validation (%s); using classic fallback",
+                     g_current_id, layout_err[0] ? layout_err : "resolve failed");
+        } else {
+            log_error("layout", "No usable layout; cannot create main area");
+            refresh();
+            render_menu_hint_bar();
+            return;
+        }
+    }
 
     LayoutGeometry geometry;
     layout_geometry_compute(&resolved, rows, cols, &geometry);

@@ -65,26 +65,31 @@ void update_progress_bar(void)
     if (h < 5 || w < 20) return;
     wattrset(win_controls, ui_pane_body_attr(LAYOUT_PANE_CONTROLS));
 
+    int duration = player_duration_seconds();
+    if (duration <= 0) return;
+
     int current_pos = player_position_seconds();
     if (current_pos < 0) current_pos = 0;
-    if (current_pos > player_duration_seconds()) current_pos = player_duration_seconds();
+    if (current_pos > duration) current_pos = duration;
 
     uint64_t now_ms = get_ui_time_ms();
     int position_changed = (current_pos != last_position);
-    int force_redraw = position_changed || player_duration_seconds() != last_duration || (int)player_play_state() != (int)last_state;
+    int force_redraw = position_changed || duration != last_duration || (int)player_play_state() != (int)last_state;
     if (!force_redraw && (now_ms - last_refresh_ms) < UI_PROGRESS_REFRESH_MS) return;
 
-    int progress_percent = (current_pos * 100) / player_duration_seconds();
+    int progress_percent = (current_pos * 100) / duration;
     if (progress_percent > 100) progress_percent = 100;
 
     int current_min = current_pos / 60;
     int current_sec = current_pos % 60;
-    int total_min = player_duration_seconds() / 60;
-    int total_sec = player_duration_seconds() % 60;
+    int total_min = duration / 60;
+    int total_sec = duration % 60;
     current_min %= 100;
     total_min %= 100;
 
-    int progress_row = get_controls_progress_row(h);
+    ControlsLayout layout;
+    controls_compute_layout(h, w, &layout);
+    int progress_row = layout.progress_row;
     if (progress_row < 1 || progress_row >= h - 1) return;
 
     wmove(win_controls, progress_row, 1);
@@ -126,6 +131,6 @@ void update_progress_bar(void)
 
     last_refresh_ms = now_ms;
     last_position = current_pos;
-    last_duration = player_duration_seconds();
+    last_duration = duration;
     last_state = player_play_state();
 }

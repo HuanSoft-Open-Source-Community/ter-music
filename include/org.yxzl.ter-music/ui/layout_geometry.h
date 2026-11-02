@@ -2,8 +2,8 @@
  * @file layout_geometry.h
  * @brief 主界面布局的像素几何（纯算术，无 ncurses 依赖）
  *
- * 输入是已经执行过 vinyl/lyrics 回退的布局规范，输出每个窗格在终端
- * 主区域内的单元格矩形。主区域 = 终端去掉底部菜单栏后的全部区域。
+ * 输入是分栏树展开后的千分比矩形，输出每个窗格在终端主区域内的
+ * 单元格矩形。主区域 = 终端去掉底部菜单栏后的全部区域。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -33,12 +33,12 @@ void layout_geometry_main_area(int rows, int cols,
                                int *x, int *y, int *w, int *h);
 
 /**
- * @brief 把已回退的布局规范映射到单元格。
+ * @brief 把分栏树展开结果映射到单元格。
  *
- * 共享边界使用同一 floor 公式，严格平铺的布局在像素级也不会产生
+ * 共享边界使用同一 floor 公式，强制平铺的布局在像素级也不会产生
  * 缝隙或重叠。宽或高为 0 的窗格 has_cells=0。
  */
-void layout_geometry_compute(const LayoutSpec *resolved, int rows, int cols,
+void layout_geometry_compute(const LayoutResolved *resolved, int rows, int cols,
                              LayoutGeometry *out);
 
 /**

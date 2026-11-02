@@ -2030,8 +2030,16 @@ static void activate_settings_current_option(void)
         } else if (strcmp(previous_id, ui_layout_current_id()) != 0) {
             show_status_message(i18n_get("settings.layout.fallback"));
         } else {
-            char msg[128];
-            snprintf(msg, sizeof(msg), i18n_get("settings.layout.reload_ok"), count);
+            char msg[160];
+            int adjusted = ui_layout_last_adjusted();
+            if (adjusted > 0) {
+                snprintf(msg, sizeof(msg),
+                         i18n_get("settings.layout.reload_ok_adjusted"),
+                         count, adjusted);
+            } else {
+                snprintf(msg, sizeof(msg),
+                         i18n_get("settings.layout.reload_ok"), count);
+            }
             show_status_message(msg);
         }
         return;

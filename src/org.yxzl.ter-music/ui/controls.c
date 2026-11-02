@@ -28,35 +28,6 @@
 
 extern WINDOW *win_controls;
 
-/* ── Controls 窗格内部坐标（不参与主布局） ── */
-
-int get_controls_progress_row(int height)
-{
-    if (height >= 9) return 1;
-    int row = height / 2 - 2;
-    if (row < 1) row = 1;
-    return row;
-}
-
-int get_controls_button_row(int height)
-{
-    if (height >= 9) return 2;
-    int row = height / 2;
-    if (row < 2) row = 2;
-    return row;
-}
-
-int get_controls_visualizer_top(int height)
-{
-    if (height >= 9) return 4;
-    return get_controls_button_row(height) + 1;
-}
-
-int get_controls_visualizer_bottom(int height)
-{
-    return height - 3;
-}
-
 /* ── Control label i18n keys ── */
 static const char *control_label_keys[] = {
     "controls.label.prev",
@@ -115,12 +86,136 @@ void build_control_label(int index, char *dest, size_t dest_size)
 }
 
 /* ============================================================
+ * Control content layout
+ * ============================================================ */
+
+/* 控件按钮按渲染宽度换行，整块在窗格内垂直居中；鼠标、进度条和
+ * 可视化都使用同一份坐标，不再各自推算行号。 */
+void controls_compute_layout(int height, int width, ControlsLayout *out)
+{
+    if (!out) return;
+
+    memset(out, 0, sizeof(*out));
+    out->progress_row = -1;
+    out->visualizer_top = -1;
+    out->visualizer_bottom = -1;
+    out->status_row = height - 2;
+    for (int i = 0; i < CONTROL_COUNT; i++) {
+        out->button_row[i] = -1;
+        out->button_col[i] = -1;
+        out->button_width[i] = 0;
+    }
+
+    if (height < 4 || width < 10) return;
+
+    int available_width = width - 2;
+    int max_label_cols = available_width - 4;
+    if (max_label_cols < 1) return;
+
+    int button_count = CONTROL_COUNT - 1;
+    int button_width[CONTROL_COUNT] = {0};
+    int button_row_index[CONTROL_COUNT] = {0};
+    int row_width[CONTROL_COUNT + 1] = {0};
+    int row_count = 0;
+
+    for (int i = 0; i < button_count; i++) {
+        char raw_label[256];
+        char display_label[256];
+        build_control_label(i, raw_label, sizeof(raw_label));
+        format_display_text(display_label, sizeof(display_label),
+                            raw_label, max_label_cols, 0);
+
+        int label_width = utf8_str_width(display_label);
+        int button_width_value = label_width + 4;
+        if (button_width_value > available_width) {
+            button_width_value = available_width;
+        }
+
+        if (row_count == 0) row_count = 1;
+        if (row_width[row_count - 1] > 0 &&
+            row_width[row_count - 1] + button_width_value > available_width) {
+            row_count++;
+        }
+        button_width[i] = button_width_value;
+        button_row_index[i] = row_count - 1;
+        row_width[row_count - 1] += button_width_value;
+    }
+
+    int show_progress = height >= 5 && width >= 20 &&
+                        player_play_state() != PLAY_STATE_STOPPED &&
+                        player_duration_seconds() > 0;
+
+    /* 优先使用状态行上方的完整内容区，避免状态消息盖住按钮；只有
+     * 控件确实放不下时，才临时借用状态行。 */
+    int block_h = (show_progress ? 1 : 0) + row_count;
+    int content_rows = height - 3;
+    if (content_rows < 1) content_rows = 1;
+    if (block_h > content_rows) {
+        content_rows = height - 2;
+    }
+    if (content_rows < 1) return;
+
+    int visible_button_rows = row_count;
+    if (show_progress) {
+        int room = content_rows - 1;
+        if (visible_button_rows > room) visible_button_rows = room;
+    } else if (visible_button_rows > content_rows) {
+        visible_button_rows = content_rows;
+    }
+    if (visible_button_rows < 0) visible_button_rows = 0;
+
+    int visible_block_h = (show_progress ? 1 : 0) + visible_button_rows;
+    if (visible_block_h <= 0) return;
+
+    /* 在可用内容区内居中；放不下时贴边，绝不占边框。 */
+    int top = 1 + (content_rows - visible_block_h + 1) / 2;
+    if (top < 1) top = 1;
+    if (top + visible_block_h - 1 > content_rows) {
+        top = content_rows - visible_block_h + 1;
+    }
+    if (top < 1) top = 1;
+
+    int next_row = top;
+    if (show_progress) {
+        out->progress_row = next_row;
+        next_row++;
+    }
+
+    int row_cursor[CONTROL_COUNT + 1] = {0};
+    for (int i = 0; i < button_count; i++) {
+        int row_index = button_row_index[i];
+        if (row_index >= visible_button_rows) continue;
+
+        int row = next_row + row_index;
+        if (row < 1 || row > height - 2) continue;
+
+        int row_start = 1 + (available_width - row_width[row_index]) / 2;
+        if (row_start < 1) row_start = 1;
+        int col = row_start + row_cursor[row_index];
+        row_cursor[row_index] += button_width[i];
+
+        out->button_row[i] = row;
+        out->button_col[i] = col;
+        out->button_width[i] = button_width[i];
+    }
+
+    int block_bottom = top + visible_block_h - 1;
+    int viz_top = block_bottom + 2; /* 中间保留一行分隔线 */
+    int viz_bottom = height - 3;
+    if (viz_top <= viz_bottom) {
+        out->visualizer_top = viz_top;
+        out->visualizer_bottom = viz_bottom;
+    }
+}
+
+/* ============================================================
  * Status line rendering
  * ============================================================ */
 
 static pthread_mutex_t g_controls_status_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char g_controls_status_message[256] = "";
 static time_t g_controls_status_time = 0;
+static int g_controls_status_drawn = 0;
 
 void update_controls_status(const char *msg)
 {
@@ -150,12 +245,39 @@ void render_controls_status_line(void)
     status_time = g_controls_status_time;
     pthread_mutex_unlock(&g_controls_status_mutex);
 
+    int active = status_msg[0] != '\0' && (time(NULL) - status_time) < 3;
+    if (!active) {
+        /* 状态行可能被控件块临时借用；不能直接擦除，否则会擦掉控件。
+         * 请求一次完整重绘，由 ui_pane_begin() 清屏后按无状态布局重画。 */
+        if (g_controls_status_drawn) {
+            g_controls_status_drawn = 0;
+            request_ui_refresh(UI_DIRTY_CONTROLS);
+        }
+        return;
+    }
+
     int status_row = h - 2;
     mvwhline(win_controls, status_row, 1, ' ', w - 2);
+    ui_pane_clip_printf(win_controls, status_row, 2, "%s", status_msg);
+    g_controls_status_drawn = 1;
+}
 
-    if (status_msg[0] != '\0' && (time(NULL) - status_time) < 3) {
-        ui_pane_clip_printf(win_controls, status_row, 2, "%s", status_msg);
-    }
+/* 状态消息到期后主动触发一次整块重绘，避免它一直覆盖借用状态行的按钮。 */
+void controls_status_tick(void)
+{
+    if (!g_controls_status_drawn) return;
+
+    char status_msg[sizeof(g_controls_status_message)];
+    time_t status_time = 0;
+    pthread_mutex_lock(&g_controls_status_mutex);
+    snprintf(status_msg, sizeof(status_msg), "%s", g_controls_status_message);
+    status_time = g_controls_status_time;
+    pthread_mutex_unlock(&g_controls_status_mutex);
+
+    if (status_msg[0] != '\0' && (time(NULL) - status_time) < 3) return;
+
+    g_controls_status_drawn = 0;
+    request_ui_refresh(UI_DIRTY_CONTROLS);
 }
 
 /* ============================================================
@@ -603,118 +725,81 @@ void render_controls(void)
         return;
     }
 
+    ControlsLayout layout;
+    controls_compute_layout(h, w, &layout);
+
     // Progress bar
-    if (player_play_state() != PLAY_STATE_STOPPED && player_duration_seconds() > 0) {
-        int progress_row = get_controls_progress_row(h);
+    int duration = player_duration_seconds();
+    if (layout.progress_row >= 0 && duration > 0) {
+        int progress_row = layout.progress_row;
+        int current_pos = player_position_seconds();
+        if (current_pos < 0) current_pos = 0;
+        if (current_pos > duration) current_pos = duration;
 
-        if (h >= 5 && w >= 20) {
-            int current_pos = player_position_seconds();
-            if (current_pos < 0) current_pos = 0;
-            if (current_pos > player_duration_seconds()) current_pos = player_duration_seconds();
+        int progress_percent = (current_pos * 100) / duration;
+        if (progress_percent > 100) progress_percent = 100;
 
-            int progress_percent = (current_pos * 100) / player_duration_seconds();
-            if (progress_percent > 100) progress_percent = 100;
+        int current_min = current_pos / 60;
+        int current_sec = current_pos % 60;
+        int total_min = duration / 60;
+        int total_sec = duration % 60;
+        current_min %= 100;
+        total_min %= 100;
 
-            int current_min = current_pos / 60;
-            int current_sec = current_pos % 60;
-            int total_min = player_duration_seconds() / 60;
-            int total_sec = player_duration_seconds() % 60;
-            current_min %= 100;
-            total_min %= 100;
+        char time_str[32];
+        snprintf(time_str, sizeof(time_str), "%02d:%02d / %02d:%02d",
+                 current_min, current_sec, total_min, total_sec);
+        ui_pane_clip_printf(win_controls, progress_row, 2, "%s", time_str);
 
-            char time_str[32];
-            snprintf(time_str, sizeof(time_str), "%02d:%02d / %02d:%02d",
-                     current_min, current_sec, total_min, total_sec);
-            ui_pane_clip_printf(win_controls, progress_row, 2, "%s", time_str);
+        int time_width = 13;
+        int percent_width = 4;
+        int padding = 6;
+        int progress_bar_width = w - time_width - percent_width - padding - 4;
+        if (progress_bar_width >= 1) {
+            int progress_start_col = 2 + time_width + 1;
 
-            int time_width = 13;
-            int percent_width = 4;
-            int padding = 6;
-            int progress_bar_width = w - time_width - percent_width - padding - 4;
-            if (progress_bar_width >= 1) {
-                int progress_start_col = 2 + time_width + 1;
+            ui_pane_clip_printf(win_controls, progress_row, progress_start_col, "[");
 
-                ui_pane_clip_printf(win_controls, progress_row, progress_start_col, "[");
+            int filled_width = (progress_bar_width * progress_percent) / 100;
+            if (filled_width > progress_bar_width) filled_width = progress_bar_width;
 
-                int filled_width = (progress_bar_width * progress_percent) / 100;
-                if (filled_width > progress_bar_width) filled_width = progress_bar_width;
-
-                for (int i = 0; i < progress_bar_width && (progress_start_col + 1 + i) < w - 2; i++) {
-                    char c = '-';
-                    if (i < filled_width) c = '=';
-                    else if (i == filled_width && progress_percent < 100) c = '>';
-                    mvwaddch(win_controls, progress_row, progress_start_col + 1 + i, c);
-                }
-
-                ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
-                ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
+            for (int i = 0; i < progress_bar_width && (progress_start_col + 1 + i) < w - 2; i++) {
+                char c = '-';
+                if (i < filled_width) c = '=';
+                else if (i == filled_width && progress_percent < 100) c = '>';
+                mvwaddch(win_controls, progress_row, progress_start_col + 1 + i, c);
             }
 
-            mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
-            mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
+            ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 1 + progress_bar_width, "]");
+            ui_pane_clip_printf(win_controls, progress_row, progress_start_col + 2 + progress_bar_width, "%d%%", progress_percent);
         }
+
+        mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
+        mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
     }
 
     // Control buttons
-    int button_start_row = get_controls_button_row(h);
-    int current_row = button_start_row;
-    int available_width = w - 2;
-    int current_col = 0;
-    int is_first_in_row = 1;
-
     int max_label_cols = w - 6;
     for (int i = 0; i < CONTROL_COUNT - 1; i++) {
-        char raw_label[128];
-        char display_label[128];
-        build_control_label(i, raw_label, sizeof(raw_label));
-        if (max_label_cols < 1) {
-            break;
+        if (layout.button_row[i] < 0 || layout.button_width[i] <= 0) {
+            continue;
         }
+
+        char raw_label[256];
+        char display_label[256];
+        build_control_label(i, raw_label, sizeof(raw_label));
+        if (max_label_cols < 1) break;
         format_display_text(display_label, sizeof(display_label),
                             raw_label, max_label_cols, 0);
-        int len = utf8_str_width(display_label);
-        int button_width = len + 4;
 
-        if (is_first_in_row) {
-            int row_button_count = 0;
-            int row_width = 0;
-            for (int j = i; j < CONTROL_COUNT - 1; j++) {
-                char temp_label[32];
-                build_control_label(j, temp_label, sizeof(temp_label));
-                int temp_len = utf8_str_width(temp_label);
-                int temp_button_width = temp_len + 4;
-                if (row_width + temp_button_width > available_width && row_button_count > 0) break;
-                row_width += temp_button_width;
-                row_button_count++;
-            }
-            current_col = (available_width - row_width) / 2 + 1;
-            if (current_col < 1) current_col = 1;
-            is_first_in_row = 0;
-        }
-
-        if (!is_first_in_row && current_col + button_width > w - 1) {
-            current_row++;
-            if (current_row >= h - 2) break;
-
-            int row_button_count = 0;
-            int row_width = 0;
-            for (int j = i; j < CONTROL_COUNT - 1; j++) {
-                char temp_label[32];
-                build_control_label(j, temp_label, sizeof(temp_label));
-                int temp_len = utf8_str_width(temp_label);
-                int temp_button_width = temp_len + 4;
-                if (row_width + temp_button_width > available_width && row_button_count > 0) break;
-                row_width += temp_button_width;
-                row_button_count++;
-            }
-            current_col = (available_width - row_width) / 2 + 1;
-            if (current_col < 1) current_col = 1;
-        }
-
-        if (current_row < 1 || current_row >= h - 1 ||
+        int current_row = layout.button_row[i];
+        int current_col = layout.button_col[i];
+        int button_width = layout.button_width[i];
+        if (current_row < 1 || current_row > h - 2 ||
             current_col < 1 || current_col + button_width > w - 1) {
-            break;
+            continue;
         }
+
         if (i == g_current_control_idx && g_control_focus == 1) {
             wattron(win_controls, A_REVERSE | A_BOLD);
             mvwprintw(win_controls, current_row, current_col, " [%s] ", display_label);
@@ -722,7 +807,6 @@ void render_controls(void)
         } else {
             mvwprintw(win_controls, current_row, current_col, " [%s] ", display_label);
         }
-        current_col += button_width;
     }
 
     render_controls_status_line();
