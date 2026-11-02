@@ -306,8 +306,11 @@ void render_lyrics(void) {
     int total = player_lyrics_total();
 
     if (!has_lyrics || total <= 0) {
+        /* 布局已有独立 spectrum 窗格时回退动画不再画频谱柱，
+         * 避免同一屏出现两份频谱（碟面与文案保留）。 */
+        int draw_bars = !ui_pane_is_visible(LAYOUT_PANE_SPECTRUM);
         render_vinyl_disc(win_lyrics, 1,
-                          ui_pane_body_attr(LAYOUT_PANE_LYRICS));
+                          ui_pane_body_attr(LAYOUT_PANE_LYRICS), draw_bars);
         wrefresh(win_lyrics);
         return;
     }

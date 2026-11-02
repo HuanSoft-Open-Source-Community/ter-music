@@ -29,7 +29,9 @@ The bottom row (`LINES - 1`) is reserved for the `F1:... F9:...` hint bar.
 
 - both visible in a layout → `lyrics` is hidden at runtime; `vinyl` is shown;
 - `lyrics` only → a track without lyrics still gets the vinyl animation inside
-  the lyrics pane;
+  the lyrics pane; the fallback skips its spectrum bars when the layout
+  already has a dedicated `spectrum` pane, so one screen never paints the
+  spectrum twice;
 - `vinyl` only → the vinyl pane is shown whether or not the track has lyrics.
 
 The fallback happens **before** the tiling check. Therefore a layout that defines
@@ -173,7 +175,6 @@ disc.
 | --- | --- | --- |
 | `classic` | playlist, info, controls, spectrum, lyrics | default, familiar five-pane arrangement |
 | `vinyl` | playlist, info, controls, spectrum, vinyl | lyrics replaced by the standalone vinyl pane |
-| `dual` | all six; lyrics and vinyl overlap by definition | after fallback, lyrics is hidden and the remaining panes tile exactly |
 | `karaoke` | playlist, info, controls, lyrics | lyrics column dominates; no spectrum/vinyl |
 | `visualizer` | playlist, info, controls, spectrum, vinyl | large spectrum + vinyl, no lyrics pane |
 | `focus` | playlist, info, controls | full-width rows; maps the old `show_lyrics_panel=0` default |
@@ -205,15 +206,67 @@ Two panes side by side, with a coloured playlist pane:
 Save it to `~/.config/ter-music/layouts.json`, choose
 `F2 → Appearance → UI Layout → My Split`, or `Reload Layouts` after editing.
 
+## Layout editor
+
+Settings → Appearance offers two action items:
+
+- **Edit Layout** (`settings.opt.layout_edit`): opens the editor on the current
+  layout. Editing a built-in preset keeps its `id`; saving writes a user
+  override file that shadows the preset by the same id. The preset's i18n
+  `name_key` is dropped so your own name is displayed.
+- **New Layout** (`settings.opt.layout_new`): seeds the editor with the current
+  layout as a template and generates a unique `user_N` id.
+
+The editor shows a list of panes with a live, schematic preview on the right
+(and below the list on narrow terminals). Keys:
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓` | select pane row (each row is one pane kind) |
+| `←`/`→` | select field: visibility, x, y, w, h, fg, bg, border fg, border bg |
+| `+`/`-` | adjust by 1 (visibility toggles; colours cycle `-2 → -1 → 0..255`) |
+| `PgUp`/`PgDn` | adjust geometry by 10 |
+| `v`/`Space` | toggle visibility when the visibility field is selected |
+| `a` | add the next unused pane kind (up to 6) |
+| `d` | delete the selected pane (at least one must remain) |
+| `r` | reset the pane's colours to inherit (`-2`), i.e. follow the theme |
+| `n` | rename the layout |
+| `S` | validate and save |
+| `Esc` | discard the working copy (press twice when changes are unsaved) |
+
+The validation status line re-runs the strict tiling check after every edit
+(after the lyrics/vinyl fallback). Saving is refused while the check fails.
+A successful save writes the user file, reloads the catalog and selects the
+saved layout immediately.
+
+### User file management
+
+The user file `~/.config/ter-music/layouts.json` is rewritten atomically
+(write-to-temp + rename) and preserves the other user layouts it contains.
+Notes:
+
+- Up to `LAYOUT_MAX_CATALOG` (24) user layouts; beyond that the save fails
+  with a message.
+- The file is re-serialized from the parsed catalog, so hand-added unknown
+  fields are dropped by an editor save (the parser itself ignores them too).
+- If the file exists but is unreadable/corrupt, an editor save rebuilds it
+  from scratch (a warning is logged).
+- Deleting the user file (or removing a layout from it) restores the built-in
+  preset's original definition.
+
 ## Troubleshooting
 
 - **My layout is missing from the list**: it was rejected. Check the log
   (`--debug`) for messages such as “does not tile the main area” or “overlap”.
 - **I changed a pane width and the layout disappeared**: update the adjacent
   pane(s) so the area sum stays at 1,000,000.
-- **Colours do not follow the theme**: the preset specifies explicit `fg`/`bg`.
-  Remove those fields to inherit the theme again. Rainbow mode ignores explicit
-  layout colours.
+- **Colours do not follow the theme**: the pane carries explicit `fg`/`bg`
+  values, which take precedence over the theme. Colour precedence is:
+  rainbow mode → per-pane explicit colours (layout JSON / user file) →
+  theme colours from Settings (`playlist`/`controls`/`lyrics` fg+bg).
+  To hand a pane back to the theme, open the layout editor, select the pane,
+  press `r` (reset colours to inherit) and save. Rainbow mode still ignores
+  explicit layout colours.
 - **I selected a layout but the list is still the old one**: press
   `Reload Layouts` in Settings.
 - **No layout files are installed**: the compiled-in `classic` rescue layout is

@@ -72,6 +72,40 @@ int layout_spec_parse_file(const char *path, LayoutCatalog *out,
                            char *err, size_t err_size);
 
 /**
+ * @brief 把目录序列化为布局 JSON 文本。
+ *
+ * 输出形如 {"version":1,"default":"..","layouts":[..]}；与解析层互逆
+ * （serialize → parse 得到等价目录）。未显式指定的颜色（继承 -2）与
+ * 可见窗格（visible=1）不输出，保持与内置预设文件相同的精简风格。
+ *
+ * @return malloc 分配的 JSON 文本（调用方负责 free）；参数非法或
+ *         内存不足/超出缓冲上限时返回 NULL。
+ */
+char *layout_spec_serialize(const LayoutCatalog *catalog);
+
+/**
+ * @brief 把目录序列化并写入 JSON 文件。
+ *
+ * 先写同名临时文件再原子改名，避免中途崩溃留下半截文件。
+ * @return 0 成功；-1 失败（err 给出原因）。
+ */
+int layout_spec_write_file(const char *path, const LayoutCatalog *catalog,
+                           char *err, size_t err_size);
+
+/**
+ * @brief 在用户目录内新增或覆盖一份布局（同 id 覆盖）。
+ * @return 操作后的目录布局数；参数非法或目录已满（LAYOUT_MAX_CATALOG）
+ *         返回 -1，调用方应提示用户。
+ */
+int layout_user_catalog_upsert(LayoutCatalog *user, const LayoutSpec *layout);
+
+/**
+ * @brief 从用户目录删除一份布局（id 不存在时无动作）。
+ * @return 操作后的目录布局数；参数非法返回 -1。
+ */
+int layout_user_catalog_remove(LayoutCatalog *user, const char *id);
+
+/**
  * @brief 把 src 合并进 dst：同 id 覆盖，新 id 追加。
  * @return 合并后 dst 的布局数；超过 LAYOUT_MAX_CATALOG 的条目被忽略。
  */

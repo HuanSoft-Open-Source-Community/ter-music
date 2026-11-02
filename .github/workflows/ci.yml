@@ -211,6 +211,9 @@ jobs:
       - name: Config ownership (the front end must not write the core config)
         run: scripts/test/check-config-ownership.sh
 
+      - name: i18n keys (zh_CN/en_US stay complete and aligned)
+        run: python3 scripts/test/check-i18n-keys.py
+
       - name: Unit tests
         run: scripts/test/run-unit-tests.sh
 

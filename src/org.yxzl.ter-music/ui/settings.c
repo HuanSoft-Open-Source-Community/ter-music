@@ -17,6 +17,7 @@
 #include "player/player.h"
 #include "ui/ui.h"
 #include "ui/layout.h"
+#include "ui/layout_editor.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/keymap.h"
@@ -126,7 +127,9 @@ static const char *settings_options[] = {
     "settings.opt.reload_config",
     "settings.opt.reset_config",
     "settings.opt.stop_core_on_exit",
-    "settings.opt.layout_reload"
+    "settings.opt.layout_reload",
+    "settings.opt.layout_edit",
+    "settings.opt.layout_new"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -180,11 +183,13 @@ static const char *settings_options_ascii[] = {
     "Reload Config",
     "Restore Defaults",
     "Stop Playback Process On Exit",
-    "Reload Layouts"
+    "Reload Layouts",
+    "Edit Layout",
+    "New Layout"
 };
 /* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
- * 另含尾部追加的 stop_core_on_exit、layout_reload）。 */
-#define SETTINGS_OPTION_COUNT 52
+ * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new）。 */
+#define SETTINGS_OPTION_COUNT 54
 
 /* 编译期护栏：两张文案表必须与枚举/段数组使用同一数量。 */
 typedef char settings_option_arrays_must_match_count[
@@ -250,7 +255,10 @@ enum {
     /* ── 生命周期：退出时停止播放进程（尾部追加，不重排既有下标，
      * 规避 196-197 行注释所述"删除死项整体前移"约束） ── */
     SETTINGS_IDX_STOP_CORE_ON_EXIT   = 50,
-    SETTINGS_IDX_LAYOUT_RELOAD       = 51
+    SETTINGS_IDX_LAYOUT_RELOAD       = 51,
+    /* ── 布局编辑器入口（动作项：ENTER 打开，无 ←/→ 调整） ── */
+    SETTINGS_IDX_LAYOUT_EDIT         = 52,
+    SETTINGS_IDX_LAYOUT_NEW          = 53
 };
 
 typedef struct {
@@ -272,7 +280,9 @@ static const int settings_theme_option_indices[] = {
     SETTINGS_IDX_THEME_COLOR_PAIR_10,
     SETTINGS_IDX_THEME_COLOR_PAIR_11,
     SETTINGS_IDX_UI_LAYOUT,
-    SETTINGS_IDX_LAYOUT_RELOAD
+    SETTINGS_IDX_LAYOUT_RELOAD,
+    SETTINGS_IDX_LAYOUT_EDIT,
+    SETTINGS_IDX_LAYOUT_NEW
 };
 
 static const int settings_path_option_indices[] = {
@@ -651,7 +661,10 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
                  ui_layout_current_name());
-    } else if (option_index == SETTINGS_IDX_LAYOUT_RELOAD) {
+    } else if (option_index == SETTINGS_IDX_LAYOUT_RELOAD ||
+               option_index == SETTINGS_IDX_LAYOUT_EDIT ||
+               option_index == SETTINGS_IDX_LAYOUT_NEW) {
+        /* 动作项：只显示标签本身 */
         snprintf(line, line_size, "%s",
                  i18n_get(current_settings_options[option_index]));
     } else if (option_index == SETTINGS_IDX_SHOW_ALBUM_COVER) {
@@ -943,6 +956,10 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             }
             break;
         }
+        case SETTINGS_IDX_LAYOUT_EDIT:
+        case SETTINGS_IDX_LAYOUT_NEW:
+            /* 动作项：←/→ 无调整，ENTER 打开编辑器（见 activate_*） */
+            break;
         case SETTINGS_IDX_SHOW_ALBUM_COVER:
             g_app_config.show_album_cover = !g_app_config.show_album_cover;
             player_config_persist();
@@ -1990,6 +2007,20 @@ static void activate_settings_current_option(void)
         return;
     }
 
+    if (g_settings_current_option == SETTINGS_IDX_LAYOUT_EDIT ||
+        g_settings_current_option == SETTINGS_IDX_LAYOUT_NEW) {
+        LayoutSpec base;
+        if (ui_layout_current_spec(&base) != 0) {
+            show_status_message(i18n_get("layout.editor.open_failed"));
+            return;
+        }
+        /* 用户覆盖不继承内置预设的 i18n 名字键，显示用户设置的名字 */
+        base.name_key[0] = '\0';
+        int is_new = (g_settings_current_option == SETTINGS_IDX_LAYOUT_NEW);
+        layout_editor_open(&base, is_new);
+        return;
+    }
+
     if (g_settings_current_option == SETTINGS_IDX_LAYOUT_RELOAD) {
         char previous_id[LAYOUT_ID_MAX];
         snprintf(previous_id, sizeof(previous_id), "%s", ui_layout_current_id());
@@ -2362,6 +2393,9 @@ void render_settings_content(void)
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.layout.hint"));
         menu_content_puts(&area, start_y + 1, hint_buf);
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
+                 i18n_get("settings.layout.edit_hint"));
+        menu_content_puts(&area, start_y + 2, hint_buf);
     } else if (g_menu_selected_idx == 1) {  /* 默认路径 */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.hint"));
@@ -2695,6 +2729,16 @@ int handle_settings_input(int ch)
     /* Selection menu active — handle menu input first */
     if (g_sel_active) {
         handle_sel_input(ch);
+        return 1;
+    }
+
+    /* 布局编辑器激活：全按键拦截；关闭的那次按键也被消费，
+     * 关闭后立刻重绘设置界面（编辑器自身的全屏画面被覆盖掉）。 */
+    if (layout_editor_active()) {
+        layout_editor_handle_key(ch);
+        if (!layout_editor_active()) {
+            rerender_settings_view();
+        }
         return 1;
     }
 

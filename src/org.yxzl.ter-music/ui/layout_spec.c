@@ -601,3 +601,210 @@ const LayoutSpec *layout_catalog_find(const LayoutCatalog *catalog, const char *
     }
     return NULL;
 }
+
+/* ============================================================
+ * 序列化（布局编辑器保存）；与解析层互逆，风格对齐内置预设文件
+ * ============================================================ */
+
+#define LAYOUT_JSON_MAX (256 * 1024)
+
+static size_t append_pane_json(char *out, size_t out_size, size_t pos,
+                               const LayoutPaneSpec *pane)
+{
+    pos = json_append_raw(out, out_size, pos, "{\"id\":\"");
+    pos = json_append_raw(out, out_size, pos,
+                          layout_pane_id_name(pane->kind));
+    pos = json_append_raw(out, out_size, pos, "\"");
+    /* 写出器不自动补成员分隔逗号，每个键前必须显式带 "," */
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "x");
+    pos = json_append_int(out, out_size, pos, pane->x);
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "y");
+    pos = json_append_int(out, out_size, pos, pane->y);
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "w");
+    pos = json_append_int(out, out_size, pos, pane->w);
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "h");
+    pos = json_append_int(out, out_size, pos, pane->h);
+    if (!pane->visible) {
+        pos = json_append_raw(out, out_size, pos, ",");
+        pos = json_append_key(out, out_size, pos, "visible");
+        pos = json_append_bool(out, out_size, pos, 0);
+    }
+    if (pane->fg != LAYOUT_COLOR_INHERIT) {
+        pos = json_append_raw(out, out_size, pos, ",");
+        pos = json_append_key(out, out_size, pos, "fg");
+        pos = json_append_int(out, out_size, pos, pane->fg);
+    }
+    if (pane->bg != LAYOUT_COLOR_INHERIT) {
+        pos = json_append_raw(out, out_size, pos, ",");
+        pos = json_append_key(out, out_size, pos, "bg");
+        pos = json_append_int(out, out_size, pos, pane->bg);
+    }
+    if (pane->border_fg != LAYOUT_COLOR_INHERIT) {
+        pos = json_append_raw(out, out_size, pos, ",");
+        pos = json_append_key(out, out_size, pos, "border_fg");
+        pos = json_append_int(out, out_size, pos, pane->border_fg);
+    }
+    if (pane->border_bg != LAYOUT_COLOR_INHERIT) {
+        pos = json_append_raw(out, out_size, pos, ",");
+        pos = json_append_key(out, out_size, pos, "border_bg");
+        pos = json_append_int(out, out_size, pos, pane->border_bg);
+    }
+    return json_append_raw(out, out_size, pos, "}");
+}
+
+char *layout_spec_serialize(const LayoutCatalog *catalog)
+{
+    if (!catalog || catalog->count <= 0) {
+        return NULL;
+    }
+
+    char *out = malloc(LAYOUT_JSON_MAX);
+    if (!out) {
+        return NULL;
+    }
+    size_t pos = 0;
+    pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, "{\"version\":1");
+    if (catalog->default_id[0] != '\0') {
+        pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, ",\"default\":");
+        pos = json_append_escaped(out, LAYOUT_JSON_MAX, pos,
+                                  catalog->default_id);
+    }
+    pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, ",\"layouts\":[");
+
+    for (int i = 0; i < catalog->count; i++) {
+        const LayoutSpec *layout = &catalog->layouts[i];
+        if (i > 0) {
+            pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, ",");
+        }
+        pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, "{\"id\":");
+        pos = json_append_escaped(out, LAYOUT_JSON_MAX, pos, layout->id);
+        if (layout->name[0] != '\0') {
+            pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, ",\"name\":");
+            pos = json_append_escaped(out, LAYOUT_JSON_MAX, pos, layout->name);
+        }
+        if (layout->name_key[0] != '\0') {
+            pos = json_append_raw(out, LAYOUT_JSON_MAX, pos,
+                                  ",\"name_key\":");
+            pos = json_append_escaped(out, LAYOUT_JSON_MAX, pos,
+                                      layout->name_key);
+        }
+        pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, ",\"panes\":[");
+        for (int j = 0; j < layout->pane_count; j++) {
+            if (j > 0) {
+                pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, ",");
+            }
+            pos = append_pane_json(out, LAYOUT_JSON_MAX, pos,
+                                   &layout->panes[j]);
+        }
+        pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, "]}");
+    }
+    pos = json_append_raw(out, LAYOUT_JSON_MAX, pos, "]}");
+
+    if (json_writer_overflowed(LAYOUT_JSON_MAX, pos)) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+int layout_spec_write_file(const char *path, const LayoutCatalog *catalog,
+                           char *err, size_t err_size)
+{
+    if (!path || path[0] == '\0' || !catalog) {
+        set_error(err, err_size, "invalid write target");
+        return -1;
+    }
+
+    char *json = layout_spec_serialize(catalog);
+    if (!json) {
+        set_error(err, err_size,
+                  "cannot serialize layouts (empty or too large)");
+        return -1;
+    }
+
+    /* 先写临时文件再原子改名：中途崩溃不会留下半截 JSON */
+    size_t path_len = strlen(path);
+    char *tmp = malloc(path_len + sizeof(".tmp"));
+    if (!tmp) {
+        set_error(err, err_size, "out of memory");
+        free(json);
+        return -1;
+    }
+    snprintf(tmp, path_len + sizeof(".tmp"), "%s.tmp", path);
+    FILE *file = fopen(tmp, "wb");
+    if (!file) {
+        set_error(err, err_size, "cannot open '%s' for writing", tmp);
+        free(tmp);
+        free(json);
+        return -1;
+    }
+    size_t len = strlen(json);
+    size_t written = fwrite(json, 1, len, file);
+    int rc = 0;
+    if (written != len || fflush(file) != 0 || fclose(file) != 0) {
+        set_error(err, err_size, "short write on '%s'", tmp);
+        remove(tmp);
+        rc = -1;
+    }
+    free(json);
+    if (rc != 0) {
+        free(tmp);
+        return -1;
+    }
+    if (rename(tmp, path) != 0) {
+        set_error(err, err_size, "cannot rename '%s' to '%s'", tmp, path);
+        remove(tmp);
+        free(tmp);
+        return -1;
+    }
+    free(tmp);
+    return 0;
+}
+
+int layout_user_catalog_upsert(LayoutCatalog *user, const LayoutSpec *layout)
+{
+    if (!user || !layout || !is_valid_id(layout->id)) {
+        return -1;
+    }
+    for (int i = 0; i < user->count; i++) {
+        if (strcmp(user->layouts[i].id, layout->id) == 0) {
+            user->layouts[i] = *layout;
+            return user->count;
+        }
+    }
+    if (user->count >= LAYOUT_MAX_CATALOG) {
+        return -1;
+    }
+    user->layouts[user->count++] = *layout;
+    return user->count;
+}
+
+int layout_user_catalog_remove(LayoutCatalog *user, const char *id)
+{
+    if (!user || !id) {
+        return -1;
+    }
+    int found = -1;
+    for (int i = 0; i < user->count; i++) {
+        if (strcmp(user->layouts[i].id, id) == 0) {
+            found = i;
+            break;
+        }
+    }
+    if (found < 0) {
+        return user->count;   /* 不存在：无动作 */
+    }
+    for (int i = found; i < user->count - 1; i++) {
+        user->layouts[i] = user->layouts[i + 1];
+    }
+    user->count--;
+    memset(&user->layouts[user->count], 0, sizeof(LayoutSpec));
+    if (user->default_id[0] != '\0' && strcmp(user->default_id, id) == 0) {
+        user->default_id[0] = '\0';
+    }
+    return user->count;
+}

@@ -64,6 +64,7 @@
   <string key="settings.color.select_hint">Theme: ↑/↓ select, → or ENTER adjust, ←/TAB back</string>
   <string key="settings.color.auto_avoid_same">Foreground and background colors will automatically avoid being the same</string>
   <string key="settings.layout.hint">Layout: ←/→ switch, ENTER choose; a custom layout must tile the main area seamlessly or it is rejected</string>
+  <string key="settings.layout.edit_hint">Layout editing: ENTER opens the editor for pane geometry and per-pane colors</string>
   <string key="settings.layout.saved">Layout switched</string>
   <string key="settings.layout.save_failed">Layout applied, but the selection state could not be saved</string>
   <string key="settings.layout.reload_ok">Reloaded %d layouts</string>
@@ -122,6 +123,8 @@
   <string key="settings.opt.latency">Latency</string>
   <string key="settings.opt.ui_layout">UI Layout</string>
   <string key="settings.opt.layout_reload">Reload Layouts</string>
+  <string key="settings.opt.layout_edit">Edit Layout</string>
+  <string key="settings.opt.layout_new">New Layout</string>
   <string key="settings.opt.lyrics_align">Lyrics Align</string>
   <string key="settings.opt.play_mode">Play Mode</string>
   <string key="settings.opt.default_speed">Default Speed</string>
@@ -1221,10 +1224,30 @@
   <string key="cli.keys.err.unknown_option">Error: unknown keys option '%s'.</string>
   <string key="cli.keys.err.unknown_subcommand">Error: unknown keys subcommand '%s'.</string>
 
+  <!-- ===== Layout editor ===== -->
+  <string key="layout.editor.title">Layout Editor</string>
+  <string key="layout.editor.too_small">Terminal too small for the layout editor (needs at least 69 cols × 14 rows)</string>
+  <string key="layout.editor.col_kind">Pane</string>
+  <string key="layout.editor.col_vis">Vis</string>
+  <string key="layout.editor.col_fg">FG</string>
+  <string key="layout.editor.col_bg">BG</string>
+  <string key="layout.editor.col_bfg">B.FG</string>
+  <string key="layout.editor.col_bbg">B.BG</string>
+  <string key="layout.editor.valid_ok">✓ strict tiling OK, ready to save</string>
+  <string key="layout.editor.hint">↑/↓ pane  ←/→ field  +/- adjust  PgUp/PgDn ±10  v visible  a add  d delete  r reset colors  n rename  S save  Esc exit</string>
+  <string key="layout.editor.hint_visible">Move the field to Vis first (←/→)</string>
+  <string key="layout.editor.dirty_exit">Unsaved changes — press Esc again to discard</string>
+  <string key="layout.editor.add_full">All pane kinds are in use (max 6)</string>
+  <string key="layout.editor.min_pane">At least one pane is required</string>
+  <string key="layout.editor.rename_prompt">Layout name: </string>
+  <string key="layout.editor.custom_name">Custom Layout %d</string>
+  <string key="layout.editor.saved">Layout saved</string>
+  <string key="layout.editor.save_failed">Save failed</string>
+  <string key="layout.editor.open_failed">Cannot read the current layout</string>
+
   <!-- ===== Layout presets ===== -->
   <string key="layout.preset.classic">Classic</string>
   <string key="layout.preset.vinyl">Vinyl</string>
-  <string key="layout.preset.dual">Six-pane Fallback</string>
   <string key="layout.preset.karaoke">Karaoke</string>
   <string key="layout.preset.visualizer">Visualizer</string>
   <string key="layout.preset.focus">Focus</string>

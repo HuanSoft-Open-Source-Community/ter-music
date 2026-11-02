@@ -64,6 +64,7 @@
   <string key="settings.color.select_hint">颜色主题：↑/↓ 选择，→或 ENTER 调整，←/TAB 返回菜单</string>
   <string key="settings.color.auto_avoid_same">前景色和背景色会自动避免使用相同颜色</string>
   <string key="settings.layout.hint">界面布局：←/→ 切换，ENTER 选择；自定义布局必须无缝铺满主区域，否则整份布局被拒绝</string>
+  <string key="settings.layout.edit_hint">布局编辑：ENTER 打开编辑器，可调整窗格几何与逐面板颜色</string>
   <string key="settings.layout.saved">布局已切换</string>
   <string key="settings.layout.save_failed">布局已应用，但选中状态保存失败</string>
   <string key="settings.layout.reload_ok">已重新加载 %d 个布局</string>
@@ -122,6 +123,8 @@
   <string key="settings.opt.latency">时延</string>
   <string key="settings.opt.ui_layout">界面布局</string>
   <string key="settings.opt.layout_reload">重新加载布局</string>
+  <string key="settings.opt.layout_edit">编辑布局</string>
+  <string key="settings.opt.layout_new">新建布局</string>
   <string key="settings.opt.lyrics_align">歌词对齐</string>
   <string key="settings.opt.play_mode">播放模式</string>
   <string key="settings.opt.default_speed">默认倍速</string>
@@ -1221,10 +1224,30 @@
   <string key="cli.keys.err.unknown_option">错误：未知的 keys 选项 '%s'。</string>
   <string key="cli.keys.err.unknown_subcommand">错误：未知 keys 子命令 '%s'。</string>
 
+  <!-- ===== Layout editor ===== -->
+  <string key="layout.editor.title">布局编辑器</string>
+  <string key="layout.editor.too_small">终端太小，无法打开布局编辑器（至少需要 69 列 × 14 行）</string>
+  <string key="layout.editor.col_kind">窗格</string>
+  <string key="layout.editor.col_vis">可见</string>
+  <string key="layout.editor.col_fg">前景</string>
+  <string key="layout.editor.col_bg">背景</string>
+  <string key="layout.editor.col_bfg">边框色</string>
+  <string key="layout.editor.col_bbg">边底色</string>
+  <string key="layout.editor.valid_ok">✓ 严格平铺校验通过，可以保存</string>
+  <string key="layout.editor.hint">↑/↓ 选窗格  ←/→ 选字段  +/− 调整  PgUp/PgDn ±10  v 可见  a 添加  d 删除  r 重置颜色  n 改名  S 保存  Esc 退出</string>
+  <string key="layout.editor.hint_visible">请先把字段移到“可见”列（←/→）</string>
+  <string key="layout.editor.dirty_exit">有未保存的更改，再按一次 Esc 放弃</string>
+  <string key="layout.editor.add_full">窗格种类已用完（最多 6 种）</string>
+  <string key="layout.editor.min_pane">至少要保留一个窗格</string>
+  <string key="layout.editor.rename_prompt">布局名称：</string>
+  <string key="layout.editor.custom_name">自定义布局 %d</string>
+  <string key="layout.editor.saved">布局已保存</string>
+  <string key="layout.editor.save_failed">保存失败</string>
+  <string key="layout.editor.open_failed">无法读取当前布局</string>
+
   <!-- ===== Layout presets ===== -->
   <string key="layout.preset.classic">经典</string>
   <string key="layout.preset.vinyl">黑胶</string>
-  <string key="layout.preset.dual">六格回退</string>
   <string key="layout.preset.karaoke">歌词优先</string>
   <string key="layout.preset.visualizer">频谱黑胶</string>
   <string key="layout.preset.focus">专注</string>

@@ -150,11 +150,11 @@ static void test_embedded_catalogs(void)
           "hidden pane is excluded from tiling");
 }
 
-static void test_resolve_dual(void)
+static void test_resolve_fallback(void)
 {
     LayoutSpec spec;
     memset(&spec, 0, sizeof(spec));
-    snprintf(spec.id, sizeof(spec.id), "dual");
+    snprintf(spec.id, sizeof(spec.id), "fallback-demo");
     spec.pane_count = 3;
     spec.panes[0] = (LayoutPaneSpec){LAYOUT_PANE_PLAYLIST, 1, 0, 0, 500, 1000,
                                      -2, -2, -2, -2};
@@ -210,6 +210,115 @@ static void test_catalog_merge(void)
     CHECK(layout_catalog_find(&base, "extra") != NULL, "new id appended");
 }
 
+static void test_user_catalog_ops(void)
+{
+    LayoutSpec base;
+    memset(&base, 0, sizeof(base));
+    snprintf(base.id, sizeof(base.id), "mine");
+    snprintf(base.name, sizeof(base.name), "Mine");
+    base.pane_count = 1;
+    base.panes[0] = (LayoutPaneSpec){LAYOUT_PANE_PLAYLIST, 1, 0, 0, 1000, 1000,
+                                     51, -1, 45, -2};
+
+    LayoutCatalog user;
+    layout_catalog_init(&user);
+    CHECK(layout_user_catalog_upsert(&user, &base) == 1, "upsert appends");
+    snprintf(base.name, sizeof(base.name), "Mine2");
+    CHECK(layout_user_catalog_upsert(&user, &base) == 1,
+          "upsert same id replaces");
+    CHECK(strcmp(user.layouts[0].name, "Mine2") == 0, "upsert overwrites");
+    CHECK(layout_user_catalog_remove(&user, "nope") == 1,
+          "remove unknown id is a no-op");
+    CHECK(layout_user_catalog_remove(&user, "mine") == 0,
+          "remove drops the entry");
+    CHECK(layout_user_catalog_remove(&user, "mine") == 0,
+          "remove from empty catalog is a no-op");
+
+    /* 目录上限：填满后再 upsert 必须被拒绝 */
+    LayoutCatalog full;
+    layout_catalog_init(&full);
+    LayoutSpec dummy;
+    memset(&dummy, 0, sizeof(dummy));
+    dummy.pane_count = 1;
+    dummy.panes[0] = (LayoutPaneSpec){LAYOUT_PANE_PLAYLIST, 1, 0, 0, 1000,
+                                      1000, -2, -2, -2, -2};
+    int filled = 1;
+    for (int i = 0; i < LAYOUT_MAX_CATALOG; i++) {
+        snprintf(dummy.id, sizeof(dummy.id), "cap%02d", i);
+        if (layout_user_catalog_upsert(&full, &dummy) < 0) {
+            filled = 0;
+            break;
+        }
+    }
+    CHECK(filled == 1, "catalog fills to cap");
+    snprintf(dummy.id, sizeof(dummy.id), "overflow");
+    CHECK(layout_user_catalog_upsert(&full, &dummy) < 0,
+          "beyond-cap upsert is rejected");
+    CHECK(layout_user_catalog_remove(&full, "cap00") == LAYOUT_MAX_CATALOG - 1,
+          "remove frees a catalog slot");
+    snprintf(dummy.id, sizeof(dummy.id), "overflow");
+    CHECK(layout_user_catalog_upsert(&full, &dummy) ==
+          LAYOUT_MAX_CATALOG, "upsert after remove succeeds");
+}
+
+static void test_serialize_roundtrip(void)
+{
+    LayoutSpec src;
+    memset(&src, 0, sizeof(src));
+    snprintf(src.id, sizeof(src.id), "roundtrip");
+    snprintf(src.name, sizeof(src.name), "Round Trip");
+    src.pane_count = 3;
+    /* 显式颜色、隐藏面板、缺省继承色三种情况都要保真。
+     * 隐藏面板不参与平铺（解析层的既定行为），可见面板必须自足铺满。 */
+    src.panes[0] = (LayoutPaneSpec){LAYOUT_PANE_PLAYLIST, 1, 0, 0, 500, 1000,
+                                    51, -1, 45, -2};
+    src.panes[1] = (LayoutPaneSpec){LAYOUT_PANE_INFO, 1, 500, 0, 500, 1000,
+                                    -2, -2, 39, 234};
+    src.panes[2] = (LayoutPaneSpec){LAYOUT_PANE_LYRICS, 0, 500, 0, 500, 1000,
+                                    -2, -2, -2, -2};
+
+    LayoutCatalog catalog;
+    layout_catalog_init(&catalog);
+    catalog.layouts[0] = src;
+    catalog.count = 1;
+    snprintf(catalog.default_id, sizeof(catalog.default_id), "%s", src.id);
+
+    char *json = layout_spec_serialize(&catalog);
+    CHECK(json != NULL, "serialize returns text");
+    if (!json) {
+        return;
+    }
+
+    LayoutCatalog back;
+    char err[256] = "";
+    CHECK(layout_spec_parse(json, strlen(json), &back, err, sizeof(err)) == 0,
+          "serialized text parses back");
+    free(json);
+    if (back.count != 1) {
+        CHECK(back.count == 1, "roundtrip layout count");
+        return;
+    }
+
+    const LayoutSpec *out = &back.layouts[0];
+    CHECK(strcmp(out->id, src.id) == 0, "roundtrip id");
+    CHECK(strcmp(out->name, src.name) == 0, "roundtrip name");
+    CHECK(strcmp(back.default_id, src.id) == 0, "roundtrip default id");
+    CHECK(out->pane_count == src.pane_count, "roundtrip pane count");
+    for (int i = 0; i < src.pane_count && i < out->pane_count; i++) {
+        const LayoutPaneSpec *a = &src.panes[i];
+        const LayoutPaneSpec *b = &out->panes[i];
+        CHECK(a->kind == b->kind, "roundtrip pane kind");
+        CHECK(a->visible == b->visible, "roundtrip pane visibility");
+        CHECK(a->x == b->x && a->y == b->y && a->w == b->w && a->h == b->h,
+              "roundtrip pane geometry");
+        CHECK(a->fg == b->fg && a->bg == b->bg, "roundtrip pane colors");
+        CHECK(a->border_fg == b->border_fg && a->border_bg == b->border_bg,
+              "roundtrip border colors");
+    }
+    CHECK(layout_spec_validate(out, err, sizeof(err)) == 0,
+          "roundtrip layout still validates (hidden pane excluded)");
+}
+
 static void test_shipped_presets(void)
 {
     char path[512];
@@ -235,7 +344,8 @@ static void test_shipped_presets(void)
     CHECK(catalog.count >= 6, "at least six presets");
     CHECK(layout_catalog_find(&catalog, "classic") != NULL, "classic exists");
     CHECK(layout_catalog_find(&catalog, "vinyl") != NULL, "vinyl exists");
-    CHECK(layout_catalog_find(&catalog, "dual") != NULL, "dual exists");
+    CHECK(layout_catalog_find(&catalog, "dual") == NULL,
+          "dual demo preset is removed");
     CHECK(layout_catalog_find(&catalog, catalog.default_id) != NULL,
           "default id resolves");
 
@@ -244,34 +354,15 @@ static void test_shipped_presets(void)
         CHECK(layout_spec_validate(&catalog.layouts[i], why, sizeof(why)) == 0,
               "every preset tiles strictly");
     }
-
-    const LayoutSpec *dual = layout_catalog_find(&catalog, "dual");
-    CHECK(dual != NULL && dual->pane_count == 6, "dual defines six panes");
-    if (dual) {
-        LayoutSpec resolved;
-        layout_spec_resolve(dual, &resolved);
-        int lyrics_visible = 0;
-        int vinyl_visible = 0;
-        for (int i = 0; i < resolved.pane_count; i++) {
-            if (resolved.panes[i].kind == LAYOUT_PANE_LYRICS) {
-                lyrics_visible = resolved.panes[i].visible;
-            }
-            if (resolved.panes[i].kind == LAYOUT_PANE_VINYL) {
-                vinyl_visible = resolved.panes[i].visible;
-            }
-        }
-        CHECK(lyrics_visible == 0, "dual hides lyrics");
-        CHECK(vinyl_visible == 1, "dual keeps vinyl");
-        CHECK(layout_spec_validate(dual, err, sizeof(err)) == 0,
-              "dual remains a strict tiling");
-    }
 }
 
 int main(void)
 {
     test_embedded_catalogs();
-    test_resolve_dual();
+    test_resolve_fallback();
     test_catalog_merge();
+    test_user_catalog_ops();
+    test_serialize_roundtrip();
     test_shipped_presets();
 
     if (g_failures == 0) {
