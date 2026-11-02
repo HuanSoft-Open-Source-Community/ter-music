@@ -53,8 +53,21 @@
      （v4 核心缺字段时逐字高亮降级为整行），v4 前端/CLI 也能接入 v5 核心；
      TUI 歌词面板按逐字点亮，旧式只有行首时间戳的歌词按「本行起点 → 下一行
      起点」均分（最后一行沿用前一段时长）。
-   回归脚本：`scripts/test/check-core-purity.sh`、`check-ui-purity.sh`、
-   `check-config-ownership.sh`、`run-unit-tests.sh`、`dbus-rpc-check.sh`、
+    - **外观系统修正（数据驱动布局落地后）**：
+      - 内置预设 `dual`（"六格回退"）移除——它只是平铺规则的演示品，
+        lyrics/vinyl 坐标重叠，回退后与 `vinyl` 预设逐像素相同；
+        已选 `dual` 的选中状态自动回退到默认布局；
+      - 控制窗格的嵌入式可视化（封面+频谱条）改为**仅在布局没有独立
+        `spectrum` 窗格时绘制**（即旧版行为）；`focus`/`karaoke` 观感不变，
+        `classic`/`vinyl` 等不再出现同一屏两份频谱；歌词窗格的无歌词
+        黑胶回退动画同理不再画频谱条（独立 `vinyl` 窗格的频谱柱不受影响）；
+      - 新增 **TUI 布局编辑器**（设置 → 界面外观 → 编辑布局/新建布局）：
+        可视化编辑窗格几何（千分比）、可见性与逐面板颜色，右侧实时缩放
+        预览 + 严格平铺校验，保存写入用户布局文件并热重载立即生效；
+        编辑内置预设 = 同 id 用户覆盖；颜色优先级为彩虹模式 > 布局逐面板
+        显式颜色 > 主题色，编辑器 `r` 键把面板颜色重置为"跟随主题"。
+    回归脚本：`scripts/test/check-core-purity.sh`、`check-ui-purity.sh`、
+    `check-config-ownership.sh`、`run-unit-tests.sh`、`dbus-rpc-check.sh`、
    `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
    `multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、
    `perf-check.sh`（CI 的 `gates` 作业跑三条门禁与单测，`e2e` 作业跑全部 e2e，
