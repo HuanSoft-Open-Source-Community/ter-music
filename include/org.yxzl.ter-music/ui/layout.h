@@ -36,10 +36,40 @@ const char *ui_layout_current_id(void);
 const char *ui_layout_current_name(void);
 
 /**
+ * @brief 拷贝当前布局规范到 out（布局编辑器打开时用）。
+ * @return 0 成功；-1 参数错误或布局系统未初始化。
+ */
+int ui_layout_current_spec(LayoutSpec *out);
+
+/**
  * @brief 切换当前布局并写本地状态。
  * @return 0 成功；-1 未找到或状态写失败（内存中仍已应用）。
  */
 int ui_layout_select(const char *id);
+
+/* ============================================================
+ * 用户布局文件（~/.config/ter-music/layouts.json，供布局编辑器）
+ * ============================================================ */
+
+/** @brief 用户布局文件完整路径；失败返回 -1。 */
+int layout_user_file_path(char *path, size_t path_size);
+
+/**
+ * @brief 把一份布局写入用户布局文件（同 id 覆盖）。
+ *
+ * 读现有用户文件 → upsert → 原子写回；文件里其它用户布局保持不变。
+ * 用户文件损坏时按空目录处理并重建（写入会覆盖旧内容）。
+ * @return 0 成功；-1 失败（err 给出原因）。
+ */
+int layout_user_save_layout(const LayoutSpec *spec, char *err, size_t err_size);
+
+/**
+ * @brief 从用户布局文件删除一份布局（用于恢复内置预设原貌）。
+ *
+ * 删空后直接移除文件。文件不存在或 id 不存在视为成功。
+ * @return 0 成功；-1 失败（err 给出原因）。
+ */
+int layout_user_remove_layout(const char *id, char *err, size_t err_size);
 
 /** @brief 按当前主题/彩虹状态重新初始化窗格颜色 pair。 */
 void ui_layout_apply_colors(void);

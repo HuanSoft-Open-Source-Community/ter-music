@@ -151,6 +151,7 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/layout_spec.c
     src/org.yxzl.ter-music/ui/layout_geometry.c
     src/org.yxzl.ter-music/ui/layout_state.c
+    src/org.yxzl.ter-music/ui/layout_editor.c
     src/org.yxzl.ter-music/ui/vinyl.c
     src/org.yxzl.ter-music/ui/info_bar_layout.c
     src/org.yxzl.ter-music/ui/cover_art_cells.c

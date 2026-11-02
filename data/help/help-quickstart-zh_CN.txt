@@ -38,10 +38,14 @@ ter-music 快速上手
   窄而高时封面在上，元数据与音频依次在下。封面与右边框之间始终留有空列，
   空间不足时自动隐藏封面。
   同时定义 lyrics 与 vinyl 时隐藏 lyrics；只有 lyrics 时，无歌词的曲目
-  仍在该窗格内回退显示黑胶动画（彩色可用时为色块，否则为字符）。
+  仍在该窗格内回退显示黑胶动画（彩色可用时为色块，否则为字符）；
+  布局已有独立频谱窗格时，回退动画不再重复画频谱条。
   选择布局：F2 -> 界面外观 -> 界面布局（←/→ 循环，ENTER 开列表）；
   “重新加载布局”可重读布局文件。
-  预设：classic / vinyl / dual / karaoke / visualizer / focus /
+  编辑布局：F2 -> 界面外观 -> 编辑布局 / 新建布局（可视化编辑窗格几何、
+  可见性与逐面板颜色，实时预览 + 严格平铺校验；保存写入用户覆盖文件，
+  编辑内置预设即同 id 覆盖，改名用 N 键）。
+  预设：classic / vinyl / karaoke / visualizer / focus /
         stage / neon
   内置文件：/usr/share/ter-music/layouts/layouts.json（源码树 data/layouts/）
   用户覆盖：~/.config/ter-music/layouts.json（同 id 覆盖内置）

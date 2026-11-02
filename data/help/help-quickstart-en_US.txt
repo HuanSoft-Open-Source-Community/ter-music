@@ -47,10 +47,15 @@ ter-music Quick Start Guide
   If both lyrics and vinyl are defined, lyrics is hidden. A lyrics-only
   layout still falls back to the vinyl animation (colored blocks when colors
   are available; the original glyph animation otherwise) when the track has
-  no lyrics.
+  no lyrics; the fallback skips its spectrum bars when the layout already
+  has a dedicated spectrum pane.
   Choose: F2 -> Appearance -> UI Layout (←/→ cycles, ENTER opens the list);
   "Reload Layouts" re-reads the files.
-  Presets: classic / vinyl / dual / karaoke / visualizer / focus /
+  Layout editor: F2 -> Appearance -> Edit Layout / New Layout (visual pane
+  geometry, visibility and per-pane colors with a live preview and strict
+  tiling validation; saving writes the user override file — editing a preset
+  overrides it by the same id, N renames).
+  Presets: classic / vinyl / karaoke / visualizer / focus /
            stage / neon
   Built-in: /usr/share/ter-music/layouts/layouts.json (source: data/layouts/)
   User override: ~/.config/ter-music/layouts.json (same id overrides built-in)

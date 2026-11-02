@@ -661,6 +661,15 @@ const char *ui_layout_current_name(void)
     return ui_layout_name_at(index);
 }
 
+int ui_layout_current_spec(LayoutSpec *out)
+{
+    if (!out || !g_initialized) {
+        return -1;
+    }
+    *out = g_current;
+    return 0;
+}
+
 int ui_layout_select(const char *id)
 {
     if (!g_initialized) {
@@ -678,6 +687,107 @@ int ui_layout_select(const char *id)
         return -1;
     }
     return layout_state_write(path, g_current_id);
+}
+
+/* ============================================================
+ * 用户布局文件（布局编辑器保存/恢复内置预设）
+ * ============================================================ */
+
+int layout_user_file_path(char *path, size_t path_size)
+{
+    return layout_user_path(path, path_size);
+}
+
+int layout_user_save_layout(const LayoutSpec *spec, char *err, size_t err_size)
+{
+    if (err && err_size) {
+        err[0] = '\0';
+    }
+    if (!spec) {
+        snprintf(err, err_size, "no layout to save");
+        return -1;
+    }
+
+    char path[MAX_PATH_LEN];
+    if (layout_user_path(path, sizeof(path)) != 0) {
+        snprintf(err, err_size, "cannot resolve user layout path");
+        return -1;
+    }
+
+    LayoutCatalog user;
+    layout_catalog_init(&user);
+    if (access(path, R_OK) == 0) {
+        char parse_err[192] = "";
+        if (layout_spec_parse_file(path, &user, parse_err,
+                                   sizeof(parse_err)) != 0) {
+            /* 损坏的用户文件按空目录处理，本次保存重建整个文件 */
+            log_warn("layout", "User layout file unusable, rebuilding: %s",
+                     parse_err);
+            layout_catalog_init(&user);
+        }
+    }
+
+    if (layout_user_catalog_upsert(&user, spec) < 0) {
+        snprintf(err, err_size, "layout catalog is full (%d)",
+                 LAYOUT_MAX_CATALOG);
+        return -1;
+    }
+    if (user.default_id[0] == '\0') {
+        snprintf(user.default_id, sizeof(user.default_id), "%s", spec->id);
+    }
+    if (layout_spec_write_file(path, &user, err, err_size) != 0) {
+        return -1;
+    }
+    log_info("layout", "Saved layout '%s' to '%s'", spec->id, path);
+    return 0;
+}
+
+int layout_user_remove_layout(const char *id, char *err, size_t err_size)
+{
+    if (err && err_size) {
+        err[0] = '\0';
+    }
+    if (!id || id[0] == '\0') {
+        snprintf(err, err_size, "no layout id to remove");
+        return -1;
+    }
+
+    char path[MAX_PATH_LEN];
+    if (layout_user_path(path, sizeof(path)) != 0) {
+        snprintf(err, err_size, "cannot resolve user layout path");
+        return -1;
+    }
+    if (access(path, R_OK) != 0) {
+        return 0;   /* 没有用户文件：内置预设本就未被覆盖 */
+    }
+
+    LayoutCatalog user;
+    layout_catalog_init(&user);
+    char parse_err[192] = "";
+    if (layout_spec_parse_file(path, &user, parse_err,
+                               sizeof(parse_err)) != 0) {
+        snprintf(err, err_size, "user layout file unusable: %s", parse_err);
+        return -1;
+    }
+
+    int count = layout_user_catalog_remove(&user, id);
+    if (count < 0) {
+        snprintf(err, err_size, "invalid arguments");
+        return -1;
+    }
+    if (count == 0) {
+        if (remove(path) != 0) {
+            snprintf(err, err_size, "cannot remove '%s'", path);
+            return -1;
+        }
+        log_info("layout", "User layout file removed (empty): '%s'", path);
+        return 0;
+    }
+    if (layout_spec_write_file(path, &user, err, err_size) != 0) {
+        return -1;
+    }
+    log_info("layout", "Removed layout '%s' from '%s'", id, path);
+    return 0;
 }
 
 /* ============================================================

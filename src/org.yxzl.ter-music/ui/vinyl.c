@@ -521,7 +521,7 @@ static void draw_vinyl_messages(WINDOW *win, int show_messages,
 
 /* 彩色块模式：标签先画，碟面后画（盖掉标签矩形的掩码四角），最后频谱柱。 */
 static void render_vinyl_disc_color(WINDOW *win, int show_messages,
-                                    int body_attr)
+                                    int body_attr, int draw_bars)
 {
     VinylGeometry geo;
     VinylAnimation anim;
@@ -538,7 +538,9 @@ static void render_vinyl_disc_color(WINDOW *win, int show_messages,
     }
 
     vinyl_draw_color_disc(win, &geo, &anim, rx, ry);
-    vinyl_draw_color_bars(win, &geo, &anim);
+    if (draw_bars) {
+        vinyl_draw_color_bars(win, &geo, &anim);
+    }
 
     wattrset(win, body_attr);
     draw_vinyl_messages(win, show_messages, body_attr, &geo);
@@ -546,7 +548,7 @@ static void render_vinyl_disc_color(WINDOW *win, int show_messages,
 
 /* 原字符动画：颜色不可用时的逐字回退，行为保持升级前不变。 */
 static void render_vinyl_disc_chars(WINDOW *win, int show_messages,
-                                    int body_attr)
+                                    int body_attr, int draw_bars)
 {
     VinylGeometry geo;
     VinylAnimation anim;
@@ -575,23 +577,25 @@ static void render_vinyl_disc_chars(WINDOW *win, int show_messages,
         }
     }
 
-    int band_count = vinyl_band_count(&geo);
-    for (int i = 0; i < band_count; i++) {
-        int level = vinyl_bar_level(&anim, i, band_count);
-        int extent = vinyl_bar_extent(&geo, level);
-        double angle = vinyl_bar_angle(i, band_count);
+    if (draw_bars) {
+        int band_count = vinyl_band_count(&geo);
+        for (int i = 0; i < band_count; i++) {
+            int level = vinyl_bar_level(&anim, i, band_count);
+            int extent = vinyl_bar_extent(&geo, level);
+            double angle = vinyl_bar_angle(i, band_count);
 
-        for (int step = 0; step < extent; step++) {
-            int row, col;
-            vinyl_bar_cell(&geo, angle, step, &row, &col);
-            if (row <= 0 || row >= geo.h - 1 ||
-                col <= 1 || col >= geo.w - 1) {
-                continue;
+            for (int step = 0; step < extent; step++) {
+                int row, col;
+                vinyl_bar_cell(&geo, angle, step, &row, &col);
+                if (row <= 0 || row >= geo.h - 1 ||
+                    col <= 1 || col >= geo.w - 1) {
+                    continue;
+                }
+                draw_vinyl_glyph(win, row, col,
+                                 pick_bar_glyph(angle, step, extent,
+                                                anim.pulse_phase + i),
+                                 step == extent - 1 ? A_BOLD : 0);
             }
-            draw_vinyl_glyph(win, row, col,
-                             pick_bar_glyph(angle, step, extent,
-                                            anim.pulse_phase + i),
-                             step == extent - 1 ? A_BOLD : 0);
         }
     }
 
@@ -599,7 +603,8 @@ static void render_vinyl_disc_chars(WINDOW *win, int show_messages,
     draw_vinyl_messages(win, show_messages, body_attr, &geo);
 }
 
-void render_vinyl_disc(WINDOW *win, int show_messages, int body_attr)
+void render_vinyl_disc(WINDOW *win, int show_messages, int body_attr,
+                       int draw_bars)
 {
     if (!win) {
         return;
@@ -617,9 +622,9 @@ void render_vinyl_disc(WINDOW *win, int show_messages, int body_attr)
     }
 
     if (vinyl_color_configure()) {
-        render_vinyl_disc_color(win, show_messages, body_attr);
+        render_vinyl_disc_color(win, show_messages, body_attr, draw_bars);
     } else {
-        render_vinyl_disc_chars(win, show_messages, body_attr);
+        render_vinyl_disc_chars(win, show_messages, body_attr, draw_bars);
     }
 }
 
@@ -641,7 +646,7 @@ void render_vinyl_pane(void)
         return;
     }
     render_vinyl_disc(win_vinyl, player_lyrics_total() <= 0,
-                      ui_pane_body_attr(LAYOUT_PANE_VINYL));
+                      ui_pane_body_attr(LAYOUT_PANE_VINYL), 1);
     wrefresh(win_vinyl);
 }
 

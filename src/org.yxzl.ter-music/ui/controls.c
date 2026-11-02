@@ -726,7 +726,12 @@ void render_controls(void)
     }
 
     render_controls_status_line();
-    render_visualizer_with_album_cover();
+    /* 旧版没有独立频谱窗格，频谱条画在控制窗格下部；布局系统引入独立
+     * spectrum 窗格后，再画就是同一屏两份频谱。故仅在布局没有独立
+     * 频谱窗格时（focus/karaoke 等）保留旧的封面+频谱行为。 */
+    if (!ui_pane_is_visible(LAYOUT_PANE_SPECTRUM)) {
+        render_visualizer_with_album_cover();
+    }
     /* 封面/可视化之后补边框，防止字形溢出盖住边框。 */
     ui_pane_repaint_border(LAYOUT_PANE_CONTROLS, win_controls);
 

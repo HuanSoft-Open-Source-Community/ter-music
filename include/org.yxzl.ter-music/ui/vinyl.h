@@ -22,8 +22,13 @@
  * @param win           目标窗口（边框/标题由调用方或 render_vinyl_pane 画）
  * @param show_messages 1 = 无歌词时显示“无歌词”两行文案
  * @param body_attr     窗格正文属性（ui_pane_body_attr），用于标签掩码/文案
+ * @param draw_bars     1 = 绘制碟外频谱柱；0 = 只画碟面不画频谱柱。
+ *                      布局中已有独立 spectrum 窗格时，歌词窗格的无歌词
+ *                      回退应传 0，避免同一屏出现两份频谱（独立 vinyl
+ *                      窗格的频谱柱是其核心设计，恒传 1）。
  */
-void render_vinyl_disc(WINDOW *win, int show_messages, int body_attr);
+void render_vinyl_disc(WINDOW *win, int show_messages, int body_attr,
+                       int draw_bars);
 
 /** @brief 绘制独立 vinyl 窗格（含边框/标题）。 */
 void render_vinyl_pane(void);
