@@ -30,6 +30,21 @@
 #define LAYOUT_COLOR_INHERIT (-2)
 #define LAYOUT_MIN_PANE_UNITS 10   /* 编辑器允许的最小窗格轴长（1%） */
 
+/* 窗格颜色字段编号：0 = 前景，1 = 背景（与边框字段区分开）。 */
+#define LAYOUT_COLOUR_FG 0
+#define LAYOUT_COLOUR_BG 1
+
+/**
+ * @brief 把调色板值降到目标终端能显示的色数（256 → 16 → 8 → 无色）。
+ *
+ * 纯函数，不依赖 ncurses，便于单测与预设配色自检：
+ * - `value < 0`（透明/继承）→ `-1`；`value > 255` 先截到 255；
+ * - `colors >= 256` 原样返回；`value < colors` 也原样返回；
+ * - 否则按 xterm 调色板取 RGB，映射到最近的 8 或 16 基色；
+ * - `colors <= 0`（黑白终端）→ `-1`，即不启用颜色。
+ */
+int layout_color_quantize(int value, int colors);
+
 /* 布局内的窗格种类；顺序必须与运行时的窗口数组一致。 */
 typedef enum {
     LAYOUT_PANE_PLAYLIST = 0,
@@ -178,6 +193,26 @@ int layout_spec_build_fallback(LayoutSpec *out);
 
 const LayoutSpec *layout_catalog_find(const LayoutCatalog *catalog, const char *id);
 
+/**
+ * @brief 给"丢了本地化名字键"的同名覆盖补回预设的 name_key。
+ *
+ * 旧版布局编辑器打开预设时会无条件清掉 name_key，保存后用户文件里就只剩
+ * 英文/原文名字。这里在合并前自愈：仅当 incoming 项 name_key 为空、existing
+ * 同 id 有 name_key、且名字为空或与预设相同（即没被用户改名）时才补。
+ */
+void layout_catalog_adopt_preset_names(LayoutCatalog *incoming,
+                                       const LayoutCatalog *existing);
+
+/**
+ * @brief 为派生副本挑一个未被占用的 id：`base-2`、`base-3` … `base-99`。
+ *
+ * 只在"同 id 覆盖写不回去"时用（例如该 id 由 TER_MUSIC_LAYOUTS 提供，
+ * 合并优先级高于用户文件）。
+ * @return 0 成功；-1 参数非法、id 放不下或 2..99 全被占用。
+ */
+int layout_catalog_next_copy_id(const LayoutCatalog *catalog, const char *base_id,
+                                char *out, size_t out_size);
+
 const char *layout_pane_id_name(LayoutPaneKind kind);
 int layout_pane_kind_from_name(const char *name, LayoutPaneKind *kind);
 
@@ -201,8 +236,41 @@ const LayoutPaneSpec *layout_spec_pane_config(const LayoutSpec *spec,
                                               LayoutPaneKind kind);
 
 /**
+ * @brief 取窗格颜色配置，**不做** enabled 过滤。
+ *
+ * 颜色在窗格被移出分栏树后仍留在 panes[] 里（见 LayoutPaneSpec 注释），
+ * 设置页要按窗格种类成对显示前景/背景，因此需要一个能读到禁用窗格的入口。
+ * @return 窗格配置指针；kind 越界返回 NULL。
+ */
+const LayoutPaneSpec *layout_spec_pane_colour(const LayoutSpec *spec,
+                                              LayoutPaneKind kind);
+
+/**
+ * @brief 解析窗格某字段的生效颜色。
+ *
+ * 语义与 `ui_layout_apply_colors()` 一致：布局里写了显式色就用布局的，
+ * `LAYOUT_COLOR_INHERIT` 才回落到调用方给出的 `base`（主题角色色）。
+ * @param field       LAYOUT_COLOUR_FG / LAYOUT_COLOUR_BG。
+ * @param base        继承时使用的基准色（-1 表示终端默认）。
+ * @param from_layout 可为 NULL；非空时写入 1 表示取自布局覆盖，0 表示继承。
+ * @return 生效颜色；参数非法时返回 `base`。
+ */
+int layout_spec_colour_effective(const LayoutSpec *spec, LayoutPaneKind kind,
+                                 int field, int base, int *from_layout);
+
+/**
+ * @brief 双格布局 + 当前曲目无歌词 → 歌词格是否应当让位。
+ *
+ * 只做判定，不改动 spec；调用方（ui/layout.c）据此在解析前派生一份"去掉
+ * 歌词格"的有效规格。逐曲目重算，所以曲目有歌词时返回 0（两格都画）。
+ * @return 1 让位；0 不需要（布局不足两格，或曲目有歌词）。
+ */
+int layout_spec_lyrics_pane_suppressed(const LayoutSpec *spec,
+                                      int lyrics_available);
+
+/**
  * @brief 判断某个种类是否可以加入当前布局。
- * @return 1 可用；0 已存在、与 lyrics/vinyl 冲突或参数非法。
+ * @return 1 可用；0 已存在或参数非法。
  */
 int layout_spec_pane_available(const LayoutSpec *spec, LayoutPaneKind kind);
 
@@ -219,18 +287,25 @@ int layout_spec_remove_pane(LayoutSpec *spec, LayoutPaneKind kind);
 /**
  * @brief 把 old_kind 叶子改成 new_kind。
  *
- * new_kind 必须未使用；lyrics/vinyl 互相替换是允许的（替换后旧种类停用）。
+ * new_kind 必须未使用（lyrics 与 vinyl 现在可以同时存在，不再互相替换）。
  */
 int layout_spec_change_pane_kind(LayoutSpec *spec, LayoutPaneKind old_kind,
                                  LayoutPaneKind new_kind);
 
 /**
- * @brief 调整选中窗格父分栏的比例，使其变大 delta 千分比。
+ * @brief 调整"最近的该方向祖先分栏"的比例，使选中窗格变大或变小。
  *
- * 若选中窗格是父分栏的第二个子节点，则父 ratio 减小；否则增加。
- * @return 0 成功；-1 无父分栏、窗格过小或参数非法。
+ * @param dir LAYOUT_SPLIT_ROW 调宽度（左右分栏），LAYOUT_SPLIT_COL 调高度
+ *            （上下分栏）；从选中叶子向上找第一个该方向的分栏，因此同一窗格
+ *            两个方向都能调。
+ *
+ * 整步会撞上"某格小于 1%"时按可用步长饱和（先试整步，再折半到 1 个单位），
+ * 所以界面上的比例会一直贴着极限走，而不是提前拒绝。
+ * @return 0 成功；-1 参数非法或校验失败；-2 该方向没有祖先分栏；
+ *         -3 连 1 个单位都放不下（已到该方向的极限）。
  */
-int layout_spec_adjust_ratio(LayoutSpec *spec, LayoutPaneKind kind, int delta);
+int layout_spec_adjust_ratio(LayoutSpec *spec, LayoutPaneKind kind,
+                             LayoutSplitDir dir, int delta);
 
 /** @brief 把选中窗格父分栏恢复为 50/50。 */
 int layout_spec_equalize_pane(LayoutSpec *spec, LayoutPaneKind kind);

@@ -318,21 +318,130 @@ const LayoutPaneSpec *layout_spec_pane_config(const LayoutSpec *spec,
     return &spec->panes[kind];
 }
 
+const LayoutPaneSpec *layout_spec_pane_colour(const LayoutSpec *spec,
+                                              LayoutPaneKind kind)
+{
+    if (!spec || kind < 0 || kind >= LAYOUT_PANE_COUNT) {
+        return NULL;
+    }
+    return &spec->panes[kind];
+}
+
+int layout_spec_colour_effective(const LayoutSpec *spec, LayoutPaneKind kind,
+                                 int field, int base, int *from_layout)
+{
+    const LayoutPaneSpec *pane;
+
+    if (from_layout) {
+        *from_layout = 0;
+    }
+    if (field != LAYOUT_COLOUR_FG && field != LAYOUT_COLOUR_BG) {
+        return base;
+    }
+    pane = layout_spec_pane_colour(spec, kind);
+    if (!pane) {
+        return base;
+    }
+    int value = (field == LAYOUT_COLOUR_BG) ? pane->bg : pane->fg;
+    if (value == LAYOUT_COLOR_INHERIT) {
+        return base;
+    }
+    if (from_layout) {
+        *from_layout = 1;
+    }
+    return value;
+}
+
+/* xterm 调色板 0-15 的 RGB；8 色终端只用到前 8 项。 */
+static const int k_ansi_rgb[16][3] = {
+    {0, 0, 0},       {205, 0, 0},     {0, 205, 0},     {205, 205, 0},
+    {0, 0, 238},     {205, 0, 205},   {0, 205, 205},   {229, 229, 229},
+    {127, 127, 127}, {255, 0, 0},     {0, 255, 0},     {255, 255, 0},
+    {92, 92, 255},   {255, 0, 255},   {0, 255, 255},   {255, 255, 255},
+};
+
+/* 调色板下标 → RGB（16..231 是六级立方，232..255 是灰阶）。 */
+static void palette_rgb(int index, int *r, int *g, int *b)
+{
+    if (index < 16) {
+        *r = k_ansi_rgb[index][0];
+        *g = k_ansi_rgb[index][1];
+        *b = k_ansi_rgb[index][2];
+        return;
+    }
+    if (index < 232) {
+        static const int levels[6] = {0, 95, 135, 175, 215, 255};
+        int i = index - 16;
+        *r = levels[i / 36];
+        *g = levels[(i / 6) % 6];
+        *b = levels[i % 6];
+        return;
+    }
+    int gray = 8 + 10 * (index - 232);
+    *r = gray;
+    *g = gray;
+    *b = gray;
+}
+
+int layout_color_quantize(int value, int colors)
+{
+    if (value < 0) {
+        return -1;
+    }
+    if (value > 255) {
+        value = 255;
+    }
+    if (colors <= 0) {
+        return -1;   /* 黑白终端：不启用颜色 */
+    }
+    if (colors >= 256) {
+        return value;
+    }
+
+    int levels = (colors >= 16) ? 16 : 8;
+    /* 0..15/0..7 是各终端一致的 ANSI 基本色，原样保留；其余按最近基色近似。
+     * 不能拿 value < colors 判定：88 色终端的 45 号与 256 色终端的 45 号
+     * 不是同一种颜色。 */
+    if (value < levels) {
+        return value;
+    }
+    int r = 0;
+    int g = 0;
+    int b = 0;
+    palette_rgb(value, &r, &g, &b);
+    int best = 0;
+    long best_dist = -1;
+    for (int i = 0; i < levels; i++) {
+        long dr = r - k_ansi_rgb[i][0];
+        long dg = g - k_ansi_rgb[i][1];
+        long db = b - k_ansi_rgb[i][2];
+        long dist = dr * dr + dg * dg + db * db;
+        if (best_dist < 0 || dist < best_dist) {
+            best_dist = dist;
+            best = i;
+        }
+    }
+    return best;
+}
+
+int layout_spec_lyrics_pane_suppressed(const LayoutSpec *spec,
+                                      int lyrics_available)
+{
+    if (!spec || !spec->panes[LAYOUT_PANE_LYRICS].enabled ||
+        !spec->panes[LAYOUT_PANE_VINYL].enabled) {
+        return 0;
+    }
+    /* 两格同在、而当前曲目没有歌词：歌词格临时让位，余格补位。 */
+    return lyrics_available ? 0 : 1;
+}
+
 int layout_spec_pane_available(const LayoutSpec *spec, LayoutPaneKind kind)
 {
     if (!spec || kind < 0 || kind >= LAYOUT_PANE_COUNT) {
         return 0;
     }
-    if (spec->panes[kind].enabled) {
-        return 0;
-    }
-    if (kind == LAYOUT_PANE_LYRICS && spec->panes[LAYOUT_PANE_VINYL].enabled) {
-        return 0;
-    }
-    if (kind == LAYOUT_PANE_VINYL && spec->panes[LAYOUT_PANE_LYRICS].enabled) {
-        return 0;
-    }
-    return 1;
+    /* 歌词与黑胶可以同时存在：运行时会按曲目有无歌词决定歌词格是否让位。 */
+    return spec->panes[kind].enabled ? 0 : 1;
 }
 
 /* 查找 parent 与 slot；返回 1 找到，0 没有父节点，-1 参数错误。 */
@@ -359,6 +468,34 @@ static int find_parent(const LayoutSpec *spec, int target, int *parent_out,
         }
     }
     return -1;
+}
+
+/* 从 node 向上找第一个该方向的祖先分栏；slot 是该祖先里包含 node 的槽位。
+ * 返回 1 找到，0 没有，-1 参数错误。 */
+static int find_ancestor_split(const LayoutSpec *spec, int node,
+                               LayoutSplitDir dir, int *parent_out,
+                               int *slot_out)
+{
+    if (!spec || node < 0 || node >= spec->node_count ||
+        (dir != LAYOUT_SPLIT_ROW && dir != LAYOUT_SPLIT_COL)) {
+        return -1;
+    }
+    int current = node;
+    for (int guard = 0; guard <= spec->node_count; guard++) {
+        int parent = -1;
+        int slot = 0;
+        int found = find_parent(spec, current, &parent, &slot);
+        if (found != 1 || parent < 0) {
+            return 0;
+        }
+        if (spec->nodes[parent].dir == dir) {
+            if (parent_out) *parent_out = parent;
+            if (slot_out) *slot_out = slot;
+            return 1;
+        }
+        current = parent;
+    }
+    return 0;
 }
 
 /* ============================================================
@@ -448,12 +585,6 @@ int layout_spec_validate(const LayoutSpec *spec, char *err, size_t err_size)
         set_error(err, err_size, "layout has no root node");
         return -1;
     }
-    if (spec->panes[LAYOUT_PANE_LYRICS].enabled &&
-        spec->panes[LAYOUT_PANE_VINYL].enabled) {
-        set_error(err, err_size, "lyrics and vinyl cannot coexist");
-        return -1;
-    }
-
     LayoutResolved resolved;
     if (layout_spec_resolve(spec, &resolved) != 0) {
         set_error(err, err_size, "layout tree cannot be resolved");
@@ -638,11 +769,7 @@ int layout_spec_change_pane_kind(LayoutSpec *spec, LayoutPaneKind old_kind,
         old_kind == new_kind || !spec->panes[old_kind].enabled) {
         return -1;
     }
-    int replacing_counterpart =
-        (old_kind == LAYOUT_PANE_LYRICS && new_kind == LAYOUT_PANE_VINYL) ||
-        (old_kind == LAYOUT_PANE_VINYL && new_kind == LAYOUT_PANE_LYRICS);
-    if (!replacing_counterpart &&
-        !layout_spec_pane_available(spec, new_kind)) {
+    if (!layout_spec_pane_available(spec, new_kind)) {
         return -1;
     }
     LayoutSpec trial = *spec;
@@ -659,10 +786,12 @@ int layout_spec_change_pane_kind(LayoutSpec *spec, LayoutPaneKind old_kind,
     return commit_if_valid(spec, &trial, 1);
 }
 
-int layout_spec_adjust_ratio(LayoutSpec *spec, LayoutPaneKind kind, int delta)
+int layout_spec_adjust_ratio(LayoutSpec *spec, LayoutPaneKind kind,
+                             LayoutSplitDir dir, int delta)
 {
     if (!spec || kind < 0 || kind >= LAYOUT_PANE_COUNT || delta == 0 ||
-        !spec->panes[kind].enabled) {
+        !spec->panes[kind].enabled ||
+        (dir != LAYOUT_SPLIT_ROW && dir != LAYOUT_SPLIT_COL)) {
         return -1;
     }
     int index = layout_spec_find_pane(spec, kind);
@@ -671,25 +800,32 @@ int layout_spec_adjust_ratio(LayoutSpec *spec, LayoutPaneKind kind, int delta)
     }
     int parent = -1;
     int slot = 0;
-    if (find_parent(spec, index, &parent, &slot) != 1 || parent < 0) {
+    int found = find_ancestor_split(spec, index, dir, &parent, &slot);
+    if (found < 0) {
         return -1;
+    }
+    if (found == 0) {
+        return -2;   /* 这个方向没有祖先分栏可调 */
     }
 
-    LayoutSpec trial = *spec;
-    LayoutNode *split = &trial.nodes[parent];
-    int next = split->ratio;
-    if (slot == 0) {
-        next += delta;
-    } else {
-        next -= delta;
+    /* 整步会撞上"某格小于 1%"时按可用步长饱和：先试整步，不行再折半，
+     * 直到 1 个单位；连 1 个单位都放不下才算到了极限。 */
+    int base_ratio = spec->nodes[parent].ratio;
+    int step = delta;
+    while (step != 0) {
+        int offset = (slot == 0) ? step : -step;
+        int next = clamp_int(base_ratio + offset, 1, 999);
+        if (next != base_ratio) {
+            LayoutSpec trial = *spec;
+            trial.nodes[parent].ratio = next;
+            trial.normalized = 0;
+            if (commit_if_valid(spec, &trial, 1) == 0) {
+                return 0;
+            }
+        }
+        step /= 2;
     }
-    next = clamp_int(next, 1, 999);
-    if (next == split->ratio) {
-        return -1;
-    }
-    split->ratio = next;
-    trial.normalized = 0;
-    return commit_if_valid(spec, &trial, 1);
+    return -3;   /* 这个方向已经动不了了 */
 }
 
 int layout_spec_equalize_pane(LayoutSpec *spec, LayoutPaneKind kind)
@@ -1185,12 +1321,6 @@ static int parse_leaf(const JsonValue *value, LayoutSpec *spec, int depth)
         spec->normalized = 1;
         return -1;
     }
-    if (kind == LAYOUT_PANE_LYRICS &&
-        spec->panes[LAYOUT_PANE_VINYL].enabled) {
-        spec->normalized = 1;
-        return -1;
-    }
-
     LayoutPaneSpec colors;
     memset(&colors, 0, sizeof(colors));
     colors.fg = LAYOUT_COLOR_INHERIT;
@@ -1406,29 +1536,6 @@ static int parse_legacy_panes(JsonReader *reader, LayoutSpec *layout)
             force_normalized = 1;
             continue;
         }
-        if (kind == LAYOUT_PANE_LYRICS) {
-            int has_vinyl = 0;
-            for (int i = 0; i < count; i++) {
-                if (parsed[i].kind == LAYOUT_PANE_VINYL) {
-                    has_vinyl = 1;
-                    break;
-                }
-            }
-            if (has_vinyl) {
-                force_normalized = 1;
-                continue;
-            }
-        }
-        if (kind == LAYOUT_PANE_VINYL) {
-            for (int i = 0; i < count; i++) {
-                if (parsed[i].kind == LAYOUT_PANE_LYRICS) {
-                    parsed[i] = parsed[count - 1];
-                    count--;
-                    force_normalized = 1;
-                    break;
-                }
-            }
-        }
         if (count >= LAYOUT_MAX_PANES) {
             force_normalized = 1;
             break;
@@ -1583,11 +1690,6 @@ static int parse_layout_object(const char *json, size_t len, LayoutSpec *layout,
     }
 
     sync_enabled_panes(layout);
-    if (layout->panes[LAYOUT_PANE_LYRICS].enabled &&
-        layout->panes[LAYOUT_PANE_VINYL].enabled) {
-        remove_pane_inplace(layout, LAYOUT_PANE_LYRICS);
-        layout->normalized = 1;
-    }
     if (finalize_layout(layout) != 0) {
         apply_classic_identity(layout);
     }
@@ -1766,6 +1868,53 @@ const LayoutSpec *layout_catalog_find(const LayoutCatalog *catalog,
         }
     }
     return NULL;
+}
+
+void layout_catalog_adopt_preset_names(LayoutCatalog *incoming,
+                                       const LayoutCatalog *existing)
+{
+    if (!incoming || !existing) {
+        return;
+    }
+    for (int i = 0; i < incoming->count; i++) {
+        LayoutSpec *layout = &incoming->layouts[i];
+        if (layout->name_key[0]) {
+            continue;
+        }
+        const LayoutSpec *preset = layout_catalog_find(existing, layout->id);
+        if (!preset || !preset->name_key[0]) {
+            continue;
+        }
+        if (layout->name[0] && strcmp(layout->name, preset->name) != 0) {
+            continue;   /* 用户改过名：保留自定义名，不挂预设键 */
+        }
+        snprintf(layout->name_key, sizeof(layout->name_key), "%s",
+                 preset->name_key);
+        if (!layout->name[0]) {
+            snprintf(layout->name, sizeof(layout->name), "%s", preset->name);
+        }
+    }
+}
+
+int layout_catalog_next_copy_id(const LayoutCatalog *catalog, const char *base_id,
+                                char *out, size_t out_size)
+{
+    if (!catalog || !base_id || !base_id[0] || !out || out_size == 0) {
+        return -1;
+    }
+    for (int n = 2; n <= 99; n++) {
+        char candidate[LAYOUT_ID_MAX];
+        int written = snprintf(candidate, sizeof(candidate), "%s-%d", base_id, n);
+        if (written <= 0 || (size_t)written >= sizeof(candidate)) {
+            /* 基础 id 已经快到上限，序号只会更长：直接判失败，不截断。 */
+            return -1;
+        }
+        if (!layout_catalog_find(catalog, candidate) && is_valid_id(candidate)) {
+            snprintf(out, out_size, "%s", candidate);
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static size_t append_color_fields(char *out, size_t out_size, size_t pos,

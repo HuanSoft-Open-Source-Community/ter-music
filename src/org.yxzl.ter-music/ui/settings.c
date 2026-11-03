@@ -21,6 +21,7 @@
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/keymap.h"
+#include "ui/scrollbar.h"
 #include "ui/remote_view.h"
 #include "config/config.h"
 #include "logger/logger.h"
@@ -129,7 +130,14 @@ static const char *settings_options[] = {
     "settings.opt.stop_core_on_exit",
     "settings.opt.layout_reload",
     "settings.opt.layout_edit",
-    "settings.opt.layout_new"
+    "settings.opt.layout_new",
+    /* ── 窗格颜色（尾部追加：当前布局的 pane fg/bg，见 ColourRow 注释） ── */
+    "settings.opt.info_fg",
+    "settings.opt.info_bg",
+    "settings.opt.spectrum_fg",
+    "settings.opt.spectrum_bg",
+    "settings.opt.vinyl_fg",
+    "settings.opt.vinyl_bg"
 };
 static const char *settings_options_ascii[] = {
     "Playlist Foreground",
@@ -185,11 +193,18 @@ static const char *settings_options_ascii[] = {
     "Stop Playback Process On Exit",
     "Reload Layouts",
     "Edit Layout",
-    "New Layout"
+    "New Layout",
+    "Info Foreground",
+    "Info Background",
+    "Spectrum Foreground",
+    "Spectrum Background",
+    "Vinyl Foreground",
+    "Vinyl Background"
 };
 /* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
- * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new）。 */
-#define SETTINGS_OPTION_COUNT 54
+ * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new，
+ * 以及 54..59 的窗格颜色项）。 */
+#define SETTINGS_OPTION_COUNT 60
 
 /* 编译期护栏：两张文案表必须与枚举/段数组使用同一数量。 */
 typedef char settings_option_arrays_must_match_count[
@@ -198,18 +213,21 @@ typedef char settings_option_arrays_must_match_count[
         ? 1 : -1];
 
 enum {
-    SETTINGS_IDX_THEME_COLOR_PAIR_0  = 0,
-    SETTINGS_IDX_THEME_COLOR_PAIR_1  = 1,
-    SETTINGS_IDX_THEME_COLOR_PAIR_2  = 2,
-    SETTINGS_IDX_THEME_COLOR_PAIR_3  = 3,
-    SETTINGS_IDX_THEME_COLOR_PAIR_4  = 4,
-    SETTINGS_IDX_THEME_COLOR_PAIR_5  = 5,
-    SETTINGS_IDX_THEME_COLOR_PAIR_6  = 6,
-    SETTINGS_IDX_THEME_COLOR_PAIR_7  = 7,
-    SETTINGS_IDX_THEME_COLOR_PAIR_8  = 8,
-    SETTINGS_IDX_THEME_COLOR_PAIR_9  = 9,
-    SETTINGS_IDX_THEME_COLOR_PAIR_10 = 10,
-    SETTINGS_IDX_THEME_COLOR_PAIR_11 = 11,
+    /* ── 窗格颜色行（绑定当前布局的 pane fg/bg；继承时可写下面的主题基色） ──
+     * 下标语义变更：0/1=播放列表、2/3=控制区、4/5=歌词，与主题同名槽一一对应。 */
+    SETTINGS_IDX_PANE_PLAYLIST_FG    = 0,
+    SETTINGS_IDX_PANE_PLAYLIST_BG    = 1,
+    SETTINGS_IDX_PANE_CONTROLS_FG    = 2,
+    SETTINGS_IDX_PANE_CONTROLS_BG    = 3,
+    SETTINGS_IDX_PANE_LYRICS_FG      = 4,
+    SETTINGS_IDX_PANE_LYRICS_BG      = 5,
+    /* ── 界面颜色行（侧边栏/高亮/边框，始终写 config.xml 主题） ── */
+    SETTINGS_IDX_THEME_SIDEBAR_FG    = 6,
+    SETTINGS_IDX_THEME_SIDEBAR_BG    = 7,
+    SETTINGS_IDX_THEME_HIGHLIGHT_FG  = 8,
+    SETTINGS_IDX_THEME_HIGHLIGHT_BG  = 9,
+    SETTINGS_IDX_THEME_BORDER_FG     = 10,
+    SETTINGS_IDX_THEME_BORDER_BG     = 11,
     SETTINGS_IDX_DEFAULT_PATH        = 12,
     SETTINGS_IDX_AUTO_PLAY           = 13,
     SETTINGS_IDX_REMEMBER_PATH       = 14,
@@ -258,7 +276,14 @@ enum {
     SETTINGS_IDX_LAYOUT_RELOAD       = 51,
     /* ── 布局编辑器入口（动作项：ENTER 打开，无 ←/→ 调整） ── */
     SETTINGS_IDX_LAYOUT_EDIT         = 52,
-    SETTINGS_IDX_LAYOUT_NEW          = 53
+    SETTINGS_IDX_LAYOUT_NEW          = 53,
+    /* ── 缺失的三个窗格配色（信息栏/频谱/黑胶）：尾部追加，不重排既有下标 ── */
+    SETTINGS_IDX_PANE_INFO_FG        = 54,
+    SETTINGS_IDX_PANE_INFO_BG        = 55,
+    SETTINGS_IDX_PANE_SPECTRUM_FG    = 56,
+    SETTINGS_IDX_PANE_SPECTRUM_BG    = 57,
+    SETTINGS_IDX_PANE_VINYL_FG       = 58,
+    SETTINGS_IDX_PANE_VINYL_BG       = 59
 };
 
 typedef struct {
@@ -267,18 +292,27 @@ typedef struct {
 } SettingsSectionSpec;
 
 static const int settings_theme_option_indices[] = {
-    SETTINGS_IDX_THEME_COLOR_PAIR_0,
-    SETTINGS_IDX_THEME_COLOR_PAIR_1,
-    SETTINGS_IDX_THEME_COLOR_PAIR_2,
-    SETTINGS_IDX_THEME_COLOR_PAIR_3,
-    SETTINGS_IDX_THEME_COLOR_PAIR_4,
-    SETTINGS_IDX_THEME_COLOR_PAIR_5,
-    SETTINGS_IDX_THEME_COLOR_PAIR_6,
-    SETTINGS_IDX_THEME_COLOR_PAIR_7,
-    SETTINGS_IDX_THEME_COLOR_PAIR_8,
-    SETTINGS_IDX_THEME_COLOR_PAIR_9,
-    SETTINGS_IDX_THEME_COLOR_PAIR_10,
-    SETTINGS_IDX_THEME_COLOR_PAIR_11,
+    /* 窗格颜色：按屏幕上的阅读顺序（左列上→下、右列上→下）成对排列。
+     * 值来自当前布局，切换/重载布局后这些行立刻变成该布局的配色。 */
+    SETTINGS_IDX_PANE_PLAYLIST_FG,
+    SETTINGS_IDX_PANE_PLAYLIST_BG,
+    SETTINGS_IDX_PANE_INFO_FG,
+    SETTINGS_IDX_PANE_INFO_BG,
+    SETTINGS_IDX_PANE_CONTROLS_FG,
+    SETTINGS_IDX_PANE_CONTROLS_BG,
+    SETTINGS_IDX_PANE_SPECTRUM_FG,
+    SETTINGS_IDX_PANE_SPECTRUM_BG,
+    SETTINGS_IDX_PANE_LYRICS_FG,
+    SETTINGS_IDX_PANE_LYRICS_BG,
+    SETTINGS_IDX_PANE_VINYL_FG,
+    SETTINGS_IDX_PANE_VINYL_BG,
+    /* 界面颜色：全局主题，存 config.xml。 */
+    SETTINGS_IDX_THEME_SIDEBAR_FG,
+    SETTINGS_IDX_THEME_SIDEBAR_BG,
+    SETTINGS_IDX_THEME_HIGHLIGHT_FG,
+    SETTINGS_IDX_THEME_HIGHLIGHT_BG,
+    SETTINGS_IDX_THEME_BORDER_FG,
+    SETTINGS_IDX_THEME_BORDER_BG,
     SETTINGS_IDX_UI_LAYOUT,
     SETTINGS_IDX_LAYOUT_RELOAD,
     SETTINGS_IDX_LAYOUT_EDIT,
@@ -605,34 +639,299 @@ static int info_cover_size_index(void)
     return best;
 }
 
+/* ============================================================
+ * 颜色行统一目标：窗格色（当前布局）+ 界面色（全局主题）
+ *
+ * 两套颜色定义在这里合流。一行代表的字段可能由三种地方决定：
+ *   1) 布局显式写了这个字段 → 改动写回布局（内置预设自动落成同 id
+ *      用户覆盖，来源为 TER_MUSIC_LAYOUTS 时自增副本 id）；
+ *   2) 字段继承、且该窗格在主题里有自己的基色（播放列表/控制区/歌词）
+ *      → 改动写主题，与所有继承该基色的布局一起变（等价于旧行为）；
+ *   3) 字段继承、但没有自己的基色（信息栏/频谱/黑胶）→ 只能写布局，
+ *      这正是这三个窗格"颜色独立了却没有选项"要补的入口。
+ * 侧边栏/高亮/边框是界面色，永远走主题（config.xml）。
+ * ============================================================ */
+
+/* 主题里的 12 个颜色槽，顺序与 config.xml 的 <theme> 字段一致。 */
+enum {
+    THEME_SLOT_PLAYLIST_FG = 0, THEME_SLOT_PLAYLIST_BG,
+    THEME_SLOT_CONTROLS_FG,     THEME_SLOT_CONTROLS_BG,
+    THEME_SLOT_LYRICS_FG,       THEME_SLOT_LYRICS_BG,
+    THEME_SLOT_SIDEBAR_FG,      THEME_SLOT_SIDEBAR_BG,
+    THEME_SLOT_HIGHLIGHT_FG,    THEME_SLOT_HIGHLIGHT_BG,
+    THEME_SLOT_BORDER_FG,       THEME_SLOT_BORDER_BG
+};
+
+/* 全文件唯一的"主题槽 → 字段指针"表（取代原先散落在 5 处的重复数组）。 */
+static int *theme_color_slot(int slot)
+{
+    ColorTheme *t = &g_app_config.theme;
+    switch (slot) {
+        case THEME_SLOT_PLAYLIST_FG:  return &t->playlist_fg;
+        case THEME_SLOT_PLAYLIST_BG:  return &t->playlist_bg;
+        case THEME_SLOT_CONTROLS_FG:  return &t->controls_fg;
+        case THEME_SLOT_CONTROLS_BG:  return &t->controls_bg;
+        case THEME_SLOT_LYRICS_FG:    return &t->lyrics_fg;
+        case THEME_SLOT_LYRICS_BG:    return &t->lyrics_bg;
+        case THEME_SLOT_SIDEBAR_FG:   return &t->sidebar_fg;
+        case THEME_SLOT_SIDEBAR_BG:   return &t->sidebar_bg;
+        case THEME_SLOT_HIGHLIGHT_FG: return &t->highlight_fg;
+        case THEME_SLOT_HIGHLIGHT_BG: return &t->highlight_bg;
+        case THEME_SLOT_BORDER_FG:    return &t->border_fg;
+        case THEME_SLOT_BORDER_BG:    return &t->border_bg;
+        default:                      return NULL;
+    }
+}
+
+typedef struct {
+    int option;        /* SETTINGS_IDX_* */
+    int paired;        /* 配对行（前景↔背景），沿用"前后景不重色"保护 */
+    signed char kind;  /* LayoutPaneKind；-1 = 界面色行，只写主题 */
+    signed char field; /* LAYOUT_COLOUR_FG / LAYOUT_COLOUR_BG */
+    signed char slot;  /* 界面色行：自身主题槽；窗格行：继承时可写的基色槽，-1 = 无基色 */
+} ColourRow;
+
+static const ColourRow k_colour_rows[] = {
+    { SETTINGS_IDX_PANE_PLAYLIST_FG, SETTINGS_IDX_PANE_PLAYLIST_BG,
+      LAYOUT_PANE_PLAYLIST, LAYOUT_COLOUR_FG, THEME_SLOT_PLAYLIST_FG },
+    { SETTINGS_IDX_PANE_PLAYLIST_BG, SETTINGS_IDX_PANE_PLAYLIST_FG,
+      LAYOUT_PANE_PLAYLIST, LAYOUT_COLOUR_BG, THEME_SLOT_PLAYLIST_BG },
+    { SETTINGS_IDX_PANE_INFO_FG, SETTINGS_IDX_PANE_INFO_BG,
+      LAYOUT_PANE_INFO, LAYOUT_COLOUR_FG, -1 },
+    { SETTINGS_IDX_PANE_INFO_BG, SETTINGS_IDX_PANE_INFO_FG,
+      LAYOUT_PANE_INFO, LAYOUT_COLOUR_BG, -1 },
+    { SETTINGS_IDX_PANE_CONTROLS_FG, SETTINGS_IDX_PANE_CONTROLS_BG,
+      LAYOUT_PANE_CONTROLS, LAYOUT_COLOUR_FG, THEME_SLOT_CONTROLS_FG },
+    { SETTINGS_IDX_PANE_CONTROLS_BG, SETTINGS_IDX_PANE_CONTROLS_FG,
+      LAYOUT_PANE_CONTROLS, LAYOUT_COLOUR_BG, THEME_SLOT_CONTROLS_BG },
+    { SETTINGS_IDX_PANE_SPECTRUM_FG, SETTINGS_IDX_PANE_SPECTRUM_BG,
+      LAYOUT_PANE_SPECTRUM, LAYOUT_COLOUR_FG, -1 },
+    { SETTINGS_IDX_PANE_SPECTRUM_BG, SETTINGS_IDX_PANE_SPECTRUM_FG,
+      LAYOUT_PANE_SPECTRUM, LAYOUT_COLOUR_BG, -1 },
+    { SETTINGS_IDX_PANE_LYRICS_FG, SETTINGS_IDX_PANE_LYRICS_BG,
+      LAYOUT_PANE_LYRICS, LAYOUT_COLOUR_FG, THEME_SLOT_LYRICS_FG },
+    { SETTINGS_IDX_PANE_LYRICS_BG, SETTINGS_IDX_PANE_LYRICS_FG,
+      LAYOUT_PANE_LYRICS, LAYOUT_COLOUR_BG, THEME_SLOT_LYRICS_BG },
+    { SETTINGS_IDX_PANE_VINYL_FG, SETTINGS_IDX_PANE_VINYL_BG,
+      LAYOUT_PANE_VINYL, LAYOUT_COLOUR_FG, -1 },
+    { SETTINGS_IDX_PANE_VINYL_BG, SETTINGS_IDX_PANE_VINYL_FG,
+      LAYOUT_PANE_VINYL, LAYOUT_COLOUR_BG, -1 },
+    { SETTINGS_IDX_THEME_SIDEBAR_FG, SETTINGS_IDX_THEME_SIDEBAR_BG,
+      -1, 0, THEME_SLOT_SIDEBAR_FG },
+    { SETTINGS_IDX_THEME_SIDEBAR_BG, SETTINGS_IDX_THEME_SIDEBAR_FG,
+      -1, 0, THEME_SLOT_SIDEBAR_BG },
+    { SETTINGS_IDX_THEME_HIGHLIGHT_FG, SETTINGS_IDX_THEME_HIGHLIGHT_BG,
+      -1, 0, THEME_SLOT_HIGHLIGHT_FG },
+    { SETTINGS_IDX_THEME_HIGHLIGHT_BG, SETTINGS_IDX_THEME_HIGHLIGHT_FG,
+      -1, 0, THEME_SLOT_HIGHLIGHT_BG },
+    { SETTINGS_IDX_THEME_BORDER_FG, SETTINGS_IDX_THEME_BORDER_BG,
+      -1, 0, THEME_SLOT_BORDER_FG },
+    { SETTINGS_IDX_THEME_BORDER_BG, SETTINGS_IDX_THEME_BORDER_FG,
+      -1, 0, THEME_SLOT_BORDER_BG },
+};
+
+/* 编译期护栏：颜色行数必须等于 12 个窗格字段 + 6 个界面字段。 */
+typedef char colour_rows_must_cover_all_colour_options[
+    (sizeof(k_colour_rows) / sizeof(k_colour_rows[0]) == 18) ? 1 : -1];
+
+static const ColourRow *colour_row(int option_index)
+{
+    for (size_t i = 0; i < sizeof(k_colour_rows) / sizeof(k_colour_rows[0]); i++) {
+        if (k_colour_rows[i].option == option_index) {
+            return &k_colour_rows[i];
+        }
+    }
+    return NULL;
+}
+
+/* 该行当前生效的颜色。*from_layout（可为 NULL）= 1 表示由布局显式指定。 */
+static int colour_row_value(const ColourRow *row, int *from_layout)
+{
+    if (from_layout) {
+        *from_layout = 0;
+    }
+    if (!row) {
+        return 0;
+    }
+    if (row->kind < 0) {
+        int *slot = theme_color_slot(row->slot);
+        return slot ? *slot : 0;
+    }
+    return ui_layout_pane_colour((LayoutPaneKind)row->kind, row->field, from_layout);
+}
+
+/* 颜色弹层：候选值表 + 两个哨兵（都不会与真实颜色值相撞）。 */
+#define COLOUR_NO_PAIR     (-9999) /* 没有配对行，无需避让 */
+#define COLOUR_MENU_CUSTOM (-9998) /* "自定义…"槽，不是颜色值 */
+#define COLOUR_MENU_MAX    34      /* 1 继承 + 1 透明 + 24 调色板 + 1 自定义 */
+
+/* 配对行的生效颜色；没有配对行时返回一个不可能撞色的哨兵值。 */
+static int colour_row_paired_value(const ColourRow *row)
+{
+    const ColourRow *paired = row ? colour_row(row->paired) : NULL;
+    if (!paired) {
+        return COLOUR_NO_PAIR;
+    }
+    return colour_row_value(paired, NULL);
+}
+
+/* colour_row_commit() 的结果。 */
+#define COLOUR_WRITE_LAYOUT    1   /* 已写入当前布局（out_id 给出布局 id） */
+#define COLOUR_WRITE_THEME     0   /* 已写入全局主题（config.xml 已持久化） */
+#define COLOUR_WRITE_FAILED   (-1) /* 落盘失败，内存与界面均未改动 */
+#define COLOUR_WRITE_PANE_OFF (-2) /* 窗格不在当前布局里，改动无法持久化 */
+#define COLOUR_WRITE_UNCHANGED (-3) /* 已经是这个状态，无需写入 */
+
+/**
+ * @brief 写入一个颜色行，按上面三条规则选择目标层。
+ *
+ * 两条路径都会调用 apply_color_theme()；主题路径另外 player_config_persist()。
+ * 布局路径由 ui_layout_set_pane_colour() 负责"先落盘再改内存"。
+ */
+static int colour_row_commit(const ColourRow *row, int value,
+                             char *out_id, size_t out_id_size,
+                             char *err, size_t err_size)
+{
+    if (out_id && out_id_size) {
+        out_id[0] = '\0';
+    }
+    if (err && err_size) {
+        err[0] = '\0';
+    }
+    if (!row) {
+        return COLOUR_WRITE_FAILED;
+    }
+
+    if (row->kind >= 0) {
+        int from_layout = 0;
+        colour_row_value(row, &from_layout);
+        /* "跟随主题"只清布局覆盖：主题字段里没有 -2 这个取值，本来就没覆盖
+         * 时不需要写任何东西。 */
+        int back_to_theme = (value == LAYOUT_COLOR_INHERIT);
+        if (back_to_theme && !from_layout) {
+            return COLOUR_WRITE_UNCHANGED;
+        }
+        /* 继承 + 有自有基色：改基色（全局），不产生布局覆盖。 */
+        if (!back_to_theme && !from_layout && row->slot >= 0) {
+            int *slot = theme_color_slot(row->slot);
+            if (!slot) {
+                return COLOUR_WRITE_FAILED;
+            }
+            *slot = value;
+            apply_color_theme();
+            player_config_persist();
+            return COLOUR_WRITE_THEME;
+        }
+        /* 序列化只写分栏树里的叶子：窗格没启用时写了也会在重载后消失。 */
+        if (!ui_layout_pane_enabled((LayoutPaneKind)row->kind)) {
+            return COLOUR_WRITE_PANE_OFF;
+        }
+        if (ui_layout_set_pane_colour((LayoutPaneKind)row->kind, row->field,
+                                     value, out_id, out_id_size,
+                                     err, err_size) != 0) {
+            return COLOUR_WRITE_FAILED;
+        }
+        apply_color_theme();
+        return COLOUR_WRITE_LAYOUT;
+    }
+
+    /* 界面色行（侧边栏/高亮/边框）只有主题这一层，没有"跟随主题"可回退。 */
+    if (value == LAYOUT_COLOR_INHERIT) {
+        return COLOUR_WRITE_UNCHANGED;
+    }
+    int *slot = theme_color_slot(row->slot);
+    if (!slot) {
+        return COLOUR_WRITE_FAILED;
+    }
+    *slot = value;
+    apply_color_theme();
+    player_config_persist();
+    return COLOUR_WRITE_THEME;
+}
+
+/**
+ * @brief 提交颜色行改动并把结果反映到底部状态栏。
+ * @param announce 1 = 成功也提示（弹层选定）；0 = 只提示异常（←/→ 连按不刷屏）。
+ */
+static void commit_colour_option(int option_index, int value, int announce)
+{
+    const ColourRow *row = colour_row(option_index);
+    if (!row) {
+        return;
+    }
+
+    char before[LAYOUT_ID_MAX];
+    snprintf(before, sizeof(before), "%s", ui_layout_current_id());
+
+    char out_id[LAYOUT_ID_MAX] = "";
+    char err[192] = "";
+    int rc = colour_row_commit(row, value, out_id, sizeof(out_id),
+                               err, sizeof(err));
+    char msg[256];
+
+    if (rc == COLOUR_WRITE_UNCHANGED) {
+        return;   /* 已经是"跟随主题"，无需写盘也无需提示 */
+    }
+    if (rc == COLOUR_WRITE_PANE_OFF) {
+        show_status_message(i18n_get("settings.color.pane_disabled"));
+        return;
+    }
+    if (rc == COLOUR_WRITE_FAILED) {
+        /* 失败原因可能是英文的底层错误（目录满、写入失败），只进日志，
+         * 状态栏给一句本地化的短话。 */
+        snprintf(msg, sizeof(msg), "%s", i18n_get("settings.color.save_failed"));
+        show_status_message(msg);
+        log_warn("settings", "Colour write failed (option %d, value %d): %s",
+                 option_index, value, err);
+        return;
+    }
+    if (rc == COLOUR_WRITE_LAYOUT && announce) {
+        /* 副本路径（来源为 TER_MUSIC_LAYOUTS）会换 id，值得单独说明。 */
+        /* 底部状态栏很窄，常规保存只说一句；换了 id（来源 TER_MUSIC_LAYOUTS
+         * 的副本路径）才把新 id 报出来。 */
+        if (strcmp(out_id, before) == 0) {
+            snprintf(msg, sizeof(msg), "%s", i18n_get("settings.color.saved_layout"));
+        } else {
+            snprintf(msg, sizeof(msg), i18n_get("settings.color.saved_copy"), out_id);
+        }
+        if (g_rainbow_mode_enabled) {
+            char both[sizeof(msg) + 160];
+            snprintf(both, sizeof(both), "%s  %s", msg,
+                     i18n_get("settings.color.rainbow_pending"));
+            snprintf(msg, sizeof(msg), "%s", both);
+        }
+        show_status_message(msg);
+    }
+}
+
 static void format_settings_option_line(int option_index, char *line, size_t line_size)
 {
     const char **current_settings_options = settings_options;
     const char *separator = i18n_get("settings.separator");
     const char *unset_label = i18n_get("general.not_set");
 
-    int *color_values[] = {
-        &g_app_config.theme.playlist_fg,
-        &g_app_config.theme.playlist_bg,
-        &g_app_config.theme.controls_fg,
-        &g_app_config.theme.controls_bg,
-        &g_app_config.theme.lyrics_fg,
-        &g_app_config.theme.lyrics_bg,
-        &g_app_config.theme.sidebar_fg,
-        &g_app_config.theme.sidebar_bg,
-        &g_app_config.theme.highlight_fg,
-        &g_app_config.theme.highlight_bg,
-        &g_app_config.theme.border_fg,
-        &g_app_config.theme.border_bg
-    };
-
     if (!line || line_size == 0 || option_index < 0 || option_index >= SETTINGS_OPTION_COUNT) return;
 
-    if (option_index < 12) {
-        int color_val = *color_values[option_index];
-        snprintf(line, line_size, "%s%s%s (%d)",
+    const ColourRow *colour = colour_row(option_index);
+    if (colour) {
+        /* 窗格行额外标注生效来源与"该布局没有这个窗格"，界面行不需要标注。 */
+        int from_layout = 0;
+        int color_val = colour_row_value(colour, &from_layout);
+        char mark[64];
+        mark[0] = '\0';
+        if (colour->kind >= 0) {
+            const char *src = i18n_get(from_layout ? "settings.color.from_layout"
+                                                   : "settings.color.from_theme");
+            if (ui_layout_pane_enabled((LayoutPaneKind)colour->kind)) {
+                snprintf(mark, sizeof(mark), " [%s]", src);
+            } else {
+                snprintf(mark, sizeof(mark), " [%s %s]", src,
+                         i18n_get("settings.color.pane_disabled"));
+            }
+        }
+        snprintf(line, line_size, "%s%s%s (%d)%s",
                  i18n_get(current_settings_options[option_index]), separator,
-                 menu_color_name(color_val), color_val);
+                 menu_color_name(color_val), color_val, mark);
     } else if (option_index == SETTINGS_IDX_DEFAULT_PATH) {
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
@@ -795,22 +1094,70 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
  * Settings option group rendering
  * ============================================================ */
 
-static void render_settings_option_group(int start_y, int max_y, SettingsSectionSpec spec)
+/**
+ * @brief 渲染一个分区的选项列表，放不下时按选中项滑动窗口。
+ * @param reserved_bottom 列表下方留给说明文字的行数。
+ *
+ * 界面外观分区共 22 行（18 个颜色 + 4 个布局项），加上两行说明与底部三条
+ * 提示，32 行以下终端就放不下了（24 行终端只剩 14 行列表位），因此这里做
+ * 滑动窗口并在保留列画滚动条（与快捷键编辑器、选择弹层同一套做法）。
+ * 偏移量直接由选中位置推出，不引入额外状态。
+ */
+static void render_settings_option_group(int start_y, int max_y,
+                                        SettingsSectionSpec spec,
+                                        int reserved_bottom)
 {
     MenuContentArea area;
     menu_content_area(&area);
 
-    for (int i = 0; i < spec.count && start_y + i < max_y - 2; i++) {
-        int option_index = spec.indices[i];
+    int last_row = max_y - 3 - reserved_bottom;
+    int visible = last_row - start_y + 1;
+    if (visible < 1) {
+        visible = 1;
+    }
+    if (spec.count <= 0 || start_y > last_row) {
+        return;
+    }
+
+    int selected = get_settings_section_position(spec, g_settings_current_option);
+    if (selected < 0) {
+        selected = 0;
+    }
+    int off = 0;
+    if (selected >= visible) {
+        off = selected - visible + 1;
+    }
+    if (off > spec.count - visible) {
+        off = spec.count - visible;
+    }
+    if (off < 0) {
+        off = 0;
+    }
+
+    int shown = 0;
+    for (int i = 0; i < visible && off + i < spec.count; i++) {
+        int option_index = spec.indices[off + i];
         char line[256];
         format_settings_option_line(option_index, line, sizeof(line));
-        menu_content_clear_row(&area, start_y + i);
+        int row = start_y + i;
+        shown++;
+        menu_content_clear_row(&area, row);
         if (option_index == g_settings_current_option && g_focus_area == FOCUS_CONTENT) {
             attron(A_REVERSE);
-            menu_content_puts(&area, start_y + i, line);
+            menu_content_puts(&area, row, line);
             attroff(A_REVERSE);
         } else {
-            menu_content_puts(&area, start_y + i, line);
+            menu_content_puts(&area, row, line);
+        }
+    }
+
+    /* 滚动条列（max_x-2）在内容区之外，menu_content_clear_rows 擦不到，
+     * 换到不需要滚动条的分区时会留下上一页的残影；scrollbar_draw 内部只会
+     * 清自己那一段，所以这里只在它不画的时候整列擦干净。 */
+    if (!scrollbar_draw(stdscr, start_y, shown, spec.count, shown, off,
+                        area.max_x - 2)) {
+        for (int i = 0; i < visible; i++) {
+            mvaddch(start_y + i, area.max_x - 2, ' ');
         }
     }
 }
@@ -840,37 +1187,31 @@ static void move_settings_content_selection(int delta)
 
 static void adjust_settings_theme_option(int option_index, int delta)
 {
-    int *color_values[] = {
-        &g_app_config.theme.playlist_fg,
-        &g_app_config.theme.playlist_bg,
-        &g_app_config.theme.controls_fg,
-        &g_app_config.theme.controls_bg,
-        &g_app_config.theme.lyrics_fg,
-        &g_app_config.theme.lyrics_bg,
-        &g_app_config.theme.sidebar_fg,
-        &g_app_config.theme.sidebar_bg,
-        &g_app_config.theme.highlight_fg,
-        &g_app_config.theme.highlight_bg,
-        &g_app_config.theme.border_fg,
-        &g_app_config.theme.border_bg
-    };
+    const ColourRow *row = colour_row(option_index);
+    if (!row) {
+        return;
+    }
+    if (delta == 0) {
+        delta = 1;
+    }
 
-    if (option_index < 0 || option_index >= 12) return;
-    if (delta == 0) delta = 1;
-
-    int paired_idx = (option_index % 2 == 0) ? option_index + 1 : option_index - 1;
-    int paired_color = *color_values[paired_idx];
-    int next = *color_values[option_index];
+    int paired_color = colour_row_paired_value(row);
+    int next = colour_row_value(row, NULL);
+    /* 继承(-2)/透明(-1)/256 色都从调色板起点进入 0..7 循环，与原行为一致。 */
+    if (next < 0 || next > 7) {
+        next = 0;
+    }
 
     do {
         next += delta;
-        if (next < 0)  next = 7;
-        else if (next > 7) next = 0;
+        if (next < 0) {
+            next = 7;
+        } else if (next > 7) {
+            next = 0;
+        }
     } while (next == paired_color);
 
-    *color_values[option_index] = next;
-    apply_color_theme();
-    player_config_persist();
+    commit_colour_option(option_index, next, 0);
 }
 
 static void edit_default_startup_path(void)
@@ -913,7 +1254,7 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
 {
     if (option_index < 0) return;
 
-    if (option_index < 12) {
+    if (colour_row(option_index)) {
         adjust_settings_theme_option(option_index, delta);
         return;
     }
@@ -1193,6 +1534,82 @@ static int sel_color_val(int i)
     return -1;
 }
 
+/* 弹层打开期间的候选颜色（值，不是下标）；由 colour_menu_build() 填充。 */
+static int g_colour_vals[COLOUR_MENU_MAX];
+static int g_colour_n = 0;
+
+/**
+ * @brief 组装一行颜色的候选表。
+ *
+ * 窗格行第一项是"跟随主题"（LAYOUT_COLOR_INHERIT），界面行没有这一项；
+ * 随后是调色板，与配对行同色的预置项被跳过（沿用原有"前后景不重色"保护）；
+ * 最后一项固定为自定义输入槽。调用方把返回值当作 g_sel_count。
+ */
+static int colour_menu_build(const ColourRow *row)
+{
+    int n = 0;
+    int paired = colour_row_paired_value(row);
+
+    if (row->kind >= 0 && n < COLOUR_MENU_MAX - 1) {
+        g_colour_vals[n++] = LAYOUT_COLOR_INHERIT;
+    }
+    int palette = sel_color_count();
+    for (int i = 0; i < palette && n < COLOUR_MENU_MAX - 1; i++) {
+        int v = sel_color_val(i);
+        if (v == paired && v != -1) {
+            continue;
+        }
+        g_colour_vals[n++] = v;
+    }
+    g_colour_vals[n++] = COLOUR_MENU_CUSTOM;
+    return n;
+}
+
+/* 当前生效值在候选表里的位置；不在预置里就落到最后的自定义槽。 */
+static int colour_menu_cursor(const ColourRow *row, int n)
+{
+    int current = colour_row_value(row, NULL);
+    for (int i = 0; i < n; i++) {
+        if (g_colour_vals[i] == current) {
+            return i;
+        }
+    }
+    return n - 1;
+}
+
+/* 颜色弹层第 i 项的文本（create_sel_window 与 draw_sel_menu 共用）。 */
+static void colour_sel_option_text(const ColourRow *row, int i,
+                                   char *out, size_t out_size)
+{
+    out[0] = '\0';
+    if (!row || i < 0 || i >= g_colour_n) {
+        return;
+    }
+    int v = g_colour_vals[i];
+    if (v == COLOUR_MENU_CUSTOM) {
+        /* 自定义槽：当前值本来就落在某个预置上时不重复显示数值。 */
+        int val = colour_row_value(row, NULL);
+        int in_pre = 0;
+        for (int k = 0; k < sel_color_count(); k++) {
+            if (sel_color_val(k) == val) {
+                in_pre = 1;
+                break;
+            }
+        }
+        if (in_pre || val < 0 || val >= COLORS) {
+            snprintf(out, out_size, "[%s...]", i18n_get("general.custom"));
+        } else {
+            snprintf(out, out_size, "%s: %d", i18n_get("general.custom"), val);
+        }
+        return;
+    }
+    if (v == LAYOUT_COLOR_INHERIT) {
+        snprintf(out, out_size, "%s", i18n_get("settings.color.follow_theme"));
+        return;
+    }
+    snprintf(out, out_size, "%s (%d)", menu_color_name(v), v);
+}
+
 /* ============================================================
  * Selection menu — close / apply
  * ============================================================ */
@@ -1332,31 +1749,15 @@ static void close_sel_menu(int apply)
                 /* Pre-amp is preserved, not reset by preset */
                 break;
 
-            default:
-                if (g_sel_src >= 0 && g_sel_src < 12) {
-                    /* Theme color: find selected color value, skip paired */
-                    int *cv[] = {&g_app_config.theme.playlist_fg,&g_app_config.theme.playlist_bg,
-                                 &g_app_config.theme.controls_fg,&g_app_config.theme.controls_bg,
-                                 &g_app_config.theme.lyrics_fg,&g_app_config.theme.lyrics_bg,
-                                 &g_app_config.theme.sidebar_fg,&g_app_config.theme.sidebar_bg,
-                                 &g_app_config.theme.highlight_fg,&g_app_config.theme.highlight_bg,
-                                 &g_app_config.theme.border_fg,&g_app_config.theme.border_bg};
-                    int paired = *cv[(g_sel_src % 2 == 0) ? g_sel_src + 1 : g_sel_src - 1];
-                    int idx = 0;
-                    int n = sel_color_count();
-                    for (int j = 0; j < n; j++) {
-                        int v = sel_color_val(j);
-                        if (v == paired && v != -1) continue;
-                        if (idx == g_sel_idx) {
-                            *cv[g_sel_src] = v;
-                            break;
-                        }
-                        idx++;
-                    }
-                    apply_color_theme();
-                    player_config_persist();
+            default: {
+                /* 颜色行：候选表由 open_sel_menu() 建好，这里按位置取值提交。 */
+                const ColourRow *row = colour_row(g_sel_src);
+                if (row && g_sel_idx >= 0 && g_sel_idx < g_colour_n &&
+                    g_colour_vals[g_sel_idx] != COLOUR_MENU_CUSTOM) {
+                    commit_colour_option(g_sel_src, g_colour_vals[g_sel_idx], 1);
                 }
-                break;
+            }
+            break;
         }
     }
 
@@ -1468,37 +1869,15 @@ static void open_sel_menu(int option_index)
             }
             break;
         }
-        default:
-            if (option_index >= 0 && option_index < 12) {
-                /* Theme color: show 8 colors, skip paired fg/bg */
-                int *cv[] = {&g_app_config.theme.playlist_fg,&g_app_config.theme.playlist_bg,
-                             &g_app_config.theme.controls_fg,&g_app_config.theme.controls_bg,
-                             &g_app_config.theme.lyrics_fg,&g_app_config.theme.lyrics_bg,
-                             &g_app_config.theme.sidebar_fg,&g_app_config.theme.sidebar_bg,
-                             &g_app_config.theme.highlight_fg,&g_app_config.theme.highlight_bg,
-                             &g_app_config.theme.border_fg,&g_app_config.theme.border_bg};
-                int paired = *cv[(option_index % 2 == 0) ? option_index + 1 : option_index - 1];
-                int current = *cv[option_index];
-                count = 0;
-                int n = sel_color_count();
-                for (int i = 0; i < n; i++) {
-                    int v = sel_color_val(i);
-                    if (v == paired && v != -1) continue;
-                    if (v == current) cur = count;
-                    count++;
-                }
-                /* Custom slot: auto-select if current not in presets */
-                if (n > 0) {
-                    int found = 0;
-                    for (int i = 0; i < n; i++) {
-                        if (sel_color_val(i) == current) { found = 1; break; }
-                    }
-                    if (!found && current >= 0 && current < COLORS)
-                        cur = count;
-                    count++; /* +1 for custom */
-                }
+        default: {
+            const ColourRow *row = colour_row(option_index);
+            if (row) {
+                g_colour_n = colour_menu_build(row);
+                count = g_colour_n;
+                cur   = colour_menu_cursor(row, g_colour_n);
             }
             break;
+        }
     }
 
     if (count <= 0) return;
@@ -1618,42 +1997,13 @@ static void create_sel_window(void)
             case SETTINGS_IDX_INFO_LYRICS:
                 info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
                 break;
-            default:
-                if (src >= 0 && src < 12) {
-                    int cv[] = {g_app_config.theme.playlist_fg,g_app_config.theme.playlist_bg,
-                                g_app_config.theme.controls_fg,g_app_config.theme.controls_bg,
-                                g_app_config.theme.lyrics_fg,g_app_config.theme.lyrics_bg,
-                                g_app_config.theme.sidebar_fg,g_app_config.theme.sidebar_bg,
-                                g_app_config.theme.highlight_fg,g_app_config.theme.highlight_bg,
-                                g_app_config.theme.border_fg,g_app_config.theme.border_bg};
-                    /* Custom slot (last item) */
-                    if (i == g_sel_count - 1) {
-                        int val = cv[src];
-                        int in_pre = 0;
-                        for (int k = 0; k < sel_color_count(); k++) {
-                            if (sel_color_val(k) == val) { in_pre = 1; break; }
-                        }
-                        if (in_pre || val < 0 || val >= COLORS)
-                            snprintf(opts[i], 48, "[%s...]", i18n_get("general.custom"));
-                        else
-                            snprintf(opts[i], 48, "%s: %d", i18n_get("general.custom"), val);
-                        break;
-                    }
-                    /* Preset colors */
-                    int paired = cv[(src % 2 == 0) ? src + 1 : src - 1];
-                    int idx = 0;
-                    int n = sel_color_count();
-                    for (int j = 0; j < n; j++) {
-                        int v = sel_color_val(j);
-                        if (v == paired && v != -1) continue;
-                        if (idx == i) {
-                            snprintf(opts[i], 48, "%s (%d)", menu_color_name(v), v);
-                            break;
-                        }
-                        idx++;
-                    }
+            default: {
+                const ColourRow *row = colour_row(src);
+                if (row) {
+                    colour_sel_option_text(row, i, opts[i], 48);
                 }
-                break;
+            }
+            break;
         }
         int l = utf8_str_width(opts[i]);
         if (l > max_w) max_w = l;
@@ -1788,40 +2138,13 @@ static void draw_sel_menu(void)
             case SETTINGS_IDX_INFO_LYRICS:
                 info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
                 break;
-            default:
-                if (src >= 0 && src < 12) {
-                    int cv[] = {g_app_config.theme.playlist_fg,g_app_config.theme.playlist_bg,
-                                g_app_config.theme.controls_fg,g_app_config.theme.controls_bg,
-                                g_app_config.theme.lyrics_fg,g_app_config.theme.lyrics_bg,
-                                g_app_config.theme.sidebar_fg,g_app_config.theme.sidebar_bg,
-                                g_app_config.theme.highlight_fg,g_app_config.theme.highlight_bg,
-                                g_app_config.theme.border_fg,g_app_config.theme.border_bg};
-                    if (i == g_sel_count - 1) {
-                        int val = cv[src];
-                        int in_pre = 0;
-                        for (int k = 0; k < sel_color_count(); k++) {
-                            if (sel_color_val(k) == val) { in_pre = 1; break; }
-                        }
-                        if (in_pre || val < 0 || val >= COLORS)
-                            snprintf(opts[i], 48, "[%s...]", i18n_get("general.custom"));
-                        else
-                            snprintf(opts[i], 48, "%s: %d", i18n_get("general.custom"), val);
-                        break;
-                    }
-                    int paired = cv[(src % 2 == 0) ? src + 1 : src - 1];
-                    int idx = 0;
-                    int nc = sel_color_count();
-                    for (int j = 0; j < nc; j++) {
-                        int v = sel_color_val(j);
-                        if (v == paired && v != -1) continue;
-                        if (idx == i) {
-                            snprintf(opts[i], 48, "%s (%d)", menu_color_name(v), v);
-                            break;
-                        }
-                        idx++;
-                    }
+            default: {
+                const ColourRow *row = colour_row(src);
+                if (row) {
+                    colour_sel_option_text(row, i, opts[i], 48);
                 }
-                break;
+            }
+            break;
         }
     }
 
@@ -1854,7 +2177,7 @@ static void draw_sel_menu(void)
                 title = i18n_get(settings_options[src]);
             break;
         default:
-            if (src >= 0 && src < 12)
+            if (colour_row(src))
                 title = i18n_get("popup.color");
             break;
     }
@@ -1951,16 +2274,13 @@ static int handle_sel_input(int ch)
                 return 1;
             }
             /* Custom color slot: prompt for a numeric value */
-            if (g_sel_src >= 0 && g_sel_src < 12 &&
-                g_sel_idx == g_sel_count - 1) {
-                int *cv[] = {&g_app_config.theme.playlist_fg,&g_app_config.theme.playlist_bg,
-                             &g_app_config.theme.controls_fg,&g_app_config.theme.controls_bg,
-                             &g_app_config.theme.lyrics_fg,&g_app_config.theme.lyrics_bg,
-                             &g_app_config.theme.sidebar_fg,&g_app_config.theme.sidebar_bg,
-                             &g_app_config.theme.highlight_fg,&g_app_config.theme.highlight_bg,
-                             &g_app_config.theme.border_fg,&g_app_config.theme.border_bg};
+            const ColourRow *crow = colour_row(g_sel_src);
+            if (crow && g_sel_idx == g_sel_count - 1) {
                 char buf[8];
-                int cur = *cv[g_sel_src];
+                int cur = colour_row_value(crow, NULL);
+                if (cur == LAYOUT_COLOR_INHERIT) {
+                    cur = -1;         /* 继承态下提示行按"透明"起步 */
+                }
                 snprintf(buf, sizeof(buf), "%d", cur);
                 int my, mx;
                 getmaxyx(stdscr, my, mx);
@@ -1972,16 +2292,11 @@ static int handle_sel_input(int ch)
                 curs_set(0);
                 noecho();
                 int v = atoi(buf);
-                {
-                    int paired_idx = (g_sel_src % 2 == 0) ? g_sel_src + 1 : g_sel_src - 1;
-                    int paired_val = *cv[paired_idx];
-                    if (v != cur && v >= 0 && v < COLORS && v != paired_val) {
-                        *cv[g_sel_src] = v;
-                        apply_color_theme();
-                        player_config_persist();
-                    } else if (v == paired_val) {
-                        show_status_message(i18n_get("settings.color.same_error"));
-                    }
+                int paired_val = colour_row_paired_value(crow);
+                if (v != cur && v >= 0 && v < COLORS && v != paired_val) {
+                    commit_colour_option(g_sel_src, v, 1);
+                } else if (v == paired_val) {
+                    show_status_message(i18n_get("settings.color.same_error"));
                 }
                 g_sel_active = 0;
                 g_sel_src = -1;
@@ -2014,8 +2329,8 @@ static void activate_settings_current_option(void)
             show_status_message(i18n_get("layout.editor.open_failed"));
             return;
         }
-        /* 用户覆盖不继承内置预设的 i18n 名字键，显示用户设置的名字 */
-        base.name_key[0] = '\0';
+        /* 保留预设的本地化名字键：用户没改名就继续跟随语言，
+         * 只有编辑器里按 n 改名时才会把它清掉。 */
         int is_new = (g_settings_current_option == SETTINGS_IDX_LAYOUT_NEW);
         layout_editor_open(&base, is_new);
         return;
@@ -2095,8 +2410,8 @@ static void activate_settings_current_option(void)
         return;
     }
 
-    /* Theme colors: ENTER opens color sel menu */
-    if (g_settings_current_option >= 0 && g_settings_current_option < 12) {
+    /* 颜色行：ENTER 打开调色板（窗格行多一项"跟随主题"） */
+    if (colour_row(g_settings_current_option)) {
         open_sel_menu(g_settings_current_option);
         return;
     }
@@ -2392,24 +2707,29 @@ void render_settings_content(void)
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.color.select_hint"));
         menu_content_puts(&area, start_y, hint_buf);
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
+                 i18n_get("settings.color.layer_hint"));
+        menu_content_puts(&area, start_y + 1, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, area.max_y, spec);
-        start_y += spec.count + 1;
+        /* 三条说明钉在底部（多留一行间隔），列表在剩余空间里滑动。 */
+        const int hint_rows = 3;
+        render_settings_option_group(start_y, area.max_y, spec, hint_rows + 1);
+        int hint_y = area.max_y - 3 - (hint_rows - 1);
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.color.auto_avoid_same"));
-        menu_content_puts(&area, start_y, hint_buf);
+        menu_content_puts(&area, hint_y, hint_buf);
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.layout.hint"));
-        menu_content_puts(&area, start_y + 1, hint_buf);
+        menu_content_puts(&area, hint_y + 1, hint_buf);
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.layout.edit_hint"));
-        menu_content_puts(&area, start_y + 2, hint_buf);
+        menu_content_puts(&area, hint_y + 2, hint_buf);
     } else if (g_menu_selected_idx == 1) {  /* 默认路径 */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.hint"));
         menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, area.max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec, 0);
         start_y += spec.count + 1;
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.tilde_hint"));
@@ -2419,7 +2739,7 @@ void render_settings_content(void)
                  i18n_get("settings.playback.hint"));
         menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, area.max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec, 0);
         start_y += spec.count + 1;
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.playback.language"));
@@ -2429,7 +2749,7 @@ void render_settings_content(void)
                  i18n_get("settings.play_mode.hint"));
         menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, area.max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec, 0);
     } else if (g_menu_selected_idx == 4) {  /* 快捷键 */
         render_hotkey_editor(start_y, area.max_y);
     } else if (g_menu_selected_idx == 5) {  /* 远程设备 */
@@ -2442,7 +2762,7 @@ void render_settings_content(void)
                  i18n_get("settings.info.hint"));
         menu_content_puts(&area, start_y, hint_buf);
         start_y += 2;
-        render_settings_option_group(start_y, area.max_y, spec);
+        render_settings_option_group(start_y, area.max_y, spec, 0);
         start_y += spec.count + 1;
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.info.fields_hint"));
@@ -2468,6 +2788,11 @@ void render_settings_content(void)
 
 static void rerender_settings_view(void)
 {
+    /* 布局编辑器是模态全屏：任何"重绘设置页"的路径都不能把它的首帧盖掉。 */
+    if (layout_editor_active()) {
+        layout_editor_render();
+        return;
+    }
     render_menu_frame(i18n_get("menu.settings"));
     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
     render_settings_content();

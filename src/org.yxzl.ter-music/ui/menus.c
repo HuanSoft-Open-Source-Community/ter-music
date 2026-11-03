@@ -74,9 +74,8 @@ void apply_color_theme(void)
 {
     if (!has_colors()) return;
 
-    int max_c = COLORS - 1;
-    if (max_c < 0) max_c = 7;
-#define CLR(v) ((v) == -1 ? -1 : (v) < 0 ? 0 : (v) > max_c ? max_c : (v))
+    /* 主题色同样按终端色数量化：256 原样、8/16 取最近基色、黑白不启用。 */
+#define CLR(v) ((v) < 0 ? ((v) == -1 ? -1 : 0) : layout_color_quantize((v), COLORS))
 
     init_pair(COLOR_PAIR_PLAYLIST,  CLR(g_app_config.theme.playlist_fg),  CLR(g_app_config.theme.playlist_bg));
     init_pair(COLOR_PAIR_CONTROLS,  CLR(g_app_config.theme.controls_fg),  CLR(g_app_config.theme.controls_bg));
@@ -851,6 +850,11 @@ void switch_to_view(ViewMode view)
 
     switch (view) {
         case VIEW_SETTINGS:
+            /* 布局编辑器打开时整屏归它，别用设置页覆盖首帧。 */
+            if (layout_editor_active()) {
+                layout_editor_render();
+                break;
+            }
             render_menu_frame(i18n_get("menu.settings"));
             render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
             render_settings_content();
@@ -929,6 +933,11 @@ void rerender_active_view(void)
 
     switch (g_current_view) {
         case VIEW_SETTINGS:
+            /* 布局编辑器打开时整屏归它，别用设置页覆盖首帧。 */
+            if (layout_editor_active()) {
+                layout_editor_render();
+                break;
+            }
             render_menu_frame(i18n_get("menu.settings"));
             render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
             render_settings_content();

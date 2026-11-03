@@ -76,9 +76,9 @@ static void compute_horizontal(int x0, int y0, int cw, int ch,
     int text_width = cw;
     if (cover_rows > 0) {
         int cover_cols = cover_rows * 2;
-        /* 封面末列固定为 w-4：右侧两列空白、一列与文字分隔。 */
+        /* 封面末列固定为 w-4：右侧两列空白、一列与文字分隔；纵向居中。 */
         out->cover.x = x0 + cw - 2 - cover_cols;
-        out->cover.y = y0;
+        out->cover.y = y0 + (ch - cover_rows) / 2;
         out->cover.w = cover_cols;
         out->cover.h = cover_rows;
         text_width = cw - cover_cols - INFO_BAR_COVER_GAP -
@@ -88,17 +88,23 @@ static void compute_horizontal(int x0, int y0, int cw, int ch,
     int metadata_width = text_width / 2;
     int audio_width = text_width - metadata_width - 1;
 
+    /* 文字块按实际行数垂直居中；两列同起点同高，保持校验不变量。 */
+    int metadata_rows = min_int(INFO_BAR_METADATA_LINES, ch);
+    int audio_rows = min_int(INFO_BAR_AUDIO_LINES, ch);
+    int rows = metadata_rows > audio_rows ? metadata_rows : audio_rows;
+    int text_y = y0 + (ch - rows) / 2;
+
     out->metadata.x = x0;
-    out->metadata.y = y0;
+    out->metadata.y = text_y;
     out->metadata.w = metadata_width;
-    out->metadata.h = ch;
-    out->metadata_rows = min_int(INFO_BAR_METADATA_LINES, ch);
+    out->metadata.h = rows;
+    out->metadata_rows = metadata_rows;
 
     out->audio.x = x0 + metadata_width + 1;
-    out->audio.y = y0;
+    out->audio.y = text_y;
     out->audio.w = audio_width;
-    out->audio.h = ch;
-    out->audio_rows = min_int(INFO_BAR_AUDIO_LINES, ch);
+    out->audio.h = rows;
+    out->audio_rows = audio_rows;
 
     out->stacked = 0;
 }
@@ -119,31 +125,35 @@ static void compute_stacked(int x0, int y0, int cw, int ch,
         }
     }
 
-    int text_y = y0;
-    int text_height = ch;
+    int gap = (cover_rows > 0) ? INFO_BAR_COVER_GAP : 0;
+    int text_height = ch - cover_rows - gap;
+    int metadata_rows = min_int(INFO_BAR_METADATA_LINES, text_height);
+    int audio_rows = min_int(INFO_BAR_AUDIO_LINES, text_height - metadata_rows);
+
+    /* 封面与文字作为一整块在内容区垂直居中，块内保持"封面在上、文字在下"。 */
+    int group = cover_rows + gap + metadata_rows + audio_rows;
+    int top = y0 + (ch - group) / 2;
+
     if (cover_rows > 0) {
         int cover_cols = cover_rows * 2;
         out->cover.x = x0 + (cw - cover_cols) / 2;
-        out->cover.y = y0;
+        out->cover.y = top;
         out->cover.w = cover_cols;
         out->cover.h = cover_rows;
-        text_y = y0 + cover_rows + INFO_BAR_COVER_GAP;
-        text_height = ch - cover_rows - INFO_BAR_COVER_GAP;
     }
 
+    int text_y = top + cover_rows + gap;
     out->metadata.x = x0;
     out->metadata.y = text_y;
     out->metadata.w = cw;
-    out->metadata.h = min_int(INFO_BAR_METADATA_LINES, text_height);
-    out->metadata_rows = out->metadata.h;
+    out->metadata.h = metadata_rows;
+    out->metadata_rows = metadata_rows;
 
-    int audio_height = min_int(INFO_BAR_AUDIO_LINES,
-                               text_height - out->metadata.h);
     out->audio.x = x0;
-    out->audio.y = text_y + out->metadata.h;
+    out->audio.y = text_y + metadata_rows;
     out->audio.w = cw;
-    out->audio.h = audio_height;
-    out->audio_rows = audio_height;
+    out->audio.h = audio_rows;
+    out->audio_rows = audio_rows;
 
     out->stacked = 1;
 }

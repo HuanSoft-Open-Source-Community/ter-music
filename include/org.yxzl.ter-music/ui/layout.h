@@ -54,6 +54,41 @@ int ui_layout_current_spec(LayoutSpec *out);
  */
 int ui_layout_select(const char *id);
 
+/**
+ * @brief 当前布局某窗格字段的生效颜色。
+ * @param field       LAYOUT_COLOUR_FG / LAYOUT_COLOUR_BG。
+ * @param from_layout 可为 NULL；1 = 布局显式覆盖，0 = 继承角色基色。
+ * @return 颜色值（-1 终端默认 / 0..255 调色板）。
+ */
+int ui_layout_pane_colour(LayoutPaneKind kind, int field, int *from_layout);
+
+/** @brief 该窗格种类是否出现在当前布局的分栏树里（不看窗口是否已建）。 */
+int ui_layout_pane_enabled(LayoutPaneKind kind);
+
+/**
+ * @brief 当前布局同时含歌词与黑胶两格、且当前曲目没有歌词 → 歌词格临时让位。
+ *
+ * 让位只影响运行时的几何：布局本身、颜色设置与用户布局文件都不变，
+ * 换到有歌词的曲目时歌词格自动回来。
+ */
+int ui_layout_lyrics_pane_suppressed(void);
+
+/**
+ * @brief 修改当前布局某窗格的前景/背景色并落盘（设置页窗格色行用）。
+ *
+ * 提交语义为"先写文件，成功才改内存"，失败时界面与布局都保持原样：
+ * - 内置预设与用户布局：写用户文件的**同 id 覆盖**，每个预设至多多一条记录；
+ * - 来源为 TER_MUSIC_LAYOUTS：同 id 会被 env 目录再盖掉，改用自增副本
+ *   `<id>-2`/`<id>-3`… 并切换过去；
+ * - 用户文件已满（LAYOUT_MAX_CATALOG）：返回 -1，不做任何修改。
+ * @param value LAYOUT_COLOR_INHERIT 表示恢复"跟随主题"。
+ * @param out_id 可为 NULL；返回最终生效的布局 id。
+ * @return 0 成功；-1 失败（err 给出原因）。
+ */
+int ui_layout_set_pane_colour(LayoutPaneKind kind, int field, int value,
+                              char *out_id, size_t out_id_size,
+                              char *err, size_t err_size);
+
 /** @brief 窗格的本地化显示名（布局编辑器与窗格标题共用）。 */
 const char *ui_layout_pane_title(LayoutPaneKind kind);
 

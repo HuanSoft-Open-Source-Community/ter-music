@@ -15,17 +15,23 @@
             "ratio": 520,
             "children": [
               {
-                "pane": "playlist"
+                "pane": "playlist",
+                "fg": 15,
+                "bg": -1
               },
               {
                 "split": "col",
                 "ratio": 542,
                 "children": [
                   {
-                    "pane": "info"
+                    "pane": "info",
+                    "fg": 37,
+                    "bg": -1
                   },
                   {
-                    "pane": "controls"
+                    "pane": "controls",
+                    "fg": 208,
+                    "bg": -1
                   }
                 ]
               }
@@ -36,10 +42,14 @@
             "ratio": 200,
             "children": [
               {
-                "pane": "spectrum"
+                "pane": "spectrum",
+                "fg": 10,
+                "bg": -1
               },
               {
-                "pane": "lyrics"
+                "pane": "lyrics",
+                "fg": 198,
+                "bg": -1
               }
             ]
           }
@@ -51,35 +61,45 @@
           "x": 0,
           "y": 0,
           "w": 680,
-          "h": 520
+          "h": 520,
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "info",
           "x": 0,
           "y": 520,
           "w": 680,
-          "h": 260
+          "h": 260,
+          "fg": 37,
+          "bg": -1
         },
         {
           "id": "controls",
           "x": 0,
           "y": 780,
           "w": 680,
-          "h": 220
+          "h": 220,
+          "fg": 208,
+          "bg": -1
         },
         {
           "id": "spectrum",
           "x": 680,
           "y": 0,
           "w": 320,
-          "h": 200
+          "h": 200,
+          "fg": 10,
+          "bg": -1
         },
         {
           "id": "lyrics",
           "x": 680,
           "y": 200,
           "w": 320,
-          "h": 800
+          "h": 800,
+          "fg": 198,
+          "bg": -1
         }
       ]
     },
@@ -96,17 +116,23 @@
             "ratio": 520,
             "children": [
               {
-                "pane": "playlist"
+                "pane": "playlist",
+                "fg": 15,
+                "bg": -1
               },
               {
                 "split": "col",
                 "ratio": 542,
                 "children": [
                   {
-                    "pane": "info"
+                    "pane": "info",
+                    "fg": 37,
+                    "bg": -1
                   },
                   {
-                    "pane": "controls"
+                    "pane": "controls",
+                    "fg": 208,
+                    "bg": -1
                   }
                 ]
               }
@@ -117,10 +143,14 @@
             "ratio": 200,
             "children": [
               {
-                "pane": "spectrum"
+                "pane": "spectrum",
+                "fg": 10,
+                "bg": -1
               },
               {
-                "pane": "vinyl"
+                "pane": "vinyl",
+                "fg": 203,
+                "bg": -1
               }
             ]
           }
@@ -132,35 +162,45 @@
           "x": 0,
           "y": 0,
           "w": 680,
-          "h": 520
+          "h": 520,
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "info",
           "x": 0,
           "y": 520,
           "w": 680,
-          "h": 260
+          "h": 260,
+          "fg": 37,
+          "bg": -1
         },
         {
           "id": "controls",
           "x": 0,
           "y": 780,
           "w": 680,
-          "h": 220
+          "h": 220,
+          "fg": 208,
+          "bg": -1
         },
         {
           "id": "spectrum",
           "x": 680,
           "y": 0,
           "w": 320,
-          "h": 200
+          "h": 200,
+          "fg": 10,
+          "bg": -1
         },
         {
           "id": "vinyl",
           "x": 680,
           "y": 200,
           "w": 320,
-          "h": 800
+          "h": 800,
+          "fg": 203,
+          "bg": -1
         }
       ]
     },
@@ -177,24 +217,32 @@
             "ratio": 560,
             "children": [
               {
-                "pane": "playlist"
+                "pane": "playlist",
+                "fg": 208,
+                "bg": -1
               },
               {
                 "split": "col",
                 "ratio": 546,
                 "children": [
                   {
-                    "pane": "info"
+                    "pane": "info",
+                    "fg": 15,
+                    "bg": -1
                   },
                   {
-                    "pane": "controls"
+                    "pane": "controls",
+                    "fg": 198,
+                    "bg": -1
                   }
                 ]
               }
             ]
           },
           {
-            "pane": "lyrics"
+            "pane": "lyrics",
+            "fg": 203,
+            "bg": -1
           }
         ]
       },
@@ -204,28 +252,36 @@
           "x": 0,
           "y": 0,
           "w": 600,
-          "h": 560
+          "h": 560,
+          "fg": 208,
+          "bg": -1
         },
         {
           "id": "info",
           "x": 0,
           "y": 560,
           "w": 600,
-          "h": 240
+          "h": 240,
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "controls",
           "x": 0,
           "y": 800,
           "w": 600,
-          "h": 200
+          "h": 200,
+          "fg": 198,
+          "bg": -1
         },
         {
           "id": "lyrics",
           "x": 600,
           "y": 0,
           "w": 400,
-          "h": 1000
+          "h": 1000,
+          "fg": 203,
+          "bg": -1
         }
       ]
     },
@@ -242,17 +298,23 @@
             "ratio": 600,
             "children": [
               {
-                "pane": "playlist"
+                "pane": "playlist",
+                "fg": 15,
+                "bg": -1
               },
               {
                 "split": "col",
                 "ratio": 500,
                 "children": [
                   {
-                    "pane": "info"
+                    "pane": "info",
+                    "fg": 75,
+                    "bg": -1
                   },
                   {
-                    "pane": "controls"
+                    "pane": "controls",
+                    "fg": 118,
+                    "bg": -1
                   }
                 ]
               }
@@ -263,10 +325,14 @@
             "ratio": 640,
             "children": [
               {
-                "pane": "spectrum"
+                "pane": "spectrum",
+                "fg": 10,
+                "bg": -1
               },
               {
-                "pane": "vinyl"
+                "pane": "vinyl",
+                "fg": 93,
+                "bg": -1
               }
             ]
           }
@@ -278,35 +344,45 @@
           "x": 0,
           "y": 0,
           "w": 560,
-          "h": 600
+          "h": 600,
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "info",
           "x": 0,
           "y": 600,
           "w": 560,
-          "h": 200
+          "h": 200,
+          "fg": 75,
+          "bg": -1
         },
         {
           "id": "controls",
           "x": 0,
           "y": 800,
           "w": 560,
-          "h": 200
+          "h": 200,
+          "fg": 118,
+          "bg": -1
         },
         {
           "id": "spectrum",
           "x": 560,
           "y": 0,
           "w": 440,
-          "h": 640
+          "h": 640,
+          "fg": 10,
+          "bg": -1
         },
         {
           "id": "vinyl",
           "x": 560,
           "y": 640,
           "w": 440,
-          "h": 360
+          "h": 360,
+          "fg": 93,
+          "bg": -1
         }
       ]
     },
@@ -319,17 +395,23 @@
         "ratio": 520,
         "children": [
           {
-            "pane": "playlist"
+            "pane": "playlist",
+            "fg": 15,
+            "bg": -1
           },
           {
             "split": "col",
             "ratio": 542,
             "children": [
               {
-                "pane": "info"
+                "pane": "info",
+                "fg": 37,
+                "bg": -1
               },
               {
-                "pane": "controls"
+                "pane": "controls",
+                "fg": 208,
+                "bg": -1
               }
             ]
           }
@@ -341,21 +423,27 @@
           "x": 0,
           "y": 0,
           "w": 1000,
-          "h": 520
+          "h": 520,
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "info",
           "x": 0,
           "y": 520,
           "w": 1000,
-          "h": 260
+          "h": 260,
+          "fg": 37,
+          "bg": -1
         },
         {
           "id": "controls",
           "x": 0,
           "y": 780,
           "w": 1000,
-          "h": 220
+          "h": 220,
+          "fg": 208,
+          "bg": -1
         }
       ]
     },
@@ -368,7 +456,9 @@
         "ratio": 450,
         "children": [
           {
-            "pane": "playlist"
+            "pane": "playlist",
+            "fg": 208,
+            "bg": -1
           },
           {
             "split": "col",
@@ -379,24 +469,32 @@
                 "ratio": 500,
                 "children": [
                   {
-                    "pane": "info"
+                    "pane": "info",
+                    "fg": 15,
+                    "bg": -1
                   },
                   {
                     "split": "col",
                     "ratio": 429,
                     "children": [
                       {
-                        "pane": "spectrum"
+                        "pane": "spectrum",
+                        "fg": 10,
+                        "bg": -1
                       },
                       {
-                        "pane": "lyrics"
+                        "pane": "lyrics",
+                        "fg": 198,
+                        "bg": -1
                       }
                     ]
                   }
                 ]
               },
               {
-                "pane": "controls"
+                "pane": "controls",
+                "fg": 37,
+                "bg": -1
               }
             ]
           }
@@ -408,35 +506,45 @@
           "x": 0,
           "y": 0,
           "w": 1000,
-          "h": 450
+          "h": 450,
+          "fg": 208,
+          "bg": -1
         },
         {
           "id": "info",
           "x": 0,
           "y": 450,
           "w": 500,
-          "h": 350
+          "h": 350,
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "spectrum",
           "x": 500,
           "y": 450,
           "w": 500,
-          "h": 150
+          "h": 150,
+          "fg": 10,
+          "bg": -1
         },
         {
           "id": "lyrics",
           "x": 500,
           "y": 600,
           "w": 500,
-          "h": 200
+          "h": 200,
+          "fg": 198,
+          "bg": -1
         },
         {
           "id": "controls",
           "x": 0,
           "y": 800,
           "w": 1000,
-          "h": 200
+          "h": 200,
+          "fg": 37,
+          "bg": -1
         }
       ]
     },
@@ -454,8 +562,8 @@
             "children": [
               {
                 "pane": "playlist",
-                "fg": 51,
-                "border_fg": 45
+                "fg": 15,
+                "bg": -1
               },
               {
                 "split": "col",
@@ -463,13 +571,13 @@
                 "children": [
                   {
                     "pane": "info",
-                    "fg": 45,
-                    "border_fg": 39
+                    "fg": 14,
+                    "bg": -1
                   },
                   {
                     "pane": "controls",
-                    "fg": 214,
-                    "border_fg": 208
+                    "fg": 11,
+                    "bg": -1
                   }
                 ]
               }
@@ -481,13 +589,13 @@
             "children": [
               {
                 "pane": "spectrum",
-                "fg": 39,
-                "border_fg": 51
+                "fg": 10,
+                "bg": -1
               },
               {
                 "pane": "lyrics",
-                "fg": 207,
-                "border_fg": 201
+                "fg": 13,
+                "bg": -1
               }
             ]
           }
@@ -500,8 +608,8 @@
           "y": 0,
           "w": 680,
           "h": 520,
-          "fg": 51,
-          "border_fg": 45
+          "fg": 15,
+          "bg": -1
         },
         {
           "id": "info",
@@ -509,8 +617,8 @@
           "y": 520,
           "w": 680,
           "h": 260,
-          "fg": 45,
-          "border_fg": 39
+          "fg": 14,
+          "bg": -1
         },
         {
           "id": "controls",
@@ -518,8 +626,8 @@
           "y": 780,
           "w": 680,
           "h": 220,
-          "fg": 214,
-          "border_fg": 208
+          "fg": 11,
+          "bg": -1
         },
         {
           "id": "spectrum",
@@ -527,8 +635,8 @@
           "y": 0,
           "w": 320,
           "h": 200,
-          "fg": 39,
-          "border_fg": 51
+          "fg": 10,
+          "bg": -1
         },
         {
           "id": "lyrics",
@@ -536,8 +644,8 @@
           "y": 200,
           "w": 320,
           "h": 800,
-          "fg": 207,
-          "border_fg": 201
+          "fg": 13,
+          "bg": -1
         }
       ]
     }

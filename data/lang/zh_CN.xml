@@ -61,8 +61,17 @@
   <!-- ===== Settings view ===== -->
   <string key="settings.playback.language">语言可用 ENTER 切换，时延会在下次播放时生效</string>
   <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
-  <string key="settings.color.select_hint">颜色主题：↑/↓ 选择，→或 ENTER 调整，←/TAB 返回菜单</string>
+  <string key="settings.color.select_hint">颜色：↑/↓ 选择，ENTER 打开调色板；←/TAB 返回菜单</string>
   <string key="settings.color.auto_avoid_same">前景色和背景色会自动避免使用相同颜色</string>
+  <string key="settings.color.layer_hint">[布局]=改当前布局的窗格配色并保存，[主题]=改全局主题</string>
+  <string key="settings.color.follow_theme">跟随主题</string>
+  <string key="settings.color.from_layout">布局</string>
+  <string key="settings.color.from_theme">主题</string>
+  <string key="settings.color.pane_disabled">未启用</string>
+  <string key="settings.color.saved_layout">配色已存入当前布局</string>
+  <string key="settings.color.saved_copy">已存为副本 %s</string>
+  <string key="settings.color.save_failed">配色保存失败（详见日志）</string>
+  <string key="settings.color.rainbow_pending">彩虹模式生效中</string>
   <string key="settings.layout.hint">布局强制平铺：←/→ 切换，ENTER 选择；旧布局或手改几何会自动适配，不再拒绝</string>
   <string key="settings.layout.edit_hint">布局编辑：ENTER 打开分栏编辑器；方向键选择，[ ] 调比例，| / - 分栏，S 保存</string>
   <string key="settings.layout.saved">布局已切换</string>
@@ -182,6 +191,12 @@
   <string key="settings.opt.controls_bg">控制区背景色</string>
   <string key="settings.opt.lyrics_fg">歌词前景色</string>
   <string key="settings.opt.lyrics_bg">歌词背景色</string>
+  <string key="settings.opt.info_fg">信息栏前景色</string>
+  <string key="settings.opt.info_bg">信息栏背景色</string>
+  <string key="settings.opt.spectrum_fg">频谱前景色</string>
+  <string key="settings.opt.spectrum_bg">频谱背景色</string>
+  <string key="settings.opt.vinyl_fg">黑胶前景色</string>
+  <string key="settings.opt.vinyl_bg">黑胶背景色</string>
   <string key="settings.opt.sidebar_fg">侧边栏前景色</string>
   <string key="settings.opt.sidebar_bg">侧边栏背景色</string>
   <string key="settings.opt.highlight_fg">高亮前景色</string>
@@ -1244,7 +1259,7 @@
   <string key="layout.editor.hint_colors">↑↓ 字段  ←→ 调色  PgUp/PgDn ±10  Home 继承  End 终端  r 重置  R 全部重置</string>
   <string key="layout.editor.help_title">按键帮助</string>
   <string key="layout.editor.help_nav">↑↓←→ 按位置选择相邻窗格；Tab/Shift+Tab 按树序循环</string>
-  <string key="layout.editor.help_ratio">[ / ] 调整比例 1%；PgUp/PgDn 调整 5%；= 恢复 50/50</string>
+  <string key="layout.editor.help_ratio">[ / ] 调宽 1%，{ / } 调高 1%；PgUp/PgDn 调宽 5%；= 恢复 50/50</string>
   <string key="layout.editor.help_split">| 左右分栏；- 上下分栏；新窗格出现在右侧/下方</string>
   <string key="layout.editor.help_edit">x 删除（兄弟接管区域）；t 换类型；w 与下一个窗格交换；Enter 操作菜单</string>
   <string key="layout.editor.help_colors">c 颜色：↑↓ 字段，←→ 调色，Home 继承，End 终端默认，r/R 重置</string>
@@ -1263,7 +1278,7 @@
   <string key="layout.editor.colors_title">窗格颜色</string>
   <string key="layout.editor.color_inherit">继承</string>
   <string key="layout.editor.color_terminal">终端默认</string>
-  <string key="layout.editor.no_kind">没有可用的窗格类型（黑胶与歌词不能同时存在，或种类已用完）</string>
+  <string key="layout.editor.no_kind">没有可用的窗格类型（六种都已在此布局中）</string>
   <string key="layout.editor.min_pane">至少要保留一个窗格</string>
   <string key="layout.editor.rename_prompt">布局名称：</string>
   <string key="layout.editor.custom_name">自定义布局 %d</string>
@@ -1279,6 +1294,8 @@
   <string key="layout.editor.status_kind">已更换窗格类型</string>
   <string key="layout.editor.status_swap_none">没有可交换的窗格</string>
   <string key="layout.editor.no_parent_split">该窗格是根窗格，没有可分栏的父级</string>
+  <string key="layout.editor.no_axis_split">该方向没有可分栏（选中窗格没这个方向的分栏祖先）</string>
+  <string key="layout.editor.ratio_at_limit">比例已到极限，无法再朝这个方向调整</string>
   <string key="layout.editor.too_small_pane">窗格太小，无法继续调整（至少保留 1% 轴长）</string>
   <string key="layout.editor.internal_error">内部错误：布局不是强制平铺，未保存</string>
 
