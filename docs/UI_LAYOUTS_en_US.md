@@ -25,12 +25,15 @@ The bottom row (`LINES - 1`) is reserved for the `F1:... F9:...` hint bar.
 | `lyrics` | Current lyric lines |
 | `vinyl` | Colored half-block vinyl disc with a rotating album-cover center label and colored spectrum bars (falls back to the glyph animation when colors are unavailable; split out of the lyrics pane) |
 
-`lyrics` and `vinyl` are **mutually exclusive** in one layout:
+`lyrics` and `vinyl` may **coexist in one layout** (they are separate panes):
 
-- a split never offers `lyrics` while `vinyl` is present (or the reverse);
-- changing type with `t` replaces the old leaf, so `lyrics` ↔ `vinyl` is allowed;
-- when a legacy file contains both, `vinyl` wins and `lyrics` is dropped
-  (this matches the old runtime's visible result);
+- the editor offers both kinds as long as the layout does not already use them;
+- when a layout contains both, the current track decides the screen: with lyrics
+  both panes are drawn (lyric lines, plus the disc in its own pane); without
+  lyrics the **lyrics pane steps aside for that track** — its leaf is removed
+  from the resolved tree, the sibling panes take over its area, and it comes
+  back as soon as a track with lyrics is playing. The stored layout, the colour
+  settings and the user layout file are not modified by this;
 - a `lyrics`-only layout still falls back to the vinyl animation inside the
   lyrics pane for a track without lyrics; the fallback skips its spectrum bars
   when the layout already has a dedicated `spectrum` pane;
@@ -130,7 +133,7 @@ leave a gap.
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `pane` | yes | `playlist`, `info`, `controls`, `spectrum`, `lyrics`, `vinyl` |
-| `fg`, `bg` | no | pane text/background colour |
+| `fg`, `bg` | no | pane text/background colour; editable per pane under Settings → Appearance |
 | `border_fg`, `border_bg` | no | border colour; when omitted, it follows the body colour |
 
 Colour values:
@@ -159,7 +162,7 @@ fitted to a valid tree:
 | `ratio` outside `1..999` | clamped, marked auto-fitted |
 | unknown / duplicate leaf, extra children | leaf/children ignored, marked auto-fitted |
 | `tree` empty or unusable | falls back to the v1 `panes` mirror; if that is unusable, classic geometry is used while preserving `id`/`name` |
-| both `lyrics` and `vinyl` | `vinyl` kept, `lyrics` dropped, marked auto-fitted |
+| both `lyrics` and `vinyl` | both kept (they are separate panes; see above) |
 | a normalized tree that still fails the tiling invariant (defensive; e.g. duplicate leaves) | the smallest pane is dropped until the tree validates; if nothing works, classic geometry is used |
 
 A layout that was auto-fitted has `LayoutSpec.normalized = 1` internally. The
@@ -225,10 +228,38 @@ used; this is a defensive fallback, not a user-facing rejection.
 | `visualizer` | playlist, info, controls, spectrum, vinyl | `row 560 [ col 600 [playlist, col 500 [info, controls]], col 640 [spectrum, vinyl] ]` |
 | `focus` | playlist, info, controls | `col 520 [playlist, col 542 [info, controls]]` |
 | `stage` | playlist, info, spectrum, lyrics, controls | `col 450 [playlist, col 637 [row 500 [info, col 429 [spectrum, lyrics]], controls]]` |
-| `neon` | classic geometry + explicit per-pane colours | classic tree with colours on the leaves |
+| `neon` | classic geometry, brightest palette | classic tree with a vivid per-pane palette |
 
-`classic` is the default. `neon` demonstrates colour overrides and clamps on
-8-colour terminals.
+`classic` is the default.
+
+### Preset colours
+
+Every preset carries an explicit foreground colour for **every** pane, and every
+pane background is `-1` (transparent, i.e. whatever the terminal draws). Within
+one preset no two panes share a colour — borders inherit the pane colour, so they
+differ too. Colours are picked so the guarantee survives the fallback chain:
+
+| Preset | playlist | info | controls | spectrum | lyrics / vinyl |
+| --- | --- | --- | --- | --- | --- |
+| `classic` | 15 bright white | 37 teal | 208 orange | 10 bright green | lyrics 198 pink |
+| `vinyl` | 15 bright white | 37 teal | 208 orange | 10 bright green | vinyl 203 coral |
+| `karaoke` | 208 orange | 15 bright white | 198 pink | — | lyrics 203 coral |
+| `visualizer` | 15 bright white | 75 sky blue | 118 lime | 10 bright green | vinyl 93 purple |
+| `focus` | 15 bright white | 37 teal | 208 orange | — | — |
+| `stage` | 208 orange | 15 bright white | 37 teal | 10 bright green | lyrics 198 pink |
+| `neon` | 15 bright white | 14 bright cyan | 11 bright yellow | 10 bright green | lyrics 13 bright magenta |
+
+The values map down without collapsing: on a 16-colour terminal each preset still
+has distinct colours, and on an 8-colour terminal they land on distinct base
+colours (white / cyan / yellow / green / magenta / red). Every value is also one
+of the colours the Settings palette offers, so the name shown there ("bright
+white", "teal", …) is meaningful. On a monochrome terminal pane colours are not
+enabled at all — that is the third fallback level.
+
+Because the presets colour every pane they contain, Settings shows each of those
+rows as `[layout]` while a preset is selected (a pane the preset does not contain
+reads `[theme] …`, `no pane` when it is absent); pick `Follow theme` on a row to
+hand that field back to the global theme.
 
 ## Custom tree example
 
@@ -285,13 +316,14 @@ split and three lines of key hints.
 | --- | --- |
 | `↑`/`↓`/`←`/`→` | select the adjacent pane by geometry |
 | `Tab` / `Shift+Tab` | cycle panes in tree order |
-| `[` / `]` | shrink/grow the selected pane's parent split by 1% |
-| `PgUp` / `PgDn` | adjust the same ratio by 5% |
-| `=` | restore the parent split to 50/50 |
+| `[` / `]` | shrink/grow the selected pane **horizontally** by 1% (nearest row split) |
+| `{` / `}` | shrink/grow the selected pane **vertically** by 1% (nearest column split) |
+| `PgUp` / `PgDn` | adjust the horizontal ratio by 5% |
+| `=` | restore the nearest parent split to 50/50 |
 | `|` | split side by side; then choose the new pane type |
 | `-` | split stacked; then choose the new pane type |
 | `x` | remove the selected pane (at least one remains; the sibling takes over) |
-| `t` | change the selected pane's type (unused kinds; `lyrics` and `vinyl` may replace each other) |
+| `t` | change the selected pane's type (any kind the layout does not already use) |
 | `w` | swap types with the next pane in tree order |
 | `c` | open the colour panel |
 | `n` | rename the layout |
@@ -327,15 +359,23 @@ colours, restore 50/50, swap with next pane, remove pane, rename layout.
 - The editor needs at least 60 columns × 16 rows.
 - A pane must keep at least 1% of each axis (`LAYOUT_MIN_PANE_UNITS = 10`
   per-mille). Operations that would violate this are refused with a status
-  message and the layout is unchanged.
-- A split never offers a kind that is already used or would create a
-  lyrics/vinyl conflict. Changing type with `t` may replace `lyrics` with
-  `vinyl` (or the reverse), because the old leaf disappears in the same
-  transaction.
+  message and the layout is unchanged. Ratio nudges are the exception: a step
+  that would break the limit is shortened (half, quarter, …, down to one unit) so
+  the split keeps moving until it really is at the limit; only then does the
+  status line say the ratio is already at its limit.
+- A split never offers a kind that is already used in the layout; `lyrics` and
+  `vinyl` are ordinary kinds and can both appear. Changing type with `t` only
+  offers unused kinds as well (the leaf's own kind is not a candidate, since
+  replacing a kind with itself would be a no-op).
 - The footer status line reports the last action or error. There is no
   "validation failed, cannot save" path for normal edits; `S` saves directly.
 - Saving writes the user file atomically, reloads the catalog, selects the
   saved layout immediately and closes the editor.
+- Editing a built-in preset keeps its localised name: the preset's `name_key`
+  is written into the override, so the layout menu keeps showing the translated
+  name. Renaming with `n` replaces it with your own text (the override then
+  stores `name` only). Older overrides that lost their `name_key` while keeping
+  the preset's original name get the key back when the catalog is loaded.
 
 ### User file management
 
@@ -363,7 +403,9 @@ clamped to the content height as well.
 The info pane rearranges itself from its own size: wide panes put the metadata
 column and the audio-parameter column side by side with the colored half-block cover on
 the right, while narrow-and-tall panes stack the cover above the metadata and
-audio blocks. The cover is dropped when it cannot keep a blank column before the
+audio blocks. The content block is **vertically centred** in the pane (cover and
+text move together in stacked mode), so a tall info pane no longer pins the text
+to the title row. The cover is dropped when it cannot keep a blank column before the
 right border, and every block is clipped to the region chosen by the layout. The
 TUI cover is drawn with colored half-block characters so its glyph advance matches the
 terminal cell grid, and is colored with an automatic 256-color → 8-color →
@@ -378,9 +420,59 @@ unusually proportioned layouts visually intact.
 
 Rainbow mode → per-pane explicit colours (tree leaves / user file) →
 theme colours from Settings (`playlist`/`controls`/`lyrics` fg+bg). To hand a
-pane back to the theme, open the layout editor, select the pane, press `c`,
-select each field and press `r`, then save. Rainbow mode still ignores explicit
-layout colours.
+pane back to the theme, use the layout editor (`c` → `r`/`R`) or the Settings
+colour page (choose `Follow theme` in the palette). Rainbow mode still ignores
+explicit layout colours.
+
+### Settings colour page (Appearance)
+
+Colours live in two layers, and the Settings page exposes both:
+
+| Rows | Bound to | Stored in |
+| --- | --- | --- |
+| 12 pane rows: playlist, info, controls, spectrum, lyrics, vinyl (fg + bg each) | the **current layout**'s `panes[].fg` / `panes[].bg` | `~/.config/ter-music/layouts.json` |
+| 6 interface rows: sidebar, highlight, border (fg + bg each) | the global theme | `config.xml` (`<theme>`) |
+
+Every pane row is tagged `[layout]` when the current layout specifies that
+field explicitly, and `[theme]` when the field is still inherited. The stock
+presets colour every pane they contain, so those rows read `[layout]`; a user
+layout that omits a colour shows `[theme]` and inherits the playlist / lyrics
+theme colour.
+
+Changing a row writes to exactly one layer, following this order:
+
+1. the layout already specifies the field → write the layout (the `[layout]`
+   tag stays);
+2. the field is inherited **and** the pane owns a theme slot (playlist,
+   controls, lyrics) → write that theme slot, i.e. the old global behaviour:
+   every layout that inherits it changes together and the tag stays `[theme]`;
+3. the field is inherited **and** the pane has no theme slot of its own (info,
+   spectrum, vinyl) → write an explicit layout override, so the pane really
+   becomes independent (the tag flips to `[layout]`);
+4. sidebar / highlight / border are interface colours → always the theme.
+
+Writing the layout persists first and only then mutates memory, so a failed
+write leaves the interface untouched:
+
+- A built-in preset or a user layout is saved back under the **same id** as a
+  user override. Repeated colour tweaks never add rows to the user file.
+- If the current layout comes from `TER_MUSIC_LAYOUTS`, a same-id override would
+  be hidden again by that file on the next reload, so the change is stored as an
+  auto-incremented copy (`<id>-2`, `<id>-3`, …) named `<preset name> N`, and the
+  player switches to it. The status line says so.
+- Colours of a pane that the current layout does not contain (for example
+  `vinyl` while `lyrics` is used, or a layout without `spectrum`) cannot be
+  persisted — the serializer only writes tree leaves. Such a row is tagged
+  `no pane` after its source tag (`[theme no pane]`, or `[layout no pane]` when
+  it already carries an override) and adjusting it only reports that the pane is
+  not in this layout; switch or edit the layout first.
+- Terminals with `COLOR_PAIRS <= 26` cannot allocate the per-pane colour pairs,
+  so explicit layout colours are ignored there; the page still shows the layout
+  values with the `[layout]` tag.
+
+The section needs 22 list rows plus the header and three pinned hint lines, so on
+terminals shorter than 32 rows the list scrolls with the selection and draws a
+scrollbar in the reserved column; the three hint lines stay at the bottom.
 
 ## Troubleshooting
 
@@ -390,12 +482,25 @@ layout colours.
   notice and adjust the split tree. It is no longer removed from the list.
 - **The editor refuses a split / ratio change**: the result would make a pane
   smaller than 1% of an axis. The status line says so and the layout is
-  unchanged. A split also cannot add `lyrics` while `vinyl` exists (or the
-  reverse); use `t` to replace the existing one instead.
+  unchanged. Pressing `{` / `}` on a pane whose ancestors are all horizontal
+  splits reports that there is no split on that axis — the pane genuinely has no
+  vertical neighbour to resize.
 - **I edited `panes` by hand and nothing changed**: `tree` is authoritative.
   Edit `tree`, or use the editor and let it write both.
 - **Colours do not follow the theme**: the pane carries explicit `fg`/`bg`
-  values, which take precedence over the theme. Reset them with `c` → `r`/`R`.
+  values, which take precedence over the theme. Reset them with `c` → `r`/`R`
+  in the editor, or choose `Follow theme` for that row in Settings → Appearance
+  (the row is tagged `[layout]` while an override is in effect).
+- **A row I changed also moved another pane, or a preset kept its own colours**:
+  the pane rows describe the *current layout*. A `[theme]` row writes the global
+  theme, so playlist and info (or spectrum, lyrics and vinyl) move together;
+  a `[layout]` row writes only this layout, so a preset that ships its own
+  colours (`neon`) keeps them until you pick `Follow theme`.
+- **The lyrics pane disappeared although the layout has one**: the layout also
+  has a `vinyl` pane and the current track has no lyrics, so the lyrics pane is
+  stepping aside for that track and the other panes fill its area. Start a track
+  with lyrics (or remove the `vinyl` pane) to get it back; the layout itself is
+  untouched.
 - **I selected a layout but the list is still the old one**: press
   `Reload Layouts` in Settings.
 - **No layout files are installed**: the compiled-in `classic` tree is used and

@@ -42,8 +42,8 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - ❤️ **Favorites Feature**: Bookmark favorite songs for quick access
 - 🕒 **Playback History**: Automatically records playback history for easy review
 - 📂 **Directory History**: Records recently visited music directories
-- 🎨 **Expanded Color Palette**: 24 preset themes + 1 custom slot with paired-color guard
-- 🧩 **Data-driven Layouts**: 7 JSON layout presets expressed as split trees; forced tiling is structural, old flat geometry is auto-fitted instead of rejected, and a separate vinyl pane is mutually exclusive with the lyrics pane
+- 🎨 **Expanded Color Palette**: 24 preset themes + 1 custom slot with paired-color guard; Settings → Appearance lists all six panes (playlist / info / controls / spectrum / lyrics / vinyl) foreground and background separately, so pane colours follow the layout while sidebar / highlight / border stay global theme colours
+- 🧩 **Data-driven Layouts**: 7 JSON layout presets expressed as split trees; forced tiling is structural, old flat geometry is auto-fitted instead of rejected; the lyrics and vinyl panes can coexist, and a track without lyrics makes the lyrics pane step aside so the other panes fill its area (a lyrics-only layout keeps the in-pane vinyl fallback)
 - 💾 **Persistent Storage**: SQLite-based storage (favorites, history, playlists) with automatic JSON migration from v1
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
@@ -666,7 +666,7 @@ files are still read and auto-fitted instead of being rejected.
 Six pane kinds are available:
 
 - `playlist`: the song list / play queue (Tab switches views)
-- `info`: playback state, current-track metadata, audio parameters and the colored half-block character cover (256→8→mono fallback)
+- `info`: playback state, current-track metadata, audio parameters and the colored half-block character cover (256→8→mono fallback); the whole block is vertically centred in the pane
 - `controls`: progress bar and transport buttons
 - `spectrum`: the audio-reactive bar spectrum
 - `lyrics`: the current lyric lines
@@ -674,11 +674,13 @@ Six pane kinds are available:
 
 The vinyl pane and the lyrics pane have a deliberate fallback relationship:
 
-- `lyrics` and `vinyl` are mutually exclusive: a legacy file that defines both
-  keeps `vinyl` and drops `lyrics` (the old runtime's visible result); the editor
-  prevents the conflict and explains it.
-- A `lyrics`-only layout still falls back to the vinyl animation whenever the
-  current track has no lyrics.
+- `lyrics` and `vinyl` may coexist in the same layout. When the current track has
+  lyrics both panes render (lyric lines + the disc in its own pane); when it has
+  none, the **lyrics pane steps aside** for that track — its leaf leaves the
+  resolved tree, the other panes take over the area, and it returns with the next
+  track that has lyrics. The stored layout and all colour settings are unchanged.
+- A `lyrics`-only layout still falls back to the vinyl animation inside the lyrics
+  pane whenever the current track has no lyrics.
 - A `vinyl`-only layout shows the vinyl pane whether or not the track has lyrics.
 
 The vinyl artwork is drawn with colored half-block cells when the terminal supports
@@ -704,7 +706,8 @@ preference, not part of the core configuration and not sent over D-Bus.
 
 The seven built-in presets are `classic`, `vinyl`, `karaoke`, `visualizer`,
 `focus`, `stage` and `neon`. `classic` is the default and keeps the familiar
-five-pane arrangement; `neon` demonstrates per-pane colour overrides. Geometry,
+five-pane arrangement; every preset colours each pane differently (transparent
+backgrounds), and `neon` is the brightest of them. Geometry,
 colours, unknown panes, gaps, overlaps and non-guillotine old layouts are
 auto-fitted to a forced tiling instead of being rejected; the reload message
 reports how many layouts were adjusted.
@@ -717,8 +720,9 @@ audio blocks; the cover is hidden when it cannot keep a blank column before the
 border.
 
 The layout editor (`F2 → Appearance → Edit Layout / New Layout`) edits the split
-tree directly: arrows select by geometry, Tab cycles, `[`/`]` and PgUp/PgDn
-adjust ratios, `|`/`-` split, `x` removes, `t` changes type, `c` edits colours,
+tree directly: arrows select by geometry, Tab cycles, `[`/`]` (and PgUp/PgDn)
+adjust the width, `{`/`}` adjust the height, `|`/`-` split, `x` removes, `t`
+changes type, `c` edits colours,
 `w` swaps, `Enter` opens the action menu, `?` shows help, `S` saves, and
 `Esc`/`q` closes. Every operation preserves forced tiling; there is no
 save-time geometry rejection.
@@ -1012,8 +1016,21 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
   `config.xml`: the front end keeps them in its own `remote.xml` next to it
   (server entries plus password ciphertext, file mode 0600), and caches
   downloaded tracks under `$XDG_CACHE_HOME/ter-music/remote/`
-- Color theme configuration: 24 preset themes + 1 custom slot, foreground and background colors for all UI elements
-- TUI layout selection: `~/.config/ter-music/ui-layout` (one layout id written by the front end); layout definitions: built-in `layouts/layouts.json` plus optional `~/.config/ter-music/layouts.json`. Layout selection never writes `config.xml`
+- Colour configuration is layered. The global theme (24 preset themes + 1 custom
+  slot, paired-colour guard) covers the interface chrome — sidebar, highlight and
+  border foreground/background — and is stored in `config.xml`. Pane colours are
+  part of the **layout**: Settings → Appearance shows one foreground/background
+  row per pane (`playlist`, `info`, `controls`, `spectrum`, `lyrics`, `vinyl`),
+  reads and writes the current layout's `panes[].fg` / `panes[].bg`, and marks each
+  row `[layout]` or `[theme]` to show which layer currently decides the colour.
+  The stock presets colour every pane with a distinct foreground and a transparent
+  background, so each row for a pane the preset contains reads `[layout]`; the
+  values are chosen to stay
+  distinct after the 256 → 8 → monochrome fallback (no colour at all on a
+  monochrome terminal). Editing a `[theme]` row of a pane that owns a theme slot
+  (playlist / controls / lyrics) still changes the theme, exactly as before; every
+  other edit is saved as a layout override. See [UI_LAYOUTS_en_US.md](UI_LAYOUTS_en_US.md)
+- TUI layout selection: `~/.config/ter-music/ui-layout` (one layout id written by the front end); layout definitions: built-in `layouts/layouts.json` plus optional `~/.config/ter-music/layouts.json`. Layout selection never writes `config.xml`; among the colour settings, only a pane-colour change writes the user layout file (the layout editor writes it too, when you save there)
 - Equalizer configuration: 10-band gains, pre-amp, enable/disable
 - Info display (CLI / D-Bus) configuration, editable in **Settings → Info Display**:
   - `info_preset`: preset (0=Full, 1=Compact, 2=Custom)
