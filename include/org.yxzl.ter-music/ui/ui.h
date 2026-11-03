@@ -21,12 +21,7 @@ extern pthread_mutex_t g_seek_mutex;
 extern int g_lyric_cursor_mode;
 extern int g_lyric_cursor_index;
 
-extern int g_rainbow_mode_enabled;
-extern ColorTheme g_saved_theme;
 extern int g_debug_enabled;
-extern int g_konami_input_pos;
-extern uint64_t g_konami_last_time;
-extern int g_rainbow_color_offset;
 
 extern WINDOW *win_playlist;
 extern WINDOW *win_info;
@@ -62,6 +57,14 @@ void render_playlist_content(void);
 void render_info_bar(void);
 void render_controls(void);
 void controls_reset_popup(void);
+/* 控制区弹层的当前窗口；未激活或创建失败时为 NULL。
+ * 流光彩蛋用它把弹层纳入整屏合成，避免刷新底层窗口时把弹层擦掉。 */
+WINDOW *controls_popup_window(void);
+/* 主视图窗格统一刷新入口：彩蛋激活时先把前景合成成当前流光色再
+ * wrefresh，避免基础色帧先被刷到终端造成闪动；未激活时等价 wrefresh。 */
+int ui_refresh_window(WINDOW *win);
+/* 彩蛋色对的背景：终端支持默认色时返回 -1（透明），否则返回黑(0)。 */
+int ui_transparent_background(void);
 void render_spectrum_pane(void);
 void spectrum_tick(void);
 void lyrics_animation_tick(void);
@@ -77,9 +80,6 @@ void process_pending_ui_refresh(void);
 void apply_color_theme(void);
 int use_ascii_fallback_ui(void);
 const char *ui_text(const char *key, const char *unused);
-void check_konami_input(int ch);
-void toggle_rainbow_mode(void);
-void update_rainbow_colors(void);
 
 /* 统一的内容下标播放入口：内容下标→路径→队列位（失配先重推队列再播）。
  * 各界面播放入口都应经它下发，避免把内容下标当队列位置盲发 PlayAt。 */

@@ -71,7 +71,7 @@
   <string key="settings.color.saved_layout">Colours saved to layout</string>
   <string key="settings.color.saved_copy">Saved as copy %s</string>
   <string key="settings.color.save_failed">Could not save colours (see log)</string>
-  <string key="settings.color.rainbow_pending">rainbow mode active</string>
+  <string key="settings.color.rainbow_pending">aurora flow active</string>
   <string key="settings.layout.hint">Layouts are force-tiled: ←/→ switch, ENTER choose; old or hand-edited geometry is auto-fitted instead of rejected</string>
   <string key="settings.layout.edit_hint">Layout editing: ENTER opens the split editor; arrows select, [ ] adjust ratio, | / - split, S save</string>
   <string key="settings.layout.saved">Layout switched</string>
@@ -502,8 +502,9 @@
   <string key="status.search_wait">Searching, please wait...</string>
   <string key="status.switched_queue">Switched to Play Queue view</string>
   <string key="status.switched_browser">Switched to File Browser view</string>
-  <string key="status.rainbow_off">Rainbow mode disabled</string>
-  <string key="status.rainbow_on">Konami code! Rainbow mode enabled</string>
+  <string key="status.rainbow_off">Aurora flow disabled</string>
+  <string key="status.rainbow_on">Konami code! Aurora flow enabled</string>
+  <string key="status.rainbow_unavailable">Aurora flow unavailable on this terminal (colour or pair limit)</string>
   <string key="status.seek_fmt">Seek to %02d:%02d</string>
   <string key="status.volume_fmt">Volume: %d%%</string>
   <string key="status.settings_saved">Settings saved</string>

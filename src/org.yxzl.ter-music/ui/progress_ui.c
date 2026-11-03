@@ -127,7 +127,7 @@ void update_progress_bar(void)
     mvwaddstr(win_controls, progress_row, 0, "\xe2\x94\x82");
     mvwaddstr(win_controls, progress_row, w - 1, "\xe2\x94\x82");
 
-    wrefresh(win_controls);
+    ui_refresh_window(win_controls);
 
     last_refresh_ms = now_ms;
     last_position = current_pos;

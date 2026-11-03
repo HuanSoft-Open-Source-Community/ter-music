@@ -32,6 +32,7 @@
 #include "ui/lyrics.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/rainbow.h"
 #include "ui/layout_editor.h"
 #include "ui/keymap.h"
 #include "library/browser/browser.h"
@@ -1047,7 +1048,6 @@ void handle_function_keys(int fkey)
 void handle_menu_input(int ch)
 {
     if (g_current_view == VIEW_INFO) {
-        extern void check_konami_input(int);
         check_konami_input(ch);
     }
 

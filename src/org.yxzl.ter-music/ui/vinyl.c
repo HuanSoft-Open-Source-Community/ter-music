@@ -137,6 +137,9 @@ static int use_emoji_no_lyrics_title(void)
 static int g_vinyl_color_state;
 static int g_vinyl_disc_pair[3][3];
 static int g_vinyl_bar_pair[3];
+/* 碟面固定色对的基准号与原始三档 shade；流光彩蛋重染/恢复用。 */
+static int g_vinyl_pair_base;
+static int g_vinyl_shades[3];
 
 /* 探测并初始化黑胶固定色对：3×3 碟面上下半 + 3 个频谱柱颜色。
  * 任何一步失败都退回字符动画，不做半套彩色。 */
@@ -181,6 +184,11 @@ static int vinyl_color_configure(void)
         }
     }
 
+    g_vinyl_pair_base = pair_base;
+    for (int i = 0; i < 3; i++) {
+        g_vinyl_shades[i] = shades[i];
+    }
+
     for (int top = 0; top < 3; top++) {
         for (int bottom = 0; bottom < 3; bottom++) {
             int pair = pair_base + top * 3 + bottom;
@@ -201,6 +209,38 @@ static int vinyl_color_configure(void)
 
     g_vinyl_color_state = 1;
     return 1;
+}
+
+int vinyl_rainbow_apply(const int colours[3])
+{
+    if (!colours || !vinyl_color_configure()) {
+        return -1;
+    }
+
+    for (int top = 0; top < 3; top++) {
+        for (int bottom = 0; bottom < 3; bottom++) {
+            int pair = g_vinyl_pair_base + top * 3 + bottom;
+            if (init_pair((short)pair, (short)colours[top],
+                          (short)colours[bottom]) != OK) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+void vinyl_rainbow_restore(void)
+{
+    if (g_vinyl_color_state <= 0) {
+        return;
+    }
+    for (int top = 0; top < 3; top++) {
+        for (int bottom = 0; bottom < 3; bottom++) {
+            int pair = g_vinyl_pair_base + top * 3 + bottom;
+            (void)init_pair((short)pair, (short)g_vinyl_shades[top],
+                            (short)g_vinyl_shades[bottom]);
+        }
+    }
 }
 
 typedef struct {
@@ -652,12 +692,12 @@ void render_vinyl_pane(void)
 
     ui_pane_begin(LAYOUT_PANE_VINYL, win_vinyl, i18n_get("controls.vinyl"));
     if (h < 3 || w < 6) {
-        wrefresh(win_vinyl);
+        ui_refresh_window(win_vinyl);
         return;
     }
     render_vinyl_disc(win_vinyl, player_lyrics_total() <= 0,
                       ui_pane_body_attr(LAYOUT_PANE_VINYL), 1);
-    wrefresh(win_vinyl);
+    ui_refresh_window(win_vinyl);
 }
 
 void vinyl_tick(void)

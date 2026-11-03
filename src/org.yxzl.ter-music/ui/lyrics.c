@@ -295,7 +295,7 @@ void render_lyrics(void) {
         : i18n_get("controls.lyrics");
     ui_pane_begin(LAYOUT_PANE_LYRICS, win_lyrics, title);
     if (h < 3 || w < 8) {
-        wrefresh(win_lyrics);
+        ui_refresh_window(win_lyrics);
         return;
     }
 
@@ -311,7 +311,7 @@ void render_lyrics(void) {
         int draw_bars = !ui_pane_is_visible(LAYOUT_PANE_SPECTRUM);
         render_vinyl_disc(win_lyrics, 1,
                           ui_pane_body_attr(LAYOUT_PANE_LYRICS), draw_bars);
-        wrefresh(win_lyrics);
+        ui_refresh_window(win_lyrics);
         return;
     }
 
@@ -324,13 +324,13 @@ void render_lyrics(void) {
             message_row = h - 2;
         }
         ui_pane_clip_printf(win_lyrics, message_row, 2, "%s", i18n_get("lyrics.playing"));
-        wrefresh(win_lyrics);
+        ui_refresh_window(win_lyrics);
         return;
     }
 
     int visible_lines = h - content_top - 1;
     if (visible_lines <= 0) {
-        wrefresh(win_lyrics);
+        ui_refresh_window(win_lyrics);
         return;
     }
 
@@ -386,7 +386,7 @@ void render_lyrics(void) {
     scrollbar_draw(win_lyrics, content_top, visible_lines,
                    total, visible_lines, start_idx, w - 2);
 
-    wrefresh(win_lyrics);
+    ui_refresh_window(win_lyrics);
 }
 
 /* 无歌词时歌词窗格仍保留黑胶/粒子动画。它不再搭歌词/频谱的 150ms

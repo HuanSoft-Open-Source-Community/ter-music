@@ -418,11 +418,38 @@ unusually proportioned layouts visually intact.
 
 ## Colour precedence
 
-Rainbow mode → per-pane explicit colours (tree leaves / user file) →
-theme colours from Settings (`playlist`/`controls`/`lyrics` fg+bg). To hand a
-pane back to the theme, use the layout editor (`c` → `r`/`R`) or the Settings
-colour page (choose `Follow theme` in the palette). Rainbow mode still ignores
-explicit layout colours.
+Per-pane explicit colours (tree leaves / user file) → theme colours from
+Settings (`playlist`/`controls`/`lyrics` fg+bg). To hand a pane back to the
+theme, use the layout editor (`c` → `r`/`R`) or the Settings colour page
+(choose `Follow theme` in the palette).
+
+The Konami easter egg ("aurora flow") is **not** a colour layer and does not
+take part in this precedence. While it is active it tints only the foreground
+of ordinary cells with a slow diagonal gradient; every rainbow pair uses a
+transparent background (black when the terminal has no default-colour
+support), so text stays readable and no gradient wash is painted behind it.
+Colours exclude pure black, pure white and **neutral** gray on the black↔white
+axis, but keep colour-tinted dark/light grays from colour→black and
+colour→white transitions so adjacent steps stay continuous. In 256-colour mode
+this is the xterm 6×6×6 cube; terminals with at least 8 but fewer than 256
+colours (including 16/88-colour terminals) use only ANSI 1..6. Monochrome
+terminals are left untouched and do not activate the effect.
+
+Ordinary cells take the flow colour as foreground on a transparent background.
+Cells carrying `A_REVERSE`/`A_STANDOUT` (the playlist cursor row, menu/selection
+rows, popup selection) are not skipped: the flow colour moves to the background
+and the text uses a black/white contrast colour — the normal foreground and
+background are swapped, so the highlight bar itself flows. The reverse
+attribute is kept across repaints (standout is normalised to reverse), so a
+second rainbow pass cannot reinterpret the highlight as an ordinary
+foreground-only cell; this keeps the highlight stable instead of flickering
+between the two colour roles. Cover-art and
+spectrum cells keep their own colours; the vinyl disc is recoloured except for
+its centre album label and spectrum bars, preserving the disc's three shading
+levels and rotating highlight. The effect never rewrites `config.xml` or
+`layouts.json`; stored colours come back as soon as it is switched off. Modal
+text prompts block the event loop, so the animation pauses there and resumes
+when they close.
 
 ### Settings colour page (Appearance)
 

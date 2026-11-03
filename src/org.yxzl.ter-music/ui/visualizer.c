@@ -226,7 +226,7 @@ void render_spectrum_pane(void)
     if (h < 1 || w < 1) return;
     ui_pane_begin(LAYOUT_PANE_SPECTRUM, win_spectrum, i18n_get("controls.spectrum"));
     if (h < 3 || w < 8) {
-        wrefresh(win_spectrum);
+        ui_refresh_window(win_spectrum);
         return;
     }
 
@@ -235,7 +235,7 @@ void render_spectrum_pane(void)
     int graph_height = graph_bottom - graph_top + 1;
     int graph_width = w - 4;
     if (graph_height < 1 || graph_width < 4) {
-        wrefresh(win_spectrum);
+        ui_refresh_window(win_spectrum);
         return;
     }
 
@@ -302,7 +302,7 @@ void render_spectrum_pane(void)
         }
     }
 
-    wrefresh(win_spectrum);
+    ui_refresh_window(win_spectrum);
 }
 
 void spectrum_tick(void)

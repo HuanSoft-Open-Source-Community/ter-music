@@ -45,6 +45,14 @@
  */
 int layout_color_quantize(int value, int colors);
 
+/**
+ * @brief xterm 调色板下标 → RGB（0..15 ANSI、16..231 六级立方、232..255 灰阶）。
+ *
+ * 纯函数，不依赖 ncurses；越界下标钳制到 0..255。布局配色、流光彩蛋
+ * 等基于 xterm 调色板的界面效果共用这一份表，避免各自复制。
+ */
+void layout_color_rgb(int index, int *r, int *g, int *b);
+
 /* 布局内的窗格种类；顺序必须与运行时的窗口数组一致。 */
 typedef enum {
     LAYOUT_PANE_PLAYLIST = 0,

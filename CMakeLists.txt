@@ -144,6 +144,8 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/library/library_query.c
     src/org.yxzl.ter-music/library/browser/browser.c
     src/org.yxzl.ter-music/ui/ui.c
+    src/org.yxzl.ter-music/ui/rainbow.c
+    src/org.yxzl.ter-music/ui/rainbow_gradient.c
     src/org.yxzl.ter-music/util/utf8.c
     src/org.yxzl.ter-music/util/utf8_safe.c
     src/org.yxzl.ter-music/ui/dialog.c

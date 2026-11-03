@@ -287,7 +287,7 @@ static void prompt_folder_input(int append_mode) {
     
     mvwprintw(win_controls, 4, 2, "                    "); 
     wclrtoeol(win_controls);
-    wrefresh(win_controls);
+    ui_refresh_window(win_controls);
 
     if (strlen(input_path) > 0) {
         char expanded_path[MAX_PATH_LEN];
