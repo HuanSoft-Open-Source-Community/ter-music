@@ -124,14 +124,6 @@ static void clear_visualizer_area(void)
     int viz_bottom = layout.visualizer_bottom;
     if (viz_top < 0 || viz_bottom < viz_top) return;
 
-    int separator_row = viz_top - 1;
-    if (separator_row > 0 && separator_row < h - 1) {
-        for (int x = 1; x < w - 1; x++)
-            mvwaddstr(win_controls, separator_row, x, "\xe2\x94\x80"); /* ─ */
-        mvwaddstr(win_controls, separator_row, 0, "\xe2\x94\x82");     /* │ */
-        mvwaddstr(win_controls, separator_row, w - 1, "\xe2\x94\x82"); /* │ */
-    }
-
     for (int row = viz_top; row <= viz_bottom; row++) {
         mvwhline(win_controls, row, 1, ' ', w - 2);
     }
@@ -203,27 +195,6 @@ static void render_wave_particle_visualizer(int start_col, int graph_width)
         int units = (level * viz_height * 8 + 99) / 100;
         if (level > 0 && units == 0) units = 1;
         column_units[col] = units;
-    }
-
-    // Smoothing
-    if (graph_width >= 3) {
-        static int *smoothed_units = NULL;
-        static int smoothed_units_cap = 0;
-        if (graph_width > smoothed_units_cap) {
-            int *new_buf = realloc(smoothed_units, (size_t)graph_width * sizeof(int));
-            if (!new_buf) return;
-            smoothed_units = new_buf;
-            smoothed_units_cap = graph_width;
-        }
-        smoothed_units[0] = (column_units[0] * 3 + column_units[1]) / 4;
-        for (int col = 1; col < graph_width - 1; col++) {
-            smoothed_units[col] = (column_units[col - 1] + column_units[col] * 2 + column_units[col + 1]) / 4;
-        }
-        smoothed_units[graph_width - 1] = (column_units[graph_width - 2] + column_units[graph_width - 1] * 3) / 4;
-
-        for (int col = 0; col < graph_width; col++) {
-            column_units[col] = smoothed_units[col];
-        }
     }
 
     // Render columns
@@ -319,26 +290,6 @@ void render_spectrum_pane(void)
             units = 1;
         }
         column_units[col] = units;
-    }
-
-    if (graph_width >= 3) {
-        static int *smoothed_units = NULL;
-        static int smoothed_units_cap = 0;
-        if (graph_width > smoothed_units_cap) {
-            int *new_buf = realloc(smoothed_units, (size_t)graph_width * sizeof(int));
-            if (!new_buf) return;
-            smoothed_units = new_buf;
-            smoothed_units_cap = graph_width;
-        }
-        smoothed_units[0] = (column_units[0] * 3 + column_units[1]) / 4;
-        for (int col = 1; col < graph_width - 1; col++) {
-            smoothed_units[col] = (column_units[col - 1] + column_units[col] * 2 + column_units[col + 1]) / 4;
-        }
-        smoothed_units[graph_width - 1] = (column_units[graph_width - 2] + column_units[graph_width - 1] * 3) / 4;
-
-        for (int col = 0; col < graph_width; col++) {
-            column_units[col] = smoothed_units[col];
-        }
     }
 
     for (int col = 0; col < graph_width; col++) {

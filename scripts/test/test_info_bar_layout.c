@@ -153,14 +153,17 @@ static void check_fixed_cases(void)
     CHECK(layout.metadata.w >= INFO_BAR_MIN_COL_WIDTH &&
           layout.audio.w >= INFO_BAR_MIN_COL_WIDTH,
           "70x21 keeps both text columns usable");
+    CHECK(layout.cover.y == 6, "70x21 cover is vertically centred");
+    CHECK(layout.metadata.y == 8 && layout.audio.y == layout.metadata.y,
+          "70x21 text block is vertically centred");
 
     /* 120x40 终端下 stage 布局的信息窗格（60x13）：窄而高，纵向。 */
     info_bar_layout_compute(60, 13, 1, &layout);
     CHECK(layout.valid && layout.stacked, "60x13 info pane stacks");
     CHECK(layout.cover.w == 0 && layout.cover.h == 0,
           "60x13 pane is too short for a cover");
-    CHECK(layout.metadata.y == 1 && layout.metadata.w == 57,
-          "stacked metadata uses the full content width");
+    CHECK(layout.metadata.y == 2 && layout.metadata.w == 57,
+          "stacked metadata is centred and uses the full content width");
     CHECK(layout.metadata_rows == 5 && layout.audio_rows == 4,
           "stacked mode keeps all nine text lines");
 
@@ -193,9 +196,19 @@ static void check_fixed_cases(void)
     CHECK(layout.cover.x == 3, "30x40 cover is centred");
     CHECK(layout.cover.x + layout.cover.w == 27,
           "30x40 cover leaves one column before the border");
-    CHECK(layout.metadata.y == 14, "30x40 text starts below the cover");
+    CHECK(layout.cover.y == 9, "30x40 cover sits at the centred block top");
+    CHECK(layout.metadata.y == 22,
+          "30x40 text starts right below the centred cover");
     CHECK(layout.metadata_rows == 5 && layout.audio_rows == 4,
           "30x40 keeps all text lines");
+
+    /* 高而宽的窗格：文字块在内容区里垂直居中（无封面）。 */
+    info_bar_layout_compute(70, 25, 0, &layout);
+    CHECK(layout.valid && !layout.stacked, "70x25 info pane uses columns");
+    CHECK(layout.metadata.y == 10 && layout.audio.y == layout.metadata.y,
+          "70x25 text block is vertically centred");
+    CHECK(layout.metadata.h == 5 && layout.audio.h == 5,
+          "70x25 text blocks shrink to the drawn rows");
 
     /* 更窄：16 宽仍可放 10x5 封面；14 宽则不放。 */
     info_bar_layout_compute(16, 40, 1, &layout);

@@ -328,21 +328,24 @@ static void editor_after_change(const char *status_key)
     editor_status_key(status_key);
 }
 
-static void editor_adjust_ratio(int delta)
+static void editor_adjust_ratio(LayoutSplitDir dir, int delta)
 {
     int kind = editor_selected_kind();
     if (kind < 0) {
         return;
     }
-    if (layout_spec_adjust_ratio(&g_ed.spec, (LayoutPaneKind)kind, delta) != 0) {
-        int index = layout_spec_find_pane(&g_ed.spec, (LayoutPaneKind)kind);
-        int parent = -1;
-        int slot = 0;
-        if (editor_find_parent(index, &parent, &slot) != 1) {
-            editor_status_error_key("layout.editor.no_parent_split");
-        } else {
-            editor_status_error_key("layout.editor.too_small_pane");
-        }
+    int rc = layout_spec_adjust_ratio(&g_ed.spec, (LayoutPaneKind)kind,
+                                      dir, delta);
+    if (rc == -2) {
+        editor_status_error_key("layout.editor.no_axis_split");
+        return;
+    }
+    if (rc == -3) {
+        editor_status_error_key("layout.editor.ratio_at_limit");
+        return;
+    }
+    if (rc != 0) {
+        editor_status_error_key("layout.editor.too_small_pane");
         return;
     }
     editor_after_change("layout.editor.status_ratio");
@@ -592,17 +595,12 @@ static void editor_draw_actions(int rows, int cols)
 
 static int editor_kind_allowed(LayoutPaneKind kind)
 {
-    if (layout_spec_pane_available(&g_ed.spec, kind)) {
-        return 1;
+    /* 换类型（t）时那一格自己用着的种类不算候选，其余未用种类都可选。 */
+    if (g_ed.pending == ED_PENDING_CHANGE &&
+        (int)kind == editor_selected_kind()) {
+        return 0;
     }
-    if (g_ed.pending == ED_PENDING_CHANGE) {
-        int selected = editor_selected_kind();
-        if ((selected == LAYOUT_PANE_LYRICS && kind == LAYOUT_PANE_VINYL) ||
-            (selected == LAYOUT_PANE_VINYL && kind == LAYOUT_PANE_LYRICS)) {
-            return 1;
-        }
-    }
-    return 0;
+    return layout_spec_pane_available(&g_ed.spec, kind);
 }
 
 static int editor_available_kinds(LayoutPaneKind *out, int capacity)
@@ -744,10 +742,20 @@ void layout_editor_render(void)
     getmaxyx(stdscr, rows, cols);
     erase();
 
-    char title[128];
+    /* 预设保留 name_key 时标题显示本地化名字，用户自定的布局显示自己的名字。 */
+    const char *display_name = g_ed.spec.name;
+    if (g_ed.spec.name_key[0]) {
+        const char *translated = i18n_get(g_ed.spec.name_key);
+        if (translated && translated[0]) {
+            display_name = translated;
+        }
+    }
+    if (!display_name || !display_name[0]) {
+        display_name = g_ed.spec.id;
+    }
+    char title[160];
     snprintf(title, sizeof(title), "%s — %s [%s]%s",
-             i18n_get("layout.editor.title"),
-             g_ed.spec.name[0] ? g_ed.spec.name : g_ed.spec.id,
+             i18n_get("layout.editor.title"), display_name,
              g_ed.spec.id, g_ed.dirty ? " *" : "");
     attron(A_BOLD);
     editor_draw_text(0, 0, cols - 12, title, 0);
@@ -886,16 +894,22 @@ static int editor_handle_main(int ch)
             }
             break;
         case '[':
-            editor_adjust_ratio(-10);
+            editor_adjust_ratio(LAYOUT_SPLIT_ROW, -10);
             break;
         case ']':
-            editor_adjust_ratio(10);
+            editor_adjust_ratio(LAYOUT_SPLIT_ROW, 10);
+            break;
+        case '{':
+            editor_adjust_ratio(LAYOUT_SPLIT_COL, -10);
+            break;
+        case '}':
+            editor_adjust_ratio(LAYOUT_SPLIT_COL, 10);
             break;
         case KEY_PPAGE:
-            editor_adjust_ratio(50);
+            editor_adjust_ratio(LAYOUT_SPLIT_ROW, 50);
             break;
         case KEY_NPAGE:
-            editor_adjust_ratio(-50);
+            editor_adjust_ratio(LAYOUT_SPLIT_ROW, -50);
             break;
         case '=':
             editor_equalize();

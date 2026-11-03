@@ -38,6 +38,7 @@
 #include "logger/logger.h"
 #include "audio/play_queue.h"
 #include "ui/menu_internal.h"
+#include "ui/layout.h"
 #include "ui/layout_editor.h"
 #include "ui/remote_view.h"
 #include <stdio.h>
@@ -475,6 +476,24 @@ static void sync_player_revisions(void)
     playlist = now_playlist;
     lyrics = now_lyrics;
     config = now_config;
+
+    /* 双格布局里歌词格随曲目有无歌词让位：只在"是否让位"翻转时重建一次，
+     * 换歌本身不重建。设置页里翻转只更新缓存（回到主界面时 exit_current_view()
+     * 的 create_layout() 会按最新可用性生效），避免回来时再白重建一次。 */
+    {
+        static int suppressed = -1;
+        int now_suppressed = ui_layout_lyrics_pane_suppressed();
+        if (suppressed < 0) {
+            suppressed = now_suppressed;
+        } else if (now_suppressed != suppressed) {
+            suppressed = now_suppressed;
+            if (g_current_view == VIEW_MAIN && !layout_editor_active()) {
+                create_layout();
+                request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                                   UI_DIRTY_LYRICS | UI_DIRTY_INFO);
+            }
+        }
+    }
 }
 
 /* 配置重载后的界面侧处理：核心已应用配置，这里只重刷配色与脏标记。

@@ -18,6 +18,7 @@
 #include "logger/logger.h"
 #include "ui/layout.h"
 #include "ui/layout_state.h"
+#include "player/player.h"
 #include "ui/menu_internal.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
@@ -44,6 +45,74 @@ static int g_last_adjusted = 0;
 
 static int g_body_pair[LAYOUT_PANE_COUNT];
 static int g_border_pair[LAYOUT_PANE_COUNT];
+
+/* 布局来源：改窗格配色时决定"同 id 覆盖"还是"自增副本 id"。
+ * 合并顺序 builtin → user → env，同 id 后者胜出，因此 ENV 的覆盖写进
+ * 用户文件也会被再次盖掉，只能另开副本。 */
+enum {
+    LAYOUT_ORIGIN_BUILTIN = 0,   /* 内置预设或编译期兜底 */
+    LAYOUT_ORIGIN_USER = 1,      /* ~/.config/ter-music/layouts.json */
+    LAYOUT_ORIGIN_ENV = 2        /* TER_MUSIC_LAYOUTS，优先级最高 */
+};
+
+static char g_origin_ids[3][LAYOUT_MAX_CATALOG][LAYOUT_ID_MAX];
+static int g_origin_counts[3];
+
+static void origin_reset(void)
+{
+    memset(g_origin_counts, 0, sizeof(g_origin_counts));
+}
+
+static void origin_add(int origin, const char *id)
+{
+    if (origin < 0 || origin > LAYOUT_ORIGIN_ENV || !id || !id[0]) {
+        return;
+    }
+    for (int i = 0; i < g_origin_counts[origin]; i++) {
+        if (strcmp(g_origin_ids[origin][i], id) == 0) {
+            return;
+        }
+    }
+    if (g_origin_counts[origin] >= LAYOUT_MAX_CATALOG) {
+        return;
+    }
+    snprintf(g_origin_ids[origin][g_origin_counts[origin]++],
+             LAYOUT_ID_MAX, "%s", id);
+}
+
+static void origin_remember(int origin, const LayoutCatalog *catalog)
+{
+    for (int i = 0; i < catalog->count; i++) {
+        origin_add(origin, catalog->layouts[i].id);
+    }
+}
+
+/* env > user > builtin；未登记过的一律按内置处理。 */
+static int layout_id_origin(const char *id)
+{
+    if (!id || !id[0]) {
+        return LAYOUT_ORIGIN_BUILTIN;
+    }
+    for (int origin = LAYOUT_ORIGIN_ENV; origin >= LAYOUT_ORIGIN_USER; origin--) {
+        for (int i = 0; i < g_origin_counts[origin]; i++) {
+            if (strcmp(g_origin_ids[origin][i], id) == 0) {
+                return origin;
+            }
+        }
+    }
+    return LAYOUT_ORIGIN_BUILTIN;
+}
+
+/* 把当前布局同步回内存目录，避免为了一次改色重新解析全部文件。 */
+static void sync_current_into_catalog(void)
+{
+    for (int i = 0; i < g_catalog.count; i++) {
+        if (strcmp(g_catalog.layouts[i].id, g_current_id) == 0) {
+            g_catalog.layouts[i] = g_current;
+            return;
+        }
+    }
+}
 
 /* ============================================================
  * 路径与文件加载
@@ -80,11 +149,13 @@ static int catalog_add_fallback(LayoutCatalog *catalog)
     one.layouts[0] = fallback;
     one.count = 1;
     snprintf(one.default_id, sizeof(one.default_id), "%s", fallback.id);
+    origin_add(LAYOUT_ORIGIN_BUILTIN, fallback.id);
     layout_catalog_merge(catalog, &one);
     return 0;
 }
 
-static void merge_catalog_file(const char *path, LayoutCatalog *catalog)
+static void merge_catalog_file(const char *path, LayoutCatalog *catalog,
+                               int origin)
 {
     if (!path || !path[0] || access(path, R_OK) != 0) {
         return;
@@ -95,6 +166,11 @@ static void merge_catalog_file(const char *path, LayoutCatalog *catalog)
         log_warn("layout", "Ignoring layout file '%s': %s", path, err);
         return;
     }
+    if (origin != LAYOUT_ORIGIN_BUILTIN) {
+        /* 旧版编辑器把预设的 name_key 清掉了：同名覆盖在这里补回本地化名字。 */
+        layout_catalog_adopt_preset_names(&parsed, catalog);
+    }
+    origin_remember(origin, &parsed);
     layout_catalog_merge(catalog, &parsed);
     g_last_adjusted += parsed.adjusted;
     log_info("layout",
@@ -133,10 +209,10 @@ static void load_builtin_catalog(LayoutCatalog *catalog)
         if (catalog->count > 0) {
             break;
         }
-        merge_catalog_file(candidates[i], catalog);
+        merge_catalog_file(candidates[i], catalog, LAYOUT_ORIGIN_BUILTIN);
     }
     if (catalog->count == 0 && executable_relative[0] != '\0') {
-        merge_catalog_file(executable_relative, catalog);
+        merge_catalog_file(executable_relative, catalog, LAYOUT_ORIGIN_BUILTIN);
     }
     if (catalog->count == 0) {
         log_warn("layout", "No built-in layout file found; using compiled fallback");
@@ -147,17 +223,18 @@ static void load_builtin_catalog(LayoutCatalog *catalog)
 static int load_full_catalog(LayoutCatalog *catalog)
 {
     layout_catalog_init(catalog);
+    origin_reset();
     g_last_adjusted = 0;
     load_builtin_catalog(catalog);
 
     char user_path[MAX_PATH_LEN];
     if (layout_user_path(user_path, sizeof(user_path)) == 0) {
-        merge_catalog_file(user_path, catalog);
+        merge_catalog_file(user_path, catalog, LAYOUT_ORIGIN_USER);
     }
 
     const char *env_path = getenv("TER_MUSIC_LAYOUTS");
     if (env_path && env_path[0]) {
-        merge_catalog_file(env_path, catalog);
+        merge_catalog_file(env_path, catalog, LAYOUT_ORIGIN_ENV);
     }
 
     if (catalog->count == 0) {
@@ -261,6 +338,31 @@ static int role_pair(LayoutPaneKind kind)
     }
 }
 
+static void role_colors(LayoutPaneKind kind, int *fg, int *bg);
+
+int ui_layout_pane_colour(LayoutPaneKind kind, int field, int *from_layout)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    int role_fg = COLOR_WHITE;
+    int role_bg = -1;
+    role_colors(kind, &role_fg, &role_bg);
+    int base = (field == LAYOUT_COLOUR_BG) ? role_bg : role_fg;
+    return layout_spec_colour_effective(&g_current, kind, field, base, from_layout);
+}
+
+int ui_layout_pane_enabled(LayoutPaneKind kind)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    if (kind < 0 || kind >= LAYOUT_PANE_COUNT) {
+        return 0;
+    }
+    return g_current.panes[kind].enabled ? 1 : 0;
+}
+
 static void role_colors(LayoutPaneKind kind, int *fg, int *bg)
 {
     switch (kind) {
@@ -286,19 +388,10 @@ static void role_colors(LayoutPaneKind kind, int *fg, int *bg)
     }
 }
 
+/* 逐格配色落到本终端：256 色原样，8/16 色按最近基色近似，黑白不启用颜色。 */
 static int clamp_color(int value)
 {
-    int max_color = COLORS - 1;
-    if (max_color < 0) {
-        max_color = 0;
-    }
-    if (value < -1) {
-        return -1;
-    }
-    if (value > max_color) {
-        return max_color;
-    }
-    return value;
+    return layout_color_quantize(value, COLORS);
 }
 
 void ui_layout_apply_colors(void)
@@ -687,6 +780,104 @@ int ui_layout_select(const char *id)
 }
 
 /* ============================================================
+ * 设置页窗格配色：先落盘，成功才改内存
+ * ============================================================ */
+
+int ui_layout_set_pane_colour(LayoutPaneKind kind, int field, int value,
+                              char *out_id, size_t out_id_size,
+                              char *err, size_t err_size)
+{
+    if (err && err_size) {
+        err[0] = '\0';
+    }
+    if (out_id && out_id_size) {
+        out_id[0] = '\0';
+    }
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    if (kind < 0 || kind >= LAYOUT_PANE_COUNT) {
+        snprintf(err, err_size, "invalid pane kind");
+        return -1;
+    }
+    if (field != LAYOUT_COLOUR_FG && field != LAYOUT_COLOUR_BG) {
+        snprintf(err, err_size, "invalid colour field");
+        return -1;
+    }
+    if (value < LAYOUT_COLOR_INHERIT) {
+        snprintf(err, err_size, "invalid colour value");
+        return -1;
+    }
+    /* 未启用的窗格：序列化只写分栏树里的叶子，写了也会在重载后消失。
+       设置页应先用 ui_layout_pane_enabled() 拦下这种情况，这里是兜底。 */
+    if (!g_current.panes[kind].enabled) {
+        snprintf(err, err_size, "pane is not in the current layout");
+        return -1;
+    }
+
+    LayoutSpec cand = g_current;
+    if (field == LAYOUT_COLOUR_BG) {
+        cand.panes[kind].bg = value;
+    } else {
+        cand.panes[kind].fg = value;
+    }
+
+    /* 内置预设与用户布局都写同 id 覆盖：每个预设至多多一条记录，
+     * 反复改色不会让用户文件膨胀。env 目录的同 id 会被再盖一次，
+     * 只能自增副本 id（<id>-2、<id>-3…）。 */
+    int same_id = 1;
+    if (layout_id_origin(g_current_id) == LAYOUT_ORIGIN_ENV) {
+        char copy_id[LAYOUT_ID_MAX];
+        if (layout_catalog_next_copy_id(&g_catalog, g_current_id,
+                                        copy_id, sizeof(copy_id)) != 0) {
+            snprintf(err, err_size, "no free copy id for '%s'", g_current_id);
+            return -1;
+        }
+        const char *base_name = ui_layout_current_name();
+        if (!base_name || !base_name[0]) {
+            base_name = g_current_id;
+        }
+        int suffix = atoi(copy_id + strlen(g_current_id) + 1);
+        snprintf(cand.id, sizeof(cand.id), "%s", copy_id);
+        snprintf(cand.name, sizeof(cand.name), "%s %d", base_name, suffix);
+        /* 副本不是预设，不能再借用预设的本地化 key。 */
+        cand.name_key[0] = '\0';
+        same_id = 0;
+    }
+
+    if (layout_user_save_layout(&cand, err, err_size) != 0) {
+        return -1;   /* 落盘失败：内存、颜色 pair、状态文件一律不动 */
+    }
+
+    if (same_id) {
+        /* id 没变：只把内存目录里的同一条目换成新配色，不重载文件。状态
+         * 文件无需改写——它记的 id 与这里相同；没写过状态（首次运行用默认
+         * 布局）时，下次启动按同样的规则仍会落到这个布局。 */
+        g_current = cand;
+        sync_current_into_catalog();
+        origin_add(LAYOUT_ORIGIN_USER, g_current_id);
+        ui_layout_apply_colors();
+    } else if (ui_layout_reload() > 0) {
+        if (ui_layout_select(cand.id) != 0) {
+            snprintf(err, err_size, "cannot switch to copy layout '%s'", cand.id);
+            ui_layout_reload();
+            return -1;
+        }
+    } else {
+        snprintf(err, err_size, "layout reload failed after saving copy");
+        return -1;
+    }
+
+    if (out_id && out_id_size) {
+        snprintf(out_id, out_id_size, "%s", g_current_id);
+    }
+    log_info("layout", "Pane '%s' %s colour set to %d in layout '%s'",
+             layout_pane_id_name(kind),
+             field == LAYOUT_COLOUR_BG ? "bg" : "fg", value, g_current_id);
+    return 0;
+}
+
+/* ============================================================
  * 用户布局文件（布局编辑器保存/恢复内置预设）
  * ============================================================ */
 
@@ -791,6 +982,16 @@ int layout_user_remove_layout(const char *id, char *err, size_t err_size)
  * 主布局创建
  * ============================================================ */
 
+int ui_layout_lyrics_pane_suppressed(void)
+{
+    if (!g_initialized) {
+        ui_layout_init();
+    }
+    /* 判定本身是纯函数（ui/layout_spec.c），这里只补上"有没有歌词"。 */
+    return layout_spec_lyrics_pane_suppressed(&g_current,
+                                              player_lyrics_total() > 0);
+}
+
 void create_layout(void)
 {
     static int view_initialized = 0;
@@ -807,10 +1008,17 @@ void create_layout(void)
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
 
+    /* 让位只影响这一帧的几何：g_current 与用户布局文件都不动。 */
+    LayoutSpec effective = g_current;
+    if (ui_layout_lyrics_pane_suppressed() &&
+        layout_spec_remove_pane(&effective, LAYOUT_PANE_LYRICS) != 0) {
+        effective = g_current;   /* 兜底：两格都画，不能因此没有界面 */
+    }
+
     LayoutResolved resolved;
     char layout_err[192] = "";
-    if (layout_spec_resolve(&g_current, &resolved) != 0 ||
-        layout_spec_validate(&g_current, layout_err, sizeof(layout_err)) != 0) {
+    if (layout_spec_resolve(&effective, &resolved) != 0 ||
+        layout_spec_validate(&effective, layout_err, sizeof(layout_err)) != 0) {
         LayoutSpec fallback;
         if (layout_spec_build_fallback(&fallback) == 0 &&
             layout_spec_resolve(&fallback, &resolved) == 0) {

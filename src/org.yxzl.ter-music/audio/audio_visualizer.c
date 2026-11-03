@@ -108,11 +108,13 @@ static void analyze_mono_window(const int32_t *mono)
         if (scaled_level < 0) scaled_level = 0;
         if (scaled_level > 100) scaled_level = 100;
 
+        /* 快起慢落：上升吃掉本帧 87.5% 的新值（一帧到顶，鼓点有冲击感），
+         * 回落只吃 37.5%，仍要几帧才落下，避免闪烁。 */
         int previous = g_visualizer_levels[i];
         if (scaled_level > previous)
-            g_visualizer_levels[i] = (previous + scaled_level * 3) / 4;
+            g_visualizer_levels[i] = (previous + scaled_level * 7) / 8;
         else
-            g_visualizer_levels[i] = (previous * 3 + scaled_level) / 4;
+            g_visualizer_levels[i] = (previous * 5 + scaled_level * 3) / 8;
 
         if (g_visualizer_levels[i] < 1) g_visualizer_levels[i] = 0;
         if (g_visualizer_levels[i] > g_visualizer_peaks[i])

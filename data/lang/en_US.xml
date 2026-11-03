@@ -61,8 +61,17 @@
   <!-- ===== Settings view ===== -->
   <string key="settings.playback.language">Press Enter to toggle language; latency applies on next playback</string>
   <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
-  <string key="settings.color.select_hint">Theme: ↑/↓ select, → or ENTER adjust, ←/TAB back</string>
+  <string key="settings.color.select_hint">Colours: ↑/↓ select, ENTER opens the palette; ←/TAB back</string>
   <string key="settings.color.auto_avoid_same">Foreground and background colors will automatically avoid being the same</string>
+  <string key="settings.color.layer_hint">[layout] recolours and saves the current layout; [theme] changes the global theme</string>
+  <string key="settings.color.follow_theme">Follow theme</string>
+  <string key="settings.color.from_layout">layout</string>
+  <string key="settings.color.from_theme">theme</string>
+  <string key="settings.color.pane_disabled">no pane</string>
+  <string key="settings.color.saved_layout">Colours saved to layout</string>
+  <string key="settings.color.saved_copy">Saved as copy %s</string>
+  <string key="settings.color.save_failed">Could not save colours (see log)</string>
+  <string key="settings.color.rainbow_pending">rainbow mode active</string>
   <string key="settings.layout.hint">Layouts are force-tiled: ←/→ switch, ENTER choose; old or hand-edited geometry is auto-fitted instead of rejected</string>
   <string key="settings.layout.edit_hint">Layout editing: ENTER opens the split editor; arrows select, [ ] adjust ratio, | / - split, S save</string>
   <string key="settings.layout.saved">Layout switched</string>
@@ -182,6 +191,12 @@
   <string key="settings.opt.controls_bg">Controls Background</string>
   <string key="settings.opt.lyrics_fg">Lyrics Foreground</string>
   <string key="settings.opt.lyrics_bg">Lyrics Background</string>
+  <string key="settings.opt.info_fg">Info Foreground</string>
+  <string key="settings.opt.info_bg">Info Background</string>
+  <string key="settings.opt.spectrum_fg">Spectrum Foreground</string>
+  <string key="settings.opt.spectrum_bg">Spectrum Background</string>
+  <string key="settings.opt.vinyl_fg">Vinyl Foreground</string>
+  <string key="settings.opt.vinyl_bg">Vinyl Background</string>
   <string key="settings.opt.sidebar_fg">Sidebar Foreground</string>
   <string key="settings.opt.sidebar_bg">Sidebar Background</string>
   <string key="settings.opt.highlight_fg">Highlight Foreground</string>
@@ -1244,7 +1259,7 @@
   <string key="layout.editor.hint_colors">↑↓ field  ←→ color  PgUp/PgDn ±10  Home inherit  End terminal  r reset  R reset all</string>
   <string key="layout.editor.help_title">Key Help</string>
   <string key="layout.editor.help_nav">↑↓←→ select the adjacent pane by geometry; Tab/Shift+Tab cycle in tree order</string>
-  <string key="layout.editor.help_ratio">[ / ] adjust ratio by 1%; PgUp/PgDn by 5%; = restore 50/50</string>
+  <string key="layout.editor.help_ratio">[ / ] width ±1%, { / } height ±1%; PgUp/PgDn width ±5%; = restore 50/50</string>
   <string key="layout.editor.help_split">| split side by side; - split stacked; the new pane appears right/below</string>
   <string key="layout.editor.help_edit">x remove (sibling takes over); t change type; w swap with next; Enter actions menu</string>
   <string key="layout.editor.help_colors">c colors: ↑↓ field, ←→ cycle, Home inherit, End terminal, r/R reset</string>
@@ -1263,7 +1278,7 @@
   <string key="layout.editor.colors_title">Pane Colors</string>
   <string key="layout.editor.color_inherit">inherit</string>
   <string key="layout.editor.color_terminal">terminal</string>
-  <string key="layout.editor.no_kind">No pane type is available (vinyl and lyrics cannot coexist, or all types are in use)</string>
+  <string key="layout.editor.no_kind">No pane type is available (all six are already in this layout)</string>
   <string key="layout.editor.min_pane">At least one pane is required</string>
   <string key="layout.editor.rename_prompt">Layout name: </string>
   <string key="layout.editor.custom_name">Custom Layout %d</string>
@@ -1279,6 +1294,8 @@
   <string key="layout.editor.status_kind">Pane type changed</string>
   <string key="layout.editor.status_swap_none">No pane available to swap with</string>
   <string key="layout.editor.no_parent_split">This is the root pane; there is no parent split to adjust</string>
+  <string key="layout.editor.no_axis_split">No split on that axis for the selected pane</string>
+  <string key="layout.editor.ratio_at_limit">The ratio is already at its limit in that direction</string>
   <string key="layout.editor.too_small_pane">The pane is too small to adjust further (keep at least 1% of the axis)</string>
   <string key="layout.editor.internal_error">Internal error: layout is not force-tiled; not saved</string>
 
