@@ -292,7 +292,7 @@ void render_info_bar(void)
     }
     ui_pane_begin(LAYOUT_PANE_INFO, win_info, i18n_get("hint.info"));
     if (h < 3 || w < 6) {
-        wrefresh(win_info);
+        ui_refresh_window(win_info);
         return;
     }
 
@@ -342,7 +342,7 @@ void render_info_bar(void)
     if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
         log_error("info_bar", "Invalid info-pane geometry (%dx%d); skipping content",
                   w, h);
-        wrefresh(win_info);
+        ui_refresh_window(win_info);
         return;
     }
 
@@ -354,7 +354,7 @@ void render_info_bar(void)
             /* 解码失败：本帧退化为无封面布局，把封面空间还给文字。 */
             info_bar_layout_compute(w, h, 0, &layout);
             if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
-                wrefresh(win_info);
+                ui_refresh_window(win_info);
                 return;
             }
         }
@@ -437,7 +437,7 @@ void render_info_bar(void)
 
     /* 内容画完后最后补一遍边框，防止任何字形溢出盖住边框。 */
     ui_pane_repaint_border(LAYOUT_PANE_INFO, win_info);
-    wrefresh(win_info);
+    ui_refresh_window(win_info);
 }
 
 void render_playlist_content(void)
@@ -488,7 +488,7 @@ void render_playlist_content(void)
     }
     ui_pane_begin(LAYOUT_PANE_PLAYLIST, win_playlist, title_buf);
     if (h < 3 || w < 12) {
-        wrefresh(win_playlist);
+        ui_refresh_window(win_playlist);
         return;
     }
     int content_height = h - 2;
@@ -772,6 +772,6 @@ void render_playlist_content(void)
         }
 
     }
-    wrefresh(win_playlist);
+    ui_refresh_window(win_playlist);
     render_info_bar();
 }

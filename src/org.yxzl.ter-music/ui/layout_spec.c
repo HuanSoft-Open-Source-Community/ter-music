@@ -361,8 +361,16 @@ static const int k_ansi_rgb[16][3] = {
 };
 
 /* 调色板下标 → RGB（16..231 是六级立方，232..255 是灰阶）。 */
-static void palette_rgb(int index, int *r, int *g, int *b)
+void layout_color_rgb(int index, int *r, int *g, int *b)
 {
+    if (!r || !g || !b) {
+        return;
+    }
+    if (index < 0) {
+        index = 0;
+    } else if (index > 255) {
+        index = 255;
+    }
     if (index < 16) {
         *r = k_ansi_rgb[index][0];
         *g = k_ansi_rgb[index][1];
@@ -408,7 +416,7 @@ int layout_color_quantize(int value, int colors)
     int r = 0;
     int g = 0;
     int b = 0;
-    palette_rgb(value, &r, &g, &b);
+    layout_color_rgb(value, &r, &g, &b);
     int best = 0;
     long best_dist = -1;
     for (int i = 0; i < levels; i++) {

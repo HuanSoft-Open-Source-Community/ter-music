@@ -71,7 +71,7 @@
   <string key="settings.color.saved_layout">配色已存入当前布局</string>
   <string key="settings.color.saved_copy">已存为副本 %s</string>
   <string key="settings.color.save_failed">配色保存失败（详见日志）</string>
-  <string key="settings.color.rainbow_pending">彩虹模式生效中</string>
+  <string key="settings.color.rainbow_pending">流光模式生效中</string>
   <string key="settings.layout.hint">布局强制平铺：←/→ 切换，ENTER 选择；旧布局或手改几何会自动适配，不再拒绝</string>
   <string key="settings.layout.edit_hint">布局编辑：ENTER 打开分栏编辑器；方向键选择，[ ] 调比例，| / - 分栏，S 保存</string>
   <string key="settings.layout.saved">布局已切换</string>
@@ -502,8 +502,9 @@
   <string key="status.search_wait">搜索中，请稍候...</string>
   <string key="status.switched_queue">切换到播放队列视图</string>
   <string key="status.switched_browser">切换到文件浏览视图</string>
-  <string key="status.rainbow_off">彩虹模式已关闭</string>
-  <string key="status.rainbow_on">康娜米！彩虹模式已启用</string>
+  <string key="status.rainbow_off">流光模式已关闭</string>
+  <string key="status.rainbow_on">科乐美！流光模式已启用</string>
+  <string key="status.rainbow_unavailable">当前终端不支持流光模式（颜色或色对不足）</string>
   <string key="status.seek_fmt">已跳转到 %02d:%02d</string>
   <string key="status.volume_fmt">音量：%d%%</string>
   <string key="status.settings_saved">设置已保存</string>

@@ -33,6 +33,19 @@ void render_vinyl_disc(WINDOW *win, int show_messages, int body_attr,
 /** @brief 绘制独立 vinyl 窗格（含边框/标题）。 */
 void render_vinyl_pane(void);
 
+/**
+ * @brief 用 3 个流光色重染碟面 3×3 固定色对。
+ *
+ * 只改碟面（上下半三档明暗），中心封面标签与频谱柱色对不变。
+ * colours[0..2] 应为暗/中/亮三档；亮档落到 shade 2 的旋转高光。
+ *
+ * @return 0 成功；-1 参数非法或彩色碟面不可用。
+ */
+int vinyl_rainbow_apply(const int colours[3]);
+
+/** @brief 把碟面固定色对恢复为原始灰色/基础色（不影响 label/bars）。 */
+void vinyl_rainbow_restore(void);
+
 /** @brief 100ms 节拍：播放/暂停时推进黑胶动画。 */
 void vinyl_tick(void);
 

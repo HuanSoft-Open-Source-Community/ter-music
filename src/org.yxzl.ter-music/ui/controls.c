@@ -611,7 +611,7 @@ static void render_controls_popup(void)
 
     /* Step 6 — cleanup and flush */
     wattrset(popup_win, A_NORMAL);
-    wrefresh(popup_win);
+    ui_refresh_window(popup_win);
 }
 
 /* ============================================================
@@ -647,6 +647,12 @@ void controls_reset_popup(void)
 {
     destroy_popup_window(&g_popup);
     g_popup.active = 0;
+}
+
+/* 流光彩蛋整屏合成用：弹层当前是否可见，以及它的窗口。 */
+WINDOW *controls_popup_window(void)
+{
+    return g_popup.active ? (WINDOW *)g_popup.popup_win : NULL;
 }
 
 /* ============================================================
@@ -721,7 +727,7 @@ void render_controls(void)
 
     ui_pane_begin(LAYOUT_PANE_CONTROLS, win_controls, header_line);
     if (h < 4 || w < 10) {
-        wrefresh(win_controls);
+        ui_refresh_window(win_controls);
         return;
     }
 

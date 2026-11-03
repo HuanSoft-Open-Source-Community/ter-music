@@ -140,6 +140,9 @@ int  remove_track_from_playlist(int playlist_idx, int track_idx);
 int handle_settings_input(int ch);
 /* 快捷键页是否处于按键捕获模式（Esc 应交给设置页取消捕获）。 */
 int settings_hotkey_capture_active(void);
+/* 设置页选项/颜色选择弹层的窗口；未激活时 NULL。
+ * 流光彩蛋用它把弹层纳入整屏合成，避免刷新底层窗口时把弹层擦掉。 */
+WINDOW *settings_sel_window(void);
 int handle_history_input(int ch);
 int handle_playlist_input(int ch);
 int handle_favorites_input(int ch);

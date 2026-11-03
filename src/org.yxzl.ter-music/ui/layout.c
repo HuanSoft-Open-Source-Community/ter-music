@@ -415,7 +415,7 @@ void ui_layout_apply_colors(void)
                            pane->bg != LAYOUT_COLOR_INHERIT ||
                            pane->border_fg != LAYOUT_COLOR_INHERIT ||
                            pane->border_bg != LAYOUT_COLOR_INHERIT;
-        if (!has_override || g_rainbow_mode_enabled) {
+        if (!has_override) {
             continue;
         }
 
@@ -629,7 +629,7 @@ static int create_windows(const LayoutGeometry *geometry)
         *slot = win;
         ui_pane_begin((LayoutPaneKind)i, win,
                       ui_layout_pane_title((LayoutPaneKind)i));
-        wrefresh(win);
+        ui_refresh_window(win);
     }
     return 0;
 }

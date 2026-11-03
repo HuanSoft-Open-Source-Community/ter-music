@@ -21,6 +21,7 @@
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/keymap.h"
+#include "ui/rainbow.h"
 #include "ui/scrollbar.h"
 #include "ui/remote_view.h"
 #include "config/config.h"
@@ -894,7 +895,7 @@ static void commit_colour_option(int option_index, int value, int announce)
         } else {
             snprintf(msg, sizeof(msg), i18n_get("settings.color.saved_copy"), out_id);
         }
-        if (g_rainbow_mode_enabled) {
+        if (ui_rainbow_active()) {
             char both[sizeof(msg) + 160];
             snprintf(both, sizeof(both), "%s  %s", msg,
                      i18n_get("settings.color.rainbow_pending"));
@@ -2035,6 +2036,12 @@ static void create_sel_window(void)
         g_sel_win = NULL;
         g_sel_active = 0;
     }
+}
+
+/* 流光彩蛋整屏合成用：选择弹层当前是否可见，以及它的窗口。 */
+WINDOW *settings_sel_window(void)
+{
+    return g_sel_active ? g_sel_win : NULL;
 }
 
 static void draw_sel_menu(void)
