@@ -95,9 +95,10 @@ violating_files=0
 declare -a rows=()
 declare -a samples=()
 
-# 扫描目录（Task 10.2 扩面）：ui/（含 braille 子目录）、main/、app/
+# 扫描目录（Task 10.2 扩面）：ui/（含 cover 子目录，原 braille 子目录已随
+# 封面模块改名）、main/、app/
 scan_files=()
-for f in "$SRC_ROOT"/ui/*.c "$SRC_ROOT"/ui/braille/*.c \
+for f in "$SRC_ROOT"/ui/*.c "$SRC_ROOT"/ui/cover/*.c \
          "$SRC_ROOT"/main/*.c "$SRC_ROOT"/app/*.c; do
     [ -e "$f" ] || continue
     scan_files+=("$f")

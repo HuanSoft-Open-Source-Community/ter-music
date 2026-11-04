@@ -13,7 +13,8 @@
 #include "i18n/i18n.h"
 #include "logger/logger.h"
 #include "queue/backend_queue.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/album_cover.h"
+#include "ui/cover/text_cover.h"
 #include "util/utf8.h"
 #include "util/json.h"
 
@@ -810,15 +811,15 @@ int info_cover_text(int cols, int rows, int charset, char *out, size_t out_size)
     InfoCoverCache *slot = cover_cache_slot(cover_path, cols, rows, charset);
     int rc;
     if (charset == INFO_COVER_ASCII) {
-        rc = generate_ascii_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
+        rc = generate_ascii_art_dynamic(cover_path, TEXT_COVER_DEFAULT_THRESHOLD,
                                         cols, rows, slot->text,
                                         sizeof(slot->text));
     } else if (charset == INFO_COVER_HALF) {
-        rc = generate_halfblock_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
+        rc = generate_halfblock_art_dynamic(cover_path, TEXT_COVER_DEFAULT_THRESHOLD,
                                             cols, rows, slot->text,
                                             sizeof(slot->text));
     } else {
-        rc = generate_braille_art_dynamic(cover_path, BRAILLE_DEFAULT_THRESHOLD,
+        rc = generate_braille_art_dynamic(cover_path, TEXT_COVER_DEFAULT_THRESHOLD,
                                           cols, rows, slot->text,
                                           sizeof(slot->text));
     }

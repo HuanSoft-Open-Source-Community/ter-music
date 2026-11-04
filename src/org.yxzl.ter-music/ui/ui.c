@@ -31,7 +31,7 @@
 #include "ui/menus.h"
 #include "library/library.h"
 #include "library/browser/browser.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/album_cover.h"
 #include "search/search.h"
 #include "ui/scrollbar.h"
 #include "remote/remote.h"

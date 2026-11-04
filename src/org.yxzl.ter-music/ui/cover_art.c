@@ -21,7 +21,7 @@
 #include <string.h>
 
 #include "types.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/cover_image.h"
 #include "util/utf8.h"
 
 typedef struct {
@@ -448,4 +448,29 @@ void cover_art_draw(WINDOW *win, int x, int y,
         }
     }
     wattrset(win, body_attr);
+}
+
+/* ── 控制区封面尺寸估算（原 ui/braille/braille_art.c:calculate_optimal_cover_size）
+ * 逐字搬迁，仅常量改名 BRAILLE_MIN_SIZE/BRAILLE_MAX_SIZE/BRAILLE_CELL_H →
+ * COVER_MIN_SIZE/COVER_MAX_SIZE/COVER_CELL_H，数值与判定顺序未变。 ── */
+int calculate_optimal_cover_size(int controls_height) {
+    if (controls_height < 10) {
+        return COVER_MIN_SIZE;
+    }
+
+    int available_height = controls_height - 5;
+    if (available_height < COVER_MIN_SIZE * COVER_CELL_H) {
+        return COVER_MIN_SIZE;
+    }
+
+    int target_height = (int)(available_height * 0.7);
+    int size = target_height / COVER_CELL_H;
+
+    if (size < COVER_MIN_SIZE) {
+        size = COVER_MIN_SIZE;
+    } else if (size > COVER_MAX_SIZE) {
+        size = COVER_MAX_SIZE;
+    }
+
+    return size;
 }

@@ -176,8 +176,8 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/i18n/i18n.c
     src/org.yxzl.ter-music/lyrics/lyrics.c
     src/org.yxzl.ter-music/ui/lyrics.c
-    src/org.yxzl.ter-music/ui/braille/braille_art.c
-    src/org.yxzl.ter-music/ui/braille/image_loader.c
+    src/org.yxzl.ter-music/ui/cover/text_cover.c
+    src/org.yxzl.ter-music/ui/cover/cover_image.c
     src/org.yxzl.ter-music/ui/scrollbar.c
     src/org.yxzl.ter-music/media/session.c
     src/org.yxzl.ter-music/media/rpc_common.c

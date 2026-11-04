@@ -1,66 +1,23 @@
+/**
+ * @file text_cover.c
+ * @brief CLI / D-Bus 文本封面的字符集生成（盲文 / ASCII / 半块）
+ *
+ * 拆自旧的 `ui/braille/braille_art.c`。与字符集无关的像素运算
+ * （`rgba_to_gray` / `resize_gray` / `threshold_gray`）已移到
+ * `ui/cover/cover_image.c`；只服务控制区封面尺寸的
+ * `calculate_optimal_cover_size` 移到 `ui/cover_art.c`；无调用者的
+ * `print_braille_art` 删除。本文件保留的函数体逐字搬迁，无行为改动。
+ *
+ * 命名说明：TUI 的专辑封面已不再使用盲文点阵（见 `ui/cover_art_cells.c`
+ * 的 ▀ 半块实现），但 `--charset braille` 这条 CLI/D-Bus 输出路径仍逐字
+ * 生成盲文点阵，因此 `binary_to_braille` / `braille_to_utf8` /
+ * `generate_braille_art_dynamic` 与 `BRAILLE_CELL_*` 保留 braille 字样。
+ */
+
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
-#include <stdio.h>
-#include "ui/braille/braille_art.h"
-
-int rgba_to_gray(const unsigned char *rgba, int w, int h, unsigned char *gray) {
-    if (!rgba || !gray || w <= 0 || h <= 0) return -1;
-
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int idx = (y * w + x) * 4;
-            float r = rgba[idx];
-            float g = rgba[idx + 1];
-            float b = rgba[idx + 2];
-            gray[y * w + x] = (unsigned char)(0.299f * r + 0.587f * g + 0.114f * b + 0.5f);
-        }
-    }
-    return 0;
-}
-
-int resize_gray(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw, int dh) {
-    if (!src || !dst || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return -1;
-
-    float scale_x = (float)sw / dw;
-    float scale_y = (float)sh / dh;
-
-    for (int dy = 0; dy < dh; dy++) {
-        for (int dx = 0; dx < dw; dx++) {
-            float src_x = dx * scale_x;
-            float src_y = dy * scale_y;
-
-            int x0 = (int)floorf(src_x);
-            int y0 = (int)floorf(src_y);
-            int x1 = (x0 + 1 < sw) ? x0 + 1 : x0;
-            int y1 = (y0 + 1 < sh) ? y0 + 1 : y0;
-
-            float fx = src_x - x0;
-            float fy = src_y - y0;
-
-            float v00 = src[y0 * sw + x0];
-            float v10 = src[y0 * sw + x1];
-            float v01 = src[y1 * sw + x0];
-            float v11 = src[y1 * sw + x1];
-
-            float interp = (1 - fx) * (1 - fy) * v00 +
-                          fx * (1 - fy) * v10 +
-                          (1 - fx) * fy * v01 +
-                          fx * fy * v11;
-
-            dst[dy * dw + dx] = (unsigned char)(interp + 0.5f);
-        }
-    }
-    return 0;
-}
-
-void threshold_gray(const unsigned char *gray, int w, int h, unsigned char *binary, uint8_t thresh) {
-    if (!gray || !binary || w <= 0 || h <= 0) return;
-
-    for (int i = 0; i < w * h; i++) {
-        binary[i] = (gray[i] >= thresh) ? 1 : 0;
-    }
-}
+#include "ui/cover/cover_image.h"
+#include "ui/cover/text_cover.h"
 
 int binary_to_braille(const unsigned char *binary, int w, int h, int cols, int rows, uint32_t *output) {
     if (!binary || !output || w <= 0 || h <= 0) return -1;
@@ -103,19 +60,6 @@ int braille_to_utf8(uint32_t codepoint, char *utf8_buf) {
     utf8_buf[2] = (char)(0x80 | (codepoint & 0x3F));
     utf8_buf[3] = '\0';
     return 3;
-}
-
-void print_braille_art(const uint32_t *braille, int rows, int cols) {
-    if (!braille || rows <= 0 || cols <= 0) return;
-
-    char utf8_buf[4];
-    for (int row = 0; row < rows; row++) {
-        for (int col = 0; col < cols; col++) {
-            braille_to_utf8(braille[row * cols + col], utf8_buf);
-            fwrite(utf8_buf, 1, 3, stdout);
-        }
-        fputc('\n', stdout);
-    }
 }
 
 /* 半块字符画（▀ ▄ █ 与空格）。
@@ -186,28 +130,6 @@ int generate_halfblock_art_dynamic(const char *image_path,
 
     free(resized);
     return 0;
-}
-
-int calculate_optimal_cover_size(int controls_height) {
-    if (controls_height < 10) {
-        return BRAILLE_MIN_SIZE;
-    }
-
-    int available_height = controls_height - 5;
-    if (available_height < BRAILLE_MIN_SIZE * BRAILLE_CELL_H) {
-        return BRAILLE_MIN_SIZE;
-    }
-
-    int target_height = (int)(available_height * 0.7);
-    int size = target_height / BRAILLE_CELL_H;
-
-    if (size < BRAILLE_MIN_SIZE) {
-        size = BRAILLE_MIN_SIZE;
-    } else if (size > BRAILLE_MAX_SIZE) {
-        size = BRAILLE_MAX_SIZE;
-    }
-
-    return size;
 }
 
 int generate_braille_art_dynamic(const char *image_path,

@@ -20,6 +20,23 @@
 #define COVER_ART_SLOT_CONTROLS 1
 #define COVER_ART_SLOT_COUNT    2
 
+/* ── 控制区封面尺寸经验值 ──
+ * 原为 BRAILLE_MIN_SIZE / BRAILLE_MAX_SIZE / BRAILLE_CELL_H，随
+ * `calculate_optimal_cover_size` 一起从 ui/braille/ 迁到这里：它只决定
+ * 控制区封面的字符行数，与盲文无关（封面本身由 ▀ 半块单元绘制）。
+ * 数值与判定顺序逐字保留，不做任何调整：COVER_CELL_H=4 是"1 字符按 2×4
+ * 像素估高"的历史假设，与半块封面的 1×2 像素并不等价，因此它现在纯粹是
+ * 经验系数，改名不等于改行为。 */
+#define COVER_MIN_SIZE 5
+#define COVER_MAX_SIZE 15
+#define COVER_CELL_H   4
+
+/**
+ * @brief 按控制区窗格高度估算封面字符行数（钳到 COVER_MIN_SIZE..COVER_MAX_SIZE）。
+ * @param controls_height 控制区窗格总行数
+ */
+int calculate_optimal_cover_size(int controls_height);
+
 /**
  * @brief 取指定槽位的封面网格（带缓存）。
  *

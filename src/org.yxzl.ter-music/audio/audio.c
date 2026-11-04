@@ -25,7 +25,7 @@
 #include "media/session.h"
 #include "queue/backend_queue.h"
 #include "audio/progress/progress.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/album_cover.h"
 #include "lyrics/lyrics.h"
 #include <stdio.h>
 #include <stdlib.h>

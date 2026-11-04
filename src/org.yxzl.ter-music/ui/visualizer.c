@@ -15,7 +15,6 @@
 #include "ui/layout.h"
 #include "ui/cover_art.h"
 #include "ui/menu_internal.h"
-#include "ui/braille/braille_art.h"
 #include "audio/audio.h"
 #include "audio/visualizer.h"
 #include "config/config.h"
@@ -74,10 +73,10 @@ static void render_album_cover(void)
     if (viz_top < 0 || viz_bottom < viz_top) return;
     int viz_height = viz_bottom - viz_top + 1;
 
-    if (viz_height < BRAILLE_MIN_SIZE * BRAILLE_CELL_H) return;
+    if (viz_height < COVER_MIN_SIZE * COVER_CELL_H) return;
 
     int optimal_size = calculate_optimal_cover_size(h);
-    if (optimal_size < BRAILLE_MIN_SIZE) return;
+    if (optimal_size < COVER_MIN_SIZE) return;
 
     int cover_char_width = optimal_size * 2;
 
@@ -86,9 +85,9 @@ static void render_album_cover(void)
     int max_cover_width = w - start_col - 4;
     if (cover_char_width > max_cover_width) {
         cover_char_width = max_cover_width;
-        if (cover_char_width < BRAILLE_MIN_SIZE * 2) return;
+        if (cover_char_width < COVER_MIN_SIZE * 2) return;
         optimal_size = cover_char_width / 2;
-        if (optimal_size < BRAILLE_MIN_SIZE) return;
+        if (optimal_size < COVER_MIN_SIZE) return;
     }
 
     int min_spectrum_width = 20;
