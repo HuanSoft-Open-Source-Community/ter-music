@@ -435,6 +435,12 @@ Notes:
   migrates them and rewrites the attribute to the number. Sending `version`
   back inside a patch is accepted and ignored, so a front end can re-apply a
   full snapshot.
+- The `info_fields` mask also drives the TUI info pane, but only for the bits
+  it can display (state/mode/title/artist/album/queue/format);
+  `index`/`path`/`volume`/`speed` remain CLI/D-Bus-only. `info_show_cover`
+  toggles both the info-pane cover and the CLI text cover; the TUI pane also
+  requires the playback `show_album_cover` master switch.
+  `info_cover_cols/rows/charset` only affect CLI/D-Bus text covers.
   **Downgrade:** a build from before contract v9 reads the attribute with the
   same integer parse, so `version="9"` loads without error and its own migration
   blocks (`file_version < 4`, `< 7`, `< 8`) correctly stay inactive. But that

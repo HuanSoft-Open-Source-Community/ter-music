@@ -13,7 +13,6 @@ extern int g_content_selected_idx;
 extern FocusArea g_focus_area;
 extern int g_control_focus;
 extern int g_current_control_idx;
-extern int g_control_count;
 extern int g_current_position;
 extern int g_total_duration;
 extern int g_initial_seek_position;
@@ -81,7 +80,6 @@ void process_pending_ui_refresh(void);
 
 void apply_color_theme(void);
 int use_ascii_fallback_ui(void);
-const char *ui_text(const char *key, const char *unused);
 
 /* 统一的内容下标播放入口：内容下标→路径→队列位（失配先重推队列再播）。
  * 各界面播放入口都应经它下发，避免把内容下标当队列位置盲发 PlayAt。 */
@@ -109,7 +107,6 @@ int ui_toggle_playlist_tab_mode(void);
  * 结果，避免各自换行/居中导致画面与点击错位。 */
 typedef struct {
     int progress_row;                 /* -1 = 不显示 */
-    int status_row;
     int button_row[CONTROL_COUNT];    /* -1 = 未显示 */
     int button_col[CONTROL_COUNT];
     int button_width[CONTROL_COUNT];
@@ -158,9 +155,7 @@ void ui_lyric_cursor_step(int delta);
 int  handle_global_mouse_event(const MEVENT *event);
 
 int  handle_popup_action(ActionId action);
-int  handle_popup_input(int ch);
 int  is_primary_mouse_click(const MEVENT *event);
-int  translate_screen_to_window(WINDOW *win, int screen_y, int screen_x, int *window_y, int *window_x);
 int  get_playlist_index_from_window_row(int window_y, int *display_index, int *actual_index);
 int  get_control_index_from_window_point(int window_y, int window_x);
 int  get_lyric_index_from_window_row(int window_y, int *lyric_index, double *timestamp);

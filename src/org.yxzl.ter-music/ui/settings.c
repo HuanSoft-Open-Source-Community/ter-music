@@ -52,8 +52,6 @@ static int backend_option_selectable(int backend)
  * ============================================================ */
 
 static int g_settings_current_option = 0;
-static int g_settings_color_editing = 0;
-static int g_settings_color_which = 0;
 
 /* 快捷键编辑器（Task 5）：选中行、滚动偏移、捕获模式与提示消息。 */
 static int g_hotkey_selected = 0;      /* 0 .. actions_count()-1 */
@@ -164,77 +162,15 @@ static const char *settings_options[] = {
     "settings.opt.vinyl_fg",
     "settings.opt.vinyl_bg"
 };
-static const char *settings_options_ascii[] = {
-    "Playlist Foreground",
-    "Playlist Background",
-    "Controls Foreground",
-    "Controls Background",
-    "Lyrics Foreground",
-    "Lyrics Background",
-    "Sidebar Foreground",
-    "Sidebar Background",
-    "Highlight Foreground",
-    "Highlight Background",
-    "Border Foreground",
-    "Border Background",
-    "Default Startup Path",
-    "Auto Play On Start",
-    "Remember Last Path",
-    "Clear History On Start",
-    "Output Latency",
-    "UI Layout",
-    "Default Play Mode",
-    "Default Speed",
-    "Show Album Cover",
-    "Lyrics Alignment",
-    "Audio Backend",
-    "Sort Mode",
-    "Advanced Play Modes",
-    "Seamless Preload",
-    "CUE Encoding",
-    "Enable Equalizer",
-    "Pre-amp",
-    "31 Hz",
-    "62 Hz",
-    "125 Hz",
-    "250 Hz",
-    "500 Hz",
-    "1 kHz",
-    "2 kHz",
-    "4 kHz",
-    "8 kHz",
-    "16 kHz",
-    "EQ Preset",
-    "Info Display Preset",
-    "Basic Info Fields",
-    "Show Text Cover",
-    "Cover Size",
-    "Cover Charset",
-    "Show Progress",
-    "Progress Style",
-    "Lyric Lines",
-    "Reload Config",
-    "Restore Defaults",
-    "Stop Playback Process On Exit",
-    "Reload Layouts",
-    "Edit Layout",
-    "New Layout",
-    "Info Foreground",
-    "Info Background",
-    "Spectrum Foreground",
-    "Spectrum Background",
-    "Vinyl Foreground",
-    "Vinyl Background"
-};
+
 /* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
  * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new，
  * 以及 54..59 的窗格颜色项）。 */
 #define SETTINGS_OPTION_COUNT 60
 
-/* 编译期护栏：两张文案表必须与枚举/段数组使用同一数量。 */
+/* 编译期护栏：文案表必须与枚举/段数组使用同一数量。 */
 typedef char settings_option_arrays_must_match_count[
-    (sizeof(settings_options) / sizeof(settings_options[0]) == SETTINGS_OPTION_COUNT &&
-     sizeof(settings_options_ascii) / sizeof(settings_options_ascii[0]) == SETTINGS_OPTION_COUNT)
+    (sizeof(settings_options) / sizeof(settings_options[0]) == SETTINGS_OPTION_COUNT)
         ? 1 : -1];
 
 enum {
@@ -485,13 +421,6 @@ static void sync_settings_selection_to_sidebar(void)
  * Formatting helpers
  * ============================================================ */
 
-static int clamp_latency_ms(int latency_ms)
-{
-    if (latency_ms < 20)  return 20;
-    if (latency_ms > 250) return 250;
-    return latency_ms;
-}
-
 static int is_valid_path(const char *path)
 {
     if (!path || strlen(path) == 0) return 0;
@@ -536,9 +465,12 @@ static const char *info_progress_style_label(int style)
 
 static const char *info_charset_label(int charset)
 {
-    return (charset == INFO_COVER_ASCII)
-        ? i18n_get("settings.info.charset.ascii")
-        : i18n_get("settings.info.charset.braille");
+    switch (charset) {
+        case INFO_COVER_ASCII: return i18n_get("settings.info.charset.ascii");
+        case INFO_COVER_HALF:  return i18n_get("settings.info.charset.half");
+        case INFO_COVER_BRAILLE:
+        default:               return i18n_get("settings.info.charset.braille");
+    }
 }
 
 static const char *info_lyrics_label(int lines)
@@ -620,10 +552,14 @@ static void info_sel_option_text(int src, int index, char *out, size_t out_size)
             break;
         case SETTINGS_IDX_INFO_FIELDS: {
             const InfoFieldDef *field = info_field_at(index);
-            if (field)
-                snprintf(out, out_size, "[%c] %s",
+            if (field) {
+                const char *cli_only = field->pane_field
+                    ? "" : i18n_get("settings.info.field_cli_only");
+                snprintf(out, out_size, "[%c] %s%s%s",
                          (g_sel_work_mask & field->bit) ? 'x' : ' ',
-                         i18n_get(field->label_key));
+                         i18n_get(field->label_key),
+                         cli_only[0] ? " " : "", cli_only);
+            }
             break;
         }
         case SETTINGS_IDX_INFO_COVER_SIZE:
@@ -633,9 +569,7 @@ static void info_sel_option_text(int src, int index, char *out, size_t out_size)
             break;
         case SETTINGS_IDX_INFO_COVER_CHARSET:
             if (index >= 0 && index < INFO_COVER_CHARSET_COUNT)
-                snprintf(out, out_size, "%s", index == INFO_COVER_ASCII
-                         ? i18n_get("settings.info.charset.ascii")
-                         : i18n_get("settings.info.charset.braille"));
+                snprintf(out, out_size, "%s", info_charset_label(index));
             break;
         case SETTINGS_IDX_INFO_PROGRESS_STYLE:
             if (index >= 0 && index < INFO_PROGRESS_STYLE_COUNT)
@@ -664,6 +598,29 @@ static int info_cover_size_index(void)
         }
     }
     return best;
+}
+
+/* 当前 EQ 增益与哪个内置预设完全一致；都不一致返回 0（Rock）。
+ * 预设弹窗据此把光标放到当前档，而不是永远从第一项开始。 */
+static int eq_preset_index_from_config(void)
+{
+    for (int preset = 0; preset < EQ_PRESET_COUNT; preset++) {
+        const int *gains = eq_preset_gains(preset);
+        if (!gains) {
+            continue;
+        }
+        int match = 1;
+        for (int band = 0; band < EQ_BAND_COUNT; band++) {
+            if (g_app_config.eq_band_gains[band] != gains[band]) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) {
+            return preset;
+        }
+    }
+    return 0;
 }
 
 /* ============================================================
@@ -1220,35 +1177,6 @@ static void move_settings_content_selection(int delta)
     g_settings_current_option = spec.indices[position];
 }
 
-static void adjust_settings_theme_option(int option_index, int delta)
-{
-    const ColourRow *row = colour_row(option_index);
-    if (!row) {
-        return;
-    }
-    if (delta == 0) {
-        delta = 1;
-    }
-
-    int paired_color = colour_row_paired_value(row);
-    int next = colour_row_value(row, NULL);
-    /* 继承(-2)/透明(-1)/256 色都从调色板起点进入 0..7 循环，与原行为一致。 */
-    if (next < 0 || next > 7) {
-        next = 0;
-    }
-
-    do {
-        next += delta;
-        if (next < 0) {
-            next = 7;
-        } else if (next > 7) {
-            next = 0;
-        }
-    } while (next == paired_color);
-
-    commit_colour_option(option_index, next, 0);
-}
-
 static void edit_default_startup_path(void)
 {
     noecho();
@@ -1289,11 +1217,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
 {
     if (option_index < 0) return;
 
-    if (colour_row(option_index)) {
-        adjust_settings_theme_option(option_index, delta);
-        return;
-    }
-
     switch (option_index) {
         case SETTINGS_IDX_AUTO_PLAY:
             g_app_config.auto_play_on_start = !g_app_config.auto_play_on_start;
@@ -1311,12 +1234,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.stop_core_on_exit = !g_app_config.stop_core_on_exit;
             player_config_persist();
             break;
-        case SETTINGS_IDX_LATENCY:
-            if (delta == 0) delta = 1;
-            g_app_config.audio_latency_ms = clamp_latency_ms(g_app_config.audio_latency_ms + delta * 10);
-            player_config_persist();
-            show_status_message(i18n_get("settings.opt.latency_hint"));
-            break;
         case SETTINGS_IDX_UI_LAYOUT: {
             int count = ui_layout_count();
             if (count <= 0) {
@@ -1332,10 +1249,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             }
             break;
         }
-        case SETTINGS_IDX_LAYOUT_EDIT:
-        case SETTINGS_IDX_LAYOUT_NEW:
-            /* 动作项：←/→ 无调整，ENTER 打开编辑器（见 activate_*） */
-            break;
         case SETTINGS_IDX_SHOW_ALBUM_COVER:
             g_app_config.show_album_cover = !g_app_config.show_album_cover;
             player_config_persist();
@@ -1344,67 +1257,9 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.seamless_preload = !g_app_config.seamless_preload;
             player_config_persist();
             break;
-        case SETTINGS_IDX_DEFAULT_PLAY_MODE:
-            if (delta < 0) {
-                g_app_config.default_play_mode = (g_app_config.default_play_mode - 1 + PLAY_MODE_COUNT) % PLAY_MODE_COUNT;
-            } else if (delta > 0) {
-                g_app_config.default_play_mode = (g_app_config.default_play_mode + 1) % PLAY_MODE_COUNT;
-            } else {
-                g_app_config.default_play_mode = (g_app_config.default_play_mode + 1) % PLAY_MODE_COUNT;
-            }
-            player_config_persist();
-            player_set_play_mode((PlayMode)g_app_config.default_play_mode);
-            show_status_message(i18n_get("settings.play_mode.updated"));
-            break;
-        case SETTINGS_IDX_LYRICS_ALIGNMENT:
-            if (delta < 0) {
-                g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment - 1 + 3) % 3;
-            } else {
-                g_app_config.lyrics_alignment = (g_app_config.lyrics_alignment + 1) % 3;
-            }
-            player_config_persist();
-            break;
         case SETTINGS_IDX_ADVANCED_PLAY_MODES:
             g_app_config.advanced_play_modes_enabled = !g_app_config.advanced_play_modes_enabled;
             player_config_persist();
-            break;
-        case SETTINGS_IDX_DEFAULT_SPEED: {
-            static float speed_ratios[] = {0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
-            static int speed_count = sizeof(speed_ratios) / sizeof(speed_ratios[0]);
-            int current_idx = 1;
-            for (int i = 0; i < speed_count; i++) {
-                if (fabs(g_app_config.default_playback_speed - speed_ratios[i]) < 0.01f) {
-                    current_idx = i;
-                    break;
-                }
-            }
-            if (delta < 0) {
-                current_idx = (current_idx - 1 + speed_count) % speed_count;
-            } else {
-                current_idx = (current_idx + 1) % speed_count;
-            }
-            g_app_config.default_playback_speed = speed_ratios[current_idx];
-            player_set_speed(g_app_config.default_playback_speed);
-            player_config_persist();
-            char msg[64];
-            snprintf(msg, sizeof(msg), "%s: %.2fx",
-                     i18n_get("settings.speed.updated"),
-                     (double)g_app_config.default_playback_speed);
-            show_status_message(msg);
-            break;
-        }
-        case SETTINGS_IDX_INFO_PRESET:
-            /* 左右键在 全量/精简/自定义 间循环 */
-            if (delta < 0) {
-                g_app_config.info_preset =
-                    (g_app_config.info_preset - 1 + INFO_PRESET_COUNT) % INFO_PRESET_COUNT;
-            } else {
-                g_app_config.info_preset =
-                    (g_app_config.info_preset + 1) % INFO_PRESET_COUNT;
-            }
-            info_apply_preset_to_config(g_app_config.info_preset);
-            player_config_persist();
-            show_status_message(i18n_get("settings.info.saved"));
             break;
         case SETTINGS_IDX_INFO_COVER:
             g_app_config.info_show_cover = !g_app_config.info_show_cover;
@@ -1415,100 +1270,6 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.info_show_progress = !g_app_config.info_show_progress;
             info_mark_custom();
             player_config_persist();
-            break;
-        case SETTINGS_IDX_INFO_COVER_SIZE: {
-            int index = info_cover_size_index();
-            if (delta <= 0) {
-                index = (index + k_info_cover_size_count - 1) % k_info_cover_size_count;
-            } else {
-                index = (index + 1) % k_info_cover_size_count;
-            }
-            g_app_config.info_cover_cols = k_info_cover_sizes[index][0];
-            g_app_config.info_cover_rows = k_info_cover_sizes[index][1];
-            info_mark_custom();
-            player_config_persist();
-            break;
-        }
-        case SETTINGS_IDX_INFO_COVER_CHARSET:
-            if (delta < 0) {
-                g_app_config.info_cover_charset =
-                    (g_app_config.info_cover_charset - 1 + INFO_COVER_CHARSET_COUNT) % INFO_COVER_CHARSET_COUNT;
-            } else {
-                g_app_config.info_cover_charset =
-                    (g_app_config.info_cover_charset + 1) % INFO_COVER_CHARSET_COUNT;
-            }
-            info_mark_custom();
-            player_config_persist();
-            break;
-        case SETTINGS_IDX_INFO_PROGRESS_STYLE:
-            if (delta < 0) {
-                g_app_config.info_progress_style =
-                    (g_app_config.info_progress_style - 1 + INFO_PROGRESS_STYLE_COUNT) % INFO_PROGRESS_STYLE_COUNT;
-            } else {
-                g_app_config.info_progress_style =
-                    (g_app_config.info_progress_style + 1) % INFO_PROGRESS_STYLE_COUNT;
-            }
-            info_mark_custom();
-            player_config_persist();
-            break;
-        case SETTINGS_IDX_INFO_LYRICS:
-            if (delta < 0) {
-                g_app_config.info_lyrics_lines =
-                    (g_app_config.info_lyrics_lines - 1 + (INFO_LYRICS_MAX + 1)) % (INFO_LYRICS_MAX + 1);
-            } else {
-                g_app_config.info_lyrics_lines =
-                    (g_app_config.info_lyrics_lines + 1) % (INFO_LYRICS_MAX + 1);
-            }
-            info_mark_custom();
-            player_config_persist();
-            break;
-        case SETTINGS_IDX_AUDIO_BACKEND: {
-            int options[] = {AUDIO_BACKEND_AUTO, AUDIO_BACKEND_PIPEWIRE,
-                             AUDIO_BACKEND_PULSE, AUDIO_BACKEND_ALSA};
-            int count = 4;
-            int has_pw    = backend_option_selectable(AUDIO_BACKEND_PIPEWIRE);
-            int has_pulse = backend_option_selectable(AUDIO_BACKEND_PULSE);
-            int has_alsa  = backend_option_selectable(AUDIO_BACKEND_ALSA);
-            int current = 0;
-            for (int i = 0; i < count; i++) {
-                if (g_app_config.audio_backend == options[i]) { current = i; break; }
-            }
-            int direction = (delta >= 0) ? 1 : -1;
-            int next = current;
-            int attempts = 0;
-            do {
-                next = (next + direction + count) % count;
-                attempts++;
-                if ((options[next] == AUDIO_BACKEND_PIPEWIRE && !has_pw) ||
-                    (options[next] == AUDIO_BACKEND_PULSE && !has_pulse) ||
-                    (options[next] == AUDIO_BACKEND_ALSA && !has_alsa)) {
-                    continue;
-                }
-                break;
-            } while (attempts < count);
-            g_app_config.audio_backend = options[next];
-            player_config_persist();
-            show_status_message(i18n_get("settings.backend.hint"));
-            break;
-        }
-        case SETTINGS_IDX_SORT_MODE:
-            if (delta < 0) {
-                g_app_config.sort_mode = (g_app_config.sort_mode - 1 + 5) % 5;
-            } else {
-                g_app_config.sort_mode = (g_app_config.sort_mode + 1) % 5;
-            }
-            player_config_persist();
-            recompute_sort_order();
-            show_status_message(i18n_get("settings.sort.applied"));
-            break;
-        case SETTINGS_IDX_CUE_ENCODING:
-            if (delta < 0) {
-                g_app_config.cue_encoding = (g_app_config.cue_encoding - 1 + CUE_ENCODING_COUNT) % CUE_ENCODING_COUNT;
-            } else {
-                g_app_config.cue_encoding = (g_app_config.cue_encoding + 1) % CUE_ENCODING_COUNT;
-            }
-            player_config_persist();
-            show_status_message(i18n_get("settings.cue.saved"));
             break;
         case SETTINGS_IDX_EQ_ENABLED:
             g_app_config.eq_enabled = !g_app_config.eq_enabled;
@@ -1826,14 +1587,23 @@ static void open_sel_menu(int option_index)
             cur   = g_app_config.default_play_mode;
             break;
         case SETTINGS_IDX_DEFAULT_SPEED:
-            cur   = player_speed_index();
-            {
-                int step_count = 0;
-                const float *steps = player_speed_steps(&step_count);
-                count = step_count;
-                (void)steps;
+        {
+            int step_count = 0;
+            const float *steps = player_speed_steps(&step_count);
+            count = step_count;
+            cur = 0;
+            if (steps && step_count > 0) {
+                float best = fabsf(g_app_config.default_playback_speed - steps[0]);
+                for (int i = 1; i < step_count; i++) {
+                    float distance = fabsf(g_app_config.default_playback_speed - steps[i]);
+                    if (distance < best) {
+                        best = distance;
+                        cur = i;
+                    }
+                }
             }
             break;
+        }
         case SETTINGS_IDX_AUDIO_BACKEND: {
             int backend_opts[] = {AUDIO_BACKEND_AUTO, AUDIO_BACKEND_PIPEWIRE,
                                   AUDIO_BACKEND_PULSE, AUDIO_BACKEND_ALSA};
@@ -1858,7 +1628,7 @@ static void open_sel_menu(int option_index)
             break;
         case SETTINGS_IDX_EQ_PRESET:
             count = EQ_PRESET_COUNT;
-            cur   = 0;
+            cur   = eq_preset_index_from_config();
             break;
         case SETTINGS_IDX_LYRICS_ALIGNMENT:
             count = 3;
@@ -2341,8 +2111,7 @@ static int handle_sel_action(ActionId action)
                 } else if (v == paired_val) {
                     show_status_message(i18n_get("settings.color.same_error"));
                 }
-                g_sel_active = 0;
-                g_sel_src = -1;
+                close_sel_menu(0);
                 rerender_settings_view();
                 return 1;
             }
@@ -2461,6 +2230,7 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_AUDIO_BACKEND ||
         g_settings_current_option == SETTINGS_IDX_SORT_MODE ||
         g_settings_current_option == SETTINGS_IDX_CUE_ENCODING ||
+        g_settings_current_option == SETTINGS_IDX_EQ_PRESET ||
         g_settings_current_option == SETTINGS_IDX_INFO_PRESET ||
         g_settings_current_option == SETTINGS_IDX_INFO_FIELDS ||
         g_settings_current_option == SETTINGS_IDX_INFO_COVER_SIZE ||
@@ -2826,11 +2596,14 @@ void render_settings_content(void)
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
         render_eq_visual();
         attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
-    } else if (g_menu_selected_idx == 7) {  /* 信息显示（CLI / D-Bus） */
+    } else if (g_menu_selected_idx == 7) {  /* 信息显示（窗格 + CLI/D-Bus） */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.info.hint"));
         menu_content_puts(&area, start_y, hint_buf);
-        start_y += 2;
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
+                 i18n_get("settings.info.pane_hint"));
+        menu_content_puts(&area, start_y + 1, hint_buf);
+        start_y += 3;
         render_settings_option_group(start_y, area.max_y, spec, 0);
         start_y += spec.count + 1;
         snprintf(hint_buf, sizeof(hint_buf), "%s",
@@ -2845,6 +2618,7 @@ void render_settings_content(void)
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
     /* Refresh stdscr first, then overlay selection menu sub-window */
+    repaint_status_message();
     wnoutrefresh(stdscr);
     if (g_sel_active)
         draw_sel_menu();
@@ -3127,6 +2901,15 @@ static int handle_eq_action(ActionId action)
             }
             return 1;
 
+        case ACTION_SETTINGS_EQ_PRESETS:
+            /* 键盘 P 与右键菜单共用：均衡器页的预设弹窗。 */
+            if (g_focus_area == FOCUS_CONTENT) {
+                open_sel_menu(SETTINGS_IDX_EQ_PRESET);
+                draw_sel_menu();
+                refresh();
+            }
+            return 1;
+
         default:
             return 0;
     }
@@ -3163,6 +2946,13 @@ int handle_settings_input(int ch)
         action = keymap_resolve(CTX_SETTINGS_EQ, ch);
         if (action != ACTION_NONE && actions_context(action) == CTX_SETTINGS_EQ) {
             handle_eq_action(action);
+            return 1;
+        }
+        /* P 属于 CTX_SETTINGS（settings.eq_presets），不在 EQ 上下文里；
+         * 这里显式放行，否则提示里承诺的 P:预设 会被下面整段吞掉。 */
+        ActionId settings_action = keymap_resolve(CTX_SETTINGS, ch);
+        if (settings_action == ACTION_SETTINGS_EQ_PRESETS) {
+            handle_eq_action(settings_action);
             return 1;
         }
         /* 旧行为：EQ 内容区吞掉非全局键；仅全局动作交给上层分发。 */
@@ -3451,7 +3241,8 @@ void settings_context_menu_build(UIContextMenuLevel *level,
         ui_ctx_menu_add_action(level, ACTION_REMOTE_ACTIVATE, valid, 0);
         ui_ctx_menu_add_action(level, ACTION_REMOTE_ADJUST_UP, valid, 0);
         ui_ctx_menu_add_action(level, ACTION_REMOTE_ADJUST_DOWN, valid, 0);
-        ui_ctx_menu_add_action(level, ACTION_REMOTE_SAVE, 1, 0);
+        ui_ctx_menu_add_action(level, ACTION_REMOTE_SAVE,
+                               remote_view_form_active() ? 1 : 0, 0);
     } else if (content && g_menu_selected_idx == 6) {   /* equalizer */
         ui_ctx_menu_add_separator(level);
         ui_ctx_menu_add_action(level, ACTION_SETTINGS_EQ_PRESETS, 1, 0);

@@ -36,13 +36,10 @@ extern const int LANGUAGE_ITEM_COUNT;
  * Text helper functions (defined in util.c)
  * ============================================================ */
 
-const char *menu_text(const char *key, const char *unused);
 const char *menu_bool_text(int enabled);
 const char *menu_color_name(int color_value);
-const char *menu_language_name(void);
 void sanitize_ascii_menu_text(char *dest, size_t dest_size, const char *src);
 const char **resolve_sidebar_items(const char **items);
-const char *resolve_menu_title(const char *title);
 
 /* ============================================================
  * Status message (defined in util.c)
@@ -51,6 +48,7 @@ const char *resolve_menu_title(const char *title);
 void show_status_message(const char *msg);
 const char *get_status_message(void);
 time_t get_status_message_time(void);
+void repaint_status_message(void);
 
 void rounded_box(WINDOW *win);
 
@@ -93,15 +91,8 @@ extern FocusArea g_focus_area;
 
 extern int g_history_content_offset;
 extern int g_favorites_content_offset;
-extern int g_playlist_content_offset;
 
-/* ============================================================
- * Playlist view state (defined in playlist_view.c)
- * ============================================================ */
-
-extern int g_playlist_view_mode;
-extern int g_playlist_selected_playlist;
-extern int g_playlist_track_offset;
+/* Playlist view state lives in playlist_view.c; reset through reset_playlist_view(). */
 
 /* ============================================================
  * Config helpers (defined in menus.c)
@@ -193,7 +184,6 @@ void help_free_lines(void);
  * ============================================================ */
 
 extern PopupState g_popup;
-int handle_popup_input(int ch);
 int popup_handle_mouse_click(int screen_y, int screen_x);
 
 /* 弹层展开状态与屏幕矩形：全局鼠标分发用它决定"这次事件归谁"。

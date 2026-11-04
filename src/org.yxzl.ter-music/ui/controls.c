@@ -36,8 +36,7 @@ static const char *control_label_keys[] = {
     "controls.label.stop",
     "controls.label.loop",
     "controls.label.speed",
-    "controls.label.volume",
-    "controls.label.progress"
+    "controls.label.volume"
 };
 
 /* ── Speed state (defined in audio.c) ── */
@@ -59,7 +58,8 @@ static void render_controls_popup(void);
 
 static const char *get_control_label(int index)
 {
-    if (index < 0 || index >= CONTROL_COUNT) return "";
+    int count = (int)(sizeof(control_label_keys) / sizeof(control_label_keys[0]));
+    if (index < 0 || index >= count) return "";
     return i18n_get(control_label_keys[index]);
 }
 
@@ -99,7 +99,6 @@ void controls_compute_layout(int height, int width, ControlsLayout *out)
     out->progress_row = -1;
     out->visualizer_top = -1;
     out->visualizer_bottom = -1;
-    out->status_row = height - 2;
     for (int i = 0; i < CONTROL_COUNT; i++) {
         out->button_row[i] = -1;
         out->button_col[i] = -1;
@@ -447,16 +446,6 @@ int handle_popup_action(ActionId action)
     }
 }
 
-int handle_popup_input(int ch)
-{
-    if (!g_popup.active) return 0;
-
-    if (ch == 27) {
-        return handle_popup_action(ACTION_POPUP_CANCEL);
-    }
-    return handle_popup_action(keymap_resolve(CTX_POPUP, ch));
-}
-
 /* ============================================================
  * Control activation
  * ============================================================ */
@@ -469,12 +458,10 @@ void activate_current_control(void)
             break;
         case CONTROL_IDX_PLAY_PAUSE: {
             PlayState current_state = player_play_state();
-            /* 播放线程状态属播放面：门面用“播放状态”表达同一件事 */
-            int is_thread_running = (player_play_state() != PLAY_STATE_STOPPED);
 
-            if (current_state == PLAY_STATE_PLAYING && is_thread_running) {
+            if (current_state == PLAY_STATE_PLAYING) {
                 player_pause();
-            } else if (current_state == PLAY_STATE_PAUSED && is_thread_running) {
+            } else if (current_state == PLAY_STATE_PAUSED) {
                 player_resume();
             } else if (current_state == PLAY_STATE_STOPPED) {
                 int playlist_total = playlist_count();

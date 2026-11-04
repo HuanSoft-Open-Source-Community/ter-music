@@ -8,6 +8,10 @@
  * (1+INFO_BAR_PAD_LEFT, 1) 起算，永不触碰第 0 行标题、w-1/h-1 边框；
  * 封面额外与右边框保留空白。
  *
+ * 行数由调用方给出：主页信息窗格按 info_fields 中实际启用的字段
+ * 传入元数据/音频行数；固定 5+4 的旧调用方走 info_bar_layout_compute()
+ * 兼容包装。
+ *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
@@ -18,6 +22,22 @@
 static int min_int(int a, int b)
 {
     return a < b ? a : b;
+}
+
+static int max_int(int a, int b)
+{
+    return a > b ? a : b;
+}
+
+static int clamp_rows(int value, int max_rows)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value > max_rows) {
+        return max_rows;
+    }
+    return value;
 }
 
 static int rect_is_empty(const InfoBarRect *rect)
@@ -55,13 +75,21 @@ static int rects_overlap(const InfoBarRect *a, const InfoBarRect *b)
 
 /* 横向：元数据 | 音频 [+ 封面]；cw/ch 已由调用方保证足够。 */
 static void compute_horizontal(int x0, int y0, int cw, int ch,
-                               int want_cover, InfoBarLayout *out)
+                               int want_cover, int metadata_req, int audio_req,
+                               InfoBarLayout *out)
 {
+    int metadata_rows = clamp_rows(metadata_req, INFO_BAR_METADATA_LINES);
+    int audio_rows = clamp_rows(audio_req, INFO_BAR_AUDIO_LINES);
     int cover_rows = 0;
+    int has_text = (metadata_rows > 0 || audio_rows > 0);
 
     if (want_cover && ch >= INFO_BAR_COVER_MIN_ROWS) {
-        int room = cw - INFO_BAR_MIN_TEXT_WITH_COVER -
-                   INFO_BAR_COVER_GAP - INFO_BAR_COVER_RIGHT_PAD;
+        /* 有文字时给文字留最小宽度；无文字时封面可以独享空间。 */
+        int reserve = has_text
+                          ? INFO_BAR_MIN_TEXT_WITH_COVER +
+                                INFO_BAR_COVER_GAP + INFO_BAR_COVER_RIGHT_PAD
+                          : 0;
+        int room = cw - reserve;
         if (room >= 2 * INFO_BAR_COVER_MIN_ROWS) {
             cover_rows = min_int(room / 2, ch);
             if (cover_rows > INFO_BAR_COVER_MAX_ROWS) {
@@ -83,56 +111,96 @@ static void compute_horizontal(int x0, int y0, int cw, int ch,
         out->cover.h = cover_rows;
         text_width = cw - cover_cols - INFO_BAR_COVER_GAP -
                      INFO_BAR_COVER_RIGHT_PAD;
+        if (text_width < 0) {
+            text_width = 0;
+        }
     }
 
-    int metadata_width = text_width / 2;
-    int audio_width = text_width - metadata_width - 1;
+    metadata_rows = min_int(metadata_rows, ch);
+    audio_rows = min_int(audio_rows, ch);
 
-    /* 文字块按实际行数垂直居中；两列同起点同高，保持校验不变量。 */
-    int metadata_rows = min_int(INFO_BAR_METADATA_LINES, ch);
-    int audio_rows = min_int(INFO_BAR_AUDIO_LINES, ch);
-    int rows = metadata_rows > audio_rows ? metadata_rows : audio_rows;
+    int rows = max_int(metadata_rows, audio_rows);
     int text_y = y0 + (ch - rows) / 2;
 
-    out->metadata.x = x0;
-    out->metadata.y = text_y;
-    out->metadata.w = metadata_width;
-    out->metadata.h = rows;
-    out->metadata_rows = metadata_rows;
+    if (metadata_rows > 0 && audio_rows > 0) {
+        int metadata_width = text_width / 2;
+        int audio_width = text_width - metadata_width - 1;
+        if (metadata_width < 0) {
+            metadata_width = 0;
+        }
+        if (audio_width < 0) {
+            audio_width = 0;
+        }
+        out->metadata.x = x0;
+        out->metadata.y = text_y;
+        out->metadata.w = metadata_width;
+        out->metadata.h = rows;
+        out->metadata_rows = metadata_rows;
 
-    out->audio.x = x0 + metadata_width + 1;
-    out->audio.y = text_y;
-    out->audio.w = audio_width;
-    out->audio.h = rows;
-    out->audio_rows = audio_rows;
+        out->audio.x = x0 + metadata_width + 1;
+        out->audio.y = text_y;
+        out->audio.w = audio_width;
+        out->audio.h = rows;
+        out->audio_rows = audio_rows;
+    } else if (metadata_rows > 0) {
+        out->metadata.x = x0;
+        out->metadata.y = text_y;
+        out->metadata.w = text_width;
+        out->metadata.h = rows;
+        out->metadata_rows = metadata_rows;
+    } else if (audio_rows > 0) {
+        out->audio.x = x0;
+        out->audio.y = text_y;
+        out->audio.w = text_width;
+        out->audio.h = rows;
+        out->audio_rows = audio_rows;
+    }
 
     out->stacked = 0;
 }
 
 /* 纵向：封面在上，元数据、音频依次在下，两段占满内容宽。 */
 static void compute_stacked(int x0, int y0, int cw, int ch,
-                            int want_cover, InfoBarLayout *out)
+                            int want_cover, int metadata_req, int audio_req,
+                            InfoBarLayout *out)
 {
+    int metadata_req_clamped = clamp_rows(metadata_req, INFO_BAR_METADATA_LINES);
+    int audio_req_clamped = clamp_rows(audio_req, INFO_BAR_AUDIO_LINES);
+    int text_req = metadata_req_clamped + audio_req_clamped;
     int cover_rows = 0;
 
-    if (want_cover && ch >= INFO_BAR_VERTICAL_COVER_MIN_ROWS && cw >= 12) {
-        int max_by_width = (cw - 2) / 2;
-        cover_rows = ch - INFO_BAR_VERTICAL_MIN_ROWS - INFO_BAR_COVER_GAP;
-        cover_rows = min_int(cover_rows, INFO_BAR_COVER_MAX_ROWS);
-        cover_rows = min_int(cover_rows, max_by_width);
-        if (cover_rows < INFO_BAR_COVER_MIN_ROWS) {
-            cover_rows = 0;
+    if (want_cover && cw >= 12) {
+        int gap = (text_req > 0) ? INFO_BAR_COVER_GAP : 0;
+        int min_total = text_req + gap + INFO_BAR_COVER_MIN_ROWS;
+        if (ch >= min_total) {
+            int max_by_width = (cw - 2) / 2;
+            cover_rows = ch - text_req - gap;
+            if (cover_rows > INFO_BAR_COVER_MAX_ROWS) {
+                cover_rows = INFO_BAR_COVER_MAX_ROWS;
+            }
+            if (cover_rows > max_by_width) {
+                cover_rows = max_by_width;
+            }
+            if (cover_rows < INFO_BAR_COVER_MIN_ROWS) {
+                cover_rows = 0;
+            }
         }
     }
 
     int gap = (cover_rows > 0) ? INFO_BAR_COVER_GAP : 0;
     int text_height = ch - cover_rows - gap;
-    int metadata_rows = min_int(INFO_BAR_METADATA_LINES, text_height);
-    int audio_rows = min_int(INFO_BAR_AUDIO_LINES, text_height - metadata_rows);
+    if (text_height < 0) {
+        text_height = 0;
+    }
+    int metadata_rows = min_int(metadata_req_clamped, text_height);
+    int audio_rows = min_int(audio_req_clamped, text_height - metadata_rows);
 
     /* 封面与文字作为一整块在内容区垂直居中，块内保持"封面在上、文字在下"。 */
     int group = cover_rows + gap + metadata_rows + audio_rows;
     int top = y0 + (ch - group) / 2;
+    if (top < y0) {
+        top = y0;
+    }
 
     if (cover_rows > 0) {
         int cover_cols = cover_rows * 2;
@@ -143,23 +211,28 @@ static void compute_stacked(int x0, int y0, int cw, int ch,
     }
 
     int text_y = top + cover_rows + gap;
-    out->metadata.x = x0;
-    out->metadata.y = text_y;
-    out->metadata.w = cw;
-    out->metadata.h = metadata_rows;
-    out->metadata_rows = metadata_rows;
+    if (metadata_rows > 0) {
+        out->metadata.x = x0;
+        out->metadata.y = text_y;
+        out->metadata.w = cw;
+        out->metadata.h = metadata_rows;
+        out->metadata_rows = metadata_rows;
+    }
 
-    out->audio.x = x0;
-    out->audio.y = text_y + metadata_rows;
-    out->audio.w = cw;
-    out->audio.h = audio_rows;
-    out->audio_rows = audio_rows;
+    if (audio_rows > 0) {
+        out->audio.x = x0;
+        out->audio.y = text_y + metadata_rows;
+        out->audio.w = cw;
+        out->audio.h = audio_rows;
+        out->audio_rows = audio_rows;
+    }
 
     out->stacked = 1;
 }
 
-void info_bar_layout_compute(int window_width, int window_height,
-                             int want_cover, InfoBarLayout *out)
+void info_bar_layout_compute_rows(int window_width, int window_height,
+                                  int want_cover, int metadata_rows,
+                                  int audio_rows, InfoBarLayout *out)
 {
     if (!out) {
         return;
@@ -183,19 +256,21 @@ void info_bar_layout_compute(int window_width, int window_height,
 
     if (horizontal) {
         compute_horizontal(x0, y0, content_width, content_height,
-                           want_cover, out);
+                           want_cover, metadata_rows, audio_rows, out);
     } else {
         compute_stacked(x0, y0, content_width, content_height,
-                        want_cover, out);
-    }
-
-    if (out->metadata.w <= 0 || out->metadata.h <= 0 ||
-        out->audio.w <= 0) {
-        memset(out, 0, sizeof(*out));
-        return;
+                        want_cover, metadata_rows, audio_rows, out);
     }
 
     out->valid = 1;
+}
+
+void info_bar_layout_compute(int window_width, int window_height,
+                             int want_cover, InfoBarLayout *out)
+{
+    info_bar_layout_compute_rows(window_width, window_height, want_cover,
+                                 INFO_BAR_METADATA_LINES, INFO_BAR_AUDIO_LINES,
+                                 out);
 }
 
 int info_bar_layout_validate(int window_width, int window_height,
@@ -210,7 +285,7 @@ int info_bar_layout_validate(int window_width, int window_height,
     if (layout->stacked != 0 && layout->stacked != 1) {
         return 0;
     }
-    if (layout->metadata_rows < 1 ||
+    if (layout->metadata_rows < 0 ||
         layout->metadata_rows > INFO_BAR_METADATA_LINES) {
         return 0;
     }
@@ -219,30 +294,48 @@ int info_bar_layout_validate(int window_width, int window_height,
         return 0;
     }
 
-    if (!rect_inside_content(&layout->metadata, window_width, window_height)) {
-        return 0;
-    }
-    if (!rect_inside_content(&layout->audio, window_width, window_height)) {
-        return 0;
-    }
-    if (layout->metadata.w <= 0 || layout->metadata.h <= 0) {
-        return 0;
-    }
-    if (layout->audio.w <= 0) {
-        return 0;
-    }
-    if (layout->metadata_rows > layout->metadata.h) {
-        return 0;
-    }
-    if (layout->audio_rows > layout->audio.h) {
-        return 0;
-    }
-    if (rects_overlap(&layout->metadata, &layout->audio)) {
-        return 0;
+    int metadata_empty = rect_is_empty(&layout->metadata);
+    int audio_empty = rect_is_empty(&layout->audio);
+
+    if (layout->metadata_rows == 0) {
+        if (!metadata_empty) {
+            return 0;
+        }
+    } else {
+        if (metadata_empty) {
+            return 0;
+        }
+        if (!rect_inside_content(&layout->metadata, window_width,
+                                 window_height)) {
+            return 0;
+        }
+        if (layout->metadata_rows > layout->metadata.h) {
+            return 0;
+        }
     }
 
-    if (layout->stacked) {
-        if (layout->audio.h > 0) {
+    if (layout->audio_rows == 0) {
+        if (!audio_empty) {
+            return 0;
+        }
+    } else {
+        if (audio_empty) {
+            return 0;
+        }
+        if (!rect_inside_content(&layout->audio, window_width,
+                                 window_height)) {
+            return 0;
+        }
+        if (layout->audio_rows > layout->audio.h) {
+            return 0;
+        }
+    }
+
+    if (!metadata_empty && !audio_empty) {
+        if (rects_overlap(&layout->metadata, &layout->audio)) {
+            return 0;
+        }
+        if (layout->stacked) {
             if (layout->audio.x != layout->metadata.x ||
                 layout->audio.w != layout->metadata.w) {
                 return 0;
@@ -250,9 +343,7 @@ int info_bar_layout_validate(int window_width, int window_height,
             if (layout->metadata.y + layout->metadata.h > layout->audio.y) {
                 return 0;
             }
-        }
-    } else {
-        if (layout->audio.h > 0) {
+        } else {
             if (layout->audio.y != layout->metadata.y ||
                 layout->audio.h != layout->metadata.h) {
                 return 0;

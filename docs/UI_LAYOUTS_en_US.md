@@ -411,7 +411,11 @@ clamped to the content height as well.
 The info pane rearranges itself from its own size: wide panes put the metadata
 column and the audio-parameter column side by side with the colored half-block cover on
 the right, while narrow-and-tall panes stack the cover above the metadata and
-audio blocks. The content block is **vertically centred** in the pane (cover and
+audio blocks. Its rows are driven by Settings -> Info Display: the metadata
+column uses the enabled state/mode/title/artist/album-or-queue fields, and the
+audio column appears only while `format` is enabled (all four audio parameters
+belong to that bit). Unsupported `index`/`path`/`volume`/`speed` bits are
+CLI/D-Bus only. The content block is **vertically centred** in the pane (cover and
 text move together in stacked mode), so a tall info pane no longer pins the text
 to the title row. The cover is dropped when it cannot keep a blank column before the
 right border, and every block is clipped to the region chosen by the layout. The
@@ -420,7 +424,10 @@ terminal cell grid, and is colored with an automatic 256-color → 8-color →
 monochrome fallback (a tight color-pair budget can reduce the palette further).
 Color mode composes both halves with `▀` (foreground = upper half, background =
 lower half); `█` is used only by the monochrome fallback. The CLI/D-Bus text
-cover still honours the configured braille/ASCII/half-block charset. The controls-pane cover is bounded by the same
+cover still honours the configured braille/ASCII/half-block charset. The info-
+pane cover is requested only when both `info_show_cover` and the playback
+`show_album_cover` master switch are on; the controls-pane cover follows the
+master switch. Both covers are bounded by the same
 content rectangle, so no cover paints on a pane border. This keeps small or
 unusually proportioned layouts visually intact.
 

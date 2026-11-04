@@ -59,9 +59,7 @@ static const char *get_spectrum_glyph(int units)
 static void render_album_cover(void)
 {
     if (!win_controls || g_current_view != VIEW_MAIN) return;
-
-    static int g_album_cover_enabled = 1;
-    if (!g_album_cover_enabled || !g_app_config.show_album_cover) return;
+    if (!g_app_config.show_album_cover) return;
 
     int h, w;
     getmaxyx(win_controls, h, w);

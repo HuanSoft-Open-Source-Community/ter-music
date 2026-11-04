@@ -47,9 +47,9 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 💾 **Persistent Storage**: SQLite-based storage (favorites, history, playlists) with automatic JSON migration from v1
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
-- 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG as colored half-block character art with automatic 256→8→monochrome fallback; the CLI also supports braille/ASCII/half-block). The info/controls covers can be toggled in Settings, and the standalone vinyl pane reuses the current cover as a rotating circular center label
+- 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG as colored half-block character art with automatic 256→8→monochrome fallback; the CLI also supports braille/ASCII/half-block). The controls-pane cover follows the playback master switch; the info-pane cover also has its own switch in Settings → Info Display, and the standalone vinyl pane reuses the current cover as a rotating circular center label
 - 🖥️ **CLI Mode & Background Playback**: Full command-line subcommands (`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`) with a detached background playback daemon that keeps playing after you close the terminal — including inside Linyaps packages, where background playback is started through D-Bus activation or the shipped systemd user service
-- 📋 **Configurable Info Display**: The basic info block, braille/ASCII text cover, progress line and two lyric lines (current + next) printed by `ter-music show` are configurable in the TUI settings
+- 📋 **Configurable Info Display**: The main info pane (fields, preset and cover), plus the braille/ASCII/half-block text cover, progress line and two lyric lines (current + next) printed by `ter-music show`, are configurable in the TUI settings
 - 🎵 **MPRIS & Lyrics API**: Desktop media controls with album art, an open D-Bus lyrics API, plus a `Info` interface (track / progress / text cover) and a `Control` interface for other programs
 
 ### 1.2 Design Philosophy
@@ -367,7 +367,7 @@ Options:
                        or local (in-process playback, kept as a regression baseline)
   --attach-only        Never start a core automatically: exit with code 3 when none runs
   --bus <name>         Address a specific core/instance bus name (default: the primary one)
-  --lang <lang-id>     Use this language for this run (e.g. zh_CN, en_US); not saved to config
+  --lang <lang-id>     Use this language for this run (e.g. zh_CN, en_US, zh-PQ); not saved to config
   -h, --help           Show help information
   -v, --version        Show version information
   tui [path]           Explicitly start the TUI
@@ -429,7 +429,7 @@ path in its own process and delivers the resulting queue to the core.
 | `--one-line` | Single-line output, suitable for status bars |
 | `--full` / `--compact` / `--preset full\|compact\|custom` | Info display preset |
 | `--fields a,b,c` | Basic info fields: `state,mode,index,queue,title,artist,album,format,path,volume,speed` |
-| `--cover` / `--no-cover`, `--cover-size WxH`, `--charset braille\|ascii` | Text cover options (4-40 columns, 2-20 rows) |
+| `--cover` / `--no-cover`, `--cover-size WxH`, `--charset braille\|ascii\|half` | Text cover options (4-40 columns, 2-20 rows) |
 | `--progress bar\|time\|percent\|time+percent`, `--no-progress` | Progress line style |
 | `--lyrics 0\|1\|2` | Lyric lines: off / current line / current + next line |
 | `--width N` | Output width (defaults to the terminal width) |
@@ -666,7 +666,7 @@ files are still read and auto-fitted instead of being rejected.
 Six pane kinds are available:
 
 - `playlist`: the song list / play queue (Tab switches views)
-- `info`: playback state, current-track metadata, audio parameters and the colored half-block character cover (256→8→mono fallback); the whole block is vertically centred in the pane
+- `info`: playback state, current-track metadata, audio parameters and the colored half-block character cover (256→8→mono fallback); the field set follows Settings → Info Display, rows compact when fields are disabled, and the whole block is vertically centred in the pane
 - `controls`: progress bar and transport buttons
 - `spectrum`: the audio-reactive bar spectrum
 - `lyrics`: the current lyric lines
@@ -718,7 +718,9 @@ renderer shows only its background and border. The info pane adapts to its own
 size: wide panes keep metadata and audio parameters side by side with the cover
 on the right, while narrow-and-tall panes stack the cover above the metadata and
 audio blocks; the cover is hidden when it cannot keep a blank column before the
-border.
+border. These rows are driven by Settings → Info Display: the pane uses the
+fields it can display, compacts when fields are disabled, and drops the audio
+block when `format` is off.
 
 The layout editor (`F2 → Appearance → Edit Layout / New Layout`) edits the split
 tree directly: arrows select by geometry, Tab cycles, `[`/`]` (and PgUp/PgDn)
@@ -1086,7 +1088,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `default_startup_path`: Default startup directory
 - `auto_play_on_start`: Auto-play on startup (0/1)
 - `remember_last_path`: Remember last opened directory (0/1)
-- `show_album_cover`: Show album cover art in the TUI info/control areas (0/1; the vinyl center label is independent)
+- `show_album_cover`: controls-pane album cover master switch and the info-pane cover master gate (0/1; the vinyl center label is independent)
 - `show_lyrics_panel`: **deprecated for the TUI**. Layout visibility now comes from the selected layout preset. This key is only used as a first-run hint when `~/.config/ter-music/ui-layout` does not exist (`1` → `classic`, `0` → `focus`). It remains in `Config.GetAll` for compatibility
 - `default_playback_speed`: Default playback speed (0.75, 1.0, 1.25, 1.5, 2.0, 3.0)
 - `default_play_mode`: Default play mode (0=Sequential, 1=Single Repeat, 2=List Repeat, 3=Shuffle Once, 4=Shuffle Repeat, ...)
@@ -1095,7 +1097,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `clear_history_on_startup`: Clear the directory history on startup (0/1)
 - `resume_last_playback`: Resume playback from last position (0/1)
 - `seamless_preload`: Pre-decode next track at end of current for gapless playback (0/1)
-- `ui_language`: Interface language ID. Built-in packs are `zh_CN` and `en_US`; any third-party ID installed through the F7 language view is also valid (e.g. `ja_JP`). An invalid ID falls back to `zh_CN`.
+- `ui_language`: Interface language ID. Built-in packs are `zh_CN`, `en_US` and `zh-PQ` (language name 中文（先秦）: pre-Qin classical Chinese, traditional characters; the app's translated display name is 端闈樂部); any third-party ID installed through the F7 language view is also valid (e.g. `ja_JP`). An invalid ID falls back to `zh_CN`.
 - `volume_percent`: Default volume percentage (0-100)
 - `audio_latency_ms`: Output latency in milliseconds
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire). Auto probes every candidate at startup; if an explicitly chosen backend turns out unavailable it falls back to the next working one at play time and the switch is announced in the status line
@@ -1124,15 +1126,15 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
   other edit is saved as a layout override. See [UI_LAYOUTS_en_US.md](UI_LAYOUTS_en_US.md)
 - TUI layout selection: `~/.config/ter-music/ui-layout` (one layout id written by the front end); layout definitions: built-in `layouts/layouts.json` plus optional `~/.config/ter-music/layouts.json`. Layout selection never writes `config.xml`; among the colour settings, only a pane-colour change writes the user layout file (the layout editor writes it too, when you save there)
 - Equalizer configuration: 10-band gains, pre-amp, enable/disable
-- Info display (CLI / D-Bus) configuration, editable in **Settings → Info Display**:
+- Info display configuration (main info pane + CLI/D-Bus), editable in **Settings → Info Display**:
   - `info_preset`: preset (0=Full, 1=Compact, 2=Custom)
-  - `info_fields`: bitmask of the basic info fields (1=State, 2=Mode, 4=Index, 8=Queue, 16=Title, 32=Artist, 64=Album, 128=Format, 256=Path, 512=Volume, 1024=Speed; 2047=all)
-  - `info_show_cover`: print the braille/ASCII text cover (0/1)
-  - `info_cover_cols` / `info_cover_rows`: cover size in character columns/rows (4-40 / 2-20)
-  - `info_cover_charset`: cover charset (0=Braille, 1=ASCII)
-  - `info_show_progress`: print the progress line (0/1)
-  - `info_progress_style`: progress style (0=Bar+Time, 1=Time, 2=Percent, 3=Time+Percent)
-  - `info_lyrics_lines`: lyric lines (0=Off, 1=Current, 2=Current+Next)
+  - `info_fields`: bitmask of the basic info fields (1=State, 2=Mode, 4=Index, 8=Queue, 16=Title, 32=Artist, 64=Album, 128=Format, 256=Path, 512=Volume, 1024=Speed; 2047=all). The main info pane uses the subset it can display (state/mode/title/artist/album/queue/format); `index`/`path`/`volume`/`speed` are CLI/D-Bus only and are marked "CLI only" in the field picker
+  - `info_show_cover`: info-pane cover and CLI text cover (0/1); the TUI pane additionally requires the playback cover master switch `show_album_cover`
+  - `info_cover_cols` / `info_cover_rows`: CLI text-cover size in character columns/rows (4-40 / 2-20)
+  - `info_cover_charset`: CLI text-cover charset (0=Braille, 1=ASCII, 2=Half-block)
+  - `info_show_progress`: print the CLI progress line (0/1)
+  - `info_progress_style`: CLI progress style (0=Bar+Time, 1=Time, 2=Percent, 3=Time+Percent)
+  - `info_lyrics_lines`: CLI lyric lines (0=Off, 1=Current, 2=Current+Next)
 
 The program automatically saves configuration; changes take effect immediately after modification.
 
@@ -1166,7 +1168,7 @@ Ter-Music uses an XML-based internationalization (i18n) system. Built-in languag
 
 To add a new language, create an `<id>.xml` file following the format above and place it in one of the search paths (user override at `~/.config/ter-music/lang/` is recommended). The language will appear in the F7 language selection view automatically.
 
-`ui_language` is not restricted to the built-in `zh_CN`/`en_US` packs: selecting
+`ui_language` is not restricted to the built-in `zh_CN`/`en_US`/`zh-PQ` packs: selecting
 a third-party language in F7 stores its ID, and the configuration validator
 accepts any ID that is safe as a file name. An ID that is not installed, or one
 that fails validation, falls back to `zh_CN`.
@@ -1184,7 +1186,8 @@ uses this priority, highest first:
 
 `--lang` and `TER_MUSIC_CLI_LANG` may appear anywhere on the command line
 (including before the subcommand) and are normalized like locale names
-(`en_US.UTF-8` → `en_US`, `zh-*` → `zh_CN`). `C`, `POSIX` and an empty locale
+(`en_US.UTF-8` → `en_US`, `zh-*` → `zh_CN`; the built-in `zh-PQ` is kept as
+`zh-PQ`). `C`, `POSIX` and an empty locale
 value mean "no preference" and continue down the chain, so a configured
 `ui_language` still wins over them. An explicit language that is not installed
 prints a warning and falls back to `zh_CN`.
@@ -1245,7 +1248,7 @@ The program validates the archive on import:
 1. Rejects non-regular files and non-`.tar.gz`/`.tgz` extensions
 2. Extracts `lang.xml` and parses it as XML
 3. Verifies the root element is `<lang>` with a non-empty `id` attribute
-4. Rejects archives that would overwrite built-in languages (`zh_CN`, `en_US`)
+4. Rejects archives that would overwrite built-in languages (`zh_CN`, `en_US`, `zh-PQ`)
 5. Enforces the 50 MB per-file size limit
 
 After successful validation, the language appears in the language selection view immediately. User-installed languages are marked distinctly from built-in languages in the UI.
@@ -1618,7 +1621,8 @@ Ter-Music adopts a modular design, main modules include:
   `rpc_control.c`, `rpc_queue.c`, `rpc_lyrics.c`, `rpc_config.c`, plus the
   MPRIS media player interface
 - **info/info.c**: Playback info snapshot and rendering (text, JSON, braille /
-  ASCII cover cache) shared by `ter-music show` and the `Info` interface
+  ASCII / half-block cover cache) shared by `ter-music show`, the `Info`
+  interface and the TUI info pane's field rows
 - **config/**: Configuration subsystem — `config.c` (XML load/save via libxml2,
   versioned migrations, defaults), `config_json.c` + `migration.c` (v1
   `config.json` → XML), schema constants, `crypto.c` (password encryption for

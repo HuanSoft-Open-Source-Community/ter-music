@@ -20,6 +20,7 @@
 
   <!-- ===== App / Exit ===== -->
   <string key="app.exit_clean">ter-music exited cleanly.</string>
+  <string key="app.name">ter-music</string>
 
   <!-- ===== Sidebar items ===== -->
   <string key="sidebar.settings.theme">Appearance</string>
@@ -138,23 +139,25 @@
   <string key="settings.opt.lyrics_align">Lyrics Align</string>
   <string key="settings.opt.play_mode">Play Mode</string>
   <string key="settings.opt.default_speed">Default Speed</string>
-  <string key="settings.opt.cover_art">Album Cover</string>
+  <string key="settings.opt.cover_art">Album Cover (master)</string>
   <string key="settings.opt.seamless_preload">Seamless Preload</string>
   <string key="settings.opt.audio_backend">Audio Backend</string>
   <string key="settings.opt.sort_mode">Sort Mode</string>
   <string key="settings.opt.cue_encoding">CUE Encoding</string>
 
-  <!-- ===== Info display (CLI / D-Bus) ===== -->
+  <!-- ===== Info display (info pane + CLI / D-Bus) ===== -->
   <string key="settings.opt.info_preset">Info Display Preset</string>
-  <string key="settings.opt.info_fields">Basic Info Fields</string>
-  <string key="settings.opt.info_cover">Show Text Cover</string>
-  <string key="settings.opt.info_cover_size">Cover Size</string>
-  <string key="settings.opt.info_cover_charset">Cover Charset</string>
-  <string key="settings.opt.info_progress">Show Progress</string>
-  <string key="settings.opt.info_progress_style">Progress Style</string>
-  <string key="settings.opt.info_lyrics">Lyric Lines</string>
-  <string key="settings.info.hint">Info display: ↑/↓ select, ENTER to expand, ←/TAB back; this section affects only `ter-music show` and D-Bus output</string>
-  <string key="settings.info.fields_hint">Space/Enter toggles a field, a = all, n = none, Enter applies, ESC cancels</string>
+  <string key="settings.opt.info_fields">Basic Info Fields (pane/CLI)</string>
+  <string key="settings.opt.info_cover">Show Cover (pane/CLI)</string>
+  <string key="settings.opt.info_cover_size">Cover Size (CLI/D-Bus only)</string>
+  <string key="settings.opt.info_cover_charset">Cover Charset (CLI/D-Bus only)</string>
+  <string key="settings.opt.info_progress">Show Progress (CLI/D-Bus only)</string>
+  <string key="settings.opt.info_progress_style">Progress Style (CLI/D-Bus only)</string>
+  <string key="settings.opt.info_lyrics">Lyric Lines (CLI/D-Bus only)</string>
+  <string key="settings.info.hint">Info display: ↑/↓ select, ENTER to expand, ←/TAB back</string>
+  <string key="settings.info.pane_hint">Preset/fields/cover also drive the main info pane; the pane cover is additionally gated by the playback cover master switch</string>
+  <string key="settings.info.fields_hint">Space toggles a field, a = all, n = none, Enter applies; fields marked "CLI only" and cover size/charset/progress/lyrics affect CLI/D-Bus only</string>
+  <string key="settings.info.field_cli_only">(CLI only)</string>
   <string key="settings.info.saved">Info display settings saved</string>
   <string key="settings.info.preset.full">Full</string>
   <string key="settings.info.preset.compact">Compact</string>
@@ -165,6 +168,7 @@
   <string key="settings.info.progress.time_percent">Time + Percent</string>
   <string key="settings.info.charset.braille">Braille</string>
   <string key="settings.info.charset.ascii">ASCII</string>
+  <string key="settings.info.charset.half">Half-block</string>
   <string key="settings.info.lyrics.none">Off</string>
   <string key="settings.info.lyrics.current">Current Only</string>
   <string key="settings.info.lyrics.current_next">Current + Next</string>
@@ -266,6 +270,7 @@
   <string key="controls.controls_area">Controls</string>
   <string key="controls.ctrl_focus">[Ctrl Focus]</string>
   <string key="controls.list_focus">[List Focus]</string>
+  <string key="controls.pane_hidden">Controls pane is hidden</string>
   <string key="controls.space_run">[Space:Run]</string>
   <string key="controls.c_ctrl">[C:Ctrl]</string>
   <string key="controls.l_list">[L:List]</string>
@@ -351,11 +356,13 @@
   <string key="playlist_mgr.create_failed">Failed to create playlist</string>
   <string key="playlist_mgr.deleted">Playlist deleted</string>
   <string key="playlist_mgr.track_removed">Track removed</string>
+  <string key="playlist_mgr.track_remove_failed">Could not remove this track</string>
   <string key="playlist_mgr.rename_prompt">New name: </string>
   <string key="playlist_mgr.renamed">Playlist renamed</string>
   <string key="playlist_mgr.rename_failed">Failed to rename playlist</string>
   <string key="playlist_mgr.track_not_in_queue">Track not in current queue</string>
   <string key="playlist_mgr.select_playlist"> Select Playlist </string>
+  <string key="playlist_mgr.select_hint">Up/Down: Select | Enter: OK | Esc: Cancel</string>
   <string key="playlist_mgr.added_to_playlist">Added to playlist</string>
   <string key="playlist_mgr.playlist_full">Playlist is full</string>
   <string key="playlist_mgr.already_in_playlist">Track already in playlist</string>
@@ -417,8 +424,6 @@
   <!-- ===== Remote ===== -->
   <string key="remote.list_failed">Cannot list remote directory</string>
   <string key="remote.refresh_failed">Refresh failed: </string>
-  <string key="remote.press_any_key">  &lt;- Press any key</string>
-  <string key="remote.refresh_failed_short">Refresh failed  &lt;- Press any key</string>
   <string key="remote.connection_ok">Connection OK, found</string>
   <string key="remote.entries">entries</string>
   <string key="remote.loaded">Loaded</string>
@@ -497,6 +502,8 @@
   <string key="status.tracks_unit">tracks</string>
   <string key="status.added_to_queue">Added to queue</string>
   <string key="status.queue_cleared">Queue cleared</string>
+  <string key="status.queue_item_missing">Current track is not in the play queue</string>
+  <string key="status.queue_at_edge">Already at the queue edge</string>
   <string key="status.inserted_next">Inserted next</string>
   <string key="status.search_cancelled">Search cancelled</string>
   <string key="status.search_wait">Searching, please wait...</string>

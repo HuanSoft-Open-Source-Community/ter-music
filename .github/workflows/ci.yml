@@ -283,6 +283,9 @@ jobs:
       - name: Right-click context menus (anchor, depth, per-page, stale guard)
         run: scripts/test/context-menu-e2e.sh --bin ./build/ter-music
 
+      - name: Info pane follows info display settings
+        run: scripts/test/info-pane-e2e.sh --bin ./build/ter-music
+
       - name: Lyrics pane steps aside and returns automatically (remote front end)
         run: scripts/test/lyrics-pane-e2e.sh --bin ./build/ter-music
 

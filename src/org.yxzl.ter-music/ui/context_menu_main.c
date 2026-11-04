@@ -147,8 +147,9 @@ static void playback_menu_build(UIContextMenuLevel *level,
 {
     (void)ctx;
     ui_ctx_menu_set_title(level, i18n_get("context.menu.playback"));
-    ui_ctx_menu_add_action(level, ACTION_TRACK_PREV, playlist_is_loaded(), 0);
-    ui_ctx_menu_add_action(level, ACTION_TRACK_NEXT, playlist_is_loaded(), 0);
+    const int can_skip = playlist_is_loaded() && !g_lyric_cursor_mode;
+    ui_ctx_menu_add_action(level, ACTION_TRACK_PREV, can_skip, 0);
+    ui_ctx_menu_add_action(level, ACTION_TRACK_NEXT, can_skip, 0);
     ui_ctx_menu_add_separator(level);
     ui_ctx_menu_add_action(level, ACTION_VOLUME_UP, 1, 0);
     ui_ctx_menu_add_action(level, ACTION_VOLUME_DOWN, 1, 0);

@@ -278,6 +278,47 @@ def check_languages(bin_path, home_en, home_lang, home_cfg):
         else:
             bad(name, "首行=%r，退出码=%d" % (line, result.returncode))
 
+    # 5) --lang zh-PQ → 内置先秦文言（不得被 zh_* → zh_CN 归一化吃掉）
+    env = make_env(
+        home_lang,
+        LANG="zh_CN.UTF-8",
+        LC_ALL=None,
+        LC_MESSAGES=None,
+        TER_MUSIC_CLI_LANG=None,
+    )
+    name = "--lang zh-PQ 使用内置先秦文言"
+    try:
+        result = run_cli(bin_path, ["--lang", "zh-PQ", "--help"], env)
+    except subprocess.TimeoutExpired:
+        bad(name, "超时")
+    else:
+        line = first_line(result.stdout)
+        out = result.stdout.decode("utf-8", "replace")
+        if result.returncode == 0 and "用法" in line and "播弄之控" in out:
+            ok(name)
+        else:
+            bad(name, "首行=%r，退出码=%d" % (line, result.returncode))
+
+    # 6) TER_MUSIC_CLI_LANG=zh-PQ 同样有效
+    env = make_env(
+        home_lang,
+        LANG="zh_CN.UTF-8",
+        LC_ALL=None,
+        LC_MESSAGES=None,
+        TER_MUSIC_CLI_LANG="zh-PQ",
+    )
+    name = "TER_MUSIC_CLI_LANG=zh-PQ 生效"
+    try:
+        result = run_cli(bin_path, ["--help"], env)
+    except subprocess.TimeoutExpired:
+        bad(name, "超时")
+    else:
+        out = result.stdout.decode("utf-8", "replace")
+        if result.returncode == 0 and "播弄之控" in out:
+            ok(name)
+        else:
+            bad(name, "退出码=%d" % result.returncode)
+
 
 # ── PTY / 分页器检查 ─────────────────────────────────────────────────
 

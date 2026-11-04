@@ -397,6 +397,7 @@ void render_help_content(void)
                    total_lines, visible_lines, g_help_scroll_offset, max_x - 2);
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
+    repaint_status_message();
     refresh();
 }
 
@@ -537,7 +538,8 @@ void help_context_menu_build(UIContextMenuLevel *level,
     ui_ctx_menu_add_action(level, ACTION_HELP_SEARCH, 1, 0);
     if (ctx->area == UI_CTX_AREA_CONTENT) {
         ui_ctx_menu_add_action(level, ACTION_HELP_NEXT_MATCH,
-                               g_help_search_active ? 1 : 0, 0);
+                               (g_help_search_active &&
+                                g_help_search_count > 0) ? 1 : 0, 0);
         ui_ctx_menu_add_action(level, ACTION_HELP_UP, 1, 0);
         ui_ctx_menu_add_action(level, ACTION_HELP_DOWN, 1, 0);
         ui_ctx_menu_add_action(level, ACTION_HELP_LEFT, 1, 0);
@@ -616,7 +618,6 @@ int help_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
          * 本视图的 enter 键位本来就绑在 ACTION_HELP_RIGHT 上（见 keymap 默认表：
          * help.right = right/enter），语义是"末项返回主界面，其余进入内容区"，
          * 所以这里复用同一个动作，不自创 ACTIVATE。 */
-        if (!ev->click || ev->wheel) return 1;
         if (already_selected || ev->click_count >= 2) {
             return handle_help_action(ACTION_HELP_RIGHT);
         }

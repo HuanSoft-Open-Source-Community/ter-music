@@ -330,6 +330,7 @@ install(FILES resources/icons/hicolor/scalable/apps/${PROJECT_NAME}.svg
 
 # 安装帮助文档
 install(FILES data/help/help-quickstart-zh_CN.txt data/help/help-quickstart-en_US.txt
+             data/help/help-quickstart-zh-PQ.txt
         DESTINATION share/ter-music/help
 )
 
@@ -357,7 +358,7 @@ if(INSTALL_LINYAPS_INTEGRATION)
 endif()
 
 # Install language translation files
-install(FILES data/lang/zh_CN.xml data/lang/en_US.xml
+install(FILES data/lang/zh_CN.xml data/lang/en_US.xml data/lang/zh-PQ.xml
         DESTINATION share/ter-music/lang
 )
 

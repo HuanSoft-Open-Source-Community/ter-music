@@ -45,8 +45,10 @@ int cli_lang_is_explicit(void);
  * 归一化 locale / 语言 ID（测试与内部解析共用）：
  *   - 去掉 @修饰 与 .编码；
  *   - 空值、C、POSIX → 无偏好（out 为空串）；
- *   - zh* → zh_CN，en* → en_US；其他保留（如 ja_JP）；
- *   - '-' 归一化为 '_'；只接受字母/数字/下划线/连字符，长度 <= 64；
+ *   - zh_PQ（含 zh-PQ）→ 内置 zh-PQ；其余 zh* → zh_CN，en* → en_US，
+ *     其他保留（如 ja_JP）；
+ *   - '-' 归一化为 '_' 后匹配；输出沿用内置 ID（zh-PQ 带连字符）；
+ *     只接受字母/数字/下划线/连字符，长度 <= 64；
  *   - 非法值回退 zh_CN。
  * @param raw       输入字符串（可为 NULL）
  * @param out       输出缓冲

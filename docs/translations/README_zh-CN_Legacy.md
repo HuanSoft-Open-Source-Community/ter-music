@@ -38,9 +38,9 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **色采之谱**：24套预设主题 + 1个自定槽位，前后色彩配对保护；**设置 → 界面外观**为六格（列表、信息、控制、频谱、歌辞、黑胶）各立前景、背景之目，格之色随其所用之局而定，侧栏、高亮、边框之色仍为通体之饰
 - **数据驭局**：7 个 JSON 预设以分栏树定诸窗格之位、比例与色；强制平铺为结构之保，旧几何自动适配而不见拒；黑胶与歌辞之格可并存，曲无歌辞则歌辞格暂退而余格补其位，更至有歌辞之曲则其还自至（不待易视，亦不待改其尺寸；惟存歌辞一格者，仍于格内退作黑胶之戏）
 - **恒存之储**：SQLite一统（珍存、往迹、曲帙），自动从v1 JSON迁移
-- 专辑封面显明之能，可于格中以彩色半块之字绘封面之图，色自二百五十六而降于八、终归于黑白；信息、控制二区之封面可于节度中启闭，黑胶之格取其面裁为圆标，随碟而转
+- 专辑封面显明之能，可于格中以彩色半块之字绘封面之图，色自二百五十六而降于八、终归于黑白；控制区之封面由播弄总开关主之，信息窗格之封面别有节度开关，黑胶之格取其面裁为圆标，随碟而转
 - **符令行之制与背景播弄**：诸符令子目咸备（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），兼有离脱背景之播弄役使，端闱既闭而乐声不绝；Linyaps 封缄之态亦可用——背景播弄或经 D-Bus 按需唤起，或凭随包之 systemd 用户役使常驻
-- **信息显明之可自定**：`ter-music show` 所出之基本信息、点阵文书封面、音程之行与歌辞二行（当前及其次），俱可于文界节度中厘定
+- **信息显明之可自定**：主页信息窗格之诸域、预设与封面，及 `ter-music show` 所出之基本信息、点阵／ASCII／半块文书封面、音程之行与歌辞二行（当前及其次），俱可于文界节度中厘定
 - **MPRIS 与歌词 API**：经D-Bus而通桌面媒体之制、`mpris:artUrl`封面、开放歌辞之接口，兼有 `Info`（曲目／音程／文书封面）与 `Control` 二接口，以惠他器
 - 全凭键符捷操，迅疾无伦
 - 音程条贯实时昭显，流转顺滑，可任意跳转
@@ -68,7 +68,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | 🎛️ 10段均衡器 | ISO准图示均衡器，设中可视化条图 |
 | ⏩ 迅疾节度 | 六档迅迟之度，播弄中可随意迁转 |
 | 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约，由前端览之、下载于本地之藏 |
-| 🎨 专辑封面 | 端闱中显乐集之面，彩色半块之字，色竭则归于黑白；信息、控制二区可于节度中启闭，黑胶之格取封面为旋转圆标 |
+| 🎨 专辑封面 | 端闱中显乐集之面，彩色半块之字，色竭则归于黑白；控制区由播弄总开关主之，信息窗格别有节度开关，黑胶之格取封面为旋转圆标 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体之制、`mpris:artUrl`封面，及基于D-Bus之JSON歌辞接口 |
 | 🖥️ 符令行之制 | `ter-music play/pause/next/seek/volume/speed/mode/show` 诸令皆役当下所行之实例；`show` 则出可自定之信息块 |
 | 🌙 背景播弄 | `ter-music daemon start` 行无文界之播弄，任于何端闱皆得御之，不待文墨之界 |
@@ -321,7 +321,7 @@ ter-music [OPTIONS]
                        或 local（进程内播弄，留作回归基线）
   --attach-only        不自动拉起核心：无核心在行时以退去之码 3 终
   --bus <名称>         指特定核心／实例之总线名（默指主实例）
-  --lang <语言ID>      本次行止用此语言（如 zh_CN、en_US），不写入节度
+  --lang <语言ID>      本次行止用此语言（如 zh_CN、en_US、zh-PQ），不写入节度
   -h, --help           显助益之文
   -v, --version        显版本之文
   tui [path]           明入文墨之界
@@ -373,7 +373,7 @@ ter-music --help
 | `--one-line` | 单行而出，宜于状态之栏 |
 | `--full` / `--compact` / `--preset full\|compact\|custom` | 信息显明之预设 |
 | `--fields a,b,c` | 基本信息之域：`state,mode,index,queue,title,artist,album,format,path,volume,speed` |
-| `--cover` / `--no-cover`、`--cover-size WxH`、`--charset braille\|ascii` | 文书封面之选项（宽4-40列，高2-20行） |
+| `--cover` / `--no-cover`、`--cover-size WxH`、`--charset braille\|ascii\|half` | 文书封面之选项（宽4-40列，高2-20行） |
 | `--progress bar\|time\|percent\|time+percent`、`--no-progress` | 音程之行式 |
 | `--lyrics 0\|1\|2` | 歌辞之行：无／仅当前句／当前及其次 |
 | `--width N` | 输出之修广（默取端闱之广） |
@@ -526,7 +526,7 @@ ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
 - 用户之覆：`~/.config/ter-music/layouts.json`（同 `id` 者覆内置）
 - 开发之覆：`TER_MUSIC_LAYOUTS=/path/to/layouts.json`
 
-内置七局：`classic`、`vinyl`、`karaoke`、`visualizer`、`focus`、`stage`、`neon`。`classic` 为默，存旧五格之制；七局皆逐格设色，同局之内无二格同色，底皆透明（`-1`），色自二百五十六而降于八、终归黑白而不混；`neon` 其色最艳。歌辞与黑胶并置者，曲无歌辞则歌辞格暂退，余格补位，更至有歌辞之曲则其还自至，局与色俱不改。凡几何、色、未知之格、空洞、重叠及非 guillotine 之旧局，皆自动适配为强制平铺，不复全份见拒；重载之提示报其适配之数。窗格之文（含信息格之专辑封面）严裁于边框之内（不犯其框）；格小不能容者，惟见其底与框。信息之格随其广狭自陈：广则元文与音数并列、封面居右；狭而高则封面居上，元文、音数在下；封面与边框之间必留空列，地不足则隐其封面。
+内置七局：`classic`、`vinyl`、`karaoke`、`visualizer`、`focus`、`stage`、`neon`。`classic` 为默，存旧五格之制；七局皆逐格设色，同局之内无二格同色，底皆透明（`-1`），色自二百五十六而降于八、终归黑白而不混；`neon` 其色最艳。歌辞与黑胶并置者，曲无歌辞则歌辞格暂退，余格补位，更至有歌辞之曲则其还自至，局与色俱不改。凡几何、色、未知之格、空洞、重叠及非 guillotine 之旧局，皆自动适配为强制平铺，不复全份见拒；重载之提示报其适配之数。窗格之文（含信息格之专辑封面）严裁于边框之内（不犯其框）；格小不能容者，惟见其底与框。信息之格随其广狭自陈：广则元文与音数并列、封面居右；狭而高则封面居上，元文、音数在下；封面与边框之间必留空列，地不足则隐其封面。其域由节度→信息显示所主：惟用格所能容者，闭其域则行减，闭“制式”则音数之块亦隐。
 
 布局编辑器（`F2 → 界面外观 → 编辑布局 / 新建布局`）直治分栏之树：方向键按位择格，Tab 循环，`[`／`]` 调其宽（就近之左右分栏）、`{`／`}` 调其高（就近之上下分栏），PgUp/PgDn 调宽五厘，`=` 复其半，`|`／`-` 分栏，`x` 删除，`t` 易类，`c` 改色，`w` 交换，`Enter` 开操作之目，`?` 见帮助，`S` 存之，`Esc`／`q` 返。凡操作皆守强制平铺，无存时几何校验之拒。
 
@@ -777,7 +777,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `default_startup_path`：默认启行之目录
 - `auto_play_on_start`：启器时自动播弄（0/1）
 - `remember_last_path`：记上次所临之目录（0/1）
-- `show_album_cover`：显信息、控制二区之专辑封面（0/1；黑胶中心之标不与此开关相干）
+- `show_album_cover`：显控制区之专辑封面，并为信息窗格封面之总开关（0/1；黑胶中心之标不与此开关相干）
 - `show_lyrics_panel`：TUI 中已**弃用**。窗格之显隐今由布局预设定之；此键惟于 `~/.config/ter-music/ui-layout` 未有时，为初启映射之提示（`1` → `classic`，`0` → `focus`）。为通旧客，仍存于 `Config.GetAll`
 - `default_playback_speed`：默播之速（0.75、1.0、1.25、1.5、2.0、3.0）
 - `default_play_mode`：默播弄之制（0=序进、1=单曲回环、2=全帙周流、3=乱序一度、4=乱序杂陈……）
@@ -786,7 +786,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `clear_history_on_startup`：启时清目录之迹（0/1）
 - `resume_last_playback`：续从前之处播弄（0/1）
 - `seamless_preload`：当前曲末预解下曲，达无隙播弄（0/1）
-- `ui_language`：界语之ID。内置者为 `zh_CN`、`en_US`；经 F7 语言视图所纳之第三方语言ID（如 `ja_JP`）亦可用。非法之ID回退 `zh_CN`。
+- `ui_language`：界语之ID。内置者三：`zh_CN`、`en_US`、`zh-PQ`（语包之名「中文（先秦）」；先秦文言、繁体，应用译名「端闈樂部」）；经 F7 语言视图所纳之第三方语言ID（如 `ja_JP`）亦可用。非法之ID回退 `zh_CN`。
 - `volume_percent`：默音量之率（0-100）
 - `audio_latency_ms`：输出时延（千分秒）
 - `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）。自动之式启时历探诸枢；明择之枢倘实不可用，播时退就余枢并以状语告之，不默然而败
@@ -814,15 +814,15 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
   布局之覆。详制见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)
 - TUI 布局之择：`~/.config/ter-music/ui-layout`（前端所书单行布局 id）；布局之文：内置 `layouts/layouts.json` 与可选之 `~/.config/ter-music/layouts.json`。择局不书 `config.xml`；色采之中，惟改格之色书用户布局文件（布局编辑器存盘亦书之）
 - 均衡器：10段增益、前置放大、启/禁
-- 信息显明（CLI / D-Bus）之节度，可于**节度 → 信息显示**中厘定：
+- 信息显明之节度（主页信息窗格兼 CLI/D-Bus），可于**节度 → 信息显示**中厘定：
   - `info_preset`：预设（0=全、1=简、2=自定）
-  - `info_fields`：基本信息诸域之位掩码（1=状态、2=制、4=序号、8=队列、16=标题、32=艺术家、64=专辑、128=制式、256=路径、512=音量、1024=迅疾；2047=尽有）
-  - `info_show_cover`：出点阵／ASCII之文书封面（0/1）
-  - `info_cover_cols` / `info_cover_rows`：封面之修广，以字符之列、行计（4-40 / 2-20）
-  - `info_cover_charset`：封面之字符集（0=点阵、1=ASCII）
-  - `info_show_progress`：出音程之行（0/1）
-  - `info_progress_style`：音程之行式（0=条贯＋时、1=时、2=百分、3=时＋百分）
-  - `info_lyrics_lines`：歌辞之行（0=无、1=仅当前句、2=当前及其次）
+  - `info_fields`：基本信息诸域之位掩码（1=状态、2=制、4=序号、8=队列、16=标题、32=艺术家、64=专辑、128=制式、256=路径、512=音量、1024=迅疾；2047=尽有）。主页信息窗格惟用其所能容者（状态/制/标题/艺术家/专辑/队列/制式）；序号/路径/音量/迅疾止及 CLI/D-Bus，择域之幕标曰“仅 CLI”
+  - `info_show_cover`：信息窗格与 CLI 之封面（0/1）；TUI 窗格兼须播弄之 `show_album_cover` 总开关
+  - `info_cover_cols` / `info_cover_rows`：CLI 文书封面之修广，以字符之列、行计（4-40 / 2-20）
+  - `info_cover_charset`：CLI 封面之字符集（0=点阵、1=ASCII、2=半块）
+  - `info_show_progress`：出 CLI 音程之行（0/1）
+  - `info_progress_style`：CLI 音程之行式（0=条贯＋时、1=时、2=百分、3=时＋百分）
+  - `info_lyrics_lines`：CLI 歌辞之行（0=无、1=仅当前句、2=当前及其次）
 
 器将自动存其节度，改之即生效。
 
@@ -856,7 +856,7 @@ Ter-Music 用 XML 之国际化（i18n）制。内置语言包在源码 `data/lan
 
 欲添新语言，依上制创 `<id>.xml`，置任一搜索路径（推荐 `~/.config/ter-music/lang/`）。该语言将自现于 F7 语言选择之视。
 
-`ui_language` 不复限于内置之 `zh_CN`／`en_US`：于 F7 择第三方语言者，存其ID；节度之验惟拒不可安全为文件名之ID。未纳置或验而不合者，回退 `zh_CN`。
+`ui_language` 不复限于内置之 `zh_CN`／`en_US`／`zh-PQ`：于 F7 择第三方语言者，存其ID；节度之验惟拒不可安全为文件名之ID。未纳置或验而不合者，回退 `zh_CN`。
 
 **CLI 择语之序。** CLI 本地之辞（助文、谬误、表列与提示），自高而低如次：
 
@@ -868,7 +868,7 @@ Ter-Music 用 XML 之国际化（i18n）制。内置语言包在源码 `data/lan
 6. `LANG`
 7. `zh_CN`
 
-`--lang` 与 `TER_MUSIC_CLI_LANG` 可置于命令行之任意处（含子令之前），并依 locale 之名归一（`en_US.UTF-8` → `en_US`，`zh-*` → `zh_CN`）。`C`、`POSIX` 与空 locale 之值谓「无偏好」，仍循序而下，故节度之 `ui_language` 犹胜之。显指之语言包未纳置者，示警而回退 `zh_CN`。
+`--lang` 与 `TER_MUSIC_CLI_LANG` 可置于命令行之任意处（含子令之前），并依 locale 之名归一（`en_US.UTF-8` → `en_US`，`zh-*` → `zh_CN`；内置之 `zh-PQ` 仍作 `zh-PQ`）。`C`、`POSIX` 与空 locale 之值谓「无偏好」，仍循序而下，故节度之 `ui_language` 犹胜之。显指之语言包未纳置者，示警而回退 `zh_CN`。
 
 `--lang` 惟改 CLI 自身之辞。`show`、`track`、`lyrics`、`cover` 所出之正文，由核心依其 `ui_language` 渲染；非改核心节度，则仍用文墨之界之语。
 
@@ -923,7 +923,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 1. 拒非普通文件与非 `.tar.gz`/`.tgz` 扩展名
 2. 提 `lang.xml` 析为 XML
 3. 验根元素为 `<lang>` 且 `id` 非空
-4. 拒覆内置语言（`zh_CN`、`en_US`）之包
+4. 拒覆内置语言（`zh_CN`、`en_US`、`zh-PQ`）之包
 5. 行 50 MB 单文件大小限之检
 
 验过，该语言即现于语言选择视。用户所加之语言，在界面上与内置者有明别。
@@ -1161,7 +1161,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 - **media/**：**核心**之D-Bus会话——`session.c`（总线之名、自省、分发）、
   `rpc_common.c`（回复之助、分页）、`rpc_info.c`、`rpc_control.c`、
   `rpc_queue.c`、`rpc_lyrics.c`、`rpc_config.c`，及MPRIS媒体播弄之接口
-- **info/info.c**：播弄信息之快照与渲染（文、JSON、点阵／ASCII封面之缓存），
+- **info/info.c**：播弄信息之快照与渲染（文、JSON、点阵／ASCII／半块封面之缓存），
   为 `ter-music show` 与 `Info` 接口所共用
 - **config/**：节度之统——`config.c`（libxml2之读写、版本之迁、默认之值）、
   `config_json.c` + `migration.c`（v1 `config.json` → XML）、schema之常量、

@@ -26,15 +26,14 @@
 /* ============================================================
  * Playlist view internal state
  *
- * g_playlist_view_mode / g_playlist_selected_playlist /
- * g_playlist_track_offset are non-static (extern in
- * menu_internal.h) so menus.c can reset them in switch_to_view
- * and handle ESC-in-track-view navigation.
+ * 全部为本文件私有；视图切换由 menus.c 调用 reset_playlist_view()，
+ * 歌单列表/曲目列表的滚动偏移也在这里统一复位。
  * ============================================================ */
 
-int g_playlist_view_mode = 0;           /* 0=list, 1=tracks */
-int g_playlist_selected_playlist = -1;
-int g_playlist_track_offset = 0;
+static int g_playlist_view_mode = 0;           /* 0=list, 1=tracks */
+static int g_playlist_selected_playlist = -1;
+static int g_playlist_track_offset = 0;
+static int g_playlist_content_offset = 0;      /* 歌单列表滚动偏移 */
 
 /* ============================================================
  * Playlist view rendering
@@ -82,14 +81,38 @@ void render_playlist_manager_content(void)
             menu_content_puts(&area, start_y + 1, i18n_get("playlist_mgr.create_hint"));
         } else {
             int visible_lines = max_y - start_y - 3;
+            if (visible_lines < 1) visible_lines = 1;
 
-            /* 渲染期记下歌单列表几何。此模式整屏不分页，
-             * 渲染循环里的 i 既是行号也是歌单下标。 */
+            /* 歌单列表按选中项推导滚动偏移；渲染循环与鼠标命中共用
+             * g_playlist_content_offset，避免“画到哪”与“点到哪”漂移。 */
+            if (g_content_selected_idx >= g_playlist_manager.count) {
+                g_content_selected_idx = g_playlist_manager.count - 1;
+            }
+            if (g_content_selected_idx < 0) g_content_selected_idx = 0;
+            if (g_content_selected_idx < g_playlist_content_offset) {
+                g_playlist_content_offset = g_content_selected_idx;
+            } else if (g_content_selected_idx >=
+                       g_playlist_content_offset + visible_lines) {
+                g_playlist_content_offset =
+                    g_content_selected_idx - visible_lines + 1;
+            }
+            if (g_playlist_content_offset < 0) {
+                g_playlist_content_offset = 0;
+            }
+            if (g_playlist_content_offset > g_playlist_manager.count - visible_lines) {
+                g_playlist_content_offset = g_playlist_manager.count - visible_lines;
+            }
+            if (g_playlist_content_offset < 0) {
+                g_playlist_content_offset = 0;
+            }
+
             g_pl_list_top = start_y;
             g_pl_list_visible = visible_lines;
 
-            for (int i = 0; i < visible_lines && i < g_playlist_manager.count; i++) {
-                UserPlaylist *pl = &g_playlist_manager.playlists[i];
+            for (int i = 0; i < visible_lines; i++) {
+                int idx = g_playlist_content_offset + i;
+                if (idx >= g_playlist_manager.count) break;
+                UserPlaylist *pl = &g_playlist_manager.playlists[idx];
                 char display_name[MAX_PLAYLIST_NAME_LEN + 8];
                 utf8_str_pad(display_name, sizeof(display_name), pl->name, 30);
 
@@ -97,7 +120,7 @@ void render_playlist_manager_content(void)
                 snprintf(line, sizeof(line), i18n_get("playlist_mgr.track_count_fmt"),
                          display_name, pl->track_count);
 
-                if (i == g_content_selected_idx && g_focus_area == FOCUS_CONTENT) {
+                if (idx == g_content_selected_idx && g_focus_area == FOCUS_CONTENT) {
                     attron(A_REVERSE);
                     menu_content_puts(&area, start_y + i, line);
                     attroff(A_REVERSE);
@@ -177,6 +200,7 @@ void render_playlist_manager_content(void)
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_LYRICS));
+    repaint_status_message();
     refresh();
 }
 
@@ -357,13 +381,18 @@ int handle_playlist_action(ActionId action)
                 } else {
                     if (g_playlist_selected_playlist >= 0 &&
                         g_playlist_selected_playlist < g_playlist_manager.count) {
-                        remove_track_from_playlist(g_playlist_selected_playlist,
-                                                   g_content_selected_idx);
                         UserPlaylist *pl = &g_playlist_manager.playlists[g_playlist_selected_playlist];
-                        if (g_content_selected_idx >= pl->track_count) {
-                            g_content_selected_idx = pl->track_count - 1;
+                        if (g_content_selected_idx >= 0 &&
+                            g_content_selected_idx < pl->track_count &&
+                            remove_track_from_playlist(g_playlist_selected_playlist,
+                                                       g_content_selected_idx) == 0) {
+                            if (g_content_selected_idx >= pl->track_count) {
+                                g_content_selected_idx = pl->track_count - 1;
+                            }
+                            show_status_message(i18n_get("playlist_mgr.track_removed"));
+                        } else {
+                            show_status_message(i18n_get("playlist_mgr.track_remove_failed"));
                         }
-                        show_status_message(i18n_get("playlist_mgr.track_removed"));
                         render_playlist_manager_content();
                     }
                 }
@@ -442,8 +471,8 @@ static int playlist_index_at_row(int screen_row)
         int line = screen_row - g_pl_list_top;
         if (line < 0 || line >= g_pl_list_visible) return -1;
 
-        /* 模式 0 渲染不分页（从 0 起画 visible_lines 条），行号即下标 */
-        int idx = line;
+        /* 模式 0 与渲染使用同一份滚动偏移，行号不是下标。 */
+        int idx = g_playlist_content_offset + line;
         if (idx < 0 || idx >= g_playlist_manager.count) return -1;
         return idx;
     }
@@ -637,4 +666,5 @@ void reset_playlist_view(void)
     g_playlist_view_mode = 0;
     g_playlist_selected_playlist = -1;
     g_playlist_track_offset = 0;
+    g_playlist_content_offset = 0;
 }

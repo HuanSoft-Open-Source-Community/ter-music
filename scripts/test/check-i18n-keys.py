@@ -2,7 +2,7 @@
 """i18n 键一致性校验（缺失键回归防线）
 
 检查项：
-  1. zh_CN / en_US 两语言文件键集完全一致；
+  1. 内置 zh_CN / en_US / zh-PQ 三语言文件键集完全一致；
   2. 无重复键、无空值；
   3. 源码与头文件中每一条 i18n_get("字面量") 的键在两种语言中都存在；
   4. 两个间接引用清单同样必须完整：
@@ -49,15 +49,18 @@ def iter_sources():
 
 
 def main():
-    if not (LANG_DIR / "zh_CN.xml").is_file() or not (LANG_DIR / "en_US.xml").is_file():
-        print("FAIL i18n keys: language files not found under", LANG_DIR)
-        return 1
+    builtins = ("zh_CN", "en_US", "zh-PQ")
+    for lang in builtins:
+        if not (LANG_DIR / f"{lang}.xml").is_file():
+            print(f"FAIL i18n keys: built-in language {lang} not found under {LANG_DIR}")
+            return 1
 
     zh = load_lang(LANG_DIR / "zh_CN.xml")
     en = load_lang(LANG_DIR / "en_US.xml")
+    pq = load_lang(LANG_DIR / "zh-PQ.xml")
     errors = []
 
-    for name, pairs in (("zh_CN", zh), ("en_US", en)):
+    for name, pairs in (("zh_CN", zh), ("en_US", en), ("zh-PQ", pq)):
         seen = set()
         for key, value in pairs:
             if key in seen:
@@ -68,10 +71,15 @@ def main():
 
     zh_keys = {key for key, _ in zh}
     en_keys = {key for key, _ in en}
+    pq_keys = {key for key, _ in pq}
     for key in sorted(zh_keys - en_keys):
         errors.append(f"en_US missing key '{key}'")
     for key in sorted(en_keys - zh_keys):
         errors.append(f"zh_CN missing key '{key}'")
+    for key in sorted(zh_keys - pq_keys):
+        errors.append(f"zh-PQ missing key '{key}'")
+    for key in sorted(pq_keys - zh_keys):
+        errors.append(f"zh_CN missing key from zh-PQ '{key}'")
 
     direct = set()
     for path in iter_sources():
@@ -83,6 +91,8 @@ def main():
             errors.append(f"zh_CN missing (i18n_get) '{key}'")
         if key not in en_keys:
             errors.append(f"en_US missing (i18n_get) '{key}'")
+        if key not in pq_keys:
+            errors.append(f"zh-PQ missing (i18n_get) '{key}'")
 
     settings_c = ROOT / "src" / "org.yxzl.ter-music" / "ui" / "settings.c"
     text = settings_c.read_text(encoding="utf-8", errors="replace")
@@ -96,6 +106,8 @@ def main():
                 errors.append(f"zh_CN missing (settings_options) '{key}'")
             if key not in en_keys:
                 errors.append(f"en_US missing (settings_options) '{key}'")
+            if key not in pq_keys:
+                errors.append(f"zh-PQ missing (settings_options) '{key}'")
 
     editor_c = ROOT / "src" / "org.yxzl.ter-music" / "ui" / "layout_editor.c"
     text = editor_c.read_text(encoding="utf-8", errors="replace")
@@ -109,6 +121,8 @@ def main():
                 errors.append(f"zh_CN missing (layout_editor actions) '{key}'")
             if key not in en_keys:
                 errors.append(f"en_US missing (layout_editor actions) '{key}'")
+            if key not in pq_keys:
+                errors.append(f"zh-PQ missing (layout_editor actions) '{key}'")
 
     actions_c = ROOT / "src" / "org.yxzl.ter-music" / "keymap" / "actions.c"
     text = strip_comments(actions_c.read_text(encoding="utf-8", errors="replace"))
@@ -121,6 +135,8 @@ def main():
             errors.append(f"zh_CN missing (keyaction) '{key}'")
         if key not in en_keys:
             errors.append(f"en_US missing (keyaction) '{key}'")
+        if key not in pq_keys:
+            errors.append(f"zh-PQ missing (keyaction) '{key}'")
 
     if errors:
         print(f"FAIL i18n keys ({len(errors)} problem(s))")
@@ -130,7 +146,7 @@ def main():
             print(f"  ... and {len(errors) - 60} more")
         return 1
 
-    print(f"PASS i18n keys ({len(zh_keys)} keys; zh_CN/en_US aligned, "
+    print(f"PASS i18n keys ({len(zh_keys)} keys; zh_CN/en_US/zh-PQ aligned, "
           f"{len(direct)} direct + {len(ids)} actions checked)")
     return 0
 

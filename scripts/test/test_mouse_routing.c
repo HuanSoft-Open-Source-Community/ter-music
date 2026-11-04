@@ -594,7 +594,8 @@ static void test_exhaustive_unique_owner(void)
         }
     }
     printf("  穷举矩阵用例数：%d\n", cases);
-    CHECK(cases == 9 * 8 * 4 * 36, "矩阵覆盖完整");
+    CHECK(cases == (VIEW_LANGUAGE - VIEW_MAIN + 1) * 8 * 4 * 36,
+          "矩阵覆盖完整");
 }
 
 int main(void)

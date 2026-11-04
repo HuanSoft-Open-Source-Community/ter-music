@@ -16,7 +16,7 @@ ter-music Quick Start Guide
                        (the default is remote — playback is left to the core)
     --attach-only      Only attach to an already running core; fail if there is none
     --bus <name>       Target instance bus name (default: the primary instance)
-    --lang <lang-id>   Use this language for this run (e.g. zh_CN, en_US),
+    --lang <lang-id>   Use this language for this run (e.g. zh_CN, en_US, zh-PQ),
                        without saving it to config.xml
 
   Process model: the default is "resident core + front end". The TUI is only a
@@ -234,7 +234,8 @@ ter-music Quick Start Guide
   F4  Playlists (manage and create playlists)
   F5  Favorites (view and manage favorite tracks)
   F6  About (version and project info)
-  F7  Language (language manager: ENTER switches, A adds a pack, D deletes)
+  F7  Language (language manager: ENTER switches, A adds a pack, D deletes;
+      built-ins: zh_CN, en_US, zh-PQ)
   F8  Help (this page; / searches, ↑/↓ scroll)
   F9  Quit the front end (stop_core_on_exit = 1 is the default, so the core
       stops too; only with 0 does playback continue in the background — see
@@ -362,7 +363,9 @@ ter-music Quick Start Guide
 
 16. Album Art
 -------------
-  Enable the info/controls album cover display in Settings.
+  The controls-pane cover follows Settings -> Playback "Album Cover".
+  The info-pane cover also has its own "Show Cover" switch in Settings ->
+  Info Display; both must be on for the pane cover to appear.
   The CLI/D-Bus text cover can be braille, ASCII or half blocks. The TUI
   info/controls cover uses colored half-block characters (automatic 256→8→
   monochrome fallback) so its glyph width matches the terminal cell grid.
@@ -389,6 +392,10 @@ ter-music Quick Start Guide
   and the current audio technical info (its placement is defined by the layout
   preset):
     Sample Rate, Bit Depth, Bitrate, Codec
+  Its rows follow the Settings -> Info Display field mask: the pane uses only
+  the fields it can display (state/mode/title/artist/album/queue/format),
+  compacts when fields are disabled, and drops the audio block when `format` is
+  off. index/path/volume/speed are CLI/D-Bus only.
   It switches between a side-by-side arrangement and a stacked one (cover on
   top) depending on the pane's own width and height. The TUI cover is drawn with
   colored half-block characters (not braille; automatic 256→8→monochrome
@@ -400,9 +407,10 @@ ter-music Quick Start Guide
     Auto, PipeWire, PulseAudio, ALSA (applies on next startup)
   The "Latency" entry opens a 20–250 ms popup; it takes effect on next playback.
 
-  The Settings -> Info Display section (preset, fields, text cover size and
-  charset, progress style, lyric lines) affects only `ter-music show` and the
-  D-Bus Info.GetDisplay/GetInfo output — it does not change the TUI layout.
+  Settings -> Info Display: preset, fields and cover also drive the main info
+  pane; cover size/charset, progress style and lyric lines affect only
+  `ter-music show` and the D-Bus Info.GetDisplay/GetInfo output. Fields marked
+  "CLI only" never affect the TUI pane.
 
 18. Configuration & Data
 -------------------------

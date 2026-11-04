@@ -2,7 +2,8 @@
  * @file info_bar_layout.h
  * @brief 主界面信息窗格的列/块分区几何（纯计算，无 ncurses 依赖）
  *
- * 信息窗格不再固定为“左/中/封面”三栏，而是按窗格宽高自适应排布：
+ * 信息窗格不再固定为“左/中/封面”三栏，而是按窗格宽高与调用方给出的
+ * 元数据/音频行数自适应排布：
  *
  *   - 横向（`stacked == 0`）：元数据在左、音频在右；空间足够时封面贴在
  *     右侧，与文字之间留一列空白，与右边框之间至少留两列空白；
@@ -15,10 +16,12 @@
  *     放下 5+4 行堆叠（`ch < INFO_BAR_VERTICAL_MIN_ROWS`）→ 横向；
  *   - 其余（窄而高，或窄到放不下两列）→ 纵向堆叠/单列，按行裁剪。
  *
+ * 行数可以是 0：例如用户关闭全部可显示字段时，信息窗格只画封面/边框。
+ *
  * 硬性不变量（info_bar_layout_validate() 逐条校验）：
  *   - 内容区为 `x∈[1,w-2]`、`y∈[1,h-2]`，第 0 行是标题，w-1/h-1 是边框；
  *   - 文字/封面块从 `1 + INFO_BAR_PAD_LEFT` 开始，避免紧贴左边框；
- *   - 三个矩形两两不重叠；
+ *   - 有文本时三个矩形两两不重叠；某一块行数为 0 时其矩形必须为空；
  *   - 封面隐藏时 w/h 同时为 0；显示时 `w == 2*h`、`5 <= h <= 12`，
  *     且 `cover.x + cover.w <= w - 2`（右侧至少空一列再是右边框）；
  *   - 元数据/音频矩形完整落在内容区内。
@@ -31,8 +34,7 @@
 #ifndef UI_INFO_BAR_LAYOUT_H
 #define UI_INFO_BAR_LAYOUT_H
 
-/* 信息窗格固定字段行数：5 行元数据（状态/模式/标题/艺术家/专辑或队列）、
- * 4 行音频参数（采样率/位深/比特率/编码）。 */
+/* 信息窗格元数据行数上限（状态/模式/标题/艺术家/专辑或队列）与音频行数。 */
 #define INFO_BAR_METADATA_LINES 5
 #define INFO_BAR_AUDIO_LINES    4
 
@@ -60,10 +62,6 @@
 /* 纵向模式把 5 行元数据 + 4 行音频全部放下才值得切换。 */
 #define INFO_BAR_VERTICAL_MIN_ROWS (INFO_BAR_METADATA_LINES + INFO_BAR_AUDIO_LINES)
 
-/* 纵向封面至少还要 9 行文字、1 行间隔、5 行封面。 */
-#define INFO_BAR_VERTICAL_COVER_MIN_ROWS \
-    (INFO_BAR_VERTICAL_MIN_ROWS + INFO_BAR_COVER_GAP + INFO_BAR_COVER_MIN_ROWS)
-
 typedef struct {
     int x, y;           /* 窗格内坐标（0 基，1 = 内容区首行/首列） */
     int w, h;           /* 可用列/行数；0 表示该块不存在 */
@@ -77,19 +75,35 @@ typedef struct {
     InfoBarRect audio;      /* 采样率/位深/比特率/编码 */
     InfoBarRect cover;      /* 字符封面；w==0 && h==0 表示隐藏 */
 
-    int metadata_rows;      /* 实际可绘制的元数据行数（1..5） */
+    int metadata_rows;      /* 实际可绘制的元数据行数（0..5） */
     int audio_rows;         /* 实际可绘制的音频行数（0..4） */
 } InfoBarLayout;
 
 /**
- * @brief 计算信息窗格的自适应分区。
+ * @brief 计算信息窗格的自适应分区（按调用方给出的行数）。
  *
  * @param window_width  窗格总列数（含左右边框）
  * @param window_height 窗格总行数（含上下边框与标题行）
  * @param want_cover    1 = 有封面可画；0 = 不预留封面空间
+ * @param metadata_rows 期望的元数据行数（0..5，超出钳制）
+ * @param audio_rows    期望的音频行数（0..4，超出钳制）
  * @param out           输出分区；函数会先整体清零
  *
  * 无论 want_cover 为何，空间不足时封面都会被隐藏，文字区相应加宽。
+ */
+void info_bar_layout_compute_rows(int window_width,
+                                  int window_height,
+                                  int want_cover,
+                                  int metadata_rows,
+                                  int audio_rows,
+                                  InfoBarLayout *out);
+
+/**
+ * @brief 兼容包装：固定请求 5 行元数据 + 4 行音频。
+ *
+ * 等价于 info_bar_layout_compute_rows(window_width, window_height, want_cover,
+ *                                    INFO_BAR_METADATA_LINES,
+ *                                    INFO_BAR_AUDIO_LINES, out)。
  */
 void info_bar_layout_compute(int window_width,
                              int window_height,

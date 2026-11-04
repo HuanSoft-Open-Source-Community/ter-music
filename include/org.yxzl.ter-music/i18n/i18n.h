@@ -23,7 +23,7 @@ extern "C" {
  * If @p lang_id is NULL or the file is missing, falls back to "zh_CN";
  * if that also fails, every i18n_get() call returns the key verbatim.
  *
- * @param lang_id  language identifier, e.g. "zh_CN", "en_US".
+ * @param lang_id  language identifier, e.g. "zh_CN", "en_US", "zh-PQ".
  * @return 0 on success, -1 if no translation file could be loaded.
  */
 int i18n_init(const char *lang_id);
@@ -92,7 +92,7 @@ double i18n_coverage(const char *lang_id);
 /* ── Language pack management (user dir) ─────────────────────── */
 
 /**
- * Check whether @p lang_id is a built-in language (zh_CN, en_US).
+ * Check whether @p lang_id is a built-in language (zh_CN, en_US, zh-PQ).
  */
 int i18n_is_builtin(const char *lang_id);
 
@@ -110,7 +110,7 @@ int i18n_add_language(const char *source_path);
 /**
  * Delete a user-installed language pack.
  * Removes both the .xml and .txt files from the user config
- * directory.  Fails with -1 for built-in languages (zh_CN / en_US).
+ * directory.  Fails with -1 for built-in languages (zh_CN / en_US / zh-PQ).
  * @return 0 on success, -1 on error.
  */
 int i18n_delete_language(const char *lang_id);

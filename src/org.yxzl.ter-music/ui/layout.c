@@ -1016,13 +1016,6 @@ void create_layout(void)
      * 先关闭（不重绘，本函数末尾会完整重绘）。 */
     ui_context_menu_close(0);
 
-    static int view_initialized = 0;
-    if (!view_initialized) {
-        g_current_view = VIEW_MAIN;
-        g_menu_selected_idx = 0;
-        view_initialized = 1;
-    }
-
     if (!g_initialized) {
         ui_layout_init();
     }

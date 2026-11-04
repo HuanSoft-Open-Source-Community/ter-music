@@ -109,7 +109,6 @@ static void recalc_coefficients(void)
             continue;
         }
 
-        float gain_linear;
         if (g_eq.band_gains[i] == 0) {
             /* Flat — straight-through.  Saves a tiny bit of CPU
              * and avoids float precision issues at exactly 0 dB. */
