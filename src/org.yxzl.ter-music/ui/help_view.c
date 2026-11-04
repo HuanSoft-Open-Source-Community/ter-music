@@ -205,6 +205,12 @@ static void help_search_prompt(void)
 
     while ((ch = getch()) != '\n' && ch != KEY_ENTER && ch != 27 && strlen(input) < MAX_META_LEN - 1) {
         if (ch == ERR) continue;
+        if (ch == KEY_MOUSE || ch == KEY_RESIZE) {
+            /* 鼠标事件与终端尺寸变化都不是可输入字符：这两类键码都 >255，
+             * 截断成 char 会直接写坏正在输入的搜索串。搜索输入框是模态的，
+             * 滚轮与点击在这里没有定义，整个忽略，退出输入框后由主循环正常处理。 */
+            continue;
+        }
         if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
             if (strlen(input) > 0) {
                 size_t len = strlen(input) - 1;
@@ -213,7 +219,9 @@ static void help_search_prompt(void)
                 input[len] = '\0';
                 help_search_redraw(&area, search_row, prompt, input);
             }
-        } else if (ch >= 32) {
+        } else if (ch >= 32 && ch < 256) {
+            /* 只接受单字节可打印字符（UTF-8 输入按字节逐个落到这里）：
+             * 功能键等 >255 的键码不再落入追加字节那条路径。 */
             size_t len = strlen(input);
             input[len] = (char)ch;
             input[len + 1] = '\0';
@@ -250,6 +258,11 @@ static void help_search_prompt(void)
  * Help view rendering
  * ============================================================ */
 
+/* 渲染期记录的正文可视行数：滚轮一格的钳制上限要用"总行数 - 可见行数"，
+ * 而可见行数是排版算出来的（标题、回退提示与底部提示都占行），
+ * 所以在这里记一次，命中判定不重抄排版公式。0 = 这一帧还没画过。 */
+static int g_help_visible_lines = 0;
+
 void render_help_content(void)
 {
     help_load_file();
@@ -265,6 +278,8 @@ void render_help_content(void)
     int fallback_banner = g_help_is_fallback ? 1 : 0;
     int visible_lines = max_y - start_y - 6 - fallback_banner;
     if (visible_lines < 1) visible_lines = 1;
+
+    g_help_visible_lines = visible_lines;
 
     int total_lines = g_help_line_count;
 
@@ -389,10 +404,10 @@ void render_help_content(void)
  * Help view input handling
  * ============================================================ */
 
-int handle_help_input(int ch)
+/* 动作入口：键盘解析出的动作与鼠标滚轮/双击共用同一条路径。
+ * （鼠标绝不合成按键码：用户可改键，合成按键会在改键后失灵或做错事。） */
+int handle_help_action(ActionId action)
 {
-    ActionId action = keymap_resolve(CTX_HELP, ch);
-
     switch (action) {
         case ACTION_HELP_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
@@ -465,4 +480,162 @@ int handle_help_input(int ch)
         default:
             return 0;
     }
+}
+
+int handle_help_input(int ch)
+{
+    return handle_help_action(keymap_resolve(CTX_HELP, ch));
+}
+
+/* ============================================================
+ * Help view mouse handling
+ * ============================================================ */
+
+/* 内容区滚轮一格：搜索态移动候选，否则移动一行。
+ * 键盘的 up/down 一次走 3 行（翻页式跳读），滚轮刻意只走 1 行（跟手），
+ * 两者不共用步进量。钳制上限用渲染期记下的可见行数。 */
+static void help_scroll_one_line(int direction)
+{
+    if (g_help_search_active && g_help_search_count > 0) {
+        if (direction < 0) {
+            if (g_help_search_selected > 0)
+                g_help_search_selected--;
+            else
+                g_help_search_selected = g_help_search_count - 1;
+        } else {
+            g_help_search_selected++;
+            if (g_help_search_selected >= g_help_search_count)
+                g_help_search_selected = 0;
+        }
+        render_help_content();
+        return;
+    }
+
+    int offset = g_help_scroll_offset + direction;
+    if (offset < 0) offset = 0;
+
+    int max_offset = g_help_line_count - g_help_visible_lines;
+    if (max_offset < 0) max_offset = 0;
+    if (offset > max_offset) offset = max_offset;
+
+    g_help_scroll_offset = offset;
+    render_help_content();
+}
+
+/* ============================================================
+ * Right-click context menu
+ * ============================================================ */
+
+void help_context_menu_build(UIContextMenuLevel *level,
+                             const UIContextMenuContext *ctx)
+{
+    if (!level || !ctx) {
+        return;
+    }
+    ui_ctx_menu_set_title(level, i18n_get("keyaction.view.help"));
+
+    ui_ctx_menu_add_action(level, ACTION_HELP_SEARCH, 1, 0);
+    if (ctx->area == UI_CTX_AREA_CONTENT) {
+        ui_ctx_menu_add_action(level, ACTION_HELP_NEXT_MATCH,
+                               g_help_search_active ? 1 : 0, 0);
+        ui_ctx_menu_add_action(level, ACTION_HELP_UP, 1, 0);
+        ui_ctx_menu_add_action(level, ACTION_HELP_DOWN, 1, 0);
+        ui_ctx_menu_add_action(level, ACTION_HELP_LEFT, 1, 0);
+    } else {
+        ui_ctx_menu_add_action(level, ACTION_HELP_RIGHT, ctx->valid, 0);
+    }
+    ui_ctx_menu_add_separator(level);
+    ui_context_menu_add_pages_submenu(level);
+}
+
+int help_context_dispatch(ActionId action, const UIContextMenuContext *ctx)
+{
+    (void)ctx;
+    return handle_help_action(action);
+}
+
+static void help_open_context_menu(const UIMouseEvent *ev,
+                                   const UIMouseDecision *d)
+{
+    UIContextMenuContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.view = VIEW_HELP;
+    ctx.target = d->target;
+
+    if (d->target == UI_MOUSE_TARGET_SIDEBAR) {
+        ctx.area = UI_CTX_AREA_SIDEBAR;
+        if (d->row >= 0 && d->row < HELP_ITEM_COUNT) {
+            g_focus_area = FOCUS_SIDEBAR;
+            g_menu_selected_idx = d->row;
+            ctx.valid = 1;
+            ctx.index = d->row;
+            render_menu_sidebar(g_menu_selected_idx, help_sidebar_items,
+                                HELP_ITEM_COUNT);
+            render_help_content();
+        }
+    } else {
+        ctx.area = UI_CTX_AREA_CONTENT;
+        ctx.valid = 1;
+        if (g_focus_area != FOCUS_CONTENT) {
+            g_focus_area = FOCUS_CONTENT;
+            render_menu_sidebar(g_menu_selected_idx, help_sidebar_items,
+                                HELP_ITEM_COUNT);
+        }
+    }
+
+    (void)ui_context_menu_open(help_context_menu_build,
+                               help_context_dispatch,
+                               &ctx, ev->y, ev->x);
+}
+
+int help_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
+{
+    if (ev->right_click) {
+        help_open_context_menu(ev, d);
+        return 1;
+    }
+
+    if (d->target == UI_MOUSE_TARGET_SIDEBAR) {
+        if (d->row < 0 || d->row >= HELP_ITEM_COUNT) return 1;
+
+        /* 滚轮落在侧栏这一列：移动侧栏选中项。动作内部按 g_focus_area 分流，
+         * 所以先把焦点带到侧栏（否则滚的是正文）。 */
+        if (ev->wheel) {
+            g_focus_area = FOCUS_SIDEBAR;
+            return handle_help_action(ev->wheel < 0 ? ACTION_HELP_UP : ACTION_HELP_DOWN);
+        }
+        if (!ev->click) return 1;
+
+        const int already_selected = (g_menu_selected_idx == d->row);
+        g_focus_area = FOCUS_SIDEBAR;
+        g_menu_selected_idx = d->row;
+        render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
+        render_help_content();
+
+        /* 双击或"再点一次已选中的那条"＝本视图的"确认侧栏项"。
+         * 本视图的 enter 键位本来就绑在 ACTION_HELP_RIGHT 上（见 keymap 默认表：
+         * help.right = right/enter），语义是"末项返回主界面，其余进入内容区"，
+         * 所以这里复用同一个动作，不自创 ACTIVATE。 */
+        if (!ev->click || ev->wheel) return 1;
+        if (already_selected || ev->click_count >= 2) {
+            return handle_help_action(ACTION_HELP_RIGHT);
+        }
+        return 1;
+    }
+
+    /* 内容区：自由滚动的正文 */
+    if (ev->wheel) {
+        /* 滚轮落在正文上就该滚正文，与侧栏焦点无关；先把焦点带到指针这一列，
+         * 否则侧栏高亮还留在原处，看起来像"滚了个别的东西"。 */
+        if (g_focus_area != FOCUS_CONTENT) {
+            g_focus_area = FOCUS_CONTENT;
+            render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
+        }
+        help_scroll_one_line(ev->wheel < 0 ? -1 : 1);
+        return 1;
+    }
+
+    /* 帮助正文是一段连续文档，没有"条目"概念，所以点击没有可对应的选中项：
+     * 认领事件、什么都不做（不选行、不跳转），免得穿透到别的窗格再做一遍。 */
+    return 1;
 }

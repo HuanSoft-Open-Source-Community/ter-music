@@ -43,11 +43,14 @@ ter-music Quick Start Guide
   convert exactly; holes, overlaps, out-of-bounds rects and non-guillotine
   arrangements are reflowed in reading order and reported in the reload message
   or the editor instead of being rejected.
-  lyrics and vinyl are mutually exclusive: a legacy file that defines both keeps
-  vinyl; a lyrics-only layout still falls back to the vinyl animation (colored
-  blocks when colors are available; the original glyph animation otherwise)
-  when the track has no lyrics; the fallback skips its spectrum bars when the
-  layout already has a dedicated spectrum pane.
+  lyrics and vinyl may coexist: when both are in the layout, a track with lyrics
+  draws both panes; a track without lyrics makes the lyrics pane step aside (the
+  other panes fill its area) and it returns automatically as soon as a track
+  with lyrics is playing — no view switch or terminal resize is needed. A
+  lyrics-only layout still falls back to the vinyl animation when the track has
+  no lyrics (colored blocks when colors are available; the original glyph
+  animation otherwise); the fallback skips its spectrum bars when the layout
+  already has a dedicated spectrum pane.
   Pane content, including the info-pane album cover, is clipped inside its
   border; a pane too small for its renderer shows only background and border.
   The info pane rearranges itself by size: wide panes keep metadata and audio
@@ -116,8 +119,68 @@ ter-music Quick Start Guide
   4                 Shuffle Repeat
   5                 Folder Sequential
 
-  The main view also takes the mouse: click the bottom function-key bar to switch
-  pages, click the list or control bar to select and play.
+  The main view and every sub-view take the mouse (left button and wheel). One
+  event has exactly one owner — the popup that is open, or the pane the pointer
+  sits in — never two:
+    · Bottom function-key bar: a click fires that key's action; the wheel does
+      nothing there (the event is still consumed).
+    · Playlist pane: a click selects the row and plays that track (in the file
+      tree it expands/collapses the directory); the wheel moves the selection one
+      row up or down. This works for search results, the play queue and the file
+      tree alike, and the wheel never starts playback.
+    · Library browser (opened with M, it replaces the playlist pane): a click
+      selects the entry, clicking the selected entry again or double-clicking
+      drills down; the [S]/[R] lines trigger scan/rescan; the wheel moves the
+      selection (same as Up/Down).
+    · Control bar pane: a click presses the button under the cursor (the Volume
+      button and the progress row only take the focus, like the keyboard); the
+      wheel on the progress row seeks ∓5 s, on the Volume button adjusts ±5 %,
+      on the Speed button steps through the speed presets (wrapping at both
+      ends); other buttons do nothing.
+    · Lyrics pane: a click jumps to the line under the cursor; the wheel seeks to
+      the next / previous lyric line (it does not toggle lyric seek mode).
+    · Info, spectrum and vinyl panes: nothing is defined there, and the event is
+      consumed, so it never leaks into another pane.
+    · Sub-view sidebar and content area: a click selects, clicking the selected
+      row again or double-clicking is Enter; the wheel moves the selection within
+      the column under the pointer. On the Settings page it follows the section
+      you are in (option list, hotkey list, remote device list); on the Equalizer
+      page it only moves between bands — the wheel never changes a gain value; on
+      the Help page it scrolls one line at a time. The About view's content area
+      is read-only text and the Language view's sidebar holds a single "back"
+      entry, so the wheel there is only claimed and moves nothing. The highlight
+      follows the pointer: scrolling or clicking in the content column also moves
+      the keyboard focus there.
+    · While a popup is open (control-bar play mode / speed / volume menus, the
+      settings option picker, the layout editor's modal menus): the wheel scrolls
+      the popup wherever the pointer is; a click inside selects that entry, and
+      clicking the selected entry again or double-clicking is Enter (Space, i.e.
+      tick the field, in the multi-select picker); a click outside only closes the
+      popup — that click is swallowed and never reaches the pane behind it.
+    · Text input boxes are modal (search, scan directory, layout rename, hotkey
+      capture, numeric colour entry): mouse events inside them are ignored, so a
+      stray wheel event cannot corrupt the text being typed.
+    · Mouse modifier keys are not read — Shift/Ctrl held while clicking behaves
+      like a plain click. Only wheel up/down is requested; the horizontal wheel
+      and pointer motion (hover) are never reported to the program.
+    · A right click opens a context menu at the pointer: the menu is clamped to
+      the screen (it flips up/left at the edges and never covers the bottom hint
+      row). At most one overlay exists at a time; while a popup or menu is open a
+      right click only closes it and is swallowed — no stacking and no pass-through.
+      Inside a menu a left click selects, clicking the selected entry again or
+      double-clicking runs it, the wheel moves the selection and submenus open to
+      the side; Up/Down/Enter/Esc/Right work from the keyboard, any other key
+      closes and swallows. The list pane menu covers queue management, favourites,
+      add to playlist, folder/search/play history, playback controls and page
+      navigation, and always includes "switch the list pane between file and queue
+      mode"; a right click never plays the row. Every sub-view (Settings, History,
+      Playlist, Favorites, Help, Language) has its own page menu; the Info page has
+      only the Konami aurora entry; the layout editor opens its pane-actions menu on
+      right click. If a queue/history/library row changes after the menu opened,
+      row actions report "the list changed; please try again" and do nothing.
+      When a repainting lyrics/spectrum/vinyl pane overlaps the menu, the pane
+      refresh is composed with the menu backing and flushed once, so the menu
+      rectangle is never erased.
 
 5. Control Bar (when focused with C)
 -------------------------------------
@@ -247,7 +310,8 @@ ter-music Quick Start Guide
   (vinyl animation in the lyrics pane — colored blocks when colors are available;
   the separate spectrum pane keeps showing the audio-reactive bars)
   .lrc files in the same directory are loaded automatically.
-  Embedded lyrics (in ID3/APE tags) take priority when available.
+  Embedded lyrics (in ID3/APE tags; keys such as lyrics, lyrics-eng,
+  UNSYNCEDLYRICS and ©lyr) take priority when available.
   Ctrl+L enters/leaves lyric seek mode: ↑/↓ moves the cursor and seeks to that
   line's timestamp.
   It works in both front-end modes — the seek goes through the player facade to

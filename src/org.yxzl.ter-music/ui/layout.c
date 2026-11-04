@@ -20,6 +20,7 @@
 #include "ui/layout_state.h"
 #include "player/player.h"
 #include "ui/menu_internal.h"
+#include "ui/context_menu.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
 
@@ -42,6 +43,13 @@ static LayoutSpec g_current;
 static char g_current_id[LAYOUT_ID_MAX];
 static int g_initialized = 0;
 static int g_last_adjusted = 0;
+
+/* 最近一次 create_layout() 实际生效的"歌词格让位"值：
+ *   -1 = 尚未建过布局；0 = 歌词格在几何里；1 = 已让位（歌词格被摘掉）。
+ * 界面用它与 ui_layout_lyrics_pane_suppressed() 的期望值对账，不一致才重建。
+ * 边沿检测曾经把"上次算出的期望值"当成已生效值，启动自动播放时唯一的翻转
+ * 被首帧种子分支吃掉，歌词格因此再也不出现（2026-11-04 根因）。 */
+static int g_applied_lyrics_pane = -1;
 
 static int g_body_pair[LAYOUT_PANE_COUNT];
 static int g_border_pair[LAYOUT_PANE_COUNT];
@@ -987,13 +995,27 @@ int ui_layout_lyrics_pane_suppressed(void)
     if (!g_initialized) {
         ui_layout_init();
     }
-    /* 判定本身是纯函数（ui/layout_spec.c），这里只补上"有没有歌词"。 */
+    /* 判定本身是纯函数（ui/layout_spec.c），这里只补上"有没有歌词"。
+     * 只看快照：player_lyrics() 两个后端都返回常驻快照（remote 为
+     * &g_remote.lyrics，由 player_pump() 维护并顶 lyrics_revision），
+     * 不触发 D-Bus 拉取、无退避、不阻塞；has_lyrics 正是"本曲有无歌词"
+     * 的业务口径（render_lyrics() 也用它）。 */
+    const InfoLyrics *lyrics = player_lyrics();
     return layout_spec_lyrics_pane_suppressed(&g_current,
-                                              player_lyrics_total() > 0);
+                                              lyrics && lyrics->has_lyrics);
+}
+
+int ui_layout_lyrics_pane_applied(void)
+{
+    return g_applied_lyrics_pane;
 }
 
 void create_layout(void)
 {
+    /* 布局重建会换掉窗格矩形与行号，旧菜单的锚点/行上下文立即失效。
+     * 先关闭（不重绘，本函数末尾会完整重绘）。 */
+    ui_context_menu_close(0);
+
     static int view_initialized = 0;
     if (!view_initialized) {
         g_current_view = VIEW_MAIN;
@@ -1008,12 +1030,25 @@ void create_layout(void)
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
 
-    /* 让位只影响这一帧的几何：g_current 与用户布局文件都不动。 */
+    /* 让位只影响这一帧的几何：g_current 与用户布局文件都不动。
+     * applied 记录"本帧几何确实摘掉了歌词格"，供界面与期望值对账；
+     * 先落值再 resolve/validate，避免布局损坏走到 fallback/early-return 时
+     * 界面每 tick 重试重建、刷日志。 */
+    int suppressed = ui_layout_lyrics_pane_suppressed();
     LayoutSpec effective = g_current;
-    if (ui_layout_lyrics_pane_suppressed() &&
-        layout_spec_remove_pane(&effective, LAYOUT_PANE_LYRICS) != 0) {
-        effective = g_current;   /* 兜底：两格都画，不能因此没有界面 */
+    int applied = 0;
+    if (suppressed) {
+        if (layout_spec_remove_pane(&effective, LAYOUT_PANE_LYRICS) == 0) {
+            applied = 1;
+        } else {
+            effective = g_current;   /* 兜底：两格都画，不能因此没有界面 */
+        }
     }
+    if (applied != g_applied_lyrics_pane) {
+        log_debug("layout", "lyrics pane: want=%d applied=%d rows=%d cols=%d",
+                  suppressed, applied, rows, cols);
+    }
+    g_applied_lyrics_pane = applied;
 
     LayoutResolved resolved;
     char layout_err[192] = "";

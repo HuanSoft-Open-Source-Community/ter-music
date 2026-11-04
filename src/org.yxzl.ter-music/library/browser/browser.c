@@ -24,6 +24,8 @@
 #include "ui/ui.h"
 #include "ui/dialog.h"
 #include "ui/keymap.h"
+#include "ui/menu_internal.h"
+#include "i18n/i18n.h"
 #include "logger/logger.h"
 #include <ncursesw/ncurses.h>
 #include <string.h>
@@ -488,6 +490,139 @@ int handle_library_input(int ch) {
 
     handle_library_action(keymap_resolve(CTX_BROWSER, ch));
     request_ui_refresh(UI_DIRTY_PLAYLIST);
+    return 1;
+}
+
+/* ── 鼠标：浏览器占用的是主视图那块播放列表窗格 ─────────────────────
+ * 行→条目映射与 render_library_home / render_artist_list / … 同源：
+ * 标题在第 0 行、分隔线在第 1 行，列表从**窗格本地行 2** 起，
+ * 可见行数 = (max_y - 2) - 3。d->row 就是窗格本地行，因为区域矩形是
+ * 用 getbegyx(win_playlist) 量出来的。
+ *
+ * 这里必须自己认领这块窗格：浏览器激活时它显示的不是播放列表，旧代码
+ * 用 get_playlist_scroll_offset()/playlist_count() 去解释同一批行号，
+ * 点第 N 行会选中/播放播放列表的第 N 首（错位）。滚轮同理：归浏览器
+ * 的 browser.up/down，不再动播放列表的选中项。
+ *
+ * 交互约定与子视图一致：单击=选中，双击或"再点一次已选中的那一行"=进入
+ * （浏览器行没有"播放"语义，ACTIVATE 就是下钻）。 */
+/* ============================================================
+ * Right-click context menu
+ * ============================================================ */
+
+void library_context_menu_build(UIContextMenuLevel *level,
+                                const UIContextMenuContext *ctx)
+{
+    if (!level || !ctx) {
+        return;
+    }
+    ui_ctx_menu_set_title(level, i18n_get("context.title.library"));
+
+    ui_ctx_menu_add_action(level, ACTION_BROWSER_ACTIVATE, ctx->valid, 0);
+    ui_ctx_menu_add_action(level, ACTION_BROWSER_QUEUE_APPEND, ctx->valid, 0);
+    if (g_library_state.view == LIBRARY_HOME) {
+        ui_ctx_menu_add_separator(level);
+        ui_ctx_menu_add_action(level, ACTION_BROWSER_SCAN, 1, 0);
+        ui_ctx_menu_add_action(level, ACTION_BROWSER_RESCAN, 1, 0);
+    }
+    ui_ctx_menu_add_separator(level);
+    ui_ctx_menu_add_action(level, ACTION_LIBRARY_TOGGLE, 1, 1);
+    ui_context_menu_add_pages_submenu(level);
+}
+
+int library_context_dispatch(ActionId action, const UIContextMenuContext *ctx)
+{
+    if (action == ACTION_BROWSER_ACTIVATE ||
+        action == ACTION_BROWSER_QUEUE_APPEND) {
+        int bound = (g_library_state.view == LIBRARY_HOME)
+                        ? 4 : g_library_state.item_count;
+        if (!ctx || !ctx->valid || ctx->library_view != (int)g_library_state.view ||
+            ctx->index < 0 || ctx->index >= bound) {
+            ui_context_menu_report_stale("library");
+            return 1;
+        }
+    }
+    return handle_library_action(action);
+}
+
+int library_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d) {
+    extern WINDOW *win_playlist;
+    if (!g_library_state.active || !win_playlist) return 0;
+
+    int max_y, max_x;
+    getmaxyx(win_playlist, max_y, max_x);
+    (void)max_x;
+
+    const int content_h = max_y - 2;          /* 与 render_library_content 一致 */
+    const int visible = content_h - 3;
+    const int home = (g_library_state.view == LIBRARY_HOME);
+    const int bound = home ? 4 : g_library_state.item_count;
+
+    if (visible < 1 || bound <= 0) return 1;  /* 窗格太矮：无事可做但不穿透 */
+
+    const int row = d->row;
+    const int idx = g_library_state.scroll_offset + (row - 2);
+
+    if (ev->right_click) {
+        UIContextMenuContext ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.view = VIEW_MAIN;
+        ctx.target = UI_MOUSE_TARGET_BROWSER;
+        ctx.area = UI_CTX_AREA_LIBRARY;
+        ctx.library_view = (int)g_library_state.view;
+        ctx.library_count = bound;
+
+        if (row >= 2 && row < 2 + visible && idx >= 0 && idx < bound) {
+            g_library_state.selected_index = idx;
+            ctx.valid = 1;
+            ctx.index = idx;
+            request_ui_refresh(UI_DIRTY_PLAYLIST);
+        }
+
+        (void)ui_context_menu_open(library_context_menu_build,
+                                   library_context_dispatch,
+                                   &ctx, ev->y, ev->x);
+        return 1;
+    }
+
+    if (row >= 2 && row < 2 + visible && idx >= 0 && idx < bound) {
+        if (ev->click) {
+            int already_selected = (idx == g_library_state.selected_index);
+            g_library_state.selected_index = idx;
+
+            if (already_selected || ev->click_count >= 2) {
+                handle_library_action(ACTION_BROWSER_ACTIVATE);
+            }
+            request_ui_refresh(UI_DIRTY_PLAYLIST);
+            return 1;
+        }
+        if (ev->wheel) {
+            handle_library_action(ev->wheel < 0 ? ACTION_BROWSER_UP
+                                                : ACTION_BROWSER_DOWN);
+            request_ui_refresh(UI_DIRTY_PLAYLIST);
+            return 1;
+        }
+        return 1;
+    }
+
+    /* 首页列表下方的两个动作行（[S] 扫描目录 / [R] 刷新曲库）。
+     * 行号与显示门控都照抄 render_library_home：分隔线在 count+2 = 6 行，
+     * [S] 在 7 行、[R] 在 8 行，且要求画得下（line < content_h）。 */
+    if (home && g_library_state.scroll_offset + visible >= bound &&
+        content_h > 8 && ev->click) {
+        if (row == 7) {
+            handle_library_action(ACTION_BROWSER_SCAN);
+            request_ui_refresh(UI_DIRTY_PLAYLIST);
+            return 1;
+        }
+        if (row == 8) {
+            handle_library_action(ACTION_BROWSER_RESCAN);
+            request_ui_refresh(UI_DIRTY_PLAYLIST);
+            return 1;
+        }
+    }
+
+    /* 标题行、分隔线、底部提示行、空条目：事件归浏览器，不做动作 */
     return 1;
 }
 

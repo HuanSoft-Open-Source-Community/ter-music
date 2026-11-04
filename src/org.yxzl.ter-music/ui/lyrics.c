@@ -285,6 +285,9 @@ static void sanitize_ascii_lyric(char *dest, size_t dest_size, const char *src) 
 
 void render_lyrics(void) {
     if (!win_lyrics) {
+        log_debug("lyrics",
+                  "render_lyrics: lyrics pane window is not built "
+                  "(layout has no lyrics leaf for this track)");
         return;
     }
 

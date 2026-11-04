@@ -163,6 +163,10 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/progress_ui.c
     src/org.yxzl.ter-music/ui/playlist_render.c
     src/org.yxzl.ter-music/ui/mouse.c
+    src/org.yxzl.ter-music/ui/mouse_routing.c
+    src/org.yxzl.ter-music/ui/context_menu.c
+    src/org.yxzl.ter-music/ui/context_menu_layout.c
+    src/org.yxzl.ter-music/ui/context_menu_main.c
     src/org.yxzl.ter-music/ui/util.c
     src/org.yxzl.ter-music/ui/menus.c
     src/org.yxzl.ter-music/ui/settings.c

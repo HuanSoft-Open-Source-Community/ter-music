@@ -212,6 +212,9 @@ int prompt_text_input(WINDOW *win, int row, int col, const char *prompt,
         }
 
         if (rc == KEY_CODE_YES) {
+            /* 功能键（含 KEY_MOUSE、KEY_RESIZE）一律不当作文本输入：
+             * 文本输入框是模态的，主循环的全局鼠标分发此刻并没有运行，
+             * 滚轮与点击在这里没有定义，直接忽略才不会把键码写进缓冲区。 */
             escape_state = INPUT_ESCAPE_NONE;
             if (wch == KEY_ENTER) {
                 break;

@@ -15,7 +15,9 @@ stderr / 取退出码」这四件事做对：shell 里 fork pty 之后主端描�
 `drive` 补的就是这一点——脚本可以先下发一段按键、经 D-Bus 断言核心状态，
 再下发下一段（曲库/收藏/历史/搜索的播放回归需要这种节奏）。
 指令文件（普通文件，调用方 `printf '%s\n' ... >> file` 追加）每行一条指令：
-  key:<按键描述>   向 pty 写入按键（见 decode_keyspec 的转义与 <F9> 命名键）
+  key:<按键描述>   向 pty 写入按键（见 decode_keyspec 的转义与 <F9> 命名键，
+                   以及鼠标键 <click:列:行> <double:列:行> <right:列:行>
+                   <wheel-up:列:行> <wheel-down:列:行>，xterm SGR 编码，坐标从 1 开始）
   wait:<秒>        驱动侧等待（同时继续收屏）
   kill             SIGKILL 掉 TUI 并结束会话
   其余（含空行、# 开头）忽略
@@ -64,6 +66,14 @@ def decode_keyspec(text, named=None):
                 out += named[name]
                 i = end + 1
                 continue
+            if end != -1:
+                # 鼠标键 <click:列:行> <double:列:行> <wheel-up:列:行>
+                # <wheel-down:列:行>（xterm SGR，与 tui-probe.py 同一套编码）
+                seq = terminfo_keys.mouse_sequence(name)
+                if seq is not None:
+                    out += seq
+                    i = end + 1
+                    continue
         if char == "\\":
             nxt = text[i + 1] if i + 1 < length else ""
             if nxt == "x" and i + 3 < length:

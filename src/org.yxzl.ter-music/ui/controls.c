@@ -366,6 +366,9 @@ static void create_popup_window(PopupState *popup)
     WINDOW *w = newwin(popup->height, popup->width, popup->start_row, popup->start_col);
     if (!w) return;
     popup->popup_win = (void *)w;
+    log_debug("controls", "popup shown type=%d rect=%d,%d,%d,%d",
+              (int)popup->type, popup->start_row, popup->start_col,
+              popup->height, popup->width);
 }
 
 static void build_popup_option_text(PopupType type, int index,
@@ -691,9 +694,89 @@ int popup_handle_mouse_click(int screen_y, int screen_x)
         return 1;  /* fully handled */
     }
 
-    /* Click outside popup — dismiss, caller should continue */
+    /* Click outside popup — dismiss.
+     * 返回 0 表示"没有选中任何项"，但**事件本身已由弹层消费**：调用方
+     * （ui/mouse.c 的全局分发）不得再把这次点击交给弹层背后的窗格，
+     * 否则一次点击会同时"收起弹层"和"播放某一行"。 */
     popup_dismiss();
-    return 0;  /* dismissed, may continue with normal handling */
+    return 0;  /* dismissed */
+}
+
+/* ── 弹层展开状态与几何（供全局鼠标分发判归属） ─────────────────────
+ * 用 PopupState 的 start_row/start_col/height/width：弹层是画在 stdscr 上的
+ * 独立窗口，几何就是它自己的屏幕矩形，无需 getbegyx。 */
+
+int controls_popup_expanded(void)
+{
+    return (g_popup.active && g_popup.popup_win) ? 1 : 0;
+}
+
+/* 右键上下文菜单的竞争规则：弹层展开时右键=取消弹层并吞掉。 */
+int controls_popup_cancel(void)
+{
+    if (!controls_popup_expanded()) {
+        return 0;
+    }
+    popup_dismiss();
+    return 1;
+}
+
+int controls_popup_rect(UIRect *out)
+{
+    if (!out || !controls_popup_expanded()) return 0;
+    out->top = g_popup.start_row;
+    out->left = g_popup.start_col;
+    out->rows = g_popup.height;
+    out->cols = g_popup.width;
+    return 1;
+}
+
+/* 弹层展开时，滚轮一格 = 上下移动一个候选项。
+ * 边界钳制与只重绘弹层都由 handle_popup_action 负责（键盘共用同一条路径）。 */
+int controls_popup_handle_wheel(int delta)
+{
+    return handle_popup_action(delta < 0 ? ACTION_POPUP_UP : ACTION_POPUP_DOWN);
+}
+
+/* ── 控制区窗格上的滚轮：按指针所在的那一行决定做什么 ───────────────
+ * 窗格几何与按钮命中由调用方（ui/mouse.c，用 controls_compute_layout 与
+ * get_control_index_from_window_point）算好后传进来，这里只决定语义：
+ *   进度条行 → 快进/快退 UI_SEEK_STEP_SECONDS 秒
+ *   音量按钮 → 音量 ±UI_VOLUME_STEP_PERCENT
+ *   倍速按钮 → 档位循环（到头回绕，与音量/播放模式弹层的循环感一致）
+ *   其余按钮（上一首/播放/下一首/停止/播放模式）→ 不做事，但事件已归此处 */
+int controls_handle_wheel_control(int control_index, int delta)
+{
+    switch (control_index) {
+        case CONTROL_IDX_PROGRESS:
+            seek_relative_seconds(delta * UI_SEEK_STEP_SECONDS);
+            render_controls();
+            return 1;
+
+        case CONTROL_IDX_VOLUME:
+            player_adjust_volume(delta * UI_VOLUME_STEP_PERCENT);
+            render_controls();
+            return 1;
+
+        case CONTROL_IDX_SPEED: {
+            int count = player_speed_step_count();
+            if (count <= 0) return 1;
+            int idx = player_speed_index();
+            int next = ((idx + delta) % count + count) % count;
+            player_set_speed_index(next);
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s: %.2fx",
+                     i18n_get("controls.label.speed"), (double)player_speed());
+            update_controls_status(msg);
+            render_controls();
+            return 1;
+        }
+
+        default:
+            /* 其它按钮的滚轮语义未被定义：不臆造动作（例如滚轮切播放模式
+             * 会让人误触），但事件已归控制区，不再穿透。 */
+            return 1;
+    }
 }
 
 /* ============================================================

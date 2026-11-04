@@ -15,6 +15,7 @@
 #define UI_LAYOUT_EDITOR_H
 
 #include "ui/layout_spec.h"
+#include "ui/mouse.h"
 
 /** @brief 编辑器是否处于激活状态（设置输入分发据此拦截按键）。 */
 int layout_editor_active(void);
@@ -34,5 +35,33 @@ int layout_editor_handle_key(int ch);
 
 /** @brief 全屏重绘（打开与每次按键后由模块内部调用，外部一般无需直接调）。 */
 void layout_editor_render(void);
+
+/**
+ * @brief 模态菜单（动作/换类型/颜色/帮助）是否展开。
+ *
+ * 全局鼠标分发用它置"弹层展开"标志：展开期间滚轮与点击都归菜单，
+ * 不会落到菜单底下的设置页（竞争态由 ui/mouse_routing.c 统一裁决）。
+ */
+int layout_editor_menu_open(void);
+
+/** @brief 取模态菜单框的屏幕矩形；未展开时返回 0。 */
+int layout_editor_menu_rect(UIRect *out);
+
+/**
+ * @brief 右键入口：在指针位置打开"窗格操作"菜单（贴边翻转/钳制）。
+ *
+ * 与 Enter 打开的菜单同一份条目与几何，只是把 anchor 设为指针坐标；
+ * 终端小于编辑器最小尺寸时返回 0（不打开）。
+ */
+int layout_editor_open_actions_menu(int anchor_y, int anchor_x);
+
+/**
+ * @brief 处理一个鼠标事件。仅在 layout_editor_active() 时有意义。
+ * @param ev 归一化后的事件（坐标为屏幕坐标）
+ * @param d  归属判定结果：EDITOR_MENU 时 d->row/d->col 是菜单框本地坐标，
+ *           框外点击为 -1；EDITOR_PANE 时 d->row/d->col 原样是屏幕坐标。
+ * @return 1 = 已消费（编辑器全屏独占，事件永不穿透）
+ */
+int layout_editor_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d);
 
 #endif /* UI_LAYOUT_EDITOR_H */

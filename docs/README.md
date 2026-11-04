@@ -43,7 +43,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🕒 **Playback History**: Automatically records playback history for easy review
 - 📂 **Directory History**: Records recently visited music directories
 - 🎨 **Expanded Color Palette**: 24 preset themes + 1 custom slot with paired-color guard; Settings → Appearance lists all six panes (playlist / info / controls / spectrum / lyrics / vinyl) foreground and background separately, so pane colours follow the layout while sidebar / highlight / border stay global theme colours
-- 🧩 **Data-driven Layouts**: 7 JSON layout presets expressed as split trees; forced tiling is structural, old flat geometry is auto-fitted instead of rejected; the lyrics and vinyl panes can coexist, and a track without lyrics makes the lyrics pane step aside so the other panes fill its area (a lyrics-only layout keeps the in-pane vinyl fallback)
+- 🧩 **Data-driven Layouts**: 7 JSON layout presets expressed as split trees; forced tiling is structural, old flat geometry is auto-fitted instead of rejected; the lyrics and vinyl panes can coexist, and a track without lyrics makes the lyrics pane step aside so the other panes fill its area, while it returns automatically as soon as a track with lyrics is playing — no view switch or terminal resize is needed (a lyrics-only layout keeps the in-pane vinyl fallback)
 - 💾 **Persistent Storage**: SQLite-based storage (favorites, history, playlists) with automatic JSON migration from v1
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
@@ -677,8 +677,9 @@ The vinyl pane and the lyrics pane have a deliberate fallback relationship:
 - `lyrics` and `vinyl` may coexist in the same layout. When the current track has
   lyrics both panes render (lyric lines + the disc in its own pane); when it has
   none, the **lyrics pane steps aside** for that track — its leaf leaves the
-  resolved tree, the other panes take over the area, and it returns with the next
-  track that has lyrics. The stored layout and all colour settings are unchanged.
+  resolved tree, the other panes take over the area, and it returns automatically
+  with the next track that has lyrics, without a view switch or a terminal
+  resize. The stored layout and all colour settings are unchanged.
 - A `lyrics`-only layout still falls back to the vinyl animation inside the lyrics
   pane whenever the current track has no lyrics.
 - A `vinyl`-only layout shows the vinyl pane whether or not the track has lyrics.
@@ -845,6 +846,97 @@ rules and a custom-layout example.
 | `Esc` + `9` | Quit |
 | `q` | Exit program |
 
+#### Mouse Operations
+
+The whole interface listens to the left and right mouse buttons and the wheel.
+One mouse event belongs to exactly one owner — either the popup that is currently
+open or the pane the pointer sits in (see "Popups and menus" below). No event is
+ever handled twice.
+
+| Where | Click | Wheel (one notch) |
+| ----- | ----- | ----------------- |
+| Bottom function-key bar | Fires that key's action, exactly as pressing the key | Nothing (the event is still consumed here) |
+| Playlist pane | Select the row; a click plays that track, or toggles a directory in the file tree, just like `Enter` | Move the selection one row up/down — works on search results, the play queue and the file tree alike, and never starts playback |
+| Library browser (it replaces the playlist pane while open, `M`) | Select the entry; clicking the already-selected entry or double-clicking drills down; `[S]`/`[R]` lines trigger scan/rescan | Move the selection (same as `↑`/`↓`) |
+| Controls pane | Press the button under the cursor. The Volume button and the progress row only take the focus, like the keyboard | Progress row: seek ∓5 s; Volume button: ±5 %; Speed button: step through the speed presets (wraps at both ends); other buttons: nothing |
+| Lyrics pane | Jump to the line under the cursor | Seek to the previous / next lyric line (it does not switch lyric seek mode on or off) |
+| Info, spectrum and vinyl panes | Nothing defined there (the event is consumed, so it never leaks into another pane) | Nothing (consumed) |
+| Sub-view sidebar (Settings, History, Playlist, Favorites, Info, Help, Language) | Select the menu entry; clicking the selected entry again or double-clicking = `Enter` | Move the sidebar selection |
+| Sub-view content area | Select that row; clicking the selected row again or double-clicking = `Enter` | Move the content selection. On the Settings page the wheel follows the section you are in: option list, hotkey list, remote-device list; on the Equalizer page it moves **between bands only** — the wheel never changes a gain value; on the Help page it scrolls the document one line |
+
+The selection highlight follows the pointer: scrolling or clicking in the content
+column also moves the keyboard focus there, so what you see highlighted is what
+the next `Enter` will act on. Two exceptions have nothing to move — the About
+view's content area is read-only text, and the Language view's sidebar holds a
+single "back" entry; there the wheel is only claimed.
+
+Right clicks are not listed in the table above: they select the row under the
+pointer (never play it) and open the context menu described below. The main-view
+info pane has no right-click menu; right clicks on the controls, lyrics, spectrum,
+vinyl, info pane and hint-bar regions are consumed without opening anything.
+
+**Popups and menus (the case that used to double-fire).** While a popup is open —
+the control-bar popups (play mode, speed, volume), the settings option picker
+(including colour and Equalizer presets, and the multi-select info-field picker),
+or the layout editor's modal menus — the popup owns every mouse event:
+
+- the wheel scrolls the popup, wherever the pointer happens to be;
+- a click inside selects that entry; clicking the selected entry again, or
+  double-clicking, is `Enter` (in the multi-select picker it is `Space`, i.e. tick
+  that field);
+- a click outside just closes the popup. That click is swallowed and never reaches
+  the pane behind it, so a single click can no longer "close the popup *and* play
+  the row under it".
+
+Text input boxes are modal (search, scan directory, layout rename, hotkey capture,
+numeric colour entry): mouse events there are ignored outright, so a stray wheel
+event cannot corrupt the text being typed. Mouse modifier keys are not read —
+Shift/Ctrl held while clicking behaves exactly like a plain click. Only the wheel
+up/down is requested; horizontal wheel and pointer motion (hover) are not
+reported to the program.
+
+**Right-click context menus.** A right click opens a menu anchored at the pointer;
+the layout is chosen so the whole menu stays on screen (it flips up/left at the
+edges and never covers the bottom key-hint row):
+
+- at most one overlay exists at a time. While a control-bar popup, a settings
+  picker or a layout-editor modal menu is open, a right click only dismisses it
+  and is swallowed; it does not stack a second menu underneath. The same holds
+  while a context menu is open: a right click (or a left click outside) closes the
+  menu and that event never reaches the pane behind it;
+- inside a menu, a left click selects an entry, clicking the selected entry again
+  (or double-clicking) runs it, the wheel moves the selection, and a submenu entry
+  opens the next level to the side. `Up`/`Down` (the same bindings as popups),
+  `Enter`, `Esc` and `Right` work from the keyboard; any other key closes and
+  swallows the menu instead of acting on the view;
+- entries are disabled when their precondition does not hold (empty queue, no
+  track under the pointer, no playlists), and a checked mark shows the active
+  choice (play mode, library browser, list mode);
+- the list pane's menu covers queue management, favourites, adding to a playlist,
+  folder opening, search, play history, playback controls, play mode and page
+  navigation, and always includes **switch the list pane between file mode and
+  queue mode**. A right click never plays the row under the pointer; it only
+  selects it before opening the menu;
+- every sub-view (Settings, History, Playlist, Favorites, Help, Language) exposes
+  its own key operations in the same way. The layout editor's right click opens
+  its existing "pane actions" menu at the pointer instead of a second menu system.
+  The **F6 Info page** has exactly one entry: start/stop the Konami aurora flow.
+  The main-view info pane deliberately has **no** right-click menu (a right click
+  there is consumed); the controls, lyrics, spectrum, vinyl and hint-bar regions
+  likewise have no right-click menu — their left-click/wheel operations already
+  cover them;
+- menus are non-blocking and are re-composed every event-loop turn, so playback,
+  animations and the aurora overlay keep running while a menu is open. When a pane
+  that is being repainted overlaps the menu, its refresh is staged with
+  `wnoutrefresh`, the menu backing windows are re-asserted, and only one
+  `doupdate` follows — the terminal never receives a frame with pane pixels inside
+  the menu rectangle. Windows that do not intersect the menu keep the plain
+  `wrefresh` path. View
+  switches, terminal resizes, config/language reloads and layout rebuilds close
+  the menu before their redraw; if a queue, history or library row changes after
+  the menu was opened, row-specific actions are rejected with "the list changed;
+  please try again" instead of acting on a shifted row.
+
 ### 5.5 Play Mode Description
 
 Ter-Music features 17 play modes organized into 5 groups, with basic modes always available:
@@ -895,7 +987,7 @@ Ter-Music supports playback speed adjustment, allowing you to listen to audio at
 
 Ter-Music supports automatic loading of LRC format lyrics files:
 
-- **Embedded lyrics take priority**: The player first reads embedded lyrics from the audio file (FFmpeg/APE tags). If none are found, it falls back to external `.lrc` files.
+- **Embedded lyrics take priority**: The player first reads embedded lyrics from the audio file (FFmpeg/APE tags). If none are found, it falls back to external `.lrc` files. Recognized keys include `lyrics`, `LYRICS`, `lyrics-eng`, `UNSYNCEDLYRICS` and `©lyr`; this covers ID3 `USLT`/iTunes `lyrics-eng` tags as well as plain `lyrics`/`UNSYNCEDLYRICS`.
 - Lyrics files should be placed in the same directory as the audio file
 - Lyrics filename should match the audio filename, with extension `.lrc`
 - Example: `song.mp3` → `song.lrc`
@@ -1459,11 +1551,23 @@ Three scripts keep the split honest, and all of them run in CI:
 
 Regression suites accompany them: `scripts/test/run-unit-tests.sh` (path queue,
 play-queue contract, lyrics parsing, JSON reader, configuration diff, layout
-schema/geometry/state, including a per-cell rasterisation check that every
+schema/geometry/state, the ncurses-free mouse-event routing table, including a
+per-cell rasterisation check that every
 preset tiles without blanks) plus the
 end-to-end scripts `dbus-rpc-check.sh`, `config-migration-check.sh`,
 `lifecycle-e2e.sh`, `offline-reconnect-e2e.sh`, `multi-frontend-e2e.sh`,
-`paging-deepdir-e2e.sh` and `remote-frontend-e2e.sh`, and the performance probe
+`paging-deepdir-e2e.sh` and `remote-frontend-e2e.sh`, `mouse-tui-e2e.sh`
+(whose pty feeds real SGR click/wheel bytes to the TUI and asserts both the
+D-Bus outcome and which pane owned each event — including the popup-expanded
+case where an outside click must dismiss the popup without reaching through
+to the list behind it), `lyrics-pane-e2e.sh` (which replays a real pty capture
+through `vt_grid.py` and asserts that the lyrics pane appears on startup, steps
+aside for a track without lyrics, and returns automatically after a track switch
+without any keypress), `context-menu-e2e.sh` (which injects real right-click SGR
+bytes, asserts the menu anchor/clamping and nested submenus, executes queue and
+page actions through the menu, checks the info page has exactly the aurora entry,
+and verifies stale-row rejection after an external queue change), and the
+performance probe
 `perf-check.sh` (command-to-visible-state latency and idle CPU, both with
 thresholds; CI records the numbers without gating on them).
 
@@ -1499,7 +1603,16 @@ Ter-Music adopts a modular design, main modules include:
   (`layout.c`, `layout_spec.c`, `layout_geometry.c`, `layout_state.c`),
   `vinyl.c` (shared colored/glyph vinyl animation and the standalone pane), progress,
   visualizer drawing, `lyrics.c` (rendering only — the engine lives in the
-  core), braille art, image loader, dialogs, mouse, scrollbar, shared widgets
+  core), the text-cover module `ui/cover/` (`text_cover.c`: braille/ASCII/half-block
+  character covers for `ter-music cover` and `Info.GetCoverArt`; `cover_image.c`:
+  PNG/JPEG decode, grayscale and resize; `album_cover.h`: current-track cover path
+  and cache declarations, defined in `playlist/playlist.c`), dialogs, mouse
+  (`mouse.c`: ncurses edge layer that measures the panes; `mouse_routing.c`:
+  ncurses-free ownership rules, unit-tested in `scripts/test/test_mouse_routing.c`;
+  `context_menu.c`/`context_menu_main.c`: right-click menu stack, rendering and
+  the main-list menu; `context_menu_layout.c`: ncurses-free placement/scroll
+  maths, unit-tested in `scripts/test/test_context_menu_layout.c`),
+  scrollbar, shared widgets
 - **media/**: Core D-Bus session — `session.c` (bus name, introspection,
   dispatch), `rpc_common.c` (reply helpers, paging), `rpc_info.c`,
   `rpc_control.c`, `rpc_queue.c`, `rpc_lyrics.c`, `rpc_config.c`, plus the

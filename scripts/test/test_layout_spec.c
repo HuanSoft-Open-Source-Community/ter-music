@@ -995,6 +995,22 @@ static void test_lyrics_suppression_decision(void)
     CHECK(layout_spec_lyrics_pane_suppressed(&lyrics_only, 1) == 0,
           "suppress: lyrics-only layout with lyrics stays");
 
+    /* 布局里根本没有 lyrics 格（playlist + vinyl）：让位判定必须恒 0，
+     * 不能因为"没有歌词"就去摘一个不存在的格子（会走 remove 失败兜底）。 */
+    LayoutSpec no_lyrics = dual;
+    CHECK(layout_spec_remove_pane(&no_lyrics, LAYOUT_PANE_LYRICS) == 0,
+          "suppress: remove lyrics from dual");
+    CHECK(layout_spec_remove_pane(&no_lyrics, LAYOUT_PANE_INFO) == 0 &&
+          layout_spec_remove_pane(&no_lyrics, LAYOUT_PANE_CONTROLS) == 0 &&
+          layout_spec_remove_pane(&no_lyrics, LAYOUT_PANE_SPECTRUM) == 0,
+          "suppress: reduce to playlist + vinyl");
+    CHECK(layout_spec_pane_count(&no_lyrics) == 2,
+          "suppress: playlist + vinyl remain");
+    CHECK(layout_spec_lyrics_pane_suppressed(&no_lyrics, 0) == 0,
+          "suppress: layout without lyrics pane never evicts");
+    CHECK(layout_spec_lyrics_pane_suppressed(&no_lyrics, 1) == 0,
+          "suppress: layout without lyrics pane stable with lyrics");
+
     CHECK(layout_spec_lyrics_pane_suppressed(NULL, 0) == 0,
           "suppress: null spec is safe");
 
