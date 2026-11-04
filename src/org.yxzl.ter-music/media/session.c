@@ -23,7 +23,6 @@
 #include "audio/play_mode_util.h"
 #include "audio/play_queue.h"
 #include "queue/backend_queue.h"
-#include "ui/braille/braille_art.h"
 #include "lyrics/lyrics.h"
 #include "media/rpc.h"
 #include "media/session.h"

@@ -68,10 +68,23 @@ int ui_layout_pane_enabled(LayoutPaneKind kind);
 /**
  * @brief 当前布局同时含歌词与黑胶两格、且当前曲目没有歌词 → 歌词格临时让位。
  *
+ * 判定只读 `player_lyrics()` 的常驻快照（两个后端都由 pump 维护），
+ * 不触发整篇歌词拉取、不阻塞、无退避。
+ *
  * 让位只影响运行时的几何：布局本身、颜色设置与用户布局文件都不变，
  * 换到有歌词的曲目时歌词格自动回来。
  */
 int ui_layout_lyrics_pane_suppressed(void);
+
+/**
+ * @brief 最近一次 create_layout() 实际生效的"歌词格让位"值。
+ *
+ * 用于把期望值与实际生效几何对账：界面只在两者不一致时重建一次，
+ * 避免"期望值被当成了生效值"导致歌词格永久不回来。
+ * 只读；不改动布局。
+ * @return -1 = 尚未建过布局；0 = 歌词格在几何里；1 = 已让位（歌词格被摘掉）。
+ */
+int ui_layout_lyrics_pane_applied(void);
 
 /**
  * @brief 修改当前布局某窗格的前景/背景色并落盘（设置页窗格色行用）。

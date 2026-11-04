@@ -32,8 +32,9 @@ The bottom row (`LINES - 1`) is reserved for the `F1:... F9:...` hint bar.
   both panes are drawn (lyric lines, plus the disc in its own pane); without
   lyrics the **lyrics pane steps aside for that track** — its leaf is removed
   from the resolved tree, the sibling panes take over its area, and it comes
-  back as soon as a track with lyrics is playing. The stored layout, the colour
-  settings and the user layout file are not modified by this;
+  back automatically as soon as a track with lyrics is playing (no view switch
+  or terminal resize is needed). The stored layout, the colour settings and the
+  user layout file are not modified by this;
 - a `lyrics`-only layout still falls back to the vinyl animation inside the
   lyrics pane for a track without lyrics; the fallback skips its spectrum bars
   when the layout already has a dedicated `spectrum` pane;
@@ -338,9 +339,16 @@ emergency quit.
 
 ### Action menu
 
-`Enter` opens: split side by side, split stacked, change pane type, edit
-colours, restore 50/50, swap with next pane, remove pane, rename layout.
-`↑`/`↓` select, `Enter` runs, `Esc` returns.
+`Enter` opens (centred): split side by side, split stacked, change pane type,
+edit colours, restore 50/50, swap with next pane, remove pane, rename layout,
+save layout, editor help, close editor, and the four ±10 ratio adjustments.
+`↑`/`↓` select, `Enter` runs, `Esc` returns; the menu scrolls when the terminal
+is too short for every entry.
+
+A **right click** anywhere in the editor opens the same action menu anchored at
+the pointer instead of a second menu system. It is clamped to the screen exactly
+like the other context menus (flips up/left at the edges, never covers the bottom
+hint row), so every destructive editor operation stays reachable by mouse.
 
 ### Colour panel
 
@@ -526,8 +534,8 @@ scrollbar in the reserved column; the three hint lines stay at the bottom.
 - **The lyrics pane disappeared although the layout has one**: the layout also
   has a `vinyl` pane and the current track has no lyrics, so the lyrics pane is
   stepping aside for that track and the other panes fill its area. Start a track
-  with lyrics (or remove the `vinyl` pane) to get it back; the layout itself is
-  untouched.
+  with lyrics and the pane comes back automatically (no view switch or terminal
+  resize is needed); the layout itself is untouched.
 - **I selected a layout but the list is still the old one**: press
   `Reload Layouts` in Settings.
 - **No layout files are installed**: the compiled-in `classic` tree is used and

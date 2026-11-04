@@ -1275,6 +1275,13 @@
   <string key="layout.editor.action_swap">与下一个窗格交换</string>
   <string key="layout.editor.action_remove">删除窗格</string>
   <string key="layout.editor.action_rename">重命名布局</string>
+  <string key="layout.editor.action_save">保存布局</string>
+  <string key="layout.editor.action_help">编辑器帮助</string>
+  <string key="layout.editor.action_close">退出编辑器</string>
+  <string key="layout.editor.action_ratio_row_dec">左右分栏比例 -10</string>
+  <string key="layout.editor.action_ratio_row_inc">左右分栏比例 +10</string>
+  <string key="layout.editor.action_ratio_col_dec">上下分栏比例 -10</string>
+  <string key="layout.editor.action_ratio_col_inc">上下分栏比例 +10</string>
   <string key="layout.editor.pick_kind">选择窗格类型</string>
   <string key="layout.editor.colors_title">窗格颜色</string>
   <string key="layout.editor.color_inherit">继承</string>
@@ -1308,4 +1315,23 @@
   <string key="layout.preset.focus">专注</string>
   <string key="layout.preset.stage">舞台</string>
   <string key="layout.preset.neon">霓虹</string>
+
+  <!-- ===== Right-click context menus ===== -->
+  <string key="context.title.list">列表操作</string>
+  <string key="context.title.library">曲库操作</string>
+  <string key="context.menu.queue">队列管理</string>
+  <string key="context.menu.playback">播放控制</string>
+  <string key="context.menu.playmode">播放模式</string>
+  <string key="context.menu.playlist">加入歌单</string>
+  <string key="context.menu.pages">前往页面</string>
+  <string key="context.hint">↑↓ 选择 · Enter 执行 · Esc 关闭</string>
+  <string key="context.mode.to_queue">切换到队列模式</string>
+  <string key="context.mode.to_file">切换到文件模式</string>
+  <string key="context.playlist.none">（暂无歌单）</string>
+  <string key="context.playlist.manage">管理歌单…</string>
+  <string key="context.playlist.create">新建歌单…</string>
+  <string key="context.playlist.remove_track">从歌单移除</string>
+  <string key="context.info.rainbow_on">启动科乐美流光模式</string>
+  <string key="context.info.rainbow_off">关闭科乐美流光模式</string>
+  <string key="context.stale">列表已变化，请重试</string>
 </lang>

@@ -82,6 +82,51 @@ _BYTE_ESCAPES = {
     "^": 0x5e,
 }
 
+# xterm SGR 鼠标编码（tui-probe.py 与 lifecycle-driver.py 共用）。
+# 按钮号：0=左键，1=中键，2=右键，64=滚轮上，65=滚轮下；列/行从 1 开始，
+# ncurses 各减 1 之后才是程序里的 0 基坐标。实测（ncursesw，TERM=xterm-256color）：
+#   · 左键按下+松开同一格 → 只报一个 BUTTON1_CLICKED（不会再补 RELEASED）；
+#   · 两次快速左击      → 只报一个 BUTTON1_DOUBLE_CLICKED（第一次的 CLICKED
+#                       被合掉），所以整段必须一次写入 pty 才能触发双击；
+#   · 右键按下          → 程序只申请 BUTTON3_PRESSED，按下即一条事件；
+#   · 滚轮              → 按下时报 BUTTON4/BUTTON5_PRESSED，松开不再报；
+#   · 老式 X10 编码（ESC [ M 三字节）在该 terminfo 下不被解析，故只用 SGR。
+_MOUSE_BUTTONS = {"click": 0, "double": 0, "right": 2, "right-click": 2,
+                  "wheel-up": 64, "wheelup": 64,
+                  "wheel-down": 65, "wheeldown": 65}
+
+
+def _sgr_mouse_event(button, col, row):
+    """一次完整的按下+松开，两个字节串合成一段（调用方一次写入）。"""
+    return ("\x1b[<%d;%d;%dM\x1b[<%d;%d;%dm" % (button, col, row,
+                                                button, col, row)).encode()
+
+
+def mouse_sequence(token):
+    """`<click:列:行>` / `<double:列:行>` / `<right:列:行>` /
+    `<wheel-up:列:行>` / `<wheel-down:列:行>` → 写入 pty 的字节串；
+    不是鼠标键时返回 None。
+
+    双击是两个"按下+松开"连在一起：ncurses 靠时间间隔判定双击，分开两次
+    写入就只会得到两次单击。
+    """
+    parts = token.split(":")
+    kind = parts[0]
+    if kind not in _MOUSE_BUTTONS:
+        return None
+    if len(parts) != 3:
+        raise ValueError("鼠标键需要 <名:列:行>，收到 <%s>" % token)
+    try:
+        col, row = int(parts[1]), int(parts[2])
+    except ValueError:
+        raise ValueError("鼠标键的列/行必须是整数，收到 <%s>" % token)
+    if col < 1 or row < 1:
+        raise ValueError("鼠标键的列/行从 1 开始，收到 <%s>" % token)
+    once = _sgr_mouse_event(_MOUSE_BUTTONS[kind], col, row)
+    if kind == "double":
+        return once + once
+    return once
+
 
 def xterm_defaults():
     return dict(XTERM_FALLBACK)

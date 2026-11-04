@@ -1,9 +1,21 @@
+/**
+ * @file cover_image.c
+ * @brief 封面图片解码与像素缓冲工具（实现）
+ *
+ * 拆自旧的 `ui/braille/`：`load_png_image` / `load_jpeg_image` /
+ * `load_image` 原在 `image_loader.c`，`rgba_to_gray` / `resize_gray` /
+ * `threshold_gray` 原在 `braille_art.c`——三者都是与字符集无关的像素
+ * 运算，TUI 半块封面与文本封面字符集共用，故归入本文件。
+ * 函数体逐字搬迁，无行为改动。
+ */
+
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <png.h>
 #include <jpeglib.h>
-#include "ui/braille/braille_art.h"
+#include "ui/cover/cover_image.h"
 
 int load_png_image(const char *filepath, unsigned char **rgba_out, int *w, int *h) {
     FILE *fp = fopen(filepath, "rb");
@@ -222,4 +234,64 @@ int load_image(const char *filepath, unsigned char **rgba_out, int *w, int *h) {
     }
 
     return -1;
+}
+
+/* ── 像素缓冲工具（原 braille_art.c:7-63，逐字搬迁） ── */
+
+int rgba_to_gray(const unsigned char *rgba, int w, int h, unsigned char *gray) {
+    if (!rgba || !gray || w <= 0 || h <= 0) return -1;
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int idx = (y * w + x) * 4;
+            float r = rgba[idx];
+            float g = rgba[idx + 1];
+            float b = rgba[idx + 2];
+            gray[y * w + x] = (unsigned char)(0.299f * r + 0.587f * g + 0.114f * b + 0.5f);
+        }
+    }
+    return 0;
+}
+
+int resize_gray(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw, int dh) {
+    if (!src || !dst || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return -1;
+
+    float scale_x = (float)sw / dw;
+    float scale_y = (float)sh / dh;
+
+    for (int dy = 0; dy < dh; dy++) {
+        for (int dx = 0; dx < dw; dx++) {
+            float src_x = dx * scale_x;
+            float src_y = dy * scale_y;
+
+            int x0 = (int)floorf(src_x);
+            int y0 = (int)floorf(src_y);
+            int x1 = (x0 + 1 < sw) ? x0 + 1 : x0;
+            int y1 = (y0 + 1 < sh) ? y0 + 1 : y0;
+
+            float fx = src_x - x0;
+            float fy = src_y - y0;
+
+            float v00 = src[y0 * sw + x0];
+            float v10 = src[y0 * sw + x1];
+            float v01 = src[y1 * sw + x0];
+            float v11 = src[y1 * sw + x1];
+
+            float interp = (1 - fx) * (1 - fy) * v00 +
+                          fx * (1 - fy) * v10 +
+                          (1 - fx) * fy * v01 +
+                          fx * fy * v11;
+
+            dst[dy * dw + dx] = (unsigned char)(interp + 0.5f);
+        }
+    }
+    return 0;
+}
+
+void threshold_gray(const unsigned char *gray, int w, int h, unsigned char *binary, uint8_t thresh) {
+    if (!gray || !binary || w <= 0 || h <= 0) return;
+
+    for (int i = 0; i < w * h; i++) {
+        binary[i] = (gray[i] >= thresh) ? 1 : 0;
+    }
 }

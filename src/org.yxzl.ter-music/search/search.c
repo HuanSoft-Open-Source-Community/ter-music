@@ -195,6 +195,12 @@ void search_prompt(void) {
             media_session_tick();
             continue;
         }
+        if (ch == KEY_MOUSE || ch == KEY_RESIZE) {
+            /* 鼠标事件与终端尺寸变化都不是可输入字符：这两类键码都 >255，
+             * 截断成 char 会直接写坏搜索串（旧行为）。搜索框不定义滚轮与
+             * 点击语义，整个忽略，退出输入框后由主循环正常处理鼠标。 */
+            continue;
+        }
         if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
             if (strlen(input) > 0) {
                 size_t len = strlen(input) - 1;
@@ -206,7 +212,8 @@ void search_prompt(void) {
                 wprintw(win_controls, "%s", input);
                 wrefresh(win_controls);
             }
-        } else if (ch >= 32) {
+        } else if (ch >= 32 && ch < 256) {
+            /* 只接受单字节可打印字符（UTF-8 输入按字节逐个落到这里） */
             size_t len = strlen(input);
             input[len] = (char)ch;
             input[len + 1] = '\0';

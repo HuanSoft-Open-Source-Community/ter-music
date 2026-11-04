@@ -18,6 +18,10 @@
  * 当前前景合成好再 wrefresh；不再出现“基础色帧先刷到终端、下一轮才被
  * 流光覆盖”的交替闪动。UI 是单线程，这里不存在数据竞态。
  *
+ * 菜单叠加：菜单展开且与窗口相交时，ui_refresh_window() 不再直接
+ * wrefresh，而是把窗口压入虚拟屏后用菜单 backing 覆盖回来，最后只
+ * doupdate 一次；终端不会收到“窗格盖住菜单”的中间帧。
+ *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
@@ -27,6 +31,7 @@
 #include "logger/logger.h"
 #include "player/player.h"
 #include "ui/cover_art_cells.h"
+#include "ui/context_menu.h"
 #include "ui/lyrics.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
@@ -240,7 +245,13 @@ static void rainbow_paint_window(WINDOW *win, int offset)
     }
 }
 
-/* 主视图窗格统一刷新入口：先合成前景，再刷新。未激活时等价 wrefresh。 */
+/* 主视图窗格统一刷新入口：先合成前景，再刷新。
+ *
+ * 菜单展开且与 win 相交时不能直接 wrefresh：wrefresh 会 doupdate 一帧
+ * 把菜单像素盖掉，下一轮才补回，形成可见闪烁。此时改为单次合成：
+ *   wnoutrefresh(win)  -> 菜单 backing 逐层压回虚拟屏 -> 唯一一次 doupdate
+ * 终端差异比较后菜单矩形内没有变化，永远看不到窗格像素。
+ * 菜单自身/不相交窗口仍走原 wrefresh，零额外开销。 */
 int ui_refresh_window(WINDOW *win)
 {
     if (!win) {
@@ -249,6 +260,23 @@ int ui_refresh_window(WINDOW *win)
     if (g_active && g_steps > 0) {
         rainbow_paint_window(win, rainbow_offset_now());
     }
+
+    if (ui_context_menu_active() &&
+        !ui_context_menu_owns_window((const void *)win)) {
+        int top = 0, left = 0, rows = 0, cols = 0;
+        getbegyx(win, top, left);
+        getmaxyx(win, rows, cols);
+        if (ui_context_menu_intersects_rect(top, left, rows, cols)) {
+            if (wnoutrefresh(win) == ERR) {
+                return ERR;
+            }
+            int levels = ui_context_menu_reassert();
+            log_debug("context_menu",
+                      "overlay reassert after refresh levels=%d", levels);
+            return doupdate();
+        }
+    }
+
     return wrefresh(win);
 }
 
@@ -305,6 +333,16 @@ void ui_rainbow_paint(void)
         if (sel) {
             rainbow_paint_window(sel, offset);
             (void)wnoutrefresh(sel);
+        }
+    }
+
+    /* 右键菜单是最高层（根→子菜单顺序合成），必须盖在窗格与弹层之上。 */
+    int menu_levels = ui_context_menu_level_count();
+    for (int i = 0; i < menu_levels; i++) {
+        WINDOW *menu = (WINDOW *)ui_context_menu_window_at(i);
+        if (menu) {
+            rainbow_paint_window(menu, offset);
+            (void)wnoutrefresh(menu);
         }
     }
 

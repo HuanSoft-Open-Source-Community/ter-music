@@ -277,6 +277,18 @@ jobs:
       - name: Content playback (browser / favourites / history / search)
         run: scripts/test/content-playback-e2e.sh --bin ./build/ter-music
 
+      - name: Global mouse (click / wheel) routing and actions
+        run: scripts/test/mouse-tui-e2e.sh --bin ./build/ter-music
+
+      - name: Right-click context menus (anchor, depth, per-page, stale guard)
+        run: scripts/test/context-menu-e2e.sh --bin ./build/ter-music
+
+      - name: Lyrics pane steps aside and returns automatically (remote front end)
+        run: scripts/test/lyrics-pane-e2e.sh --bin ./build/ter-music
+
+      - name: Lyrics pane steps aside and returns automatically (local front end)
+        run: scripts/test/lyrics-pane-e2e.sh --bin ./build/ter-music --frontend local
+
       - name: Big library delivered in chunks (600 entries)
         run: scripts/test/big-library-e2e.sh --bin ./build/ter-music
 

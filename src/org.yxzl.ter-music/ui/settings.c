@@ -73,6 +73,30 @@ static WINDOW *g_sel_win = NULL; /* popup sub-window */
 static int g_sel_multiselect = 0; /* 1 = 多选模式（信息显示字段） */
 static int g_sel_work_mask = 0;   /* 多选模式下的工作掩码 */
 
+/* 选择弹层的行几何：由 draw_sel_menu() 每帧记录，鼠标命中只读不推导。 */
+static int g_sel_visible_opts = 0;
+static int g_sel_scroll_offset = 0;
+static int g_sel_count_shown = 0;
+
+/* 设置内容区列表的几何：由 render_settings_option_group() 每帧记录。
+ * top<0 = 这一帧没画列表（分区为空或空间不足）。 */
+static int g_settings_list_top = -1;
+static int g_settings_list_visible = 0;
+static int g_settings_list_off = 0;
+
+/* 快捷键页列表的几何：由 render_hotkey_editor() 每帧记录。 */
+static int g_hotkey_list_top = -1;
+static int g_hotkey_list_visible = 0;
+
+/* EQ 页的频带是按**列**排的（每 band 宽 EQ_COL_W 列，跨若干行），
+ * 所以命中要记的是列起点与可用行范围，由 render_eq_visual() 每帧记录。
+ * bottom<0 = 这一帧没画频带。 */
+static int g_eq_bars_top = -1;
+static int g_eq_bars_bottom = -1;
+static int g_eq_col0 = 0;
+static int g_eq_col_w = 5;
+static int g_eq_max_bands = 0;
+
 /* ============================================================
  * Settings option arrays
  * ============================================================ */
@@ -384,6 +408,8 @@ static void rerender_settings_view(void);
 /* Forward declarations for EQ visual UI */
 static void render_eq_visual(void);
 static int handle_eq_action(ActionId action);
+/* 设置页动作入口：键盘解析结果与鼠标共用（定义在本文件末尾的输入分发处）。 */
+static int handle_settings_action(ActionId action);
 
 /* Reset settings view state (called from menus.c on view switch) */
 void reset_settings_view(void)
@@ -1117,6 +1143,9 @@ static void render_settings_option_group(int start_y, int max_y,
         visible = 1;
     }
     if (spec.count <= 0 || start_y > last_row) {
+        g_settings_list_top = -1;
+        g_settings_list_visible = 0;
+        g_settings_list_off = 0;
         return;
     }
 
@@ -1134,6 +1163,11 @@ static void render_settings_option_group(int start_y, int max_y,
     if (off < 0) {
         off = 0;
     }
+
+    /* 渲染期记下列表几何，鼠标命中直接按这一帧换算（滚动条也是同一份 off） */
+    g_settings_list_top = start_y;
+    g_settings_list_visible = visible;
+    g_settings_list_off = off;
 
     int shown = 0;
     for (int i = 0; i < visible && off + i < spec.count; i++) {
@@ -2199,6 +2233,12 @@ static void draw_sel_menu(void)
     if (g_sel_idx >= visible_opts)
         scroll_offset = g_sel_idx - visible_opts + 1;
 
+    /* 渲染期记下弹层的行几何：鼠标命中用"画出来的这一帧"，
+     * 不在命中判定里再抄一遍 scroll_offset 的推导。 */
+    g_sel_visible_opts = visible_opts;
+    g_sel_scroll_offset = scroll_offset;
+    g_sel_count_shown = n;
+
     for (int i = 0; i < visible_opts; i++)
         mvwprintw(g_sel_win, i + 1, 1, " %-*s ", box_w - 4, "");
 
@@ -2231,13 +2271,9 @@ static void draw_sel_menu(void)
  * Selection menu — input handling
  * ============================================================ */
 
-static int handle_sel_input(int ch)
+static int handle_sel_action(ActionId action)
 {
     if (!g_sel_active) return 0;
-
-    /* Esc 是系统保留键；其余键位由 select_menu 上下文解析。 */
-    ActionId action = (ch == 27) ? ACTION_SELECT_CANCEL
-                                 : keymap_resolve(CTX_SELECT_MENU, ch);
 
     switch (action) {
         case ACTION_SELECT_UP:
@@ -2320,6 +2356,24 @@ static int handle_sel_input(int ch)
         default:
             return 0;
     }
+}
+
+/* 右键上下文菜单的竞争规则：设置选择弹层展开时右键=取消并吞掉。 */
+int settings_cancel_sel_menu(void)
+{
+    if (!g_sel_active) {
+        return 0;
+    }
+    handle_sel_action(ACTION_SELECT_CANCEL);
+    return 1;
+}
+
+static int handle_sel_input(int ch)
+{
+    /* Esc 是系统保留键；其余键位由 select_menu 上下文解析。 */
+    ActionId action = (ch == 27) ? ACTION_SELECT_CANCEL
+                                 : keymap_resolve(CTX_SELECT_MENU, ch);
+    return handle_sel_action(action);
 }
 
 static void activate_settings_current_option(void)
@@ -2512,7 +2566,11 @@ static void render_hotkey_editor(int start_y, int max_y)
         attroff(A_BOLD);
     }
 
-    if (total <= 0 || message_row <= list_top) return;
+    if (total <= 0 || message_row <= list_top) {
+        g_hotkey_list_top = -1;
+        g_hotkey_list_visible = 0;
+        return;
+    }
 
     if (g_hotkey_selected < 0) g_hotkey_selected = 0;
     if (g_hotkey_selected >= total) g_hotkey_selected = total - 1;
@@ -2526,6 +2584,10 @@ static void render_hotkey_editor(int start_y, int max_y)
         g_hotkey_offset = g_hotkey_selected - visible + 1;
     }
     if (g_hotkey_offset < 0) g_hotkey_offset = 0;
+
+    /* 渲染期记下快捷键列表几何，供鼠标命中（g_hotkey_offset 本身就是滚动量） */
+    g_hotkey_list_top = list_top;
+    g_hotkey_list_visible = visible;
 
     for (int row = 0; row < visible && g_hotkey_offset + row < total; row++) {
         ActionId id = ACTION_NONE;
@@ -2902,6 +2964,11 @@ static void render_eq_visual(void)
     }
 
     /* Draw boost bars (row 0 = top = +12dB) */
+    g_eq_bars_top = start_y;      /* 频带命中区的第一行（渲染期记录） */
+    g_eq_bars_bottom = -1;
+    g_eq_col0 = area.content_x;
+    g_eq_col_w = EQ_COL_W;
+    g_eq_max_bands = max_bands;
     for (int row = 3; row >= 0; row--) {
         for (int b = 0; b < max_bands; b++) {
             int col = b * EQ_COL_W;
@@ -2993,6 +3060,7 @@ static void render_eq_visual(void)
             mvaddstr(start_y, area.content_x + b * EQ_COL_W, cell);
         }
     }
+    g_eq_bars_bottom = start_y;   /* 命中区最后一行＝增益值那一行 */
     start_y++;
 
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
@@ -3125,6 +3193,14 @@ int handle_settings_input(int ch)
         return 1;
     }
 
+    /* 键盘与鼠标共用同一条动作路径。鼠标**不合成按键码**：用户可以改键，
+     * 合成按键在改键后会失灵或做错事。 */
+    return handle_settings_action(action);
+}
+
+/* 设置页动作入口（CTX_SETTINGS 解析出的动作，或鼠标滚轮/点击映射出的动作）。 */
+static int handle_settings_action(ActionId action)
+{
     switch (action) {
         case ACTION_SETTINGS_UP:
             if (g_focus_area == FOCUS_SIDEBAR) {
@@ -3232,5 +3308,342 @@ int handle_settings_input(int ch)
 
         default:
             return 0;
+    }
+}
+
+/* ============================================================
+ * Settings view mouse handling
+ *
+ * 归属（在不在弹层里、侧栏列还是内容列）已由 ui/mouse_routing.c 判完，
+ * 这里只把 d->row / 屏幕坐标解释成本页的条目，并复用键盘那条动作路径。
+ * 竞争态要点：选择弹层展开时事件**不会**走到下面的侧栏/内容分支，
+ * 弹层外的点击在上层已经"收起 + 吞掉"，因此不存在"一次点击既关弹层
+ * 又改了背后那一项"的情况。
+ * ============================================================ */
+
+/* 内容区列表的某一行对应哪个设置项。只读渲染期记下的那一帧几何，
+ * 不在这里重抄 start_y / off 的推导（各分区的算法并不一样）。 */
+static int settings_option_at_screen_row(int screen_y)
+{
+    if (g_settings_list_top < 0 || g_settings_list_visible <= 0) return -1;
+
+    SettingsSectionSpec spec = get_active_settings_section_spec();
+    if (spec.count <= 0) return -1;
+
+    int line = screen_y - g_settings_list_top;
+    if (line < 0 || line >= g_settings_list_visible) return -1;
+
+    int pos = g_settings_list_off + line;
+    if (pos < 0 || pos >= spec.count) return -1;
+    return spec.indices[pos];
+}
+
+/* 快捷键页：行 → 可绑定动作序号 */
+static int hotkey_row_at_screen_row(int screen_y)
+{
+    if (g_hotkey_list_top < 0 || g_hotkey_list_visible <= 0) return -1;
+
+    int line = screen_y - g_hotkey_list_top;
+    if (line < 0 || line >= g_hotkey_list_visible) return -1;
+
+    int idx = g_hotkey_offset + line;
+    if (idx < 0 || idx >= actions_bindable_count()) return -1;
+    return idx;
+}
+
+/* 均衡器页：频带按**列**排，命中要看列起点与行范围（都来自 render_eq_visual） */
+static int eq_band_at_point(int screen_y, int screen_x)
+{
+    if (g_eq_bars_top < 0 || g_eq_bars_bottom < g_eq_bars_top) return -1;
+    if (screen_y < g_eq_bars_top || screen_y > g_eq_bars_bottom) return -1;
+    if (g_eq_max_bands <= 0 || g_eq_col_w <= 0) return -1;
+
+    int rel = screen_x - g_eq_col0;
+    if (rel < 0) return -1;
+
+    int band = rel / g_eq_col_w;
+    if (band >= g_eq_max_bands) return -1;
+    return band;
+}
+
+/* 把焦点交给内容列：内容项的高亮只在 g_focus_area==FOCUS_CONTENT 时画得出来，
+ * 所以滚轮/点击要让焦点跟着指针走，并重绘侧栏去掉旧高亮。 */
+static void settings_focus_content_area(void)
+{
+    if (g_focus_area == FOCUS_CONTENT) return;
+    g_focus_area = FOCUS_CONTENT;
+    render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
+}
+
+static void settings_select_sidebar_row(int row)
+{
+    g_focus_area = FOCUS_SIDEBAR;
+    g_menu_selected_idx = row;
+    render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
+    render_settings_content();
+}
+
+/* 选择弹层（含颜色、EQ 预设、信息显示字段多选）上的鼠标事件。
+ * d->row 是弹层窗口本地行：0 是标题行，1.. 是候选项行。 */
+static void settings_handle_sel_menu_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
+{
+    if (ev->wheel) {
+        handle_sel_action(ev->wheel < 0 ? ACTION_SELECT_UP : ACTION_SELECT_DOWN);
+        return;
+    }
+    if (!ev->click) return;
+
+    if (d->row < 0) {
+        /* 弹层外：只收起，绝不穿透（穿透会连带改到背后的那一项） */
+        handle_sel_action(ACTION_SELECT_CANCEL);
+        return;
+    }
+
+    const int line = d->row - 1;   /* 候选项从窗口第 1 行起，与 draw_sel_menu 同构 */
+    if (line < 0 || line >= g_sel_visible_opts) return;   /* 标题/边框/提示行 */
+
+    const int opt = g_sel_scroll_offset + line;
+    if (opt < 0 || opt >= g_sel_count_shown) return;      /* 空行 */
+
+    const int already_selected = (g_sel_idx == opt);
+    g_sel_idx = opt;
+    draw_sel_menu();
+    refresh();
+
+    if (!already_selected && ev->click_count < 2) return;
+
+    /* 双击或再点一次已选中的那条 = 回车（多选时等同空格勾选，
+     * 更符合"点一下就是选一项"的直觉） */
+    handle_sel_action(g_sel_multiselect ? ACTION_SELECT_TOGGLE : ACTION_SELECT_ACCEPT);
+}
+
+/* ============================================================
+ * Right-click context menu
+ * ============================================================ */
+
+void settings_context_menu_build(UIContextMenuLevel *level,
+                                 const UIContextMenuContext *ctx)
+{
+    if (!level || !ctx) {
+        return;
+    }
+    ui_ctx_menu_set_title(level, i18n_get("keyaction.view.settings"));
+
+    const int content = (ctx->area == UI_CTX_AREA_CONTENT);
+    const int valid = ctx->valid ? 1 : 0;
+
+    ui_ctx_menu_add_action(level, ACTION_SETTINGS_ACTIVATE, valid, 0);
+    if (content) {
+        ui_ctx_menu_add_action(level, ACTION_SETTINGS_RIGHT, valid, 0);
+        ui_ctx_menu_add_action(level, ACTION_SETTINGS_LEFT,
+                               g_focus_area == FOCUS_CONTENT, 0);
+    }
+    ui_ctx_menu_add_action(level, ACTION_SETTINGS_SAVE, 1, 0);
+
+    if (content && g_menu_selected_idx == 4) {          /* hotkeys */
+        ui_ctx_menu_add_separator(level);
+        ui_ctx_menu_add_action(level, ACTION_SETTINGS_HOTKEY_RESET,
+                               valid && g_focus_area == FOCUS_CONTENT, 0);
+        ui_ctx_menu_add_action(level, ACTION_SETTINGS_HOTKEY_RESET_ALL,
+                               g_focus_area == FOCUS_CONTENT, 0);
+    } else if (content && g_menu_selected_idx == 5) {   /* remote devices */
+        ui_ctx_menu_add_separator(level);
+        ui_ctx_menu_add_action(level, ACTION_REMOTE_ACTIVATE, valid, 0);
+        ui_ctx_menu_add_action(level, ACTION_REMOTE_ADJUST_UP, valid, 0);
+        ui_ctx_menu_add_action(level, ACTION_REMOTE_ADJUST_DOWN, valid, 0);
+        ui_ctx_menu_add_action(level, ACTION_REMOTE_SAVE, 1, 0);
+    } else if (content && g_menu_selected_idx == 6) {   /* equalizer */
+        ui_ctx_menu_add_separator(level);
+        ui_ctx_menu_add_action(level, ACTION_SETTINGS_EQ_PRESETS, 1, 0);
+        ui_ctx_menu_add_action(level, ACTION_EQ_GAIN_UP, valid, 0);
+        ui_ctx_menu_add_action(level, ACTION_EQ_GAIN_DOWN, valid, 0);
+        ui_ctx_menu_add_action(level, ACTION_EQ_BAND_PREV, 1, 0);
+        ui_ctx_menu_add_action(level, ACTION_EQ_BAND_NEXT, 1, 0);
+    }
+
+    ui_ctx_menu_add_separator(level);
+    ui_context_menu_add_pages_submenu(level);
+}
+
+int settings_context_dispatch(ActionId action, const UIContextMenuContext *ctx)
+{
+    (void)ctx;
+    int handled = 0;
+    if (g_menu_selected_idx == 6) {
+        handled = handle_eq_action(action);
+    } else if (g_menu_selected_idx == 4) {
+        handled = handle_hotkey_editor_action(action);
+    } else if (g_menu_selected_idx == 5) {
+        handled = remote_view_handle_action(action);
+    }
+    if (!handled) {
+        handled = handle_settings_action(action);
+    }
+    return handled;
+}
+
+/* 右键：先把指针所在行/分区选中（不执行），再在指针处弹菜单。 */
+static void settings_open_context_menu(const UIMouseEvent *ev,
+                                       const UIMouseDecision *d)
+{
+    UIContextMenuContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.view = VIEW_SETTINGS;
+    ctx.target = d->target;
+
+    if (d->target == UI_MOUSE_TARGET_SIDEBAR) {
+        ctx.area = UI_CTX_AREA_SIDEBAR;
+        if (d->row >= 0 && d->row < SETTINGS_ITEM_COUNT) {
+            settings_select_sidebar_row(d->row);
+            ctx.valid = 1;
+            ctx.index = d->row;
+        }
+    } else {
+        ctx.area = UI_CTX_AREA_CONTENT;
+        settings_focus_content_area();
+
+        if (g_menu_selected_idx == 6) {
+            int band = eq_band_at_point(ev->y, ev->x);
+            if (band >= 0) {
+                g_settings_current_option = SETTINGS_IDX_EQ_BAND_0 + band;
+                ctx.eq_band = band;
+                ctx.valid = 1;
+                render_settings_content();
+            }
+        } else if (g_menu_selected_idx == 4) {
+            int idx = hotkey_row_at_screen_row(ev->y);
+            if (idx >= 0) {
+                g_hotkey_selected = idx;
+                g_hotkey_message[0] = '\0';
+                ctx.hotkey_index = idx;
+                ctx.valid = 1;
+                render_settings_content();
+            }
+        } else if (g_menu_selected_idx == 5) {
+            ctx.valid = remote_view_handle_click(ev->y, 0) ? 1 : 0;
+        } else {
+            int option = settings_option_at_screen_row(ev->y);
+            if (option >= 0) {
+                g_settings_current_option = option;
+                ctx.index = option;
+                ctx.valid = 1;
+                render_settings_content();
+            }
+        }
+    }
+
+    (void)ui_context_menu_open(settings_context_menu_build,
+                               settings_context_dispatch,
+                               &ctx, ev->y, ev->x);
+}
+
+int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
+{
+    if (ev->right_click) {
+        settings_open_context_menu(ev, d);
+        return 1;
+    }
+
+    if (d->target == UI_MOUSE_TARGET_SEL_MENU) {
+        settings_handle_sel_menu_mouse(ev, d);
+        return 1;
+    }
+
+    /* 布局编辑器（含它的模态菜单）由分发直接交给 layout_editor_handle_mouse；
+     * 走到这里只可能是标志不同步：认领但绝不动设置页。 */
+    if (layout_editor_active()) return 1;
+
+    if (d->target == UI_MOUSE_TARGET_SIDEBAR) {
+        if (ev->wheel) {
+            settings_select_sidebar_row(g_menu_selected_idx);
+            return handle_settings_action(ev->wheel < 0 ? ACTION_SETTINGS_UP
+                                                        : ACTION_SETTINGS_DOWN);
+        }
+        if (!ev->click) return 1;
+
+        if (d->row < 0 || d->row >= SETTINGS_ITEM_COUNT) return 1;  /* 框线/空白行 */
+
+        const int already_selected = (g_menu_selected_idx == d->row);
+        settings_select_sidebar_row(d->row);
+        if (already_selected || ev->click_count >= 2) {
+            return handle_settings_action(ACTION_SETTINGS_ACTIVATE);
+        }
+        return 1;
+    }
+
+    /* ── 内容区 ── */
+    settings_focus_content_area();
+
+    if (ev->wheel) {
+        if (g_menu_selected_idx == 6) {
+            /* 均衡器：滚轮只在频带之间移动，绝不改增益——
+             * 一格滚轮就动 EQ 参数是破坏性的，必须留给明确的按键。 */
+            return handle_eq_action(ev->wheel < 0 ? ACTION_EQ_BAND_PREV
+                                                  : ACTION_EQ_BAND_NEXT);
+        }
+        if (g_menu_selected_idx == 4) {
+            return handle_hotkey_editor_action(ev->wheel < 0 ? ACTION_SETTINGS_UP
+                                                             : ACTION_SETTINGS_DOWN);
+        }
+        if (g_menu_selected_idx == 5) {
+            return remote_view_handle_action(ev->wheel < 0 ? ACTION_REMOTE_UP
+                                                           : ACTION_REMOTE_DOWN);
+        }
+        return handle_settings_action(ev->wheel < 0 ? ACTION_SETTINGS_UP
+                                                    : ACTION_SETTINGS_DOWN);
+    }
+    if (!ev->click) return 1;
+
+    /* 三个特殊分区：行/列→条目各不相同，命中依据都来自它们自己的渲染函数 */
+    if (g_menu_selected_idx == 6) {
+        int band = eq_band_at_point(ev->y, ev->x);
+        if (band < 0) return 1;
+
+        const int option = SETTINGS_IDX_EQ_BAND_0 + band;
+        const int already_selected = (g_settings_current_option == option);
+        g_settings_current_option = option;
+        render_settings_content();
+
+        if (already_selected || ev->click_count >= 2) {
+            return handle_eq_action(ACTION_EQ_ACTIVATE);
+        }
+        return 1;
+    }
+
+    if (g_menu_selected_idx == 4) {
+        int idx = hotkey_row_at_screen_row(ev->y);
+        if (idx < 0) return 1;
+
+        const int already_selected = (g_hotkey_selected == idx);
+        g_hotkey_selected = idx;
+        g_hotkey_message[0] = '\0';
+        render_settings_content();
+
+        if (already_selected || ev->click_count >= 2) {
+            return handle_hotkey_editor_action(ACTION_SETTINGS_ACTIVATE);
+        }
+        return 1;
+    }
+
+    if (g_menu_selected_idx == 5) {
+        /* 远程页的选中状态归 remote_view.c（四种模式行号推导各不相同，
+         * 目录模式还有滚动偏移），这里只把屏幕行交给它。 */
+        remote_view_handle_click(ev->y, ev->click_count >= 2);
+        return 1;
+    }
+
+    /* 普通设置分区：行 → 设置项 */
+    {
+        int option = settings_option_at_screen_row(ev->y);
+        if (option < 0) return 1;
+
+        const int already_selected = (g_settings_current_option == option);
+        g_settings_current_option = option;
+        render_settings_content();
+
+        if (already_selected || ev->click_count >= 2) {
+            return handle_settings_action(ACTION_SETTINGS_ACTIVATE);
+        }
+        return 1;
     }
 }

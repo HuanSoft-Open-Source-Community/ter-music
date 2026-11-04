@@ -36,7 +36,7 @@
 #include "queue/backend_queue.h"
 #include "remote/remote.h"
 #include "search/search.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/album_cover.h"
 #include "lyrics/lyrics.h"
 #include "ui/ui.h"
 #include "util/json.h"

@@ -1275,6 +1275,13 @@
   <string key="layout.editor.action_swap">Swap with next pane</string>
   <string key="layout.editor.action_remove">Remove pane</string>
   <string key="layout.editor.action_rename">Rename layout</string>
+  <string key="layout.editor.action_save">Save layout</string>
+  <string key="layout.editor.action_help">Editor help</string>
+  <string key="layout.editor.action_close">Close editor</string>
+  <string key="layout.editor.action_ratio_row_dec">Row split ratio -10</string>
+  <string key="layout.editor.action_ratio_row_inc">Row split ratio +10</string>
+  <string key="layout.editor.action_ratio_col_dec">Column split ratio -10</string>
+  <string key="layout.editor.action_ratio_col_inc">Column split ratio +10</string>
   <string key="layout.editor.pick_kind">Choose Pane Type</string>
   <string key="layout.editor.colors_title">Pane Colors</string>
   <string key="layout.editor.color_inherit">inherit</string>
@@ -1308,4 +1315,23 @@
   <string key="layout.preset.focus">Focus</string>
   <string key="layout.preset.stage">Stage</string>
   <string key="layout.preset.neon">Neon</string>
+
+  <!-- ===== Right-click context menus ===== -->
+  <string key="context.title.list">List actions</string>
+  <string key="context.title.library">Library actions</string>
+  <string key="context.menu.queue">Queue</string>
+  <string key="context.menu.playback">Playback</string>
+  <string key="context.menu.playmode">Play mode</string>
+  <string key="context.menu.playlist">Add to playlist</string>
+  <string key="context.menu.pages">Go to page</string>
+  <string key="context.hint">Up/Down select · Enter run · Esc close</string>
+  <string key="context.mode.to_queue">Switch to queue mode</string>
+  <string key="context.mode.to_file">Switch to file mode</string>
+  <string key="context.playlist.none">(no playlists)</string>
+  <string key="context.playlist.manage">Manage playlists…</string>
+  <string key="context.playlist.create">New playlist…</string>
+  <string key="context.playlist.remove_track">Remove from playlist</string>
+  <string key="context.info.rainbow_on">Start the Konami aurora flow</string>
+  <string key="context.info.rainbow_off">Stop the Konami aurora flow</string>
+  <string key="context.stale">The list changed; please try again</string>
 </lang>

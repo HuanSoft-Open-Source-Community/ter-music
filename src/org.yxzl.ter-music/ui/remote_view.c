@@ -663,6 +663,33 @@ static void remote_delete_connection(int conn_idx)
  * Remote device — rendering
  * ============================================================ */
 
+/* ── 渲染期行映射（供鼠标命中） ───────────────────────────────────
+ * 远程页四种模式（连接列表 / 连接动作菜单 / 表单 / 目录浏览）的可选项
+ * 行号推导各不相同，还有目录模式的滚动偏移。与其在鼠标层再抄一套公式，
+ * 不如画到哪一行就记下"这一行对应哪个 g_remote_selected 值"。
+ * 每帧开头清空，所以映射永远等于屏幕上看到的那一帧。 */
+#define REMOTE_MAP_MAX_ROWS 1024
+static int g_remote_row_map[REMOTE_MAP_MAX_ROWS];
+
+static void remote_map_clear(void)
+{
+    for (int i = 0; i < REMOTE_MAP_MAX_ROWS; i++) g_remote_row_map[i] = -1;
+}
+
+static void remote_map_row(int screen_y, int selection_value)
+{
+    if (screen_y < 0 || screen_y >= REMOTE_MAP_MAX_ROWS) return;
+    g_remote_row_map[screen_y] = selection_value;
+}
+
+/* 屏幕行 → 该模式下的选中值（与 g_remote_selected 同一套编号）；
+ * 落在不可选的行（标题、提示、空白）返回 -1。仅本模块用。 */
+static int remote_view_hit_index(int screen_y)
+{
+    if (screen_y < 0 || screen_y >= REMOTE_MAP_MAX_ROWS) return -1;
+    return g_remote_row_map[screen_y];
+}
+
 void remote_view_render(void)
 {
     MenuContentArea area;
@@ -670,6 +697,7 @@ void remote_view_render(void)
     int max_y = area.max_y;
     int y = 2;
 
+    remote_map_clear();
     attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
 
     menu_content_clear_rows(&area, 2, max_y - 3);
@@ -690,6 +718,7 @@ void remote_view_render(void)
             char line[512];
             snprintf(line, sizeof(line), "  %-20s [%s] %s",
                      rc->name, remote_protocol_name(rc->protocol), rc->host);
+            remote_map_row(y, i);   /* 第 i 条已存连接 */
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
             menu_content_puts(&area, y++, line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attroff(A_REVERSE);
@@ -699,6 +728,7 @@ void remote_view_render(void)
         if (y <= max_y - 3) {
             char add_line[512];
             snprintf(add_line, sizeof(add_line), "  %s", i18n_get("remote.add_new"));
+            remote_map_row(y, count);   /* "新建连接"行＝列表尾下标 */
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attron(A_REVERSE);
             menu_content_puts(&area, y, add_line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == count) attroff(A_REVERSE);
@@ -731,6 +761,7 @@ void remote_view_render(void)
         for (int i = 0; i < action_count && y <= max_y - 3; i++) {
             char action_line[512];
             snprintf(action_line, sizeof(action_line), "  %s", actions[i]);
+            remote_map_row(y, i);   /* 连接动作菜单的第 i 项 */
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
             menu_content_puts(&area, y++, action_line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attroff(A_REVERSE);
@@ -750,6 +781,7 @@ void remote_view_render(void)
             remote_form_value_text(i, value, sizeof(value));
             char line[512];
             snprintf(line, sizeof(line), "  %-14s %s", label, value);
+            remote_map_row(y, i);   /* 表单的第 i 个字段 */
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attron(A_REVERSE);
             menu_content_puts(&area, y, line);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == i) attroff(A_REVERSE);
@@ -789,6 +821,7 @@ void remote_view_render(void)
 
             char load_hint[512];
             snprintf(load_hint, sizeof(load_hint), "  %s", i18n_get("remote.load_hint"));
+            remote_map_row(y, 0);   /* 目录浏览里第 0 项＝"加载整个目录到播放列表" */
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attron(A_REVERSE);
             menu_content_puts(&area, y++, load_hint);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attroff(A_REVERSE);
@@ -803,6 +836,8 @@ void remote_view_render(void)
                 } else {
                     snprintf(line, sizeof(line), "  %s", e->name);
                 }
+                /* 条目本身从选中值 1 起（0 被"加载整个目录"占了） */
+                remote_map_row(y, i + 1);
                 if (is_sel) attron(A_REVERSE);
                 menu_content_puts(&area, y++, line);
                 if (is_sel) attroff(A_REVERSE);
@@ -824,9 +859,6 @@ void remote_view_render(void)
 
 int remote_view_handle_input(int ch)
 {
-    int conn_count = remote_store_count();
-    ActionId action = keymap_resolve(CTX_REMOTE, ch);
-
     /* Esc 是系统保留键：沿用各模式的返回语义 */
     if (ch == 27) {
         if (g_remote_mode == 2)
@@ -835,6 +867,15 @@ int remote_view_handle_input(int ch)
             remote_go_back();
         return 1;
     }
+
+    return remote_view_handle_action(keymap_resolve(CTX_REMOTE, ch));
+}
+
+/* 动作入口：键盘解析出的动作与鼠标滚轮共用同一条路径。
+ * 鼠标不合成按键码——用户可以改键，合成按键在改键后会失灵或做错事。 */
+int remote_view_handle_action(ActionId action)
+{
+    int conn_count = remote_store_count();
 
     if (g_remote_mode == 0) {
         switch (action) {
@@ -1012,6 +1053,32 @@ int remote_view_handle_input(int ch)
     /* 本上下文的动作即使当前模式无对应操作也视为已消费（与旧行为一致），
      * 其他上下文的动作（含 global 回退）交回上层分发。 */
     return (action != ACTION_NONE && actions_context(action) == CTX_REMOTE) ? 1 : 0;
+}
+
+/* ── 鼠标 ────────────────────────────────────────────────────────
+ *
+ * 远程页的行号在各模式（连接列表 / 动作菜单 / 表单 / 目录浏览）里推导
+ * 方式都不同，还有目录模式的滚动偏移，所以选中状态只在本模块内解释：
+ * 渲染时记下"这一行=哪个选中值"，命中就照那张表走。
+ *
+ * 约定与设置页其它分区一致：单击=选中；双击或"再点一次已选中的那一行"
+ * =等同回车（进入连接 / 执行动作 / 编辑字段 / 打开目录）。
+ * g_remote_selected 是本模块私有状态，因此设置页只传屏幕行，不碰它。 */
+int remote_view_handle_click(int screen_y, int double_click)
+{
+    int hit = remote_view_hit_index(screen_y);
+    if (hit < 0) {
+        return 0;   /* 标题、提示、空白行：不可选 */
+    }
+
+    const int already_selected = (g_remote_selected == hit);
+    g_remote_selected = hit;
+    render_settings_content();
+
+    if (double_click || already_selected) {
+        return remote_view_handle_action(ACTION_REMOTE_ACTIVATE);
+    }
+    return 1;
 }
 
 /* ── 生命周期（main.c 启动 / ui.c 退出） ───────────────────────────── */

@@ -13,7 +13,7 @@
 #   A 远程残留：后端不得出现任何"远程音乐源"符号（远程源是前端功能）。
 #   B 内容/UI 越界：后端不得引用内容模块（playlist/library/search）、内容全局、
 #     UI 渲染函数与界面钩子；也不得 include 前端头文件。
-#     例外：`ui/braille/` 的字符封面渲染（字符封面属"当前曲目信息"＝后端职责）。
+#     例外：`ui/cover/` 的封面头文件（封面路径与字符封面属"当前曲目信息"＝后端职责）。
 #
 #   scripts/test/check-core-purity.sh            # 严格模式：任一条非 0 即退出 1
 #   scripts/test/check-core-purity.sh --report   # 只报告，始终退出 0
@@ -47,11 +47,14 @@ PATTERNS_REMOTE='remote/remote\.h|remote_[a-z_]+\(|RemoteConnectionConfig|Remote
 # B 内容模块 / 内容全局 / UI 渲染与钩子
 PATTERNS_CONTENT='#include "(playlist|library|search|app|player)/|#include "ui/|(^|[^A-Za-z0-9_])(g_playlist|g_playlist_manager|g_favorites|g_play_history|g_dir_history|g_sort_state|g_search_state|g_search_mutex|g_selected_index|g_library_state)|(^|[^A-Za-z0-9_])(playlist_[a-z_]+|library_[a-z_]+|search_[a-z_]+|render_[a-z_]+|request_ui_refresh|update_controls_status|exit_current_view|rerender_active_view|handle_menu_input|handle_settings_input|handle_library_input|init_all_persistent_data|init_menu_views|load_all_playlists|load_history|load_favorites|load_dir_history|add_history_entry|add_to_favorites|create_user_playlist|load_playlist|append_playlist|load_single_file|load_temp_playlist|save_temp_playlist|cleanup_temp_playlist|app_open_path|app_restore_session|library_load_into_playlist)\('
 
-# 过滤：注释行、extern 声明行、以及字符封面渲染（后端职责）
+# 过滤：注释行、extern 声明行、以及封面模块头文件（字符封面/封面路径属
+# "当前曲目信息"＝后端职责，见头注第 B 条例外）。
+# 注意：这里只豁免 `#include "ui/cover/` 这一条包含关系，不再按"braille"
+# 字样整行放行——旧写法会连带放过任何恰好含该字样的行，改名后已无必要。
 filter_lines() {
     grep -vE '^[[:space:]]*(\*|/\*|//)' "$1" 2>/dev/null \
         | grep -vE '^[[:space:]]*extern[[:space:]]' \
-        | grep -vE 'braille'
+        | grep -vE '#include "ui/cover/'
 }
 
 count_in() {   # $1=file $2=pattern

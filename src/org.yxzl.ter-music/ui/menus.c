@@ -20,6 +20,7 @@
 #include "ui/dialog.h"
 #include "playlist/playlist.h"
 #include "ui/ui.h"
+#include "ui/context_menu.h"
 #include "ui/layout.h"
 #include "ui/vinyl.h"
 #include "i18n/i18n.h"
@@ -835,6 +836,9 @@ void render_menu_hint_bar(void)
 void switch_to_view(ViewMode view)
 {
     log_info("menu_views", "View switched: %d -> %d", g_current_view, view);
+    /* 菜单锚定的是旧视图的行号，视图一变就失效：先关闭（不重绘，
+     * 下面会按新视图完整渲染）。 */
+    ui_context_menu_close(0);
     g_current_view = view;
     g_menu_selected_idx = 0;
     g_content_selected_idx = 0;
@@ -904,6 +908,7 @@ void switch_to_view(ViewMode view)
 
 void exit_current_view(void)
 {
+    ui_context_menu_close(0);
     g_current_view = VIEW_MAIN;
     g_menu_selected_idx = 0;
     g_content_selected_idx = 0;

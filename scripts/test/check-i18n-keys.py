@@ -97,6 +97,19 @@ def main():
             if key not in en_keys:
                 errors.append(f"en_US missing (settings_options) '{key}'")
 
+    editor_c = ROOT / "src" / "org.yxzl.ter-music" / "ui" / "layout_editor.c"
+    text = editor_c.read_text(encoding="utf-8", errors="replace")
+    match = re.search(r"static const char \*const k_action_keys\[\]\s*=\s*\{(.*?)\};",
+                      text, re.S)
+    if not match:
+        errors.append("layout_editor.c: cannot locate k_action_keys[]")
+    else:
+        for key in re.findall(r'"([^"]+)"', match.group(1)):
+            if key not in zh_keys:
+                errors.append(f"zh_CN missing (layout_editor actions) '{key}'")
+            if key not in en_keys:
+                errors.append(f"en_US missing (layout_editor actions) '{key}'")
+
     actions_c = ROOT / "src" / "org.yxzl.ter-music" / "keymap" / "actions.c"
     text = strip_comments(actions_c.read_text(encoding="utf-8", errors="replace"))
     ids = ACT_ID.findall(text)

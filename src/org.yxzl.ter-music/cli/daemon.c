@@ -23,7 +23,7 @@
 #include "media/session.h"
 #include "queue/backend_queue.h"
 #include "logger/logger.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/album_cover.h"
 #include "lyrics/lyrics.h"
 #include "util/utf8.h"
 

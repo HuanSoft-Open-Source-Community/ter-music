@@ -18,7 +18,6 @@
 #include "core/core.h"
 #include "info/info.h"
 #include "logger/logger.h"
-#include "ui/braille/braille_art.h"
 #include "lyrics/lyrics.h"
 #include "queue/backend_queue.h"
 #include "util/json.h"

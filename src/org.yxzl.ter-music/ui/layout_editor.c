@@ -17,6 +17,8 @@
 #include "i18n/i18n.h"
 #include "logger/logger.h"
 #include "ui/dialog.h"
+#include "ui/context_menu.h"
+#include "ui/context_menu_layout.h"
 #include "ui/layout.h"
 #include "ui/menu_internal.h"
 #include "ui/ui.h"
@@ -53,6 +55,10 @@ typedef struct {
     int esc_confirm;
     EdMode mode;
     int action_sel;
+    int action_scroll;       /* 动作菜单滚动偏移（右击锚定/小屏时条目可能超高） */
+    int menu_anchored;       /* 1 = 动作菜单锚定在右键位置（否则居中） */
+    int menu_anchor_y;
+    int menu_anchor_x;
     EdPending pending;
     LayoutSplitDir pending_dir;
     int kind_sel;
@@ -72,6 +78,13 @@ static const char *const k_action_keys[] = {
     "layout.editor.action_swap",
     "layout.editor.action_remove",
     "layout.editor.action_rename",
+    "layout.editor.action_save",
+    "layout.editor.action_help",
+    "layout.editor.action_close",
+    "layout.editor.action_ratio_row_dec",
+    "layout.editor.action_ratio_row_inc",
+    "layout.editor.action_ratio_col_dec",
+    "layout.editor.action_ratio_col_inc",
 };
 #define ED_ACTION_COUNT ((int)(sizeof(k_action_keys) / sizeof(k_action_keys[0])))
 
@@ -84,6 +97,10 @@ static const char *const k_help_keys[] = {
     "layout.editor.help_save",
 };
 #define ED_HELP_COUNT ((int)(sizeof(k_help_keys) / sizeof(k_help_keys[0])))
+
+/* 前向声明：模态菜单的框几何要用 editor_available_kinds（定义在后面），
+ * 而四个 editor_draw_* 与鼠标命中必须共用同一份几何。 */
+static int editor_menu_rect(int mode, int rows, int cols, UIRect *box, int *count);
 
 /* ── 小工具 ────────────────────────────────────────────────────── */
 
@@ -240,6 +257,44 @@ static void editor_draw_box(int row, int col, int h, int w, const char *title)
 
 /* ── 预览 ──────────────────────────────────────────────────────── */
 
+/* 左侧窗格列表的宽度：绘制与鼠标命中共用一份推导，避免"画到哪"与
+ * "点到哪"各算一套而漂移。 */
+static int editor_list_width(int cols)
+{
+    int list_w = cols >= 88 ? 40 : cols / 2;
+    if (list_w < 30) list_w = cols - 4;
+    return list_w;
+}
+
+/* 预览外框的屏幕矩形（含边框行/列）。宽高不足时结果仍给出，由调用方
+ * 像 layout_editor_render 一样用 pw>=8 && ph>=4 门控。 */
+static void editor_preview_rect(int rows, int cols, UIRect *out)
+{
+    out->top = 2;
+    out->left = editor_list_width(cols) + 2;
+    out->cols = cols - out->left - 2;
+    out->rows = rows - 6;
+}
+
+/* 把某个窗格在分栏树里的比例坐标映射到预览框内的字符格子。
+ * 这是画框与命中测试的唯一一份映射：鼠标点到的格子必须正好是看到的那块。 */
+static void editor_pane_cell_rect(int base_row, int base_col, int pw, int ph,
+                                  const LayoutResolvedPane *pane,
+                                  int *r0, int *r1, int *c0, int *c1)
+{
+    const int inner_w = pw - 2;
+    const int inner_h = ph - 2;
+
+    *c0 = base_col + 1 + pane->x * inner_w / LAYOUT_AREA_UNITS;
+    *c1 = base_col + 1 + (pane->x + pane->w) * inner_w / LAYOUT_AREA_UNITS;
+    *r0 = base_row + 1 + pane->y * inner_h / LAYOUT_AREA_UNITS;
+    *r1 = base_row + 1 + (pane->y + pane->h) * inner_h / LAYOUT_AREA_UNITS;
+    if (*c1 <= *c0) *c1 = *c0 + 1;
+    if (*r1 <= *r0) *r1 = *r0 + 1;
+    if (*c1 > base_col + pw - 1) *c1 = base_col + pw - 1;
+    if (*r1 > base_row + ph - 1) *r1 = base_row + ph - 1;
+}
+
 static void editor_draw_preview(int base_row, int base_col, int pw, int ph)
 {
     if (pw < 8 || ph < 4) {
@@ -251,22 +306,12 @@ static void editor_draw_preview(int base_row, int base_col, int pw, int ph)
     if (layout_spec_resolve(&g_ed.spec, &resolved) != 0) {
         return;
     }
-    int inner_w = pw - 2;
-    int inner_h = ph - 2;
     int current_kind = editor_selected_kind();
 
     for (int i = 0; i < resolved.pane_count; i++) {
         const LayoutResolvedPane *pane = &resolved.panes[i];
-        int c0 = base_col + 1 + pane->x * inner_w / LAYOUT_AREA_UNITS;
-        int c1 = base_col + 1 +
-                 (pane->x + pane->w) * inner_w / LAYOUT_AREA_UNITS;
-        int r0 = base_row + 1 + pane->y * inner_h / LAYOUT_AREA_UNITS;
-        int r1 = base_row + 1 +
-                 (pane->y + pane->h) * inner_h / LAYOUT_AREA_UNITS;
-        if (c1 <= c0) c1 = c0 + 1;
-        if (r1 <= r0) r1 = r0 + 1;
-        if (c1 > base_col + pw - 1) c1 = base_col + pw - 1;
-        if (r1 > base_row + ph - 1) r1 = base_row + ph - 1;
+        int c0, c1, r0, r1;
+        editor_pane_cell_rect(base_row, base_col, pw, ph, pane, &r0, &r1, &c0, &c1);
         if (c0 >= c1 || r0 >= r1) {
             continue;
         }
@@ -494,6 +539,7 @@ static void editor_request_close(void)
         return;
     }
     g_ed.active = 0;
+    log_info("layout_editor", "closed");
 }
 
 /* ── 空间导航 ──────────────────────────────────────────────────── */
@@ -575,21 +621,34 @@ static void editor_move_focus(int dx, int dy)
 
 static void editor_draw_actions(int rows, int cols)
 {
-    int w = 44;
-    int h = ED_ACTION_COUNT + 4;
-    if (w > cols - 4) w = cols - 4;
-    if (h > rows - 4) h = rows - 4;
-    int row = (rows - h) / 2;
-    int col = (cols - w) / 2;
+    UIRect box;
+    int count = 0;
+    editor_menu_rect(ED_MODE_ACTIONS, rows, cols, &box, &count);
+    const int row = box.top;
+    const int col = box.left;
+    const int w = box.cols;
+    const int h = box.rows;
     editor_draw_box(row, col, h, w, i18n_get("layout.editor.actions_title"));
-    for (int i = 0; i < ED_ACTION_COUNT; i++) {
-        if (row + 1 + i >= row + h - 1) break;
+
+    int visible = h - 3;             /* 上边框 + 页脚 + 下边框 */
+    if (visible < 1) visible = 1;
+    if (visible > count) visible = count;
+    g_ed.action_scroll = ui_ctx_menu_scroll_for(g_ed.action_sel, count,
+                                                visible, g_ed.action_scroll);
+
+    for (int i = 0; i < visible; i++) {
+        int idx = g_ed.action_scroll + i;
+        if (idx >= count) break;
         editor_draw_text(row + 1 + i, col + 2, w - 4,
-                         i18n_get(k_action_keys[i]), i == g_ed.action_sel);
+                         i18n_get(k_action_keys[idx]), idx == g_ed.action_sel);
     }
-    if (row + h - 2 > row + 1 + ED_ACTION_COUNT) {
-        editor_draw_text(row + h - 2, col + 2, w - 4,
-                         i18n_get("layout.editor.hint_menu"), 0);
+    editor_draw_text(row + h - 2, col + 2, w - 4,
+                     i18n_get("layout.editor.hint_menu"), 0);
+    if (g_ed.action_scroll > 0) {
+        editor_draw_text(row, col + w - 3, 1, "^", 0);
+    }
+    if (g_ed.action_scroll + visible < count) {
+        editor_draw_text(row + h - 1, col + w - 3, 1, "v", 0);
     }
 }
 
@@ -614,17 +673,69 @@ static int editor_available_kinds(LayoutPaneKind *out, int capacity)
     return count;
 }
 
+/* 模态菜单框的几何：四个 editor_draw_* 与鼠标命中共用这一份推导。
+ * 条目一律从 box.top+1 起、每行一条、共 *count 条（与绘制循环同构）。
+ * 返回 0 = 该模式没有菜单（ED_MODE_MAIN）。 */
+static int editor_menu_rect(int mode, int rows, int cols, UIRect *box, int *count)
+{
+    int w = 0;
+    int h = 0;
+    int n = 0;
+
+    switch (mode) {
+        case ED_MODE_ACTIONS:
+            w = 44; n = ED_ACTION_COUNT; h = n + 4;
+            break;
+        case ED_MODE_KINDS: {
+            LayoutPaneKind kinds[LAYOUT_PANE_COUNT];
+            w = 40; n = editor_available_kinds(kinds, LAYOUT_PANE_COUNT);
+            h = n + 5;
+            if (h < 6) h = 6;
+            break;
+        }
+        case ED_MODE_COLORS:
+            w = 44; n = 4; h = 10;   /* 四个颜色字段各一行 */
+            break;
+        case ED_MODE_HELP:
+            w = 62; n = ED_HELP_COUNT; h = n + 4;
+            break;
+        default:
+            return 0;
+    }
+
+    if (w > cols - 4) w = cols - 4;
+    if (h > rows - 4) h = rows - 4;
+
+    if (mode == ED_MODE_ACTIONS && g_ed.menu_anchored) {
+        /* 右键：锚定在指针并钳制到屏幕内（末行提示条除外）。 */
+        if (!ui_ctx_menu_place_rect(g_ed.menu_anchor_y, g_ed.menu_anchor_x,
+                                    w, h, rows, cols, box)) {
+            box->top = (rows - h) / 2;
+            box->left = (cols - w) / 2;
+            box->rows = h;
+            box->cols = w;
+        }
+    } else {
+        box->top = (rows - h) / 2;
+        box->left = (cols - w) / 2;
+        box->rows = h;
+        box->cols = w;
+    }
+    *count = n;
+    return 1;
+}
+
 static void editor_draw_kinds(int rows, int cols)
 {
     LayoutPaneKind kinds[LAYOUT_PANE_COUNT];
     int count = editor_available_kinds(kinds, LAYOUT_PANE_COUNT);
-    int w = 40;
-    int h = count + 5;
-    if (h < 6) h = 6;
-    if (w > cols - 4) w = cols - 4;
-    if (h > rows - 4) h = rows - 4;
-    int row = (rows - h) / 2;
-    int col = (cols - w) / 2;
+    UIRect box;
+    int geom_count = 0;
+    editor_menu_rect(ED_MODE_KINDS, rows, cols, &box, &geom_count);
+    const int row = box.top;
+    const int col = box.left;
+    const int w = box.cols;
+    const int h = box.rows;
     editor_draw_box(row, col, h, w, i18n_get("layout.editor.pick_kind"));
     if (count == 0) {
         editor_draw_text(row + 2, col + 2, w - 4,
@@ -643,12 +754,13 @@ static void editor_draw_kinds(int rows, int cols)
 
 static void editor_draw_colors(int rows, int cols)
 {
-    int w = 44;
-    int h = 10;
-    if (w > cols - 4) w = cols - 4;
-    if (h > rows - 4) h = rows - 4;
-    int row = (rows - h) / 2;
-    int col = (cols - w) / 2;
+    UIRect box;
+    int count = 0;
+    editor_menu_rect(ED_MODE_COLORS, rows, cols, &box, &count);
+    const int row = box.top;
+    const int col = box.left;
+    const int w = box.cols;
+    const int h = box.rows;
     editor_draw_box(row, col, h, w, i18n_get("layout.editor.colors_title"));
 
     int kind = editor_selected_kind();
@@ -676,19 +788,20 @@ static void editor_draw_colors(int rows, int cols)
 
 static void editor_draw_help(int rows, int cols)
 {
-    int w = 62;
-    int h = ED_HELP_COUNT + 4;
-    if (w > cols - 4) w = cols - 4;
-    if (h > rows - 4) h = rows - 4;
-    int row = (rows - h) / 2;
-    int col = (cols - w) / 2;
+    UIRect box;
+    int count = 0;
+    editor_menu_rect(ED_MODE_HELP, rows, cols, &box, &count);
+    const int row = box.top;
+    const int col = box.left;
+    const int w = box.cols;
+    const int h = box.rows;
     editor_draw_box(row, col, h, w, i18n_get("layout.editor.help_title"));
-    for (int i = 0; i < ED_HELP_COUNT; i++) {
+    for (int i = 0; i < count; i++) {
         if (row + 1 + i >= row + h - 1) break;
         editor_draw_text(row + 1 + i, col + 2, w - 4,
                          i18n_get(k_help_keys[i]), 0);
     }
-    if (row + h - 2 > row + 1 + ED_HELP_COUNT) {
+    if (row + h - 2 > row + 1 + count) {
         editor_draw_text(row + h - 2, col + 2, w - 4,
                          i18n_get("layout.editor.help_tip"), 0);
     }
@@ -771,8 +884,7 @@ void layout_editor_render(void)
         return;
     }
 
-    int list_w = cols >= 88 ? 40 : cols / 2;
-    if (list_w < 30) list_w = cols - 4;
+    int list_w = editor_list_width(cols);
 
     char header[64];
     snprintf(header, sizeof(header), "%s (%d/%d)",
@@ -814,12 +926,10 @@ void layout_editor_render(void)
         editor_draw_detail(detail_row, 0, list_w);
     }
 
-    int preview_row = 2;
-    int preview_col = list_w + 2;
-    int preview_w = cols - preview_col - 2;
-    int preview_h = rows - 6;
-    if (preview_w >= 8 && preview_h >= 4) {
-        editor_draw_preview(preview_row, preview_col, preview_w, preview_h);
+    UIRect preview;
+    editor_preview_rect(rows, cols, &preview);
+    if (preview.cols >= 8 && preview.rows >= 4) {
+        editor_draw_preview(preview.top, preview.left, preview.cols, preview.rows);
     }
 
     int status_row = rows - 4;
@@ -950,6 +1060,8 @@ static int editor_handle_main(int ch)
         case KEY_ENTER:
             g_ed.mode = ED_MODE_ACTIONS;
             g_ed.action_sel = 0;
+            g_ed.action_scroll = 0;
+            g_ed.menu_anchored = 0;   /* Enter 打开=居中（既有行为） */
             g_ed.esc_confirm = 0;
             break;
         case 's':
@@ -1001,6 +1113,30 @@ static void editor_action_execute(int index)
         case 7:
             editor_rename();
             return;
+        case 8:
+            editor_save();
+            break;
+        case 9:
+            g_ed.mode = ED_MODE_HELP;
+            return;
+        case 10:
+            editor_request_close();
+            if (!g_ed.active) {
+                return;
+            }
+            break;
+        case 11:
+            editor_adjust_ratio(LAYOUT_SPLIT_ROW, -10);
+            break;
+        case 12:
+            editor_adjust_ratio(LAYOUT_SPLIT_ROW, 10);
+            break;
+        case 13:
+            editor_adjust_ratio(LAYOUT_SPLIT_COL, -10);
+            break;
+        case 14:
+            editor_adjust_ratio(LAYOUT_SPLIT_COL, 10);
+            break;
         default:
             break;
     }
@@ -1026,6 +1162,7 @@ static int editor_handle_actions(int ch)
         case 'q':
         case 'Q':
             g_ed.mode = ED_MODE_MAIN;
+            g_ed.menu_anchored = 0;
             break;
         default:
             g_ed.esc_confirm = 0;
@@ -1186,6 +1323,180 @@ int layout_editor_handle_key(int ch)
     }
 }
 
+/* ── 鼠标 ────────────────────────────────────────────────────────
+ *
+ * 编辑器是全屏独占的：全局分发在设置视图里把落在整屏的鼠标事件都交给这里
+ * （见 ui/mouse_routing.c 的 editor_active 分支），所以不存在"点穿了下面的
+ * 设置页"这种情况。
+ *
+ * 模态菜单（动作/换类型/颜色/帮助）：
+ *   滚轮一格 = 上下移动一项（与键盘 up/down 同一条路径，含回绕）；
+ *   单击 = 选中该条；双击或"再点一次已选中的那条" = 等同回车；
+ *   点框外 = 等同 Esc 取消。三种情形事件都归菜单，绝不穿透。
+ * 主编辑界面：
+ *   单击左侧窗格列表行或右侧预览里的某个窗格 = 选中它；
+ *   滚轮没有可滚动的列表，什么都不做（但仍被认领）。
+ * 点击不直接执行"拆分/删除"这类改动：编辑器里所有破坏性动作都要经过
+ * 动作菜单，鼠标只负责把"选中"这件事做实，与键盘的职责划分一致。 */
+
+/* 右键入口：把既有"窗格操作"菜单锚定到指针位置（贴边翻转/钳制）。
+ * Enter 打开的同一菜单仍居中，二者共用 editor_menu_rect 的几何。 */
+int layout_editor_open_actions_menu(int anchor_y, int anchor_x)
+{
+    if (!g_ed.active) {
+        return 0;
+    }
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    if (rows < ED_MIN_ROWS || cols < ED_MIN_COLS) {
+        return 0;
+    }
+    g_ed.mode = ED_MODE_ACTIONS;
+    g_ed.action_sel = 0;
+    g_ed.action_scroll = 0;
+    g_ed.menu_anchored = 1;
+    g_ed.menu_anchor_y = anchor_y;
+    g_ed.menu_anchor_x = anchor_x;
+    g_ed.esc_confirm = 0;
+    log_debug("layout_editor", "actions menu anchored at %d,%d", anchor_y, anchor_x);
+    layout_editor_render();
+
+    UIRect box;
+    int count = 0;
+    if (editor_menu_rect(ED_MODE_ACTIONS, rows, cols, &box, &count)) {
+        log_debug("layout_editor", "actions menu rect=%d,%d,%d,%d count=%d",
+                  box.top, box.left, box.rows, box.cols, count);
+    }
+    return 1;
+}
+
+int layout_editor_menu_open(void)
+{
+    return (g_ed.active && g_ed.mode != ED_MODE_MAIN) ? 1 : 0;
+}
+
+int layout_editor_menu_rect(UIRect *out)
+{
+    int count = 0;
+    if (!layout_editor_menu_open() || !out) {
+        return 0;
+    }
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
+    return editor_menu_rect(g_ed.mode, rows, cols, out, &count);
+}
+
+int layout_editor_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
+{
+    if (!g_ed.active) {
+        return 0;
+    }
+
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    if (rows < ED_MIN_ROWS || cols < ED_MIN_COLS) {
+        return 1;   /* 终端太小：画面还没画出来，无可命中 */
+    }
+
+    if (g_ed.mode != ED_MODE_MAIN) {
+        UIRect box;
+        int count = 0;
+        if (!editor_menu_rect(g_ed.mode, rows, cols, &box, &count)) {
+            return 1;
+        }
+
+        if (ev->wheel) {
+            return layout_editor_handle_key(ev->wheel < 0 ? KEY_UP : KEY_DOWN);
+        }
+        if (!ev->click) {
+            return 1;
+        }
+        /* d->row < 0：分发算出点击在菜单框之外 → 取消并吞掉 */
+        if (d->row < 0) {
+            return layout_editor_handle_key(27);
+        }
+        if (g_ed.mode == ED_MODE_HELP) {
+            return layout_editor_handle_key(27);   /* 帮助页只读：点哪都关 */
+        }
+
+        int item = d->row - 1;   /* 条目从框内第 1 行起，与绘制循环同构 */
+        if (g_ed.mode == ED_MODE_ACTIONS) {
+            item += g_ed.action_scroll;   /* 动作菜单可滚动 */
+        }
+        if (item < 0 || item >= count) {
+            return 1;            /* 标题行、边框、底部提示行：只认领不动作 */
+        }
+
+        int *sel = NULL;
+        if (g_ed.mode == ED_MODE_ACTIONS) {
+            sel = &g_ed.action_sel;
+        } else if (g_ed.mode == ED_MODE_KINDS) {
+            sel = &g_ed.kind_sel;
+        } else if (g_ed.mode == ED_MODE_COLORS) {
+            sel = &g_ed.color_field;
+        }
+        if (!sel) {
+            return 1;
+        }
+
+        const int already_selected = (*sel == item);
+        *sel = item;
+        if (already_selected || ev->click_count >= 2) {
+            return layout_editor_handle_key('\n');
+        }
+        layout_editor_render();
+        return 1;
+    }
+
+    /* ED_MODE_MAIN：只认领"选中哪个窗格"这一件事 */
+    if (ev->right_click) {
+        (void)layout_editor_open_actions_menu(ev->y, ev->x);
+        return 1;
+    }
+    if (!ev->click) {
+        return 1;
+    }
+
+    const int y = d->row;   /* 编辑器全屏，分发原样给出屏幕坐标 */
+    const int x = d->col;
+
+    if (x < editor_list_width(cols)) {
+        const int count = layout_spec_pane_count(&g_ed.spec);
+        const int i = y - 2;   /* 列表首行与 layout_editor_render 同源 */
+        if (i >= 0 && i < count && i < LAYOUT_MAX_PANES) {
+            g_ed.sel = i;
+            layout_editor_render();
+        }
+        return 1;
+    }
+
+    UIRect preview;
+    editor_preview_rect(rows, cols, &preview);
+    if (preview.cols >= 8 && preview.rows >= 4 && ui_rect_contains(&preview, y, x)) {
+        LayoutResolved resolved;
+        if (layout_spec_resolve(&g_ed.spec, &resolved) == 0) {
+            for (int i = 0; i < resolved.pane_count; i++) {
+                int r0, r1, c0, c1;
+                editor_pane_cell_rect(preview.top, preview.left,
+                                      preview.cols, preview.rows,
+                                      &resolved.panes[i], &r0, &r1, &c0, &c1);
+                if (y >= r0 && y < r1 && x >= c0 && x < c1) {
+                    const int idx = editor_kind_index(
+                        (LayoutPaneKind)resolved.panes[i].kind);
+                    if (idx >= 0) {
+                        g_ed.sel = idx;
+                        layout_editor_render();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
 /* ── 生命周期 ──────────────────────────────────────────────────── */
 
 static void editor_generate_identity(void)
@@ -1213,6 +1524,9 @@ static void editor_generate_identity(void)
 
 void layout_editor_open(const LayoutSpec *base, int is_new)
 {
+    /* 编辑器整屏独占；设置页残留的右键菜单必须先关闭。 */
+    ui_context_menu_close(0);
+
     memset(&g_ed, 0, sizeof(g_ed));
     if (base) {
         g_ed.spec = *base;

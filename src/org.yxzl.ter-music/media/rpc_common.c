@@ -20,7 +20,7 @@
 #include "config/config.h"
 #include "info/info.h"
 #include "logger/logger.h"
-#include "ui/braille/braille_art.h"
+#include "ui/cover/album_cover.h"
 #include "util/json.h"
 #include "util/utf8_safe.h"
 

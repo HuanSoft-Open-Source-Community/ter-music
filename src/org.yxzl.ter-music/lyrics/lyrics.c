@@ -1028,7 +1028,11 @@ static int extract_embedded_lyrics(const char *audio_path)
         }
 
         static const char *lyrics_keys[] = {
-            "lyrics", "LYRICS", "unsyncedlyrics", "\xa9lyr", NULL
+            "lyrics", "LYRICS", "unsyncedlyrics", "UNSYNCEDLYRICS",
+            /* ID3 USLT/iTunes 在 FFmpeg 里常暴露为 lyrics-eng（同族还可有
+             * 其它语言后缀）；精确别名覆盖旧版 libavutil，不依赖迭代 API。 */
+            "lyrics-eng", "LYRICS-ENG",
+            "\xa9lyr", NULL
         };
         for (int k = 0; !found && lyrics_keys[k]; k++) {
             AVDictionaryEntry *entry = av_dict_get(stream_meta, lyrics_keys[k], NULL, 0);
@@ -1050,7 +1054,8 @@ static int extract_embedded_lyrics(const char *audio_path)
     if (!found) {
         static const char *fallback_keys[] = {
             "LYRICS", "lyrics", "UNSYNCEDLYRICS", "unsyncedlyrics",
-            "UNSYNCED LYRICS", "\xa9lyr", NULL
+            "UNSYNCED LYRICS", "lyrics-eng", "LYRICS-ENG",
+            "\xa9lyr", NULL
         };
         AVFormatContext *meta_ctx = NULL;
         if (avformat_open_input(&meta_ctx, audio_path, NULL, NULL) == 0) {

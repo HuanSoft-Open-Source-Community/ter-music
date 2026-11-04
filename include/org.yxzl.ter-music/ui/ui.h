@@ -60,8 +60,10 @@ void controls_reset_popup(void);
 /* 控制区弹层的当前窗口；未激活或创建失败时为 NULL。
  * 流光彩蛋用它把弹层纳入整屏合成，避免刷新底层窗口时把弹层擦掉。 */
 WINDOW *controls_popup_window(void);
-/* 主视图窗格统一刷新入口：彩蛋激活时先把前景合成成当前流光色再
- * wrefresh，避免基础色帧先被刷到终端造成闪动；未激活时等价 wrefresh。 */
+/* 主视图窗格统一刷新入口：彩蛋激活时先把前景合成成当前流光色再刷新，
+ * 避免基础色帧先被刷到终端造成闪动。右键菜单展开且与窗口相交时改走
+ * "wnoutrefresh + 菜单 backing 压回 + 单次 doupdate" 的合成刷新，
+ * 保证终端不会输出菜单矩形内的窗格像素；其余情况等价 wrefresh。 */
 int ui_refresh_window(WINDOW *win);
 /* 彩蛋色对的背景：终端支持默认色时返回 -1（透明），否则返回黑(0)。 */
 int ui_transparent_background(void);
@@ -94,6 +96,15 @@ void activate_current_control(void);
 void render_controls_status_line(void);
 void controls_status_tick(void);
 
+/* 主视图动作分发（键盘与右键菜单共用）。
+ * 返回 1 = 已处理；2 = 请求退出事件循环。 */
+int handle_main_action(ActionId action);
+
+/* 列表窗格的文件/队列模式切换（键盘 view.tab_switch 与右键菜单共用）。
+ * 只切列表模式；歌词来源切换仍由 view.tab_switch 的键盘分支先判。
+ * 返回 1 = 已切换；0 = 列表未加载。 */
+int ui_toggle_playlist_tab_mode(void);
+
 /* 控制区内容坐标。渲染、进度增量刷新、鼠标命中和可视化共用同一份
  * 结果，避免各自换行/居中导致画面与点击错位。 */
 typedef struct {
@@ -108,12 +119,44 @@ typedef struct {
 
 void controls_compute_layout(int height, int width, ControlsLayout *out);
 
+/* 键盘与鼠标滚轮共用的步进量（原定义在 ui.c，控制区滚轮也要用，故上移）。
+ * 数值不变：快进/快退 5 秒、音量 5%。 */
+#define UI_SEEK_STEP_SECONDS    5
+#define UI_VOLUME_STEP_PERCENT  5
+
 int  get_playlist_scroll_offset(void);
 uint64_t get_ui_time_ms(void);
 void seek_relative_seconds(int delta_seconds);
 
-int  handle_main_view_mouse_event(const MEVENT *event);
-int  handle_menu_hint_bar_click(const MEVENT *event);
+/**
+ * @brief 移动"当前列表"的选中项一格（键盘上下键与鼠标滚轮共用）。
+ *
+ * 覆盖四种列表形态：搜索命中、播放队列、文件树、普通/排序播放列表；
+ * 边界由各自的数量钳制，越界不做事。
+ *
+ * @param delta               -1 上/前一格，+1 下/后一格
+ * @param guard_lyric_cursor  非 0 时保留 j/k 键在歌词跳转模式下的既有护栏
+ *                            （该模式下上下键归歌词，不移动列表）。鼠标滚轮
+ *                            传 0：滚轮是窗格本地操作，与键位约定无关。
+ */
+void ui_move_main_list_selection(int delta, int guard_lyric_cursor);
+
+/**
+ * @brief 歌词跳转光标移动一格并跳到该行时间戳（上一句/下一句）。
+ *
+ * 键盘（Ctrl+L 后的上下键）与歌词窗格滚轮共用；不改变跳转模式开关。
+ */
+void ui_lyric_cursor_step(int delta);
+
+/**
+ * @brief 全局鼠标事件处理：归一化 MEVENT → 量区域 → 归属判定 → 派发到属主模块。
+ *
+ * 归属规则见 ui/mouse.h 头部注释（弹层展开时弹层拥有本次事件，
+ * 弹层外的点击收起弹层并吞掉，绝不穿透到背后窗格）。
+ * @return 1 = 已消费；0 = 无人认领
+ */
+int  handle_global_mouse_event(const MEVENT *event);
+
 int  handle_popup_action(ActionId action);
 int  handle_popup_input(int ch);
 int  is_primary_mouse_click(const MEVENT *event);

@@ -163,6 +163,10 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/ui/progress_ui.c
     src/org.yxzl.ter-music/ui/playlist_render.c
     src/org.yxzl.ter-music/ui/mouse.c
+    src/org.yxzl.ter-music/ui/mouse_routing.c
+    src/org.yxzl.ter-music/ui/context_menu.c
+    src/org.yxzl.ter-music/ui/context_menu_layout.c
+    src/org.yxzl.ter-music/ui/context_menu_main.c
     src/org.yxzl.ter-music/ui/util.c
     src/org.yxzl.ter-music/ui/menus.c
     src/org.yxzl.ter-music/ui/settings.c
@@ -176,8 +180,8 @@ add_executable(${PROJECT_NAME}
     src/org.yxzl.ter-music/i18n/i18n.c
     src/org.yxzl.ter-music/lyrics/lyrics.c
     src/org.yxzl.ter-music/ui/lyrics.c
-    src/org.yxzl.ter-music/ui/braille/braille_art.c
-    src/org.yxzl.ter-music/ui/braille/image_loader.c
+    src/org.yxzl.ter-music/ui/cover/text_cover.c
+    src/org.yxzl.ter-music/ui/cover/cover_image.c
     src/org.yxzl.ter-music/ui/scrollbar.c
     src/org.yxzl.ter-music/media/session.c
     src/org.yxzl.ter-music/media/rpc_common.c

@@ -5,6 +5,8 @@
  * Renders inside the main playlist window when g_library_state.active is set.
  * Keyboard-driven navigation: Up/Down to select, Enter to drill down,
  * ESC/Backspace to go back, M to toggle library mode.
+ * 鼠标：这块窗格被浏览器占用时，点击与滚轮都归浏览器（见
+ * library_handle_mouse），不能再按播放列表的行号解释。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  * @date 2026-06-01
@@ -14,6 +16,7 @@
 #define LIBRARY_BROWSER_H
 
 #include "types.h"
+#include "ui/mouse.h"
 
 /* ── Extern globals ── */
 extern LibraryState g_library_state;
@@ -41,6 +44,16 @@ void render_library_content(void);
 int handle_library_action(ActionId action);
 
 int handle_library_input(int ch);
+
+/**
+ * 处理落在本窗格上的鼠标事件（仅在 g_library_state.active 时被调用）。
+ *
+ * d->row 是窗格本地行（区域矩形由 getbegyx(win_playlist) 量得），
+ * 行→条目映射与 render_library_home 等渲染函数同源。
+ * 单击=选中；双击或再点已选中行=下钻；滚轮一格=上下选择一项。
+ * @return 1 = 已消费（事件归浏览器，不再交给播放列表）
+ */
+int library_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d);
 
 /**
  * Called when entering library mode (sets up initial state).

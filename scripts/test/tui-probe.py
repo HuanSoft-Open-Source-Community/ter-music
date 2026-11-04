@@ -11,7 +11,9 @@
                [--term TERM] [--state-out FILE] [--wait SECONDS]
 
 --keys 同时接受命名键（<up> <down> <enter> <tab> <f1>..<f12> 等），序列
-按 --term（默认 xterm-256color）的 terminfo 选取。
+按 --term（默认 xterm-256color）的 terminfo 选取；也接受鼠标键
+<click:列:行>、<double:列:行>、<wheel-up:列:行>、<wheel-down:列:行>
+（xterm SGR 编码，坐标从 1 开始，整段一次写入 pty）。
 
 --bin 会先规范成绝对路径并校验可执行：路径若是失效的（例如调用方先 cd 到了
 别处，相对路径在那一刻已经不存在），探针当场明确报错，而不是把子进程的
@@ -43,7 +45,8 @@ def parse_keys(text, named=None):
     保留既有的 `\\t \\n \\e` 转义写法；新增 `<enter> <tab> <space> <esc>
     <up> <down> <left> <right> <f1>..<f12>` 等命名键（大小写不敏感），序列
     按 `--term` 对应的 terminfo 取。每个元素一次 os.write，多字节序列不被
-    拆成单字节。
+    拆成单字节。还支持鼠标键 `<click:列:行>`、`<double:列:行>`、
+    `<wheel-up:列:行>`、`<wheel-down:列:行>`（xterm SGR 编码，1 基坐标）。
     """
     named = terminfo_keys.xterm_defaults() if named is None else named
     keys = []
@@ -57,6 +60,12 @@ def parse_keys(text, named=None):
                 keys.append(named[token])
                 i = end + 1
                 continue
+            if end != -1:
+                seq = terminfo_keys.mouse_sequence(token)
+                if seq is not None:
+                    keys.append(seq)
+                    i = end + 1
+                    continue
         if text[i] == "\\" and i + 1 < length:
             nxt = text[i + 1]
             if nxt == "x" and i + 3 < length:
@@ -80,7 +89,10 @@ def main():
     parser.add_argument("--bin", required=True)
     parser.add_argument("--music", required=True, help="音乐目录（本次运行专用）")
     parser.add_argument("--home", help="HOME 目录，默认 <music>/../home")
-    parser.add_argument("--keys", default=" jjn+-")
+    parser.add_argument("--keys", default=" jjn+-",
+                        help="按键序列：普通字符、\\t/\\n/\\e 转义、<命名键>，"
+                             "以及鼠标键 <click:列:行> <double:列:行> "
+                             "<wheel-up:列:行> <wheel-down:列:行>")
     parser.add_argument("--term", default="xterm-256color",
                         help="被测 TUI 使用的 TERM（默认 xterm-256color）")
     parser.add_argument("--state-out", help="把 D-Bus 状态快照写到该文件")
