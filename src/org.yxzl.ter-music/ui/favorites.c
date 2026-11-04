@@ -107,6 +107,7 @@ void render_favorites_content(void)
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_LYRICS));
+    repaint_status_message();
     refresh();
 }
 

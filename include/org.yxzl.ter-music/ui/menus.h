@@ -44,8 +44,6 @@ void render_language_content(void);
 void rerender_active_view(void);
 void render_playlist_manager_content(void);
 
-void handle_function_keys(int fkey);
-
 void add_history_entry(Track *track);
 
 int add_to_favorites(Track *track);

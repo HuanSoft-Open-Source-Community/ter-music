@@ -20,6 +20,7 @@
 
   <!-- ===== App / Exit ===== -->
   <string key="app.exit_clean">ter-music 已正常退出。</string>
+  <string key="app.name">ter-music</string>
 
   <!-- ===== Sidebar items ===== -->
   <string key="sidebar.settings.theme">界面外观</string>
@@ -138,23 +139,25 @@
   <string key="settings.opt.lyrics_align">歌词对齐</string>
   <string key="settings.opt.play_mode">播放模式</string>
   <string key="settings.opt.default_speed">默认倍速</string>
-  <string key="settings.opt.cover_art">专辑封面</string>
+  <string key="settings.opt.cover_art">专辑封面（总开关）</string>
   <string key="settings.opt.seamless_preload">无缝预加载</string>
   <string key="settings.opt.audio_backend">音频后端</string>
   <string key="settings.opt.sort_mode">排序方式</string>
   <string key="settings.opt.cue_encoding">CUE编码</string>
 
-  <!-- ===== Info display (CLI / D-Bus) ===== -->
+  <!-- ===== Info display (info pane + CLI / D-Bus) ===== -->
   <string key="settings.opt.info_preset">信息显示预设</string>
-  <string key="settings.opt.info_fields">基本信息字段</string>
-  <string key="settings.opt.info_cover">显示字符封面</string>
-  <string key="settings.opt.info_cover_size">封面尺寸</string>
-  <string key="settings.opt.info_cover_charset">封面字符集</string>
-  <string key="settings.opt.info_progress">显示进度</string>
-  <string key="settings.opt.info_progress_style">进度样式</string>
-  <string key="settings.opt.info_lyrics">歌词行数</string>
-  <string key="settings.info.hint">信息显示：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单；本节只影响 ter-music show 与 D-Bus 输出</string>
-  <string key="settings.info.fields_hint">空格/回车切换字段，a 全选，n 清空，回车完成，ESC 取消</string>
+  <string key="settings.opt.info_fields">基本信息字段（窗格/CLI）</string>
+  <string key="settings.opt.info_cover">显示封面（窗格/CLI）</string>
+  <string key="settings.opt.info_cover_size">封面尺寸（仅 CLI/D-Bus）</string>
+  <string key="settings.opt.info_cover_charset">封面字符集（仅 CLI/D-Bus）</string>
+  <string key="settings.opt.info_progress">显示进度（仅 CLI/D-Bus）</string>
+  <string key="settings.opt.info_progress_style">进度样式（仅 CLI/D-Bus）</string>
+  <string key="settings.opt.info_lyrics">歌词行数（仅 CLI/D-Bus）</string>
+  <string key="settings.info.hint">信息显示：↑/↓ 选择，ENTER 展开选择，←/TAB 返回菜单</string>
+  <string key="settings.info.pane_hint">预设/字段/封面同时作用于主页信息窗格与 CLI/D-Bus；窗格封面另受播放设置的封面总开关约束</string>
+  <string key="settings.info.fields_hint">空格切换字段，a 全选，n 清空，回车完成；标“仅 CLI”的字段及封面尺寸/字符集/进度/歌词只影响 CLI/D-Bus</string>
+  <string key="settings.info.field_cli_only">（仅 CLI）</string>
   <string key="settings.info.saved">信息显示设置已保存</string>
   <string key="settings.info.preset.full">全量</string>
   <string key="settings.info.preset.compact">精简</string>
@@ -165,6 +168,7 @@
   <string key="settings.info.progress.time_percent">时间+百分比</string>
   <string key="settings.info.charset.braille">盲文</string>
   <string key="settings.info.charset.ascii">ASCII</string>
+  <string key="settings.info.charset.half">半块</string>
   <string key="settings.info.lyrics.none">关闭</string>
   <string key="settings.info.lyrics.current">仅当前句</string>
   <string key="settings.info.lyrics.current_next">当前句+下一句</string>
@@ -266,6 +270,7 @@
   <string key="controls.controls_area">控制区</string>
   <string key="controls.ctrl_focus">[控件焦点]</string>
   <string key="controls.list_focus">[列表焦点]</string>
+  <string key="controls.pane_hidden">控制区窗格已隐藏</string>
   <string key="controls.space_run">[空格:执行]</string>
   <string key="controls.c_ctrl">[C:控件]</string>
   <string key="controls.l_list">[L:列表]</string>
@@ -351,11 +356,13 @@
   <string key="playlist_mgr.create_failed">创建歌单失败</string>
   <string key="playlist_mgr.deleted">歌单已删除</string>
   <string key="playlist_mgr.track_removed">歌曲已移除</string>
+  <string key="playlist_mgr.track_remove_failed">无法移除该歌曲</string>
   <string key="playlist_mgr.rename_prompt">输入新名称：</string>
   <string key="playlist_mgr.renamed">歌单已重命名</string>
   <string key="playlist_mgr.rename_failed">歌单重命名失败</string>
   <string key="playlist_mgr.track_not_in_queue">当前播放列表中没有这首歌</string>
   <string key="playlist_mgr.select_playlist"> 选择歌单 </string>
+  <string key="playlist_mgr.select_hint">↑/↓: 选择 | ENTER: 确认 | ESC: 取消</string>
   <string key="playlist_mgr.added_to_playlist">已添加到歌单</string>
   <string key="playlist_mgr.playlist_full">歌单已满</string>
   <string key="playlist_mgr.already_in_playlist">歌曲已在歌单中</string>
@@ -417,8 +424,6 @@
   <!-- ===== Remote ===== -->
   <string key="remote.list_failed">无法列出远程目录</string>
   <string key="remote.refresh_failed">刷新失败：</string>
-  <string key="remote.press_any_key">  ← 按任意键继续</string>
-  <string key="remote.refresh_failed_short">刷新失败  ← 按任意键继续</string>
   <string key="remote.connection_ok">连接成功，共</string>
   <string key="remote.entries">个条目</string>
   <string key="remote.loaded">已加载</string>
@@ -497,6 +502,8 @@
   <string key="status.tracks_unit">首歌曲</string>
   <string key="status.added_to_queue">已添加到队列</string>
   <string key="status.queue_cleared">队列已清空</string>
+  <string key="status.queue_item_missing">当前曲目不在播放队列中</string>
+  <string key="status.queue_at_edge">已在队列边界</string>
   <string key="status.inserted_next">已插入到下一首</string>
   <string key="status.search_cancelled">搜索已取消</string>
   <string key="status.search_wait">搜索中，请稍候...</string>

@@ -262,7 +262,6 @@ static void editor_draw_box(int row, int col, int h, int w, const char *title)
 static int editor_list_width(int cols)
 {
     int list_w = cols >= 88 ? 40 : cols / 2;
-    if (list_w < 30) list_w = cols - 4;
     return list_w;
 }
 
@@ -1421,12 +1420,24 @@ int layout_editor_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
             return layout_editor_handle_key(27);   /* 帮助页只读：点哪都关 */
         }
 
+        /* 绘制区最多 h-3 个条目（标题行 + 页脚 + 下边框）；页脚/边框/空白
+         * 行不能被映射成未绘制的隐藏条目。 */
+        int visible = box.rows - 3;
+        if (visible < 1) visible = 1;
+        if (visible > count) visible = count;
+        if (d->row < 1 || d->row > visible) {
+            return 1;
+        }
+
         int item = d->row - 1;   /* 条目从框内第 1 行起，与绘制循环同构 */
         if (g_ed.mode == ED_MODE_ACTIONS) {
             item += g_ed.action_scroll;   /* 动作菜单可滚动 */
+            if (item >= g_ed.action_scroll + visible) {
+                return 1;
+            }
         }
         if (item < 0 || item >= count) {
-            return 1;            /* 标题行、边框、底部提示行：只认领不动作 */
+            return 1;
         }
 
         int *sel = NULL;

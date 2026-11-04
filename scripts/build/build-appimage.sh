@@ -303,8 +303,9 @@ create_appdir() {
 
     mkdir -p "${appdir}/usr/share/ter-music/layouts"
     cp "${SCRIPT_DIR}/data/layouts/layouts.json" "${appdir}/usr/share/ter-music/layouts/layouts.json" 2>/dev/null || true
-    cp "${SCRIPT_DIR}/data/help-quickstart-zh.txt" "${appdir}/usr/share/ter-music/" 2>/dev/null || true
-    cp "${SCRIPT_DIR}/data/help-quickstart-en.txt" "${appdir}/usr/share/ter-music/" 2>/dev/null || true
+    mkdir -p "${appdir}/usr/share/ter-music/help" "${appdir}/usr/share/ter-music/lang"
+    cp "${SCRIPT_DIR}"/data/help/help-quickstart-*.txt "${appdir}/usr/share/ter-music/help/" 2>/dev/null || true
+    cp "${SCRIPT_DIR}"/data/lang/*.xml "${appdir}/usr/share/ter-music/lang/" 2>/dev/null || true
 
     cat > "${appdir}/AppRun" << 'EOF'
 #!/bin/bash

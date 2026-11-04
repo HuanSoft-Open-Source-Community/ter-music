@@ -169,6 +169,7 @@ void render_language_content(void)
         snprintf(line, sizeof(line), "  %s", i18n_get("lang_mgr.no_langs"));
         menu_content_puts(&area, start_y, line);
         attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
+        repaint_status_message();
         refresh();
         return;
     }
@@ -241,6 +242,7 @@ void render_language_content(void)
     attroff(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
+    repaint_status_message();
     refresh();
 }
 
@@ -252,39 +254,53 @@ int handle_language_action(ActionId action)
 {
     switch (action) {
         case ACTION_LANGUAGE_UP:
-            if (g_lang_selected > 0)
-                g_lang_selected--;
-            else
-                g_lang_selected = g_lang_count > 0 ? g_lang_count - 1 : 0;
-            break;
-
         case ACTION_LANGUAGE_DOWN:
-            if (g_lang_count > 0) {
+            /* 侧栏只有“返回”一项。上下键先离开侧栏进入内容列表，
+             * 否则会在侧栏仍高亮时移动看不见的选中项。 */
+            if (g_focus_area == FOCUS_SIDEBAR) {
+                g_focus_area = FOCUS_CONTENT;
+                render_menu_sidebar(g_menu_selected_idx, language_sidebar_items,
+                                    LANGUAGE_ITEM_COUNT);
+                render_language_content();
+                return 1;
+            }
+            if (action == ACTION_LANGUAGE_UP) {
+                if (g_lang_selected > 0)
+                    g_lang_selected--;
+                else
+                    g_lang_selected = g_lang_count > 0 ? g_lang_count - 1 : 0;
+            } else if (g_lang_count > 0) {
                 g_lang_selected++;
                 if (g_lang_selected >= g_lang_count)
                     g_lang_selected = 0;
             }
             break;
 
-        case ACTION_LANGUAGE_ACTIVATE: {
+        case ACTION_LANGUAGE_ACTIVATE:
+            /* 焦点在侧栏时 Enter 确认的是“返回”；只有内容区才切语言。 */
+            if (g_focus_area == FOCUS_SIDEBAR) {
+                exit_current_view();
+                return 1;
+            }
             if (g_lang_count == 0) break;
-            const char *sel = g_langs[g_lang_selected].id;
-            const char *cur = i18n_current_lang();
-            if (strcmp(sel, cur) != 0) {
-                log_debug("lang_view", "Activate language: %s -> %s", cur, sel);
-                if (i18n_reload(sel) == 0) {
-                    strncpy(g_app_config.ui_language, sel,
-                            sizeof(g_app_config.ui_language) - 1);
-                    g_app_config.ui_language[sizeof(g_app_config.ui_language) - 1] = '\0';
-                    player_config_persist();
-                    help_free_lines();
-                    show_status_message(i18n_get("lang_mgr.switched"));
-                    rerender_active_view();
-                    return 1;
+            {
+                const char *sel = g_langs[g_lang_selected].id;
+                const char *cur = i18n_current_lang();
+                if (strcmp(sel, cur) != 0) {
+                    log_debug("lang_view", "Activate language: %s -> %s", cur, sel);
+                    if (i18n_reload(sel) == 0) {
+                        strncpy(g_app_config.ui_language, sel,
+                                sizeof(g_app_config.ui_language) - 1);
+                        g_app_config.ui_language[sizeof(g_app_config.ui_language) - 1] = '\0';
+                        player_config_persist();
+                        help_free_lines();
+                        show_status_message(i18n_get("lang_mgr.switched"));
+                        rerender_active_view();
+                        return 1;
+                    }
                 }
             }
             break;
-        }
 
         case ACTION_LANGUAGE_ADD: {
             char path[MAX_PATH_LEN];
@@ -444,9 +460,8 @@ int language_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
     if (d->target == UI_MOUSE_TARGET_SIDEBAR) {
         if (d->row < 0 || d->row >= LANGUAGE_ITEM_COUNT) return 1;
 
-        /* 侧栏只有"返回"一项，没有可移动的选中；而本视图的上下动作作用在内容区
-         * 的语言列表上（不看 g_focus_area），所以在侧栏滚轮只认领、不动作——
-         * 否则在侧栏滚一下就把语言列表换了一项。 */
+        /* 侧栏只有"返回"一项，没有可移动的选中；侧栏滚轮只认领、不动作，
+         * 避免滚一下把焦点切到内容区并改掉语言选择。 */
         if (ev->wheel) return 1;
         if (!ev->click) return 1;
 

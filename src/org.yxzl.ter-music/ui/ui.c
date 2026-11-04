@@ -93,9 +93,6 @@ WINDOW *win_spectrum;
 WINDOW *win_lyrics;
 WINDOW *win_vinyl;
 
-/* ── Control count ── */
-int g_control_count = CONTROL_COUNT;
-
 /* ── Lyric cursor mode ── */
 int g_lyric_cursor_mode = 0;
 int g_lyric_cursor_index = -1;
@@ -114,7 +111,6 @@ static int g_default_colors_ok = 0;
  * 快进/音量步进量已上移到 ui.h（UI_SEEK_STEP_SECONDS / UI_VOLUME_STEP_PERCENT）：
  * 控制区窗格的滚轮要用同一份，不能在两个文件里各写一个魔数。 */
 #define UI_INPUT_TIMEOUT_MS 40
-#define UI_PROGRESS_REFRESH_MS 80
 #define ESC_TIMEOUT_MS 3000
 
 /* ============================================================
@@ -180,16 +176,6 @@ size_t utf8_next_char(const char *src, wchar_t *wc_out, int *width_out)
     if (wc_out)   *wc_out = wc;
     if (width_out) *width_out = width;
     return char_len;
-}
-
-/* ============================================================
- * ui_text: bilingual text helper
- * ============================================================ */
-
-const char *ui_text(const char *key, const char *unused)
-{
-    (void)unused;
-    return i18n_get(key);
 }
 
 /* ============================================================
@@ -379,22 +365,22 @@ void ui_move_main_list_selection(int delta, int guard_lyric_cursor)
         return;
     }
 
-    if (g_search_state.active || g_search_state.in_progress) {
-        int next = g_search_state.selected_index + delta;
-        if (next < 0) next = 0;
-        if (next > g_search_state.result_count - 1) next = g_search_state.result_count - 1;
-        if (next == g_search_state.selected_index) return;
-        g_search_state.selected_index = next;
-        render_playlist_content();
-        return;
-    }
-
     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
         int next = g_queue_selected_index + delta;
         if (next < 0) next = 0;
         if (next > player_queue_count() - 1) next = player_queue_count() - 1;
         if (next == g_queue_selected_index) return;
         g_queue_selected_index = next;
+        render_playlist_content();
+        return;
+    }
+
+    if (g_search_state.active || g_search_state.in_progress) {
+        int next = g_search_state.selected_index + delta;
+        if (next < 0) next = 0;
+        if (next > g_search_state.result_count - 1) next = g_search_state.result_count - 1;
+        if (next == g_search_state.selected_index) return;
+        g_search_state.selected_index = next;
         render_playlist_content();
         return;
     }
@@ -452,14 +438,12 @@ static void render_offline_overlay(int connected)
     int offline = !connected && player_is_offline();
 
     if (offline) {
-        int retry_s = (player_reconnect_in_ms() + 999) / 1000;
         char line[256];
         snprintf(line, sizeof(line), "%s — %s（%s）",
                  i18n_get("core.offline.title"),
                  i18n_get("core.offline.hint"),
                  i18n_get("core.offline.restart"));
         update_controls_status(line);
-        (void)retry_s;
         was_offline = 1;
     } else if (was_offline) {
         update_controls_status(i18n_get("core.restart.done"));
@@ -491,6 +475,15 @@ static void sync_player_revisions(void)
     }
     if (now_state != state)      dirty |= UI_DIRTY_CONTROLS | UI_DIRTY_INFO;
     if (now_lyrics != lyrics)    dirty |= UI_DIRTY_LYRICS;
+
+    /* 歌词跳转模式只在当前曲目确实有歌词时成立；切到无歌词曲目后
+     * 必须在下一帧退出，否则 n/p 与历史会被静默禁用。 */
+    if (g_lyric_cursor_mode && player_lyrics_total() == 0) {
+        g_lyric_cursor_mode = 0;
+        g_lyric_cursor_index = -1;
+        dirty |= UI_DIRTY_LYRICS | UI_DIRTY_CONTROLS;
+    }
+
     if (dirty) {
         request_ui_refresh(dirty);
     }
@@ -567,15 +560,21 @@ static void ui_on_config_reloaded(void)
 }
 
 /* 列表窗格的文件/队列模式切换：Ctrl+Tab 动作与右键菜单共用。
- * 只切换列表模式；歌词来源切换仍由 ACTION_VIEW_TAB_SWITCH 先判。 */
+ * 只切换列表模式；歌词来源切换由 ACTION_LYRICS_SOURCE_SWITCH 负责。
+ * 搜索只属于文件浏览模式：切到队列页前先取消搜索，避免标题/行/命中
+ * 各按不同状态解析。 */
 int ui_toggle_playlist_tab_mode(void)
 {
     if (!playlist_is_loaded()) {
         return 0;
     }
     /* Save browser cursor position before switching to queue */
-    if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER)
+    if (g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER) {
+        if (g_search_state.active || g_search_state.in_progress) {
+            search_clear();
+        }
         g_saved_browser_index = g_selected_index;
+    }
 
     g_playlist_tab_mode = !g_playlist_tab_mode;
 
@@ -651,12 +650,19 @@ int handle_main_action(ActionId action)
             }
             return 1;
         case ACTION_FOCUS_CONTROLS:
+            if (!win_controls) {
+                update_controls_status(i18n_get("controls.pane_hidden"));
+                return 1;
+            }
             g_control_focus = 1;
             g_current_control_idx = 1;
             render_playlist_content();
             render_controls();
             return 1;
         case ACTION_FOCUS_LIST:
+            if (g_popup.active) {
+                controls_reset_popup();
+            }
             g_control_focus = 0;
             render_controls();
             render_playlist_content();
@@ -666,23 +672,26 @@ int handle_main_action(ActionId action)
                 update_controls_status(i18n_get("lyrics.pane_hidden"));
                 return 1;
             }
-            int highlight = -1;
-            int has_lyrics = player_lyrics_highlight(&highlight, NULL, NULL);
-            if (has_lyrics && highlight >= 0) {
-                g_lyric_cursor_mode = !g_lyric_cursor_mode;
-                if (g_lyric_cursor_mode) {
-                    g_lyric_cursor_index = highlight;   /* 光标是界面私有状态 */
-                    update_controls_status(i18n_get("lyrics.seek_enabled"));
-                } else {
-                    update_controls_status(i18n_get("lyrics.seek_disabled"));
-                }
+            /* 已开启时无条件允许退出：切到无歌词曲目后不能让模式卡死。 */
+            if (g_lyric_cursor_mode) {
+                g_lyric_cursor_mode = 0;
+                g_lyric_cursor_index = -1;
+                update_controls_status(i18n_get("lyrics.seek_disabled"));
                 render_controls();
                 render_lyrics();
                 return 1;
             }
-            if (!has_lyrics) {
+            int highlight = -1;
+            int has_lyrics = player_lyrics_highlight(&highlight, NULL, NULL);
+            if (!has_lyrics || highlight < 0) {
                 update_controls_status(i18n_get("lyrics.no_position"));
+                return 1;
             }
+            g_lyric_cursor_mode = 1;
+            g_lyric_cursor_index = highlight;   /* 光标是界面私有状态 */
+            update_controls_status(i18n_get("lyrics.seek_enabled"));
+            render_controls();
+            render_lyrics();
             return 1;
         }
         default:
@@ -868,33 +877,18 @@ int handle_main_action(ActionId action)
             break;
         case ACTION_SEARCH_OPEN:
             if (g_current_view == VIEW_MAIN) {
+                /* 搜索只作用于文件浏览模式；在队列页按 / 先切回浏览器。 */
+                if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
+                    !ui_toggle_playlist_tab_mode()) {
+                    break;
+                }
                 search_prompt();
                 return 1;
             }
             break;
         case ACTION_VIEW_TAB_SWITCH:
-            /* ── Lyric cursor mode: toggle between embedded / external lyrics ── */
-            if (g_lyric_cursor_mode && player_lyrics_total() > 0) {
-                int new_source = (player_lyrics_source() == LYRICS_SOURCE_EMBEDDED)
-                    ? LYRICS_SOURCE_EXTERNAL : LYRICS_SOURCE_EMBEDDED;
-                if (player_lyrics_reload_source(new_source) == 0 &&
-                    player_backend() == PLAYER_BACKEND_REMOTE) {
-                    /* 来源偏好是前端的**内容**（按曲目记在曲库里）。本地模式
-                     * 下核心与本前端同进程，由核心经 lyrics_set_source_hook
-                     * 回调落库；远端模式下核心是另一个进程、也没有内容库，
-                     * 只能由发起这次切换的前端自己落库。 */
-                    const InfoTrack *track = player_track();
-                    if (track && track->path[0] != '\0') {
-                        library_set_lyrics_source(track->path, new_source);
-                    }
-                }
-                update_controls_status(
-                    new_source == LYRICS_SOURCE_EMBEDDED
-                        ? i18n_get("lyrics.source_embedded")
-                        : i18n_get("lyrics.source_external"));
-                return 1;
-            }
-
+            /* 歌词来源切换走 CTX_MAIN_LYRIC 的 ACTION_LYRICS_SOURCE_SWITCH；
+             * 这里只负责文件/队列模式切换。 */
             (void)ui_toggle_playlist_tab_mode();
             break;
         case ACTION_PLAYLIST_ADD:
@@ -944,8 +938,7 @@ int handle_main_action(ActionId action)
                     }
 
                     mvwprintw(win_win, max_y - 6, 2, "%s",
-                              ui_text("↑/↓: 选择 | ENTER: 确认 | ESC: 取消",
-                                      "Up/Down: Select | Enter: OK | Esc: Cancel"));
+                              i18n_get("playlist_mgr.select_hint"));
                     wrefresh(win_win);
                     wtimeout(win_win, UI_INPUT_TIMEOUT_MS);
                     int c = wgetch(win_win);
@@ -975,8 +968,8 @@ int handle_main_action(ActionId action)
                 request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
                                    UI_DIRTY_LYRICS | UI_DIRTY_INFO);
             } else if (g_playlist_manager.count == 0) {
-                update_controls_status(ui_text("还没有歌单，请先到 F4 新建",
-                                               "No playlist yet. Create one in F4"));
+                update_controls_status(
+                    i18n_get("playlist_mgr.no_playlists_yet"));
             }
             break;
         case ACTION_QUEUE_REMOVE:
@@ -1005,6 +998,8 @@ int handle_main_action(ActionId action)
                             g_queue_selected_index = player_queue_count() > 0 ? player_queue_count() - 1 : 0;
                     }
                     render_playlist_content();
+                } else {
+                    update_controls_status(i18n_get("status.queue_item_missing"));
                 }
             }
             break;
@@ -1040,6 +1035,10 @@ int handle_main_action(ActionId action)
                     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
                         g_queue_selected_index++;
                     render_playlist_content();
+                } else if (target_pos < 0) {
+                    update_controls_status(i18n_get("status.queue_item_missing"));
+                } else {
+                    update_controls_status(i18n_get("status.queue_at_edge"));
                 }
             }
             break;
@@ -1067,6 +1066,10 @@ int handle_main_action(ActionId action)
                     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE)
                         g_queue_selected_index--;
                     render_playlist_content();
+                } else if (target_pos < 0) {
+                    update_controls_status(i18n_get("status.queue_item_missing"));
+                } else {
+                    update_controls_status(i18n_get("status.queue_at_edge"));
                 }
             }
             break;
@@ -1117,18 +1120,21 @@ int handle_main_action(ActionId action)
         case ACTION_HISTORY_SHOW:
             if (g_lyric_cursor_mode || g_play_history.count == 0) break;
             {
-            /* Simple inline history: show last 10 entries as a popup window */
+            /* Simple inline history: up to 10 rows, scrolls over all entries */
             int my, mx;
             getmaxyx(stdscr, my, mx);
-            int n = g_play_history.count > 10 ? 10 : g_play_history.count;
-            int pw = 60, ph = n + 4;
+            int visible = g_play_history.count > 10 ? 10 : g_play_history.count;
+            int pw = 60, ph = visible + 4;
             int px = (mx - pw) / 2, py = (my - ph) / 2;
             WINDOW *w = newwin(ph, pw, py, px);
             rounded_box(w);
             mvwprintw(w, 0, 2, "%s", i18n_get("play_history.title"));
             int sel = 0, off = 0;
             while (1) {
-                for (int i = 0; i < n && i < ph - 3; i++) {
+                if (sel < off) off = sel;
+                else if (sel >= off + visible) off = sel - visible + 1;
+                if (off < 0) off = 0;
+                for (int i = 0; i < visible; i++) {
                     int idx = off + i;
                     if (idx >= g_play_history.count) break;
                     const HistoryEntry *e = &g_play_history.entries[idx];
@@ -1155,7 +1161,8 @@ int handle_main_action(ActionId action)
                     : keymap_resolve(CTX_POPUP, c);
                 if (popup_action == ACTION_POPUP_CANCEL) break;
                 if (popup_action == ACTION_POPUP_UP && sel > 0) sel--;
-                if (popup_action == ACTION_POPUP_DOWN && sel < g_play_history.count - 1) sel++;
+                if (popup_action == ACTION_POPUP_DOWN &&
+                    sel < g_play_history.count - 1) sel++;
                 if (popup_action == ACTION_POPUP_ACCEPT) {
                     const char *hpath = g_play_history.entries[sel].path;
                     int found = playlist_find_track_index_by_path(hpath);

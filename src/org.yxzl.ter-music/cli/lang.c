@@ -82,7 +82,10 @@ const char *cli_lang_normalize(const char *raw, char *out, size_t out_size)
         }
     }
 
-    if (strncasecmp(buf, "zh", 2) == 0)
+    /* 内置 zh-PQ 是独立语言包，不能落入 zh_* → zh_CN 的通用归一。 */
+    if (strcasecmp(buf, "zh_PQ") == 0)
+        snprintf(out, out_size, "zh-PQ");
+    else if (strncasecmp(buf, "zh", 2) == 0)
         snprintf(out, out_size, "zh_CN");
     else if (strncasecmp(buf, "en", 2) == 0)
         snprintf(out, out_size, "en_US");

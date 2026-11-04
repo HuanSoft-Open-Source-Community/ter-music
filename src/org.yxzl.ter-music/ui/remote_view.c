@@ -159,6 +159,11 @@ static int remote_view_is_active(void)
     return g_current_view == VIEW_SETTINGS && g_menu_selected_idx == 5;
 }
 
+int remote_view_form_active(void)
+{
+    return g_remote_mode == 2;
+}
+
 /* UI 线程取回列目录结果（后台线程不碰 UI） */
 static void remote_drain_listing(void)
 {
@@ -176,10 +181,9 @@ static void remote_drain_listing(void)
     if (is_error) {
         if (was_check) {
             char buf[320];
-            snprintf(buf, sizeof(buf), "%s%s%s",
+            snprintf(buf, sizeof(buf), "%s%s",
                      i18n_get("remote.refresh_failed"),
-                     (err && err[0]) ? err : "",
-                     i18n_get("remote.press_any_key"));
+                     (err && err[0]) ? err : "");
             show_status_message(buf);
         } else if (err && err[0]) {
             char buf[320];
@@ -494,8 +498,7 @@ static void remote_form_value_text(int field_idx, char *buf, size_t size)
 
 static void remote_form_edit_field(int field_idx)
 {
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
+    int max_x = getmaxx(stdscr);
     int content_start_x = (max_x / 4) + 2;
     int form_start_y = 4;
 
@@ -812,11 +815,26 @@ void remote_view_render(void)
         } else if (g_remote_entry_count == 0) {
             menu_content_puts(&area, y++, i18n_get("general.empty_dir"));
         } else {
-            int display_count = g_remote_entry_count;
             int max_display = max_y - y - 3;
-            if (display_count > max_display) display_count = max_display;
-            if (g_remote_entry_offset > g_remote_entry_count - display_count)
-                g_remote_entry_offset = g_remote_entry_count - display_count;
+            if (max_display < 1) max_display = 1;
+            int entry_rows = max_display - 1;   /* 第一行是“加载整个目录” */
+            if (entry_rows < 1) entry_rows = 1;
+
+            /* 选中项跟随滚动窗口：否则 ↑/↓ 会移到一个没画出来的条目。 */
+            if (g_remote_selected == 0) {
+                g_remote_entry_offset = 0;
+            } else {
+                int sel_entry = g_remote_selected - 1;
+                if (sel_entry < g_remote_entry_offset) {
+                    g_remote_entry_offset = sel_entry;
+                } else if (sel_entry >= g_remote_entry_offset + entry_rows) {
+                    g_remote_entry_offset = sel_entry - entry_rows + 1;
+                }
+            }
+            if (g_remote_entry_offset < 0) g_remote_entry_offset = 0;
+            if (g_remote_entry_offset > g_remote_entry_count - entry_rows) {
+                g_remote_entry_offset = g_remote_entry_count - entry_rows;
+            }
             if (g_remote_entry_offset < 0) g_remote_entry_offset = 0;
 
             char load_hint[512];
@@ -826,7 +844,8 @@ void remote_view_render(void)
             menu_content_puts(&area, y++, load_hint);
             if (g_focus_area == FOCUS_CONTENT && g_remote_selected == 0) attroff(A_REVERSE);
 
-            for (int i = g_remote_entry_offset; i < g_remote_entry_count && y < max_y - 3; i++) {
+            for (int i = g_remote_entry_offset;
+                 i < g_remote_entry_count && y < max_y - 3; i++) {
                 const RemoteDirEntry *e = &g_remote_entries[i];
                 int is_sel = (g_focus_area == FOCUS_CONTENT && g_remote_selected == i + 1);
                 char line[512];

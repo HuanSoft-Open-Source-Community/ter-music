@@ -110,6 +110,7 @@ void render_history_content(void)
     }
 
     attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    repaint_status_message();
     refresh();
 }
 

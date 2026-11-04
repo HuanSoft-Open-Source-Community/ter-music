@@ -340,9 +340,6 @@ void add_history_entry(Track *track)
     g_play_history.entries[0].play_time = time(NULL);
 
     g_play_history.count++;
-    if (g_play_history.count > MAX_HISTORY_COUNT) {
-        g_play_history.count = MAX_HISTORY_COUNT;
-    }
 
     if (library_is_available()) {
         library_scan_file(track->path);
@@ -700,7 +697,7 @@ void render_menu_frame(const char *title)
 
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
     rounded_box_open_bottom(stdscr);
-    mvprintw(0, 2, " %s ", resolve_menu_title(title));
+    mvprintw(0, 2, " %s ", title ? title : "");
 
     int menu_width = max_x / 4;
     for (int y = 1; y <= max_y - 2; y++)
@@ -850,7 +847,6 @@ void switch_to_view(ViewMode view)
     reset_help_view();
     reset_language_view();
     g_history_content_offset  = 0;
-    g_playlist_content_offset = 0;
     g_favorites_content_offset = 0;
 
     switch (view) {
@@ -1038,12 +1034,6 @@ int execute_global_action(ActionId action)
         default:
             return 0;
     }
-}
-
-void handle_function_keys(int fkey)
-{
-    log_debug("menu_views", "Function key F%d pressed", fkey - KEY_F(0));
-    execute_global_action(keymap_resolve(CTX_GLOBAL, fkey));
 }
 
 /* ============================================================

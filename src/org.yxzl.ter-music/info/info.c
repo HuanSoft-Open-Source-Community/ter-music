@@ -50,19 +50,20 @@ static const char *const k_play_mode_ids[PLAY_MODE_COUNT] = {
     "artist_shuffle_repeat"
 };
 
-/* 渲染顺序即此表顺序（state/mode 在最前，format 在 path 之前） */
+/* 渲染顺序即此表顺序（state/mode 在最前，format 在 path 之前）。
+ * pane_field=1 的字段同时供主页信息窗格使用；其余仅 CLI/D-Bus。 */
 static const InfoFieldDef k_info_fields[] = {
-    { INFO_FIELD_STATE,  "state",  "settings.info.fields.state"  },
-    { INFO_FIELD_MODE,   "mode",   "settings.info.fields.mode"   },
-    { INFO_FIELD_INDEX,  "index",  "settings.info.fields.index"  },
-    { INFO_FIELD_QUEUE,  "queue",  "settings.info.fields.queue"  },
-    { INFO_FIELD_TITLE,  "title",  "settings.info.fields.title"  },
-    { INFO_FIELD_ARTIST, "artist", "settings.info.fields.artist" },
-    { INFO_FIELD_ALBUM,  "album",  "settings.info.fields.album"  },
-    { INFO_FIELD_FORMAT, "format", "settings.info.fields.format" },
-    { INFO_FIELD_PATH,   "path",   "settings.info.fields.path"   },
-    { INFO_FIELD_VOLUME, "volume", "settings.info.fields.volume" },
-    { INFO_FIELD_SPEED,  "speed",  "settings.info.fields.speed"  }
+    { INFO_FIELD_STATE,  "state",  "settings.info.fields.state",  1 },
+    { INFO_FIELD_MODE,   "mode",   "settings.info.fields.mode",   1 },
+    { INFO_FIELD_INDEX,  "index",  "settings.info.fields.index",  0 },
+    { INFO_FIELD_QUEUE,  "queue",  "settings.info.fields.queue",  1 },
+    { INFO_FIELD_TITLE,  "title",  "settings.info.fields.title",  1 },
+    { INFO_FIELD_ARTIST, "artist", "settings.info.fields.artist", 1 },
+    { INFO_FIELD_ALBUM,  "album",  "settings.info.fields.album",  1 },
+    { INFO_FIELD_FORMAT, "format", "settings.info.fields.format", 1 },
+    { INFO_FIELD_PATH,   "path",   "settings.info.fields.path",   0 },
+    { INFO_FIELD_VOLUME, "volume", "settings.info.fields.volume", 0 },
+    { INFO_FIELD_SPEED,  "speed",  "settings.info.fields.speed",  0 }
 };
 
 static const int k_info_field_count =
@@ -986,10 +987,11 @@ static void info_render_progress_line(const InfoPlayback *pb, int style,
     }
 }
 
-/* 返回 1 表示已写出一行，0 表示该字段当前无内容可显示 */
-static int info_render_field_line(int bit, const InfoTrack *t,
-                                  const InfoPlayback *pb,
-                                  char *out, size_t out_size)
+/* 返回 1 表示已写出一行，0 表示该字段当前无内容可显示。
+ * CLI 文本渲染与 TUI 信息窗格共用，保证标签和值格式一致。 */
+int info_render_field_line(int bit, const InfoTrack *t,
+                           const InfoPlayback *pb,
+                           char *out, size_t out_size)
 {
     switch (bit) {
         case INFO_FIELD_STATE: {
@@ -1224,8 +1226,8 @@ int info_render_text(const InfoRenderOptions *opts_in, char *out, size_t out_siz
                 text = truncated;
             }
 
-            int text_width = utf8_str_width(text);
-            int padding = text_budget - text_width;
+            int text_cols = utf8_str_width(text);
+            int padding = text_budget - text_cols;
             if (padding < 0) {
                 padding = 0;
             }

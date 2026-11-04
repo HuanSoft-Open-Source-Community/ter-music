@@ -27,10 +27,6 @@ extern WINDOW *win_controls;
 #include <unistd.h>
 #include <ctype.h>
 
-#ifndef MAX
-#define MAX(a,b) ((a)>(b)?(a):(b))
-#endif
-
 /* Escape sequence parser states (shared with text input helpers) */
 enum {
     INPUT_ESCAPE_NONE = 0,
@@ -111,7 +107,11 @@ static void redraw_text_input(WINDOW *win, int row, int col, const char *prompt,
         for (int i = 0; i < blen && i < (int)sizeof(masked) - 1; i++) {
             masked[i] = '*';
         }
-        masked[blen < (int)sizeof(masked) ? blen : sizeof(masked) - 1] = '\0';
+        if (blen < (int)sizeof(masked)) {
+            masked[blen] = '\0';
+        } else {
+            masked[sizeof(masked) - 1] = '\0';
+        }
         display_src = masked;
     }
 

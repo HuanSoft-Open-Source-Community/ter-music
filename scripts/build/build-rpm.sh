@@ -406,6 +406,11 @@ install -m 644 ../resources/icons/hicolor/scalable/apps/%{name}.svg %{buildroot}
 mkdir -p %{buildroot}%{_datadir}/ter-music/help
 install -m 644 ../data/help/help-quickstart-zh_CN.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-zh_CN.txt
 install -m 644 ../data/help/help-quickstart-en_US.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-en_US.txt
+install -m 644 ../data/help/help-quickstart-zh-PQ.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-zh-PQ.txt
+mkdir -p %{buildroot}%{_datadir}/ter-music/lang
+install -m 644 ../data/lang/zh_CN.xml %{buildroot}%{_datadir}/ter-music/lang/zh_CN.xml
+install -m 644 ../data/lang/en_US.xml %{buildroot}%{_datadir}/ter-music/lang/en_US.xml
+install -m 644 ../data/lang/zh-PQ.xml %{buildroot}%{_datadir}/ter-music/lang/zh-PQ.xml
 mkdir -p %{buildroot}%{_datadir}/ter-music/layouts
 install -m 644 ../data/layouts/layouts.json %{buildroot}%{_datadir}/ter-music/layouts/layouts.json
 

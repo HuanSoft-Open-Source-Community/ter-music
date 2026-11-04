@@ -570,7 +570,9 @@ static const char *i18n_user_help_dir(void)
 int i18n_is_builtin(const char *lang_id)
 {
     if (!lang_id) return 0;
-    return (strcmp(lang_id, "zh_CN") == 0 || strcmp(lang_id, "en_US") == 0);
+    return (strcmp(lang_id, "zh_CN") == 0 ||
+            strcmp(lang_id, "en_US") == 0 ||
+            strcmp(lang_id, "zh-PQ") == 0);
 }
 
 /* Forward declaration for temp-dir cleanup helper */
@@ -639,7 +641,7 @@ int i18n_add_language(const char *source_path)
     }
     xmlFreeDoc(doc);
 
-    /* Reject built-in languages (zh_CN, en_US) */
+    /* Reject built-in languages (zh_CN, en_US, zh-PQ) */
     if (i18n_is_builtin(lang_id)) {
         log_error("i18n", "Refusing to overwrite built-in language '%s' from %s",
                   lang_id, source_path);

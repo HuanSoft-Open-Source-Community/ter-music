@@ -12,6 +12,7 @@
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/layout_editor.h"
 #include "config/config.h"
 #include "playlist/playlist.h"
 #include "i18n/i18n.h"
@@ -42,7 +43,6 @@ FocusArea g_focus_area = FOCUS_SIDEBAR;
 /* ── Content offset / scroll state (declared extern in menu_internal.h) ── */
 int g_history_content_offset = 0;
 int g_favorites_content_offset = 0;
-int g_playlist_content_offset = 0;
 
 /* ── Status message state (accessed via show_status_message / getters) ── */
 static char g_status_message[256] = "";
@@ -67,6 +67,33 @@ const char *get_status_message(void)
 time_t get_status_message_time(void)
 {
     return g_status_message_time;
+}
+
+/* 子视图内容重绘后补画状态行。render_menu_frame() 只在整帧重绘时画它；
+ * 键盘动作常走“show_status_message + 只重绘内容”的路径，状态行会不可见。
+ * 调用方在 refresh/doupdate 之前调用本函数即可（不自行刷新）。 */
+void repaint_status_message(void)
+{
+    if (g_current_view == VIEW_MAIN) {
+        return;
+    }
+    if (layout_editor_active()) {
+        return;
+    }
+    if (strlen(g_status_message) == 0 ||
+        (time(NULL) - g_status_message_time) >= 3) {
+        return;
+    }
+
+    int max_y, max_x;
+    getmaxyx(stdscr, max_y, max_x);
+    if (max_y < 3 || max_x < 3) {
+        return;
+    }
+
+    attron(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+    mvprintw(max_y - 2, 2, "%s", g_status_message);
+    attroff(COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
 }
 
 /* ============================================================
@@ -248,20 +275,9 @@ const char *color_names[] = {
     "color.bright_blue", "color.bright_magenta", "color.bright_cyan", "color.bright_white"
 };
 
-const int ncurses_colors[] = {
-    COLOR_BLACK, COLOR_RED, COLOR_GREEN, COLOR_YELLOW,
-    COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE
-};
-
 /* ============================================================
  * Text helper functions
  * ============================================================ */
-
-const char *menu_text(const char *key, const char *unused)
-{
-    (void)unused;
-    return i18n_get(key);
-}
 
 const char *menu_bool_text(int enabled)
 {
@@ -285,11 +301,6 @@ const char *menu_color_name(int color_value)
         case 118: return i18n_get("color.lime");
     }
     return i18n_get("general.unknown");
-}
-
-const char *menu_language_name(void)
-{
-    return i18n_get("lang.name");
 }
 
 void sanitize_ascii_menu_text(char *dest, size_t dest_size, const char *src)
@@ -361,17 +372,4 @@ const char **resolve_sidebar_items(const char **items)
         resolved_ptrs[i] = resolved_bufs[i];
     }
     return resolved_ptrs;
-}
-
-const char *resolve_menu_title(const char *title)
-{
-    if (!title) return title;
-    if (strcmp(title, "设置 [F2]") == 0) return i18n_get("menu.settings");
-    if (strcmp(title, "历史 [F3]") == 0) return i18n_get("menu.history");
-    if (strcmp(title, "歌单 [F4]") == 0) return i18n_get("menu.playlists");
-    if (strcmp(title, "收藏 [F5]") == 0) return i18n_get("menu.favorites");
-    if (strcmp(title, "信息 [F6]") == 0) return i18n_get("menu.info");
-    if (strcmp(title, "帮助 [F8]") == 0) return i18n_get("menu.help");
-    if (strcmp(title, "Help [F8]") == 0) return i18n_get("menu.help");
-    return i18n_get(title);
 }

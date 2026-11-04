@@ -49,4 +49,7 @@ void remote_view_tick(void);
 /* 菜单入口：进入远程设备列表 */
 void remote_enter_list_mode(void);
 
+/* 当前是否处于连接表单编辑模式（右键“保存远程配置”只在此时有效）。 */
+int remote_view_form_active(void);
+
 #endif /* UI_REMOTE_VIEW_H */

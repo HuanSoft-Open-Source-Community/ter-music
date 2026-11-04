@@ -279,8 +279,9 @@ create_portable_package() {
 
     mkdir -p "${portable_dir}/share/ter-music/layouts"
     cp "${SCRIPT_DIR}/data/layouts/layouts.json" "${portable_dir}/share/ter-music/layouts/layouts.json" 2>/dev/null || true
-    cp "${SCRIPT_DIR}/data/help-quickstart-zh.txt" "${portable_dir}/share/ter-music/" 2>/dev/null || true
-    cp "${SCRIPT_DIR}/data/help-quickstart-en.txt" "${portable_dir}/share/ter-music/" 2>/dev/null || true
+    mkdir -p "${portable_dir}/share/ter-music/help" "${portable_dir}/share/ter-music/lang"
+    cp "${SCRIPT_DIR}"/data/help/help-quickstart-*.txt "${portable_dir}/share/ter-music/help/" 2>/dev/null || true
+    cp "${SCRIPT_DIR}"/data/lang/*.xml "${portable_dir}/share/ter-music/lang/" 2>/dev/null || true
 
     cat > "${portable_dir}/run.sh" << 'EOF'
 #!/bin/bash

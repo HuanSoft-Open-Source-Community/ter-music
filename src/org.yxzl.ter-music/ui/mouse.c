@@ -56,20 +56,6 @@ int is_primary_mouse_click(const MEVENT *event)
     return (event->bstate & BUTTON1_RELEASED) != 0 && (event->bstate & BUTTON1_PRESSED) == 0;
 }
 
-int translate_screen_to_window(WINDOW *win, int screen_y, int screen_x, int *window_y, int *window_x)
-{
-    if (!win) return 0;
-    int beg_y, beg_x, height, width;
-    getbegyx(win, beg_y, beg_x);
-    getmaxyx(win, height, width);
-
-    if (screen_y < beg_y || screen_y >= beg_y + height ||
-        screen_x < beg_x || screen_x >= beg_x + width) return 0;
-    if (window_y) *window_y = screen_y - beg_y;
-    if (window_x) *window_x = screen_x - beg_x;
-    return 1;
-}
-
 /* 把一个 ncurses 窗格量成区域表里的矩形。窗格不存在（当前布局没这块）时
  * 得到空矩形：ui_rect_contains 恒为假，自然不会被命中。 */
 static UIRect rect_of_window(WINDOW *win)
@@ -248,6 +234,19 @@ int get_playlist_index_from_window_row(int window_y, int *display_index, int *ac
     if (visible_lines <= 0 || window_y < 1 || window_y >= 1 + visible_lines) return 0;
 
     int clicked_display_index = get_playlist_scroll_offset() + (window_y - 1);
+
+    /* 队列页先按队列长度校验；队列可以比播放列表长/短，不能复用
+     * 播放列表的 count/sort/tree 映射。 */
+    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+        int queue_count = player_queue_count();
+        if (clicked_display_index < 0 ||
+            clicked_display_index >= queue_count) {
+            return 0;
+        }
+        if (display_index) *display_index = clicked_display_index;
+        if (actual_index)  *actual_index = player_queue_index_at(clicked_display_index);
+        return 1;
+    }
 
     if (g_search_state.active || g_search_state.in_progress) {
         pthread_mutex_lock(&g_search_mutex);
@@ -600,7 +599,7 @@ static void dispatch_controls(const UIMouseEvent *ev, const UIMouseDecision *d)
         g_current_control_idx = control_index;
     }
 
-    if (control_index != CONTROL_IDX_VOLUME && control_index != CONTROL_IDX_PROGRESS) {
+    if (control_index != CONTROL_IDX_PROGRESS) {
         activate_current_control();
         render_playlist_content();
     }
@@ -642,7 +641,7 @@ static void dispatch_menu_view(const UIMouseEvent *ev, const UIMouseDecision *d)
         case VIEW_HELP:      help_view_handle_mouse(ev, d);  break;
         case VIEW_LANGUAGE:  language_view_handle_mouse(ev, d); break;
         default:
-            /* VIEW_MAIN 不走这里；VIEW_LIBRARY 是废弃值，永远不可达 */
+            /* VIEW_MAIN 不走这里；其余子视图均已覆盖。 */
             break;
     }
 }
@@ -711,11 +710,17 @@ int handle_global_mouse_event(const MEVENT *event)
             } else {
                 layout_editor_handle_mouse(&ev, &d);
             }
+            if (!layout_editor_active()) {
+                rerender_active_view();
+            }
             break;
 
         case UI_MOUSE_TARGET_EDITOR_PANE:
             /* 编辑器主模式：右键在指针处打开"窗格操作"菜单（由编辑器处理）。 */
             layout_editor_handle_mouse(&ev, &d);
+            if (!layout_editor_active()) {
+                rerender_active_view();
+            }
             break;
 
         case UI_MOUSE_TARGET_HINT_BAR:

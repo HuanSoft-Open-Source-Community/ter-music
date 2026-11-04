@@ -121,13 +121,13 @@ static void info_bar_sanitize_controls(char *text)
     }
 }
 
-/* 在信息栏的一个分区矩形内输出一条 label+value：
- *   - 先按矩形宽度裁剪（标签宽度也计入），再走 ui_pane_clip_print()
- *     做窗口级兜底，任何情况下不触碰右边框；
+/* 在信息栏的一个分区矩形内输出一行文本：
+ *   - 先按矩形宽度裁剪，再走 ui_pane_clip_print() 做窗口级兜底，
+ *     任何情况下不触碰右边框；
  *   - line 是分区内相对行号，必须落在 [0, region->h)；
- *   - 分区矩形由 info_bar_layout_compute() 给出，已通过 validate。 */
-static void info_draw_field(const InfoBarRect *region, int line,
-                            const char *label, const char *value)
+ *   - 分区矩形由 info_bar_layout_compute_rows() 给出，已通过 validate。 */
+static void info_draw_line(const InfoBarRect *region, int line,
+                           const char *text)
 {
     if (!win_info || !region || region->w <= 0 ||
         line < 0 || line >= region->h) {
@@ -156,8 +156,7 @@ static void info_draw_field(const InfoBarRect *region, int line,
     }
 
     char line_text[INFO_BAR_LINE_MAX];
-    snprintf(line_text, sizeof(line_text), "%s%s",
-             label ? label : "", value ? value : "");
+    snprintf(line_text, sizeof(line_text), "%s", text ? text : "");
     info_bar_sanitize_controls(line_text);
 
     char clipped[INFO_BAR_LINE_MAX];
@@ -263,12 +262,12 @@ int get_playlist_scroll_offset(void)
     int content_height = h - 2;
     int visible_lines = content_height;
 
-    if (g_search_state.active || g_search_state.in_progress) {
+    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+        return clamp_playlist_start(player_queue_count(), g_queue_selected_index, visible_lines);
+    } else if (g_search_state.active || g_search_state.in_progress) {
         int total = g_search_state.result_count;
         if (total < 0) total = 0;
         return clamp_playlist_start(total, g_search_state.selected_index, visible_lines);
-    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-        return clamp_playlist_start(player_queue_count(), g_queue_selected_index, visible_lines);
     } else {
         int total = playlist_tree_is_active() ? playlist_visible_count() : playlist_count();
         return clamp_playlist_start(total, g_selected_index, visible_lines);
@@ -278,6 +277,112 @@ int get_playlist_scroll_offset(void)
 /* ============================================================
  * Playlist content rendering
  * ============================================================ */
+
+/* 把播放门面快照与“当前选中曲目”合并成信息窗格使用的轨道快照。
+ * 播放中优先当前出声曲目；未播放时回退当前选中行，保持原有行为。 */
+static void info_pane_track_snapshot(InfoTrack *out, int have_track,
+                                     int selected_index, const Track *selected)
+{
+    memset(out, 0, sizeof(*out));
+
+    const InfoTrack *playing = player_track();
+    if (playing && playing->valid) {
+        *out = *playing;
+    } else if (have_track && selected) {
+        out->valid = 1;
+        out->index = selected_index;
+        snprintf(out->path, sizeof(out->path), "%s", selected->path);
+        snprintf(out->title, sizeof(out->title), "%s", selected->title);
+        snprintf(out->artist, sizeof(out->artist), "%s", selected->artist);
+        snprintf(out->album, sizeof(out->album), "%s", selected->album);
+    }
+
+    out->playlist_total = playlist_count();
+    out->queue_count = player_queue_count();
+    out->queue_position = player_queue_position();
+}
+
+static void info_pane_playback_snapshot(InfoPlayback *out)
+{
+    const InfoPlayback *snapshot = player_playback();
+    if (snapshot) {
+        *out = *snapshot;
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->state = (PlayState)player_play_state();
+    out->play_mode = (PlayMode)player_play_mode();
+    out->volume_percent = player_volume_percent();
+    out->speed = player_speed();
+}
+
+/* 信息窗格元数据行：只使用 info_fields 中窗格可显示的字段。
+ * 队列页且队列字段可用时，最后一行显示队列位置；否则回退专辑。 */
+static int info_pane_fill_metadata(const InfoTrack *track,
+                                   const InfoPlayback *playback,
+                                   char rows[][INFO_BAR_LINE_MAX], int max_rows)
+{
+    const int mask = g_app_config.info_fields_mask;
+    int count = 0;
+
+#define ADD_PANE_FIELD(bit)                                                   \
+    do {                                                                      \
+        if (count < max_rows && (mask & (bit)) &&                             \
+            info_render_field_line((bit), track, playback, rows[count],       \
+                                   INFO_BAR_LINE_MAX)) {                      \
+            count++;                                                          \
+        }                                                                     \
+    } while (0)
+
+    ADD_PANE_FIELD(INFO_FIELD_STATE);
+    ADD_PANE_FIELD(INFO_FIELD_MODE);
+    ADD_PANE_FIELD(INFO_FIELD_TITLE);
+    ADD_PANE_FIELD(INFO_FIELD_ARTIST);
+
+    int tail_filled = 0;
+    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
+        (mask & INFO_FIELD_QUEUE) && count < max_rows) {
+        if (info_render_field_line(INFO_FIELD_QUEUE, track, playback,
+                                   rows[count], INFO_BAR_LINE_MAX)) {
+            count++;
+            tail_filled = 1;
+        }
+    }
+    if (!tail_filled) {
+        ADD_PANE_FIELD(INFO_FIELD_ALBUM);
+    }
+
+#undef ADD_PANE_FIELD
+    return count;
+}
+
+/* 信息窗格音频行：format 字段控制整块 4 行（采样率/位深/比特率/编码）。 */
+static int info_pane_fill_audio(const InfoTrack *track,
+                                char rows[][INFO_BAR_LINE_MAX], int max_rows)
+{
+    if (!(g_app_config.info_fields_mask & INFO_FIELD_FORMAT) || max_rows < 4) {
+        return 0;
+    }
+
+    char rate[32], depth[32], bitrate[32], codec[32];
+    info_format_audio_fields_from(track ? track->sample_rate : 0,
+                                  track ? track->bit_depth : 0,
+                                  track ? track->bit_rate : 0,
+                                  track ? track->codec : "",
+                                  rate, sizeof(rate),
+                                  depth, sizeof(depth),
+                                  bitrate, sizeof(bitrate),
+                                  codec, sizeof(codec));
+    snprintf(rows[0], INFO_BAR_LINE_MAX, "%s%s",
+             i18n_get("player.sample_rate"), rate);
+    snprintf(rows[1], INFO_BAR_LINE_MAX, "%s%s",
+             i18n_get("player.bit_depth"), depth);
+    snprintf(rows[2], INFO_BAR_LINE_MAX, "%s%s",
+             i18n_get("player.bitrate"), bitrate);
+    snprintf(rows[3], INFO_BAR_LINE_MAX, "%s%s",
+             i18n_get("player.codec"), codec);
+    return 4;
+}
 
 void render_info_bar(void)
 {
@@ -296,14 +401,6 @@ void render_info_bar(void)
         return;
     }
 
-    char status_msg[MAX_META_LEN];
-    switch (player_play_state()) {
-        case PLAY_STATE_PLAYING: snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.playing")); break;
-        case PLAY_STATE_PAUSED:  snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.paused")); break;
-        case PLAY_STATE_STOPPED:
-        default:                 snprintf(status_msg, sizeof(status_msg), "%s", i18n_get("player.stopped")); break;
-    }
-
     int playlist_total = playlist_count();
     int snap_active = g_search_state.active;
     int snap_in_progress = g_search_state.in_progress;
@@ -311,8 +408,10 @@ void render_info_bar(void)
                       g_playlist_tab_mode == PLAYLIST_MODE_FILE_BROWSER &&
                       !snap_active && !snap_in_progress;
 
-    Track t;
+    Track selected_track;
     int have_track = 0;
+    int selected_index = 0;
+    memset(&selected_track, 0, sizeof(selected_track));
     if (playlist_total > 0) {
         int index = player_track_index() >= 0 ? player_track_index() : g_selected_index;
         if (g_sort_state.active && !snap_active && player_track_index() < 0) {
@@ -324,13 +423,31 @@ void render_info_bar(void)
         }
         if (index < 0) index = 0;
         if (index >= playlist_total) index = playlist_total - 1;
-        get_track_metadata(index, &t);
+        get_track_metadata(index, &selected_track);
+        selected_index = index;
         have_track = 1;
     }
 
+    InfoTrack track;
+    info_pane_track_snapshot(&track, have_track, selected_index, &selected_track);
+    InfoPlayback playback;
+    info_pane_playback_snapshot(&playback);
+
+    char metadata_lines[INFO_BAR_METADATA_LINES][INFO_BAR_LINE_MAX];
+    char audio_lines[INFO_BAR_AUDIO_LINES][INFO_BAR_LINE_MAX];
+    int metadata_count = info_pane_fill_metadata(&track, &playback,
+                                                 metadata_lines,
+                                                 INFO_BAR_METADATA_LINES);
+    int audio_count = info_pane_fill_audio(&track, audio_lines,
+                                           INFO_BAR_AUDIO_LINES);
+
+    /* 封面：播放设置的总开关 + 信息显示的分开关同时开启才请求。
+     * 字符封面的尺寸/字符集仍由 CLI/D-Bus 路径使用，TUI 用彩色半块。 */
+    int cover_requested = g_app_config.info_show_cover &&
+                          g_app_config.show_album_cover;
     char cover_path[MAX_PATH_LEN];
     int want_cover = 0;
-    if (have_track && g_app_config.show_album_cover &&
+    if (have_track && cover_requested &&
         player_cover_path(cover_path, sizeof(cover_path)) == 0) {
         want_cover = 1;
     }
@@ -338,7 +455,8 @@ void render_info_bar(void)
     /* 自适应分区：横向（元数据 | 音频 | 封面）或纵向（封面在上、元数据/
      * 音频在下）。窗口太小时模型 valid=0，只保留边框/标题。 */
     InfoBarLayout layout;
-    info_bar_layout_compute(w, h, want_cover, &layout);
+    info_bar_layout_compute_rows(w, h, want_cover, metadata_count, audio_count,
+                                 &layout);
     if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
         log_error("info_bar", "Invalid info-pane geometry (%dx%d); skipping content",
                   w, h);
@@ -352,7 +470,8 @@ void render_info_bar(void)
                                    layout.cover.w, layout.cover.h);
         if (!cover_grid) {
             /* 解码失败：本帧退化为无封面布局，把封面空间还给文字。 */
-            info_bar_layout_compute(w, h, 0, &layout);
+            info_bar_layout_compute_rows(w, h, 0, metadata_count, audio_count,
+                                         &layout);
             if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
                 ui_refresh_window(win_info);
                 return;
@@ -360,72 +479,11 @@ void render_info_bar(void)
         }
     }
 
-    // 元数据块：按模型给出的行数逐行绘制（极矮窗格只画前几行）
-    if (layout.metadata_rows > 0) {
-        info_draw_field(&layout.metadata, 0,
-                        i18n_get("player.state"), status_msg);
+    for (int i = 0; i < layout.metadata_rows && i < metadata_count; i++) {
+        info_draw_line(&layout.metadata, i, metadata_lines[i]);
     }
-    if (layout.metadata_rows > 1) {
-        info_draw_field(&layout.metadata, 1,
-                        i18n_get("player.mode"), player_play_mode_name(0));
-    }
-    if (layout.metadata_rows > 2) {
-        info_draw_field(&layout.metadata, 2,
-                        i18n_get("player.title"), have_track ? t.title : "--");
-    }
-    if (layout.metadata_rows > 3) {
-        info_draw_field(&layout.metadata, 3,
-                        i18n_get("player.artist"), have_track ? t.artist : "--");
-    }
-    if (layout.metadata_rows > 4) {
-        if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
-            player_queue_count() > 0) {
-            char qbuf[64];
-            snprintf(qbuf, sizeof(qbuf), "%s %d/%d",
-                     i18n_get("player.queue_label"),
-                     player_queue_position() + 1, player_queue_count());
-            info_draw_field(&layout.metadata, 4, "", qbuf);
-        } else {
-            info_draw_field(&layout.metadata, 4,
-                            i18n_get("player.album"), have_track ? t.album : "--");
-        }
-    }
-
-    // 音频块：来自 player 门面快照，远端前端也有效
-    char rate_str[32], depth_str[32], bitrate_str[32], codec_display[32];
-    const InfoTrack *current_track = player_track();
-    if (current_track && current_track->valid) {
-        info_format_audio_fields_from(current_track->sample_rate,
-                                      current_track->bit_depth,
-                                      current_track->bit_rate,
-                                      current_track->codec,
-                                      rate_str, sizeof(rate_str),
-                                      depth_str, sizeof(depth_str),
-                                      bitrate_str, sizeof(bitrate_str),
-                                      codec_display, sizeof(codec_display));
-    } else {
-        info_format_audio_fields_from(0, 0, 0, "",
-                                      rate_str, sizeof(rate_str),
-                                      depth_str, sizeof(depth_str),
-                                      bitrate_str, sizeof(bitrate_str),
-                                      codec_display, sizeof(codec_display));
-    }
-
-    if (layout.audio_rows > 0) {
-        info_draw_field(&layout.audio, 0,
-                        i18n_get("player.sample_rate"), rate_str);
-    }
-    if (layout.audio_rows > 1) {
-        info_draw_field(&layout.audio, 1,
-                        i18n_get("player.bit_depth"), depth_str);
-    }
-    if (layout.audio_rows > 2) {
-        info_draw_field(&layout.audio, 2,
-                        i18n_get("player.bitrate"), bitrate_str);
-    }
-    if (layout.audio_rows > 3) {
-        info_draw_field(&layout.audio, 3,
-                        i18n_get("player.codec"), codec_display);
+    for (int i = 0; i < layout.audio_rows && i < audio_count; i++) {
+        info_draw_line(&layout.audio, i, audio_lines[i]);
     }
 
     // 专辑封面（彩色半块）：逐单元设置前景/背景颜色，绘制范围严格限制
@@ -434,6 +492,11 @@ void render_info_bar(void)
         cover_art_draw(win_info, layout.cover.x, layout.cover.y,
                        cover_grid, ui_pane_body_attr(LAYOUT_PANE_INFO));
     }
+
+    log_debug("info_bar",
+              "mask=0x%04x metadata=%d audio=%d cover_requested=%d cover_drawn=%d",
+              g_app_config.info_fields_mask, layout.metadata_rows,
+              layout.audio_rows, cover_requested, cover_grid ? 1 : 0);
 
     /* 内容画完后最后补一遍边框，防止任何字形溢出盖住边框。 */
     ui_pane_repaint_border(LAYOUT_PANE_INFO, win_info);
@@ -472,17 +535,17 @@ void render_playlist_content(void)
     }
 
     char title_buf[128];
-    if (snap_in_progress) {
+    if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
+        snprintf(title_buf, sizeof(title_buf), " %s [%s] ",
+                 i18n_get("player.play_queue"),
+                 player_play_mode_name(0));
+    } else if (snap_in_progress) {
         snprintf(title_buf, sizeof(title_buf), "%s (%d/%d)",
                  i18n_get("playlist.search_progress"), snap_progress, playlist_count());
     } else if (snap_active) {
         snprintf(title_buf, sizeof(title_buf), "%s (%d %s)",
                  i18n_get("playlist.search_title"), snap_count,
                  i18n_get("playlist.results_unit"));
-    } else if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE) {
-        snprintf(title_buf, sizeof(title_buf), " %s [%s] ",
-                 i18n_get("player.play_queue"),
-                 player_play_mode_name(0));
     } else {
         snprintf(title_buf, sizeof(title_buf), "%s", i18n_get("controls.playlist"));
     }
@@ -519,8 +582,7 @@ void render_playlist_content(void)
         format_display_text(display_path, sizeof(display_path), get_playlist_source_label(), w - 10, 0);
         ui_pane_clip_printf(win_playlist, h/2 - 1, 2, "%s", i18n_get("playlist.empty"));
         ui_pane_clip_printf(win_playlist, h/2, 2, "%s",
-                  ui_text("按 'O' 打开目录，按 'I' 追加目录。",
-                          "Press 'O' to open a folder, 'I' to append one."));
+                            i18n_get("playlist.press_o_i"));
         ui_pane_clip_printf(win_playlist, h/2 + 1, 2, "%s%s", i18n_get("player.path"), display_path);
     } else {
         int start_idx = 0;

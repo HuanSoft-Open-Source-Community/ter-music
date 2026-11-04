@@ -1,13 +1,15 @@
 /**
  * @file info.h
- * @brief 播放信息快照与渲染（CLI `ter-music show` 与 D-Bus Info 接口共用）
+ * @brief 播放信息快照与渲染（CLI `ter-music show`、D-Bus Info 与 TUI 信息窗格共用）
  *
  * 设计要点：
  *  - 本模块只读取全局播放状态，不做任何 ncurses 渲染，因此可在
  *    无界面 daemon 中安全使用；
  *  - 文本渲染与 JSON 渲染共用同一份快照，保证 `ter-music show`、
  *    `Info.GetDisplay`、`Info.GetInfo` 三者内容一致；
- *  - 封面文本（盲文/ASCII）按 (路径, 尺寸, 字符集) 缓存，避免
+ *  - 字段行渲染（info_render_field_line）也供 TUI 信息窗格复用，
+ *    保证窗格与 CLI 的标签/格式一致；
+ *  - 封面文本（盲文/ASCII/半块）按 (路径, 尺寸, 字符集) 缓存，避免
  *    `show --watch` 或高频 D-Bus 调用反复解码图片。
  *
  * 线程约束：仅由持有播放状态的主循环线程（TUI 事件循环或 daemon 主循环）调用。
@@ -178,15 +180,22 @@ int info_field_bit_from_name(const char *name);    /* 0 = 未知 */
 const char *info_loop_status_mpris(PlayMode mode);
 int info_shuffle_mpris(PlayMode mode);
 
-/* 基本信息字段表（顺序即渲染顺序，供设置页多选菜单复用） */
+/* 基本信息字段表（顺序即渲染顺序，供设置页多选菜单与 TUI 信息窗格复用） */
 typedef struct {
     int bit;
     const char *name;       /* 机器名，例如 "title" */
     const char *label_key;  /* i18n 键，例如 "settings.info.fields.title" */
+    int pane_field;         /* 1 = 主页信息窗格可显示；0 = 仅 CLI/D-Bus */
 } InfoFieldDef;
 
 int info_field_count(void);
 const InfoFieldDef *info_field_at(int index);       /* 越界返回 NULL */
+
+/* 把单个字段渲染成带标签的一行（CLI 文本与 TUI 信息窗格共用）。
+ * @return 1 = 已写出一行；0 = 该字段当前无内容可显示（例如无队列位置） */
+int info_render_field_line(int bit, const InfoTrack *track,
+                           const InfoPlayback *playback,
+                           char *out, size_t out_size);
 
 /* ── 快照采集 ───────────────────────────────────────────────────── */
 void info_track_snapshot(InfoTrack *out);

@@ -50,6 +50,11 @@ static int expect_horizontal(int w, int h)
             ch < INFO_BAR_VERTICAL_MIN_ROWS);
 }
 
+static int rect_empty(const InfoBarRect *r)
+{
+    return r->w <= 0 || r->h <= 0;
+}
+
 static void check_one(int w, int h, int want_cover)
 {
     InfoBarLayout layout;
@@ -66,13 +71,18 @@ static void check_one(int w, int h, int want_cover)
     CHECK(info_bar_layout_validate(w, h, &layout),
           "computed layout must validate");
 
-    CHECK(rect_inside_content(&layout.metadata, w, h),
-          "metadata stays inside the content rectangle");
-    CHECK(rect_inside_content(&layout.audio, w, h),
-          "audio stays inside the content rectangle");
+    if (!rect_empty(&layout.metadata)) {
+        CHECK(rect_inside_content(&layout.metadata, w, h),
+              "metadata stays inside the content rectangle");
+    }
+    if (!rect_empty(&layout.audio)) {
+        CHECK(rect_inside_content(&layout.audio, w, h),
+              "audio stays inside the content rectangle");
+    }
     CHECK(layout.metadata.w > 0 && layout.metadata.h > 0,
           "metadata region is non-empty");
-    CHECK(layout.audio.w > 0, "audio region has a width");
+    CHECK(layout.audio.w > 0 || layout.audio_rows == 0,
+          "audio region has a width unless it has no rows");
 
     CHECK(layout.metadata_rows >= 1 &&
           layout.metadata_rows <= INFO_BAR_METADATA_LINES,
@@ -88,13 +98,15 @@ static void check_one(int w, int h, int want_cover)
     CHECK(!rects_overlap(&layout.metadata, &layout.audio),
           "metadata and audio never overlap");
 
-    if (layout.stacked) {
+    if (layout.stacked && !rect_empty(&layout.metadata) &&
+        !rect_empty(&layout.audio)) {
         CHECK(layout.audio.x == layout.metadata.x &&
               layout.audio.w == layout.metadata.w,
               "stacked blocks share the content width");
         CHECK(layout.metadata.y + layout.metadata.h <= layout.audio.y,
               "stacked audio starts below metadata");
-    } else {
+    } else if (!layout.stacked && !rect_empty(&layout.metadata) &&
+               !rect_empty(&layout.audio)) {
         CHECK(layout.audio.y == layout.metadata.y &&
               layout.audio.h == layout.metadata.h,
               "columns share the same rows");
@@ -323,6 +335,85 @@ static void check_invalid_layouts(void)
           "half-specified hidden cover is rejected");
 }
 
+/* 变行布局：信息窗格按 info_fields 的可显示字段传入 0..5 / 0..4 行。 */
+static void check_custom_rows(void)
+{
+    InfoBarLayout layout;
+
+    info_bar_layout_compute_rows(100, 17, 1, 3, 4, &layout);
+    CHECK(layout.valid && !layout.stacked, "3+4 rows use columns");
+    CHECK(layout.metadata_rows == 3 && layout.audio_rows == 4,
+          "3+4 keeps the requested row counts");
+    CHECK(layout.metadata.w > 0 && layout.audio.w > 0,
+          "3+4 has both text blocks");
+    CHECK(info_bar_layout_validate(100, 17, &layout),
+          "3+4 layout validates");
+
+    info_bar_layout_compute_rows(100, 17, 1, 0, 4, &layout);
+    CHECK(layout.valid && layout.metadata_rows == 0 && layout.audio_rows == 4,
+          "0+4 keeps only the audio block");
+    CHECK(layout.metadata.w == 0 && layout.metadata.h == 0,
+          "0+4 leaves the metadata rect empty");
+    CHECK(layout.audio.w > 0, "0+4 audio takes the text width");
+    CHECK(info_bar_layout_validate(100, 17, &layout),
+          "0+4 layout validates");
+
+    info_bar_layout_compute_rows(100, 17, 1, 5, 0, &layout);
+    CHECK(layout.valid && layout.metadata_rows == 5 && layout.audio_rows == 0,
+          "5+0 keeps only the metadata block");
+    CHECK(layout.audio.w == 0 && layout.audio.h == 0,
+          "5+0 leaves the audio rect empty");
+    CHECK(layout.metadata.w > 0, "5+0 metadata takes the text width");
+    CHECK(info_bar_layout_validate(100, 17, &layout),
+          "5+0 layout validates");
+
+    info_bar_layout_compute_rows(100, 17, 0, 0, 0, &layout);
+    CHECK(layout.valid, "0+0 without cover is still a valid layout");
+    CHECK(layout.metadata_rows == 0 && layout.audio_rows == 0,
+          "0+0 has no text rows");
+    CHECK(layout.cover.w == 0 && layout.cover.h == 0,
+          "0+0 has no cover");
+    CHECK(info_bar_layout_validate(100, 17, &layout),
+          "empty layout validates");
+
+    info_bar_layout_compute_rows(100, 17, 1, 0, 0, &layout);
+    CHECK(layout.valid && layout.cover.w > 0 && layout.cover.h > 0,
+          "cover-only layout shows the cover");
+    CHECK(layout.metadata.w == 0 && layout.audio.w == 0,
+          "cover-only layout has no text blocks");
+    CHECK(info_bar_layout_validate(100, 17, &layout),
+          "cover-only layout validates");
+
+    info_bar_layout_compute_rows(60, 13, 1, 3, 0, &layout);
+    CHECK(layout.valid && layout.stacked && layout.metadata_rows == 3,
+          "stacked 3+0 keeps three metadata rows");
+    CHECK(layout.cover.w > 0 && layout.cover.h >= INFO_BAR_COVER_MIN_ROWS,
+          "stacked 3+0 can still show a cover");
+    CHECK(info_bar_layout_validate(60, 13, &layout),
+          "stacked 3+0 layout validates");
+
+    info_bar_layout_compute_rows(120, 3, 1, INFO_BAR_METADATA_LINES + 9,
+                                 INFO_BAR_AUDIO_LINES + 9, &layout);
+    CHECK(layout.valid && layout.metadata_rows <= INFO_BAR_METADATA_LINES,
+          "metadata rows are clamped to the maximum");
+    CHECK(layout.audio_rows <= INFO_BAR_AUDIO_LINES,
+          "audio rows are clamped to the maximum");
+    CHECK(info_bar_layout_validate(120, 3, &layout),
+          "clamped row layout validates");
+
+    info_bar_layout_compute_rows(100, 17, 0, 0, 0, &layout);
+    InfoBarLayout bad = layout;
+    bad.metadata.w = 1;
+    bad.metadata.h = 1;
+    CHECK(!info_bar_layout_validate(100, 17, &bad),
+          "rows=0 with a non-empty metadata rect is rejected");
+    bad = layout;
+    bad.audio.w = 1;
+    bad.audio.h = 1;
+    CHECK(!info_bar_layout_validate(100, 17, &bad),
+          "rows=0 with a non-empty audio rect is rejected");
+}
+
 int main(void)
 {
     check_fixed_cases();
@@ -334,6 +425,7 @@ int main(void)
         }
     }
 
+    check_custom_rows();
     check_invalid_layouts();
 
     if (g_failures == 0) {

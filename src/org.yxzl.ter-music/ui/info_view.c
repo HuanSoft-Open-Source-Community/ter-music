@@ -30,6 +30,26 @@ static void info_put_row(const MenuContentArea *area, int limit, int row, const 
     menu_content_puts(area, row, text);
 }
 
+/* 语言包可给应用一个译名；未提供（或回显键）时退回编译期 APP_NAME。 */
+static const char *info_app_name(void)
+{
+    const char *localized = i18n_get("app.name");
+    if (!localized || !localized[0] || strcmp(localized, "app.name") == 0) {
+        return APP_NAME;
+    }
+    return localized;
+}
+
+static void info_put_header(const MenuContentArea *area, int limit, int row,
+                            const char *title)
+{
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s %s", title, info_app_name());
+    info_put_row(area, limit, row, buf);
+    info_put_row(area, limit, row + 1,
+                 "========================================");
+}
+
 void render_info_content(void)
 {
     MenuContentArea area;
@@ -43,47 +63,51 @@ void render_info_content(void)
 
     attron(COLOR_PAIR(COLOR_PAIR_BORDER));
 
-    snprintf(buf, sizeof(buf), "%s %s",
-             i18n_get("info.about_title"), APP_NAME);
-    info_put_row(&area, limit, start_y, buf);
-    snprintf(buf, sizeof(buf), "========================================");
-    info_put_row(&area, limit, start_y + 1, buf);
-    start_y += 3;
+    /* 侧栏是三个页签：关于 / 仓库地址 / 返回。返回项被选中时
+     * 仍显示关于页，避免内容区突然空掉。 */
+    if (g_menu_selected_idx == 1) {
+        info_put_header(&area, limit, start_y, i18n_get("info.repository"));
+        start_y += 3;
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.repository"));
+        info_put_row(&area, limit, start_y, buf);
+        snprintf(buf, sizeof(buf), "  %s", APP_REPO);
+        info_put_row(&area, limit, start_y + 1, buf);
+        start_y += 3;
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.license"));
+        info_put_row(&area, limit, start_y, buf);
+        start_y += 2;
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.readonly"));
+        info_put_row(&area, limit, start_y, buf);
+    } else {
+        info_put_header(&area, limit, start_y, i18n_get("info.about_title"));
+        start_y += 3;
 
-    snprintf(buf, sizeof(buf), i18n_get("info.name_fmt"), APP_NAME);
-    info_put_row(&area, limit, start_y, buf);
-    snprintf(buf, sizeof(buf), i18n_get("info.version_fmt"), APP_VERSION);
-    info_put_row(&area, limit, start_y + 1, buf);
-    snprintf(buf, sizeof(buf), i18n_get("info.authors_fmt"), APP_AUTHORS);
-    info_put_row(&area, limit, start_y + 2, buf);
-    snprintf(buf, sizeof(buf), i18n_get("info.email_fmt"), APP_EMAIL);
-    info_put_row(&area, limit, start_y + 3, buf);
-    start_y += 5;
+        snprintf(buf, sizeof(buf), i18n_get("info.name_fmt"), info_app_name());
+        info_put_row(&area, limit, start_y, buf);
+        snprintf(buf, sizeof(buf), i18n_get("info.version_fmt"), APP_VERSION);
+        info_put_row(&area, limit, start_y + 1, buf);
+        snprintf(buf, sizeof(buf), i18n_get("info.authors_fmt"), APP_AUTHORS);
+        info_put_row(&area, limit, start_y + 2, buf);
+        snprintf(buf, sizeof(buf), i18n_get("info.email_fmt"), APP_EMAIL);
+        info_put_row(&area, limit, start_y + 3, buf);
+        start_y += 5;
 
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary"));
-    info_put_row(&area, limit, start_y, buf);
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line1"));
-    info_put_row(&area, limit, start_y + 1, buf);
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line2"));
-    info_put_row(&area, limit, start_y + 2, buf);
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line3"));
-    info_put_row(&area, limit, start_y + 3, buf);
-    start_y += 5;
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary"));
+        info_put_row(&area, limit, start_y, buf);
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line1"));
+        info_put_row(&area, limit, start_y + 1, buf);
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line2"));
+        info_put_row(&area, limit, start_y + 2, buf);
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.summary_line3"));
+        info_put_row(&area, limit, start_y + 3, buf);
+        start_y += 5;
 
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.repository"));
-    info_put_row(&area, limit, start_y, buf);
-    snprintf(buf, sizeof(buf), "  %s", APP_REPO);
-    info_put_row(&area, limit, start_y + 1, buf);
-    start_y += 3;
-
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.license"));
-    info_put_row(&area, limit, start_y, buf);
-    start_y += 2;
-
-    snprintf(buf, sizeof(buf), "%s", i18n_get("info.readonly"));
-    info_put_row(&area, limit, start_y, buf);
+        snprintf(buf, sizeof(buf), "%s", i18n_get("info.readonly"));
+        info_put_row(&area, limit, start_y, buf);
+    }
 
     attroff(COLOR_PAIR(COLOR_PAIR_BORDER));
+    repaint_status_message();
     refresh();
 }
 
@@ -100,17 +124,22 @@ int handle_info_action(ActionId action)
             g_menu_selected_idx--;
             if (g_menu_selected_idx < 0) g_menu_selected_idx = INFO_ITEM_COUNT - 1;
             render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
+            render_info_content();
             return 1;
 
         case ACTION_INFO_DOWN:
             g_menu_selected_idx++;
             if (g_menu_selected_idx >= INFO_ITEM_COUNT) g_menu_selected_idx = 0;
             render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
+            render_info_content();
             return 1;
 
         case ACTION_INFO_ACTIVATE:
             if (g_menu_selected_idx == INFO_ITEM_COUNT - 1) {
                 exit_current_view();
+            } else {
+                /* 页签切换由上下键/点击完成，Enter 只重绘当前页。 */
+                render_info_content();
             }
             return 1;
 

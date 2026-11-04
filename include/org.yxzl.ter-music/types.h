@@ -58,8 +58,7 @@ typedef enum {
     VIEW_FAVORITES = 4,
     VIEW_INFO = 5,
     VIEW_HELP = 6,
-    VIEW_LIBRARY = 7,
-    VIEW_LANGUAGE = 8
+    VIEW_LANGUAGE = 7
 } ViewMode;
 
 typedef enum {
@@ -313,7 +312,7 @@ typedef struct {
     int stop_core_on_exit;
     int resume_last_playback;
     int last_played_position;
-    char ui_language[32];   /* language ID, e.g. "zh_CN", "en_US" */
+    char ui_language[32];   /* language ID, e.g. "zh_CN", "en_US", "zh-PQ" */
     int volume_percent;
     int audio_latency_ms;
     int show_lyrics_panel;
@@ -332,16 +331,16 @@ typedef struct {
     int eq_preamp;               /* pre-amp gain in dB, -12..12 */
     int eq_band_gains[EQ_BAND_COUNT]; /* per-band gain in dB, -12..12 */
 
-    /* ── CLI / D-Bus 信息显示（config v5，常量见 info/info.h） ── */
+    /* ── 信息显示（主页信息窗格 + CLI/D-Bus，config v5，常量见 info/info.h） ── */
     int info_preset;             /* 0=全量 1=精简 2=自定义 */
-    int info_fields_mask;        /* INFO_FIELD_* 位掩码 */
-    int info_show_cover;         /* 0/1 字符封面 */
-    int info_cover_cols;         /* 封面列数 4..40 */
-    int info_cover_rows;         /* 封面行数 2..20 */
-    int info_cover_charset;      /* 0=盲文 1=ASCII */
-    int info_show_progress;      /* 0/1 进度行 */
-    int info_progress_style;     /* 0=bar 1=time 2=percent 3=time+percent */
-    int info_lyrics_lines;       /* 0=关 1=当前句 2=当前句+下一句 */
+    int info_fields_mask;        /* INFO_FIELD_* 位掩码（窗格只取可显示子集） */
+    int info_show_cover;         /* 0/1 信息窗格 + CLI 字符封面 */
+    int info_cover_cols;         /* CLI 封面列数 4..40 */
+    int info_cover_rows;         /* CLI 封面行数 2..20 */
+    int info_cover_charset;      /* CLI 封面字符集 0=盲文 1=ASCII 2=半块 */
+    int info_show_progress;      /* 0/1 CLI 进度行 */
+    int info_progress_style;     /* CLI 0=bar 1=time 2=percent 3=time+percent */
+    int info_lyrics_lines;       /* CLI 0=关 1=当前句 2=当前句+下一句 */
 
     /* ── 键位覆盖（config v9，见 keymap/actions.h） ── */
     KeyBindingOverride keybinding_overrides[MAX_KEYBINDING_OVERRIDES];
