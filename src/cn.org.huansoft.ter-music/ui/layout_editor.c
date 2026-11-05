@@ -1330,8 +1330,8 @@ int layout_editor_handle_key(int ch)
  *
  * 模态菜单（动作/换类型/颜色/帮助）：
  *   滚轮一格 = 上下移动一项（与键盘 up/down 同一条路径，含回绕）；
- *   单击 = 选中该条；双击或"再点一次已选中的那条" = 等同回车；
- *   点框外 = 等同 Esc 取消。三种情形事件都归菜单，绝不穿透。
+ *   单击 = 选中并执行（等同回车）；点框外 = 等同 Esc 取消。
+ *   三种情形事件都归菜单，绝不穿透。
  * 主编辑界面：
  *   单击左侧窗格列表行或右侧预览里的某个窗格 = 选中它；
  *   滚轮没有可滚动的列表，什么都不做（但仍被认领）。
@@ -1452,13 +1452,9 @@ int layout_editor_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
             return 1;
         }
 
-        const int already_selected = (*sel == item);
         *sel = item;
-        if (already_selected || ev->click_count >= 2) {
-            return layout_editor_handle_key('\n');
-        }
-        layout_editor_render();
-        return 1;
+        /* 单击即执行：等同回车。 */
+        return layout_editor_handle_key('\n');
     }
 
     /* ED_MODE_MAIN：只认领"选中哪个窗格"这一件事 */

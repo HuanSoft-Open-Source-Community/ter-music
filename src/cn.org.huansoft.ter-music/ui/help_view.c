@@ -405,7 +405,7 @@ void render_help_content(void)
  * Help view input handling
  * ============================================================ */
 
-/* 动作入口：键盘解析出的动作与鼠标滚轮/双击共用同一条路径。
+/* 动作入口：键盘解析出的动作与鼠标滚轮/单击共用同一条路径。
  * （鼠标绝不合成按键码：用户可改键，合成按键会在改键后失灵或做错事。） */
 int handle_help_action(ActionId action)
 {
@@ -608,20 +608,14 @@ int help_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         }
         if (!ev->click) return 1;
 
-        const int already_selected = (g_menu_selected_idx == d->row);
         g_focus_area = FOCUS_SIDEBAR;
         g_menu_selected_idx = d->row;
         render_menu_sidebar(g_menu_selected_idx, help_sidebar_items, HELP_ITEM_COUNT);
         render_help_content();
 
-        /* 双击或"再点一次已选中的那条"＝本视图的"确认侧栏项"。
-         * 本视图的 enter 键位本来就绑在 ACTION_HELP_RIGHT 上（见 keymap 默认表：
-         * help.right = right/enter），语义是"末项返回主界面，其余进入内容区"，
-         * 所以这里复用同一个动作，不自创 ACTIVATE。 */
-        if (already_selected || ev->click_count >= 2) {
-            return handle_help_action(ACTION_HELP_RIGHT);
-        }
-        return 1;
+        /* 单击即选中并执行：末项返回主界面，其余进入内容区。
+         * 本视图的 enter 键位本来就绑在 ACTION_HELP_RIGHT 上，复用同一动作。 */
+        return handle_help_action(ACTION_HELP_RIGHT);
     }
 
     /* 内容区：自由滚动的正文 */

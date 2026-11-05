@@ -115,7 +115,7 @@ void render_favorites_content(void)
  * Favorites view input handling
  * ============================================================ */
 
-/* 动作入口：键盘解析出的动作与鼠标滚轮/双击共用同一条路径。
+/* 动作入口：键盘解析出的动作与鼠标滚轮/单击共用同一条路径。
  * （鼠标绝不合成按键码：用户可改键，合成按键会在改键后失灵或做错事。） */
 int handle_favorites_action(ActionId action)
 {
@@ -331,17 +331,13 @@ int favorites_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         }
         if (!ev->click) return 1;
 
-        const int already_selected = (g_menu_selected_idx == d->row);
         g_focus_area = FOCUS_SIDEBAR;
         g_menu_selected_idx = d->row;
         render_menu_sidebar(g_menu_selected_idx, favorites_sidebar_items, FAVORITES_ITEM_COUNT);
         render_favorites_content();
 
-        /* 双击或"再点一次已选中的那条"等同回车：进入列表 / 返回主界面 */
-        if (already_selected || ev->click_count >= 2) {
-            return handle_favorites_action(ACTION_FAVORITES_ACTIVATE);
-        }
-        return 1;
+        /* 单击即选中并执行：进入列表 / 返回主界面 */
+        return handle_favorites_action(ACTION_FAVORITES_ACTIVATE);
     }
 
     /* 内容区 */
@@ -363,10 +359,9 @@ int favorites_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
     const int idx = favorites_index_at_row(ev->y);
     if (idx < 0) return 1;   /* 标题行、分隔线、底部提示行：只认领不动作 */
 
-    const int already_selected = (g_content_selected_idx == idx);
     /* 把焦点带到指针这一列：一是选中高亮只在焦点为内容区时才画得出来，
      * 二是 ACTION_FAVORITES_ACTIVATE 自己按 g_focus_area 分流，
-     * 焦点若还留在侧栏，双击会去执行侧栏那一条（进入列表/返回）而不是收藏项。 */
+     * 焦点若还留在侧栏，点击会去执行侧栏那一条（进入列表/返回）而不是收藏项。 */
     if (g_focus_area != FOCUS_CONTENT) {
         g_focus_area = FOCUS_CONTENT;
         render_menu_sidebar(g_menu_selected_idx, favorites_sidebar_items, FAVORITES_ITEM_COUNT);
@@ -374,8 +369,5 @@ int favorites_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
     g_content_selected_idx = idx;
     render_favorites_content();
 
-    if (already_selected || ev->click_count >= 2) {
-        return handle_favorites_action(ACTION_FAVORITES_ACTIVATE);
-    }
-    return 1;
+    return handle_favorites_action(ACTION_FAVORITES_ACTIVATE);
 }

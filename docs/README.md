@@ -875,12 +875,17 @@ ever handled twice.
 | ----- | ----- | ----------------- |
 | Bottom function-key bar | Fires that key's action, exactly as pressing the key | Nothing (the event is still consumed here) |
 | Playlist pane | Select the row; a click plays that track, or toggles a directory in the file tree, just like `Enter` | Move the selection one row up/down — works on search results, the play queue and the file tree alike, and never starts playback |
-| Library browser (it replaces the playlist pane while open, `M`) | Select the entry; clicking the already-selected entry or double-clicking drills down; `[S]`/`[R]` lines trigger scan/rescan | Move the selection (same as `↑`/`↓`) |
+| Library browser (it replaces the playlist pane while open, `M`) | Select the entry and run it (drill down); `[S]`/`[R]` lines trigger scan/rescan | Move the selection (same as `↑`/`↓`) |
 | Controls pane | Press the button under the cursor. The Volume button and the progress row only take the focus, like the keyboard | Progress row: seek ∓5 s; Volume button: ±5 %; Speed button: step through the speed presets (wraps at both ends); other buttons — the Karaoke one included, it is pop-up only —: nothing |
 | Lyrics pane | Jump to the line under the cursor | Seek to the previous / next lyric line (it does not switch lyric seek mode on or off) |
 | Info, spectrum and vinyl panes | Nothing defined there (the event is consumed, so it never leaks into another pane) | Nothing (consumed) |
-| Sub-view sidebar (Settings, History, Playlist, Favorites, Info, Help, Language) | Select the menu entry; clicking the selected entry again or double-clicking = `Enter` | Move the sidebar selection |
-| Sub-view content area | Select that row; clicking the selected row again or double-clicking = `Enter` | Move the content selection. On the Settings page the wheel follows the section you are in: option list, hotkey list, remote-device list; on the Equalizer page it moves **between bands only** — the wheel never changes a gain value; on the Help page it scrolls the document one line |
+| Sub-view sidebar (Settings, History, Playlist, Favorites, Info, Help, Language) | Select the menu entry and run it (same as `Enter`) | Move the sidebar selection |
+| Sub-view content area | Select that row and run it (same as `Enter`) | Move the content selection. On the Settings page the wheel follows the section you are in: option list, hotkey list, remote-device list; on the Equalizer page it moves **between bands only** — the wheel never changes a gain value; on the Help page it scrolls the document one line |
+
+A left click is always one action: it selects the row and runs the same action
+as `Enter`. A double or triple click carries no extra meaning; ncurses coalesces
+it into one event and the program treats it as that single click, so it can never
+fire twice. Right clicks are still selection-only and are described below.
 
 The selection highlight follows the pointer: scrolling or clicking in the content
 column also moves the keyboard focus there, so what you see highlighted is what
@@ -899,12 +904,20 @@ the control-bar popups (play mode, speed, volume), the settings option picker
 or the layout editor's modal menus — the popup owns every mouse event:
 
 - the wheel scrolls the popup, wherever the pointer happens to be;
-- a click inside selects that entry; clicking the selected entry again, or
-  double-clicking, is `Enter` (in the multi-select picker it is `Space`, i.e. tick
-  that field);
+- a click inside selects that entry and runs it immediately, exactly like `Enter`
+  (in the multi-select picker it ticks that field, like `Space`); a double or
+  triple click is treated as one click, so it never fires twice;
 - a click outside just closes the popup. That click is swallowed and never reaches
   the pane behind it, so a single click can no longer "close the popup *and* play
   the row under it".
+
+The settings option picker opens where its option is: its first row is the
+option's row and its left edge is the option text's starting column. Near the
+bottom or right edge it flips above/left and is clamped so the whole box stays
+inside the terminal — clear of the status line, the bottom key-hint row, the
+scrollbar column and the right border. The same rule applies to every settings
+section, including the colour palette, playback pickers, info-display pickers
+and the Equalizer preset picker.
 
 Text input boxes are modal (search, scan directory, layout rename, hotkey capture,
 numeric colour entry): mouse events there are ignored outright, so a stray wheel
@@ -922,11 +935,10 @@ edges and never covers the bottom key-hint row):
   and is swallowed; it does not stack a second menu underneath. The same holds
   while a context menu is open: a right click (or a left click outside) closes the
   menu and that event never reaches the pane behind it;
-- inside a menu, a left click selects an entry, clicking the selected entry again
-  (or double-clicking) runs it, the wheel moves the selection, and a submenu entry
-  opens the next level to the side. `Up`/`Down` (the same bindings as popups),
-  `Enter`, `Esc` and `Right` work from the keyboard; any other key closes and
-  swallows the menu instead of acting on the view;
+- inside a menu, a left click selects and runs that entry; a submenu entry opens
+  the next level, and the wheel moves the selection. `Up`/`Down` (the same bindings
+  as popups), `Enter`, `Esc` and `Right` work from the keyboard; any other key
+  closes and swallows the menu instead of acting on the view;
 - entries are disabled when their precondition does not hold (empty queue, no
   track under the pointer, no playlists), and a checked mark shows the active
   choice (play mode, library browser, list mode);

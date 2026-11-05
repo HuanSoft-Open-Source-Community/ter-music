@@ -18,6 +18,7 @@
 #include "ui/ui.h"
 #include "ui/layout.h"
 #include "ui/layout_editor.h"
+#include "ui/context_menu_layout.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/keymap.h"
@@ -75,6 +76,11 @@ static int g_sel_work_mask = 0;   /* 多选模式下的工作掩码 */
 static int g_sel_visible_opts = 0;
 static int g_sel_scroll_offset = 0;
 static int g_sel_count_shown = 0;
+
+/* 选择弹层创建时的终端尺寸：窗口缩放后 render_settings_content() 据此
+ * 重建并重新锚定，避免旧坐标越出新的终端边界。 */
+static int g_sel_term_rows = 0;
+static int g_sel_term_cols = 0;
 
 /* 设置内容区列表的几何：由 render_settings_option_group() 每帧记录。
  * top<0 = 这一帧没画列表（分区为空或空间不足）。 */
@@ -1436,6 +1442,8 @@ static void close_sel_menu(int apply)
 {
     if (!g_sel_active) return;
 
+    log_debug("settings", "sel menu close apply=%d", apply);
+
     if (apply) {
         switch (g_sel_src) {
             case SETTINGS_IDX_DEFAULT_PLAY_MODE:
@@ -1601,6 +1609,8 @@ static void close_sel_menu(int apply)
     g_sel_active = 0;
     g_sel_src = -1;
     g_sel_multiselect = 0;
+    g_sel_term_rows = 0;
+    g_sel_term_cols = 0;
 }
 
 /* ============================================================
@@ -1736,8 +1746,58 @@ static void open_sel_menu(int option_index)
 }
 
 /* ============================================================
- * Selection menu — render on sub-window with box()
+ * Selection menu — geometry / window
  * ============================================================ */
+
+/**
+ * @brief 选择弹层的锚点：触发它的选项在屏幕上的左上角。
+ *
+ * 行号取渲染期记录的真实列表几何（g_settings_list_top + 可见位置 - 滚动
+ * 偏移），列取内容区文字起始列；绝不在这里另抄一份 start_y/off 公式。
+ * 均衡器页的预设弹窗不对应列表行，锚定当前选中频带所在列与频带顶行。
+ */
+static void settings_sel_anchor(int src, int *out_y, int *out_x)
+{
+    MenuContentArea area;
+    menu_content_area(&area);
+
+    int anchor_y = 2;
+    int anchor_x = area.content_x;
+
+    if (src == SETTINGS_IDX_EQ_PRESET && g_menu_selected_idx == 6) {
+        if (g_eq_bars_top >= 2) {
+            anchor_y = g_eq_bars_top;
+        }
+        const int band = g_settings_current_option - SETTINGS_IDX_EQ_BAND_0;
+        if (band >= 0 && band < g_eq_max_bands && g_eq_col_w > 0) {
+            anchor_x = g_eq_col0 + band * g_eq_col_w;
+        }
+        if (anchor_x < area.content_x) {
+            anchor_x = area.content_x;
+        }
+    } else {
+        SettingsSectionSpec spec = get_active_settings_section_spec();
+        const int pos = get_settings_section_position(spec, src);
+        if (g_settings_list_top >= 0) {
+            if (pos >= 0) {
+                const int line = pos - g_settings_list_off;
+                anchor_y = (line >= 0 && line < g_settings_list_visible)
+                               ? (g_settings_list_top + line)
+                               : g_settings_list_top;
+            } else {
+                anchor_y = g_settings_list_top;
+            }
+        }
+    }
+
+    if (anchor_y < 2) anchor_y = 2;
+    if (anchor_y > area.max_y - 4) anchor_y = area.max_y - 4;
+    if (anchor_x < area.content_x) anchor_x = area.content_x;
+    if (anchor_x > area.max_x - 3) anchor_x = area.max_x - 3;
+
+    if (out_y) *out_y = anchor_y;
+    if (out_x) *out_x = anchor_x;
+}
 
 static void create_sel_window(void)
 {
@@ -1864,32 +1924,59 @@ static void create_sel_window(void)
         if (l > max_w) max_w = l;
     }
 
+    MenuContentArea area;
+    menu_content_area(&area);
+
     int box_w = max_w + 4;   /* 1 space + text + 1 space + border */
     if (box_w < 20) box_w = 20;
     if (box_w > 50) box_w = 50;
-    int max_box_w = max_x - (max_x / 4 + 2) - 2;
-    if (max_box_w < 20) max_box_w = 20;
-    if (box_w > max_box_w) box_w = max_box_w;
+    if (box_w > area.content_width) box_w = area.content_width;
+    if (box_w < 8) {
+        log_debug("settings", "sel menu refused: content width=%d", area.content_width);
+        g_sel_active = 0;
+        g_sel_src = -1;
+        return;
+    }
+
+    const int max_bottom = max_y - 4;   /* 保留空行 + 状态行 + 功能键提示行 */
     int box_h = n + 2;
     if (box_h > 20) box_h = 20;
+    const int avail_h = max_bottom - 2 + 1;
+    if (box_h > avail_h) box_h = avail_h;
+    if (box_h < 3 || max_bottom < 2 || area.max_x - 3 < area.content_x) {
+        log_debug("settings", "sel menu refused: available %dx%d",
+                  area.content_width, avail_h);
+        g_sel_active = 0;
+        g_sel_src = -1;
+        return;
+    }
 
-    /* Position: right-anchor, row-aligned with option */
-    int menu_x = max_x / 4;
-    int col    = max_x - box_w - 2;
-    if (col < menu_x + 2) col = menu_x + 2;
+    int anchor_y = 2;
+    int anchor_x = area.content_x;
+    settings_sel_anchor(src, &anchor_y, &anchor_x);
 
-    int row = 4; /* default first-option row */
-    SettingsSectionSpec spec = get_active_settings_section_spec();
-    int pos = get_settings_section_position(spec, src);
-    if (pos >= 0) row = 4 + pos;
-    if (row + box_h >= max_y - 2) row = max_y - box_h - 3;
-    if (row < 2) row = 2;
+    UIRect rect;
+    if (!ui_popup_place_rect(anchor_y, anchor_x, box_w, box_h,
+                             2, max_bottom, area.content_x,
+                             area.max_x - 3, &rect)) {
+        log_debug("settings", "sel menu refused: place failed");
+        g_sel_active = 0;
+        g_sel_src = -1;
+        return;
+    }
 
-    g_sel_win = newwin(box_h, box_w, row, col);
+    g_sel_win = newwin(rect.rows, rect.cols, rect.top, rect.left);
     if (!g_sel_win) {
         g_sel_win = NULL;
         g_sel_active = 0;
+        g_sel_src = -1;
+        return;
     }
+
+    g_sel_term_rows = max_y;
+    g_sel_term_cols = max_x;
+    log_debug("settings", "sel menu open src=%d anchor=%d,%d rect=%d,%d,%d,%d",
+              src, anchor_y, anchor_x, rect.top, rect.left, rect.rows, rect.cols);
 }
 
 /* 流光彩蛋整屏合成用：选择弹层当前是否可见，以及它的窗口。 */
@@ -2681,6 +2768,17 @@ void render_settings_content(void)
 
     /* Refresh stdscr first, then overlay selection menu sub-window */
     repaint_status_message();
+
+    /* 终端缩放后旧窗口坐标会越界：按新尺寸重建并重新锚定/钳制。
+     * 新空间不足时 create_sel_window() 会把弹层关闭。 */
+    if (g_sel_active) {
+        int rows, cols;
+        getmaxyx(stdscr, rows, cols);
+        if (rows != g_sel_term_rows || cols != g_sel_term_cols) {
+            create_sel_window();
+        }
+    }
+
     wnoutrefresh(stdscr);
     if (g_sel_active)
         draw_sel_menu();
@@ -3257,15 +3355,9 @@ static void settings_handle_sel_menu_mouse(const UIMouseEvent *ev, const UIMouse
     const int opt = g_sel_scroll_offset + line;
     if (opt < 0 || opt >= g_sel_count_shown) return;      /* 空行 */
 
-    const int already_selected = (g_sel_idx == opt);
     g_sel_idx = opt;
-    draw_sel_menu();
-    refresh();
 
-    if (!already_selected && ev->click_count < 2) return;
-
-    /* 双击或再点一次已选中的那条 = 回车（多选时等同空格勾选，
-     * 更符合"点一下就是选一项"的直觉） */
+    /* 单击即执行：单选直接落定；多选等同空格勾选并保持弹层打开。 */
     handle_sel_action(g_sel_multiselect ? ACTION_SELECT_TOGGLE : ACTION_SELECT_ACCEPT);
 }
 
@@ -3416,12 +3508,9 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
 
         if (d->row < 0 || d->row >= SETTINGS_ITEM_COUNT) return 1;  /* 框线/空白行 */
 
-        const int already_selected = (g_menu_selected_idx == d->row);
+        /* 单击即选中并执行：进入分区；最后一项直接返回主界面。 */
         settings_select_sidebar_row(d->row);
-        if (already_selected || ev->click_count >= 2) {
-            return handle_settings_action(ACTION_SETTINGS_ACTIVATE);
-        }
-        return 1;
+        return handle_settings_action(ACTION_SETTINGS_ACTIVATE);
     }
 
     /* ── 内容区 ── */
@@ -3453,35 +3542,26 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         if (band < 0) return 1;
 
         const int option = SETTINGS_IDX_EQ_BAND_0 + band;
-        const int already_selected = (g_settings_current_option == option);
         g_settings_current_option = option;
         render_settings_content();
-
-        if (already_selected || ev->click_count >= 2) {
-            return handle_eq_action(ACTION_EQ_ACTIVATE);
-        }
-        return 1;
+        return handle_eq_action(ACTION_EQ_ACTIVATE);
     }
 
     if (g_menu_selected_idx == 4) {
         int idx = hotkey_row_at_screen_row(ev->y);
         if (idx < 0) return 1;
 
-        const int already_selected = (g_hotkey_selected == idx);
         g_hotkey_selected = idx;
         g_hotkey_message[0] = '\0';
         render_settings_content();
-
-        if (already_selected || ev->click_count >= 2) {
-            return handle_hotkey_editor_action(ACTION_SETTINGS_ACTIVATE);
-        }
-        return 1;
+        return handle_hotkey_editor_action(ACTION_SETTINGS_ACTIVATE);
     }
 
     if (g_menu_selected_idx == 5) {
         /* 远程页的选中状态归 remote_view.c（四种模式行号推导各不相同，
-         * 目录模式还有滚动偏移），这里只把屏幕行交给它。 */
-        remote_view_handle_click(ev->y, ev->click_count >= 2);
+         * 目录模式还有滚动偏移），这里只把屏幕行交给它；activate=1 表示
+         * 单击即执行（右键菜单路径传 0，只选中）。 */
+        remote_view_handle_click(ev->y, 1);
         return 1;
     }
 
@@ -3490,13 +3570,8 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         int option = settings_option_at_screen_row(ev->y);
         if (option < 0) return 1;
 
-        const int already_selected = (g_settings_current_option == option);
         g_settings_current_option = option;
         render_settings_content();
-
-        if (already_selected || ev->click_count >= 2) {
-            return handle_settings_action(ACTION_SETTINGS_ACTIVATE);
-        }
-        return 1;
+        return handle_settings_action(ACTION_SETTINGS_ACTIVATE);
     }
 }

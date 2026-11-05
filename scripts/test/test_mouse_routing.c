@@ -385,10 +385,16 @@ static void test_edge_cases(void)
     CHECK(d.target == UI_MOUSE_TARGET_NONE && d.swallow == 0, "纯移动事件无人认领");
     CHECK(d.wheel == 0 && d.click_count == 0, "纯移动事件不带增量与点击数");
 
-    /* 双击：click_count 原样传出（属主用它决定"激活"） */
+    /* 双击/三击：click_count 只作诊断原样传出；归属结果必须与单击一致，
+     * 任何属主都不得据此改变"选中+执行"的行为。 */
+    UIMouseEvent single = ev_click(5, 5, 1);
+    UIMouseDecision ds = ui_mouse_resolve(&r, &single);
     UIMouseEvent dbl = ev_click(5, 5, 2);
     UIMouseDecision dd = ui_mouse_resolve(&r, &dbl);
-    CHECK(dd.click_count == 2, "双击次数传出");
+    CHECK(dd.click_count == 2, "双击次数仅作诊断传出");
+    CHECK(dd.target == ds.target && dd.swallow == ds.swallow &&
+          dd.row == ds.row && dd.col == ds.col,
+          "双击与单击归属完全一致");
 
     /* 极小终端：所有矩形都无效 */
     UIMouseRegions tiny = fixture();

@@ -1080,21 +1080,20 @@ int remote_view_handle_action(ActionId action)
  * 方式都不同，还有目录模式的滚动偏移，所以选中状态只在本模块内解释：
  * 渲染时记下"这一行=哪个选中值"，命中就照那张表走。
  *
- * 约定与设置页其它分区一致：单击=选中；双击或"再点一次已选中的那一行"
- * =等同回车（进入连接 / 执行动作 / 编辑字段 / 打开目录）。
+ * 约定与设置页其它分区一致：单击=选中并执行（进入连接 / 执行动作 /
+ * 编辑字段 / 打开目录）；右键菜单路径只传 activate=0，仅选中不执行。
  * g_remote_selected 是本模块私有状态，因此设置页只传屏幕行，不碰它。 */
-int remote_view_handle_click(int screen_y, int double_click)
+int remote_view_handle_click(int screen_y, int activate)
 {
     int hit = remote_view_hit_index(screen_y);
     if (hit < 0) {
         return 0;   /* 标题、提示、空白行：不可选 */
     }
 
-    const int already_selected = (g_remote_selected == hit);
     g_remote_selected = hit;
     render_settings_content();
 
-    if (double_click || already_selected) {
+    if (activate) {
         return remote_view_handle_action(ACTION_REMOTE_ACTIVATE);
     }
     return 1;

@@ -32,16 +32,16 @@ int remote_view_handle_input(int ch);
 int remote_view_handle_action(ActionId action);
 
 /**
- * @brief 处理落在远程页某一行的鼠标点击：选中该行对应条目。
+ * @brief 处理落在远程页某一行的鼠标点击。
  *
  * 远程页四种模式的行号推导各不相同（目录模式还有滚动偏移），命中表由
  * remote_view_render() 逐帧记录，因此选中状态只在本模块内解释，设置页
  * 只传屏幕行。
- * @param screen_y     屏幕行
- * @param double_click 1 = 双击（等同回车）
+ * @param screen_y 屏幕行
+ * @param activate 1 = 选中并执行（左键）；0 = 只选中（右键菜单路径）
  * @return 1 = 命中并处理；0 = 该行不可选（标题/提示/空白）
  */
-int remote_view_handle_click(int screen_y, int double_click);
+int remote_view_handle_click(int screen_y, int activate);
 
 /* UI 主循环每帧调用：取回后台线程的列目录结果与已下载曲目 */
 void remote_view_tick(void);
