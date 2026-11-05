@@ -504,8 +504,8 @@ int handle_library_input(int ch) {
  * 点第 N 行会选中/播放播放列表的第 N 首（错位）。滚轮同理：归浏览器
  * 的 browser.up/down，不再动播放列表的选中项。
  *
- * 交互约定与子视图一致：单击=选中，双击或"再点一次已选中的那一行"=进入
- * （浏览器行没有"播放"语义，ACTIVATE 就是下钻）。 */
+ * 交互约定与子视图一致：单击=选中并执行（浏览器行没有"播放"语义，
+ * ACTIVATE 就是下钻）。 */
 /* ============================================================
  * Right-click context menu
  * ============================================================ */
@@ -587,12 +587,9 @@ int library_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d) {
 
     if (row >= 2 && row < 2 + visible && idx >= 0 && idx < bound) {
         if (ev->click) {
-            int already_selected = (idx == g_library_state.selected_index);
             g_library_state.selected_index = idx;
-
-            if (already_selected || ev->click_count >= 2) {
-                handle_library_action(ACTION_BROWSER_ACTIVATE);
-            }
+            /* 单击即选中并执行：条目没有"播放"语义时 ACTIVATE 就是下钻。 */
+            handle_library_action(ACTION_BROWSER_ACTIVATE);
             request_ui_refresh(UI_DIRTY_PLAYLIST);
             return 1;
         }

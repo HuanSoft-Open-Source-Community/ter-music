@@ -12,6 +12,7 @@
 #   S7 弹层展开的竞争态：弹层内滚轮只滚弹层；弹层外的点击与滚轮被吞掉
 #      （既不动列表也不动控制区），并且外点收起后一切恢复正常。
 #   S8 底部功能键栏点击 = 切页（与按 F1..F8 同一条 execute_global_action 链路）。
+#   S8b 子视图单击 = 选中并执行；设置选择弹层在选项处展开、贴边翻转且不越界。
 #   S9 子视图（设置）侧栏与内容区各自认领滚轮，归属不串台。
 #   S10 控制区第 8 个按钮（卡拉OK/消人声）：点击开弹层、弹层滚轮移选、
 #       Enter 落定写进核心，Esc 取消则不改档。
@@ -211,6 +212,10 @@ wait_name() {   # $1 = 期望文件名, $2 = 超时秒
 last_route() {   # 最近一条 [mouse] 路由行（$1 = 可选 grep 过滤）
     local L; L="$(mlog)"; [ -n "$L" ] || { echo ""; return; }
     grep -h "\[mouse\].*-> target=" "$L" | tail -1 | sed -E 's/.*-> (target=[-0-9]+).*/\1/'; }
+
+sel_menu_line() {   # 最近一条 [settings] sel menu 日志行
+    local L; L="$(mlog)"; [ -n "$L" ] || { echo ""; return; }
+    grep -h "\[settings\] sel menu" "$L" | tail -1; }
 
 route_count() {   # 日志里匹配 $1 的路由行条数
     local L; L="$(mlog)"; [ -n "$L" ] || { echo 0; return; }
@@ -416,7 +421,7 @@ if [ "$t" = "target=14" ]; then
 else
     bad "设置视图内容区滚轮归属异常：期望 target=14（CONTENT），实测 $t"
 fi
-send "<click:60:20>" 0.8               # 内容区点击：认领但不越权改配置
+send "<click:60:20>" 0.8               # “返回”分区无选项：点击只认领、不动作
 t="$(last_route)"
 [ "$t" = "target=14" ] && ok "设置视图内容区点击归内容区" \
     || bad "设置视图内容区点击归属异常：$t"
@@ -424,6 +429,84 @@ send "<F1>" 1.0
 send "<wheel-down:6:5>" 0.7
 [ "$(last_route)" = "target=8" ] && ok "F1 回主界面后列表滚轮恢复归属播放列表" \
     || bad "回主界面后归属没恢复（$(last_route)）"
+
+# ── S8b 单击语义 + 设置选择弹层就地展开 ──────────────────────────
+info "S8b 设置页：单击侧栏即执行；选择弹层在选项处展开且不越界"
+# 侧栏第 9 项（general.back）在 SGR 行 11；单击一次就应退出设置视图。
+send "<F2>" 1.2
+send "<click:10:11>" 1.0
+t="$(last_route)"
+[ "$t" = "target=13" ] && ok "单击侧栏“返回”归侧栏（target=13）" \
+    || bad "单击侧栏“返回”归属异常：$t"
+send "<wheel-down:6:5>" 0.6
+if [ "$(last_route)" = "target=8" ]; then
+    ok "单击侧栏“返回”一次即回到主界面"
+else
+    bad "单击侧栏“返回”没有立即执行（列表滚轮归属 $(last_route)）"
+fi
+
+# 回设置页，单击第一行颜色选项（screen row 4，SGR 行 5）即应打开调色板。
+send "<F2>" 1.2
+send "<click:30:5>" 1.0
+sel=""
+for _ in 1 2 3 4 5 6; do
+    sel="$(sel_menu_line)"
+    case "$sel" in *"sel menu open"*) break ;; esac
+    sleep 0.5
+done
+set -- $(printf '%s' "$sel" | sed -nE \
+    's/.*anchor=([0-9]+),([0-9]+) rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3 \4 \5 \6/p')
+if [ "$#" -eq 6 ]; then
+    ay=$1; ax=$2; mt=$3; ml=$4; mh=$5; mw=$6
+    if [ "$mt" = "$ay" ] && [ "$ml" = "$ax" ]; then
+        ok "选择弹层在选项所在位置展开（anchor=$ay,$ax rect=$mt,$ml,$mh,$mw）"
+    else
+        bad "选择弹层没有锚定选项（anchor=$ay,$ax rect=$mt,$ml）"
+    fi
+    if [ $((mt + mh)) -le 27 ] && [ $((ml + mw)) -le 98 ]; then
+        ok "选择弹层完整落在终端内（不压状态/提示行与右边框）"
+    else
+        bad "选择弹层越界：rect=$mt,$ml,$mh,$mw"
+    fi
+    # 弹层内也单击即执行：首项是“跟随主题”，点一次应 apply=1 并关闭。
+    send "<click:$((ml + 3)):$((mt + 2))>" 1.0
+    closed=""
+    for _ in 1 2 3 4 5 6; do
+        closed="$(sel_menu_line)"
+        case "$closed" in *"close apply=1"*) break ;; esac
+        sleep 0.5
+    done
+    case "$closed" in
+        *"close apply=1"*) ok "单击弹层条目即落定（apply=1）" ;;
+        *) bad "单击弹层条目没有落定：${closed:-无日志}" ;;
+    esac
+else
+    bad "解析不到选择弹层打开日志：${sel:-无日志}"
+fi
+
+# 靠底部的颜色选项（screen row 21，SGR 行 22）：弹层必须上翻且仍在边界内。
+send "<click:30:22>" 1.0
+sel=""
+for _ in 1 2 3 4 5 6; do
+    sel="$(sel_menu_line)"
+    case "$sel" in *"sel menu open"*) break ;; esac
+    sleep 0.5
+done
+set -- $(printf '%s' "$sel" | sed -nE \
+    's/.*anchor=([0-9]+),([0-9]+) rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3 \4 \5 \6/p')
+if [ "$#" -eq 6 ]; then
+    ay=$1; ax=$2; mt=$3; ml=$4; mh=$5; mw=$6
+    if [ "$mt" -lt "$ay" ] && [ $((mt + mh)) -le 27 ] &&
+       [ $((ml + mw)) -le 98 ]; then
+        ok "靠底部的选项触发上翻且不越界（anchor=$ay rect=$mt,$mh）"
+    else
+        bad "靠底部的选项没有正确上翻/钳制（anchor=$ay rect=$mt,$ml,$mh,$mw）"
+    fi
+else
+    bad "解析不到底部选项的弹层日志：${sel:-无日志}"
+fi
+send "<Esc>" 0.8
+send "<F1>" 1.0
 
 # ── S9 倍速滚轮换档 + 回绕（**放在最后**：改倍速会让核心停播，
 #       这是既有缺陷，纯 CLI `ter-music speed` 同样复现，与鼠标无关；

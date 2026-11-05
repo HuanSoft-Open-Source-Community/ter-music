@@ -86,11 +86,20 @@ static void redraw_text_input(WINDOW *win, int row, int col, const char *prompt,
         return;
     }
 
-    int prompt_width = utf8_str_width(prompt);
-    int available_width = w - col - 2;
-    if (available_width < 1) {
-        available_width = 1;
+    /* 可用列：从 col 到 w-2（最右列留给边框），且至少留一列给输入。
+     * 先整段擦掉旧内容再画，避免窄窗格/换行时旧字符与输入重叠。 */
+    const int available_width = w - col - 2;
+    if (available_width < 2) {
+        return;
     }
+    mvwhline(win, row, col, ' ', (w - 1) - col);
+
+    /* 窗格太窄时先裁提示语，保证输入至少有一列且绝不换行到下一行。 */
+    char clipped_prompt[1024];
+    int max_prompt_cols = available_width - 1;
+    if (max_prompt_cols > 200) max_prompt_cols = 200;   /* 与缓冲区大小配套 */
+    utf8_str_truncate(clipped_prompt, prompt, max_prompt_cols);
+    int prompt_width = utf8_str_width(clipped_prompt);
 
     int input_width = available_width - prompt_width;
     if (input_width < 1) {
@@ -122,12 +131,15 @@ static void redraw_text_input(WINDOW *win, int row, int col, const char *prompt,
         snprintf(visible_input, sizeof(visible_input), "%s", display_src);
     }
 
-    mvwprintw(win, row, col, "%s%s", prompt, visible_input);
-    int text_end = col + prompt_width + utf8_str_width(visible_input);
-    int clear_len = (w - 1) - text_end;
-    if (clear_len > 0) {
-        mvwhline(win, row, text_end, ' ', clear_len);
+    /* 提示语与输入分别按绝对列绘制：即使提示语含宽字符，输入也严格从
+     * "提示语显示宽度之后"开始，不会被光标残位带偏。 */
+    mvwaddstr(win, row, col, clipped_prompt);
+    int input_col = col + prompt_width;
+    if (input_col < w - 1) {
+        mvwaddstr(win, row, input_col, visible_input);
     }
+
+    int text_end = input_col + utf8_str_width(visible_input);
     int cursor_x = text_end;
     if (cursor_x > w - 2) {
         cursor_x = w - 2;

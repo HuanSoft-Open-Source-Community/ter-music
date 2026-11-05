@@ -129,9 +129,8 @@ ter-music Quick Start Guide
       row up or down. This works for search results, the play queue and the file
       tree alike, and the wheel never starts playback.
     · Library browser (opened with M, it replaces the playlist pane): a click
-      selects the entry, clicking the selected entry again or double-clicking
-      drills down; the [S]/[R] lines trigger scan/rescan; the wheel moves the
-      selection (same as Up/Down).
+      selects the entry and runs it (drills down); the [S]/[R] lines trigger
+      scan/rescan; the wheel moves the selection (same as Up/Down).
     · Control bar pane: a click presses the button under the cursor (the Volume
       button and the progress row only take the focus, like the keyboard); the
       wheel on the progress row seeks ∓5 s, on the Volume button adjusts ±5 %,
@@ -142,23 +141,26 @@ ter-music Quick Start Guide
       the next / previous lyric line (it does not toggle lyric seek mode).
     · Info, spectrum and vinyl panes: nothing is defined there, and the event is
       consumed, so it never leaks into another pane.
-    · Sub-view sidebar and content area: a click selects, clicking the selected
-      row again or double-clicking is Enter; the wheel moves the selection within
-      the column under the pointer. On the Settings page it follows the section
-      you are in (option list, hotkey list, remote device list); on the Equalizer
-      page it only moves between bands — the wheel never changes a gain value; on
-      the Help page it scrolls one line at a time. The About view's content area
-      is read-only text and the Language view's sidebar holds a single "back"
-      entry, so the wheel there is only claimed and moves nothing. The highlight
-      follows the pointer: scrolling or clicking in the content column also moves
-      the keyboard focus there.
+    · Sub-view sidebar and content area: a click selects the row and runs it
+      (same as Enter); the wheel moves the selection within the column under the
+      pointer. On the Settings page it follows the section you are in (option
+      list, hotkey list, remote device list); on the Equalizer page it only moves
+      between bands — the wheel never changes a gain value; on the Help page it
+      scrolls one line at a time. The About view's content area is read-only text
+      and the Language view's sidebar holds a single "back" entry, so the wheel
+      there is only claimed and moves nothing. The highlight follows the pointer:
+      scrolling or clicking in the content column also moves the keyboard focus
+      there. A double or triple click has no extra meaning — it is treated as
+      that one click and never fires twice.
     · While a popup is open (control-bar play mode / speed / volume / karaoke
       menus, the settings option picker, the layout editor's modal menus): the
       wheel scrolls the popup wherever the pointer is; a click inside selects
-      that entry, and
-      clicking the selected entry again or double-clicking is Enter (Space, i.e.
-      tick the field, in the multi-select picker); a click outside only closes the
-      popup — that click is swallowed and never reaches the pane behind it.
+      that entry and runs it immediately (Enter; Space, i.e. tick the field, in
+      the multi-select picker); a click outside only closes the popup — that
+      click is swallowed and never reaches the pane behind it. The settings
+      picker opens at the option that triggered it (same row, aligned with the
+      option text) and flips/clamps at the edges so it stays inside the terminal,
+      clear of the status line, bottom hint row, scrollbar and right border.
     · Text input boxes are modal (search, scan directory, layout rename, hotkey
       capture, numeric colour entry): mouse events inside them are ignored, so a
       stray wheel event cannot corrupt the text being typed.
@@ -169,17 +171,17 @@ ter-music Quick Start Guide
       the screen (it flips up/left at the edges and never covers the bottom hint
       row). At most one overlay exists at a time; while a popup or menu is open a
       right click only closes it and is swallowed — no stacking and no pass-through.
-      Inside a menu a left click selects, clicking the selected entry again or
-      double-clicking runs it, the wheel moves the selection and submenus open to
-      the side; Up/Down/Enter/Esc/Right work from the keyboard, any other key
-      closes and swallows. The list pane menu covers queue management, favourites,
-      add to playlist, folder/search/play history, playback controls and page
-      navigation, and always includes "switch the list pane between file and queue
-      mode"; a right click never plays the row. Every sub-view (Settings, History,
-      Playlist, Favorites, Help, Language) has its own page menu; the Info page has
-      only the Konami aurora entry; the layout editor opens its pane-actions menu on
-      right click. If a queue/history/library row changes after the menu opened,
-      row actions report "the list changed; please try again" and do nothing.
+      Inside a menu a left click selects and runs that entry; the wheel moves the
+      selection and submenus open to the side; Up/Down/Enter/Esc/Right work from
+      the keyboard, any other key closes and swallows. The list pane menu covers
+      queue management, favourites, add to playlist, folder/search/play history,
+      playback controls and page navigation, and always includes "switch the list
+      pane between file and queue mode"; a right click never plays the row. Every
+      sub-view (Settings, History, Playlist, Favorites, Help, Language) has its
+      own page menu; the Info page has only the Konami aurora entry; the layout
+      editor opens its pane-actions menu on right click. If a queue/history/library
+      row changes after the menu opened, row actions report "the list changed;
+      please try again" and do nothing.
       When a repainting lyrics/spectrum/vinyl pane overlaps the menu, the pane
       refresh is composed with the menu backing and flushed once, so the menu
       rectangle is never erased.

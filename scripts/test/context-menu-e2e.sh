@@ -200,7 +200,7 @@ rect_inside() {   # $1=top $2=left $3=rows $4=cols
     [ $(( $1 + $3 )) -le 29 ] && [ $(( $2 + $4 )) -le 100 ]
 }
 
-click_level_item() {   # $1=level $2=idx；点两次（选中→执行/下钻）
+click_level_item() {   # $1=level $2=idx；单击即执行/下钻
     local rect top left rows cols x y
     rect="$(level_rect "$1")"
     if [ -z "$rect" ] || [ "$rect" = "$(last_level_line "$1")" ]; then
@@ -212,7 +212,6 @@ click_level_item() {   # $1=level $2=idx；点两次（选中→执行/下钻）
     cols=$(printf '%s' "$rect" | cut -d' ' -f4)
     [ -n "$top" ] && [ -n "$left" ] || return 1
     y=$((top + 1 + $2 + 1)); x=$((left + 2 + 1))
-    send "<click:$x:$y>" 0.35
     send "<click:$x:$y>" 0.9
     return 0
 }
@@ -514,7 +513,6 @@ else
     bad "编辑器菜单矩形越界：$erect"
 fi
 ey=$((et + 1 + 10 + 1)); ex=$((el + 2 + 1))   # idx 10 = 退出编辑器
-send "<click:$ex:$ey>" 0.35
 send "<click:$ex:$ey>" 0.9
 if grep -q "\[layout_editor\] closed" "$LOG_FILE"; then
     ok "通过菜单退出了布局编辑器"

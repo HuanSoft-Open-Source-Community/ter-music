@@ -283,7 +283,8 @@ void init_ncurses(void)
     }
     noecho();
     keypad(stdscr, TRUE);
-    /* 鼠标上报：主键点击（单击/双击/三击/release）+ 右键按下 + 滚轮。
+    /* 鼠标上报：主键点击（单击/双击/三击/release，均归一成一次点击）+
+     * 右键按下 + 滚轮。
      * 滚轮在 xterm 协议里只有 BUTTON4/BUTTON5_PRESSED（无 release 语义），
      * 横向滚轮 BUTTON6/BUTTON7 有意不申请——本程序没有横向滚动区域。
      * 右键只申请 BUTTON3_PRESSED：按下即一条事件，不依赖终端合成 CLICKED，

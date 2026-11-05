@@ -50,7 +50,7 @@ int handle_library_input(int ch);
  *
  * d->row 是窗格本地行（区域矩形由 getbegyx(win_playlist) 量得），
  * 行→条目映射与 render_library_home 等渲染函数同源。
- * 单击=选中；双击或再点已选中行=下钻；滚轮一格=上下选择一项。
+ * 单击=选中并执行（下钻）；滚轮一格=上下选择一项。
  * @return 1 = 已消费（事件归浏览器，不再交给播放列表）
  */
 int library_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d);

@@ -248,7 +248,7 @@ void render_language_content(void)
 
 /* ── Input handling ──────────────────────────────────────────── */
 
-/* 动作入口：键盘解析出的动作与鼠标滚轮/双击共用同一条路径。
+/* 动作入口：键盘解析出的动作与鼠标滚轮/单击共用同一条路径。
  * （鼠标绝不合成按键码：用户可改键，合成按键会在改键后失灵或做错事。） */
 int handle_language_action(ActionId action)
 {
@@ -465,19 +465,13 @@ int language_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         if (ev->wheel) return 1;
         if (!ev->click) return 1;
 
-        const int already_selected = (g_menu_selected_idx == d->row);
-        /* 高亮归焦点所在那一列：指针落到侧栏就把焦点带过来，
-         * 否则点了"返回"却看不见高亮，下一条键盘方向键还会作用在列表上。 */
         g_focus_area = FOCUS_SIDEBAR;
         g_menu_selected_idx = d->row;
         render_menu_sidebar(g_menu_selected_idx, language_sidebar_items, LANGUAGE_ITEM_COUNT);
         render_language_content();
 
-        /* 双击或"再点一次已选中的那条"＝该条的确认动作；侧栏那条是返回主界面 */
-        if (already_selected || ev->click_count >= 2) {
-            return handle_language_action(ACTION_LANGUAGE_BACK);
-        }
-        return 1;
+        /* 单击即选中并执行；侧栏那条是返回主界面 */
+        return handle_language_action(ACTION_LANGUAGE_BACK);
     }
 
     /* 内容区：语言列表 */
@@ -499,15 +493,12 @@ int language_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
     const int idx = language_index_at_row(ev->y);
     if (idx < 0) return 1;   /* 标题、分隔线、底部提示与操作行：只认领不动作 */
 
-    const int already_selected = (g_lang_selected == idx);
     g_focus_area = FOCUS_CONTENT;   /* 同上：让选中高亮真的画得出来 */
     g_lang_selected = idx;
     render_menu_sidebar(g_menu_selected_idx, language_sidebar_items, LANGUAGE_ITEM_COUNT);
     render_language_content();
 
-    /* 本视图的 ACTIVATE 就是"切换到选中的语言"（见 keymap: language.activate） */
-    if (already_selected || ev->click_count >= 2) {
-        return handle_language_action(ACTION_LANGUAGE_ACTIVATE);
-    }
-    return 1;
+    /* 本视图的 ACTIVATE 就是"切换到选中的语言"（见 keymap: language.activate）；
+     * 单击即执行。 */
+    return handle_language_action(ACTION_LANGUAGE_ACTIVATE);
 }

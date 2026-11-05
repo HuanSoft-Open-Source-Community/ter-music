@@ -207,16 +207,12 @@ int info_view_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         }
         if (!ev->click) return 1;
 
-        const int already_selected = (g_menu_selected_idx == d->row);
         g_focus_area = FOCUS_SIDEBAR;
         g_menu_selected_idx = d->row;
         render_menu_sidebar(g_menu_selected_idx, info_sidebar_items, INFO_ITEM_COUNT);
 
-        /* 双击或"再点一次已选中的那条"等同回车：关于 / 仓库 / 返回主界面 */
-        if (already_selected || ev->click_count >= 2) {
-            return handle_info_action(ACTION_INFO_ACTIVATE);
-        }
-        return 1;
+        /* 单击即选中并执行：关于 / 仓库 / 返回主界面 */
+        return handle_info_action(ACTION_INFO_ACTIVATE);
     }
 
     /* 内容区是只读文本（版本号、作者、仓库地址、许可证），没有可移动的高亮，

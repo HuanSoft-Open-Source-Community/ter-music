@@ -25,6 +25,64 @@ static int clamp_size(int *w, int *h, int screen_rows, int screen_cols)
     return 1;
 }
 
+int ui_popup_place_rect(int anchor_y, int anchor_x, int w, int h,
+                        int min_top, int max_bottom,
+                        int min_left, int max_right, UIRect *out)
+{
+    if (!out || w <= 0 || h <= 0) {
+        return 0;
+    }
+    if (min_top > max_bottom || min_left > max_right) {
+        return 0;
+    }
+
+    const int avail_w = max_right - min_left + 1;
+    const int avail_h = max_bottom - min_top + 1;
+    if (w > avail_w) {
+        w = avail_w;
+    }
+    if (h > avail_h) {
+        h = avail_h;
+    }
+    if (w <= 0 || h <= 0) {
+        return 0;
+    }
+
+    int top = anchor_y;
+    if (top < min_top) {
+        top = min_top;
+    }
+    if (top > max_bottom - h + 1) {
+        top = anchor_y - h;                 /* 下溢：整体移到锚点上方 */
+    }
+    if (top < min_top) {
+        top = min_top;
+    }
+    if (top > max_bottom - h + 1) {
+        top = max_bottom - h + 1;           /* 仍放不下：钳到区域底部 */
+    }
+
+    int left = anchor_x;
+    if (left < min_left) {
+        left = min_left;
+    }
+    if (left > max_right - w + 1) {
+        left = anchor_x - w;                /* 右溢：整体移到锚点左侧 */
+    }
+    if (left < min_left) {
+        left = min_left;
+    }
+    if (left > max_right - w + 1) {
+        left = max_right - w + 1;           /* 仍放不下：钳到区域右侧 */
+    }
+
+    out->top = top;
+    out->left = left;
+    out->rows = h;
+    out->cols = w;
+    return 1;
+}
+
 int ui_ctx_menu_place_rect(int anchor_y, int anchor_x, int w, int h,
                            int screen_rows, int screen_cols, UIRect *out)
 {
@@ -35,35 +93,10 @@ int ui_ctx_menu_place_rect(int anchor_y, int anchor_x, int w, int h,
         return 0;
     }
 
-    const int max_bottom = screen_rows - 1;   /* 不含提示条行 */
-
-    int top = anchor_y;
-    if (top + h > max_bottom) {
-        top = anchor_y - h;                   /* 上翻：菜单整体在锚点上方 */
-    }
-    if (top < 0) {
-        top = 0;
-    }
-    if (top + h > max_bottom) {
-        top = max_bottom - h;
-    }
-
-    int left = anchor_x;
-    if (left + w > screen_cols) {
-        left = anchor_x - w;                  /* 左翻：菜单整体在锚点左侧 */
-    }
-    if (left < 0) {
-        left = 0;
-    }
-    if (left + w > screen_cols) {
-        left = screen_cols - w;
-    }
-
-    out->top = top;
-    out->left = left;
-    out->rows = h;
-    out->cols = w;
-    return 1;
+    /* 右键菜单的既有边界：末行留给提示条，菜单不覆盖。 */
+    return ui_popup_place_rect(anchor_y, anchor_x, w, h,
+                               0, screen_rows - 2,
+                               0, screen_cols - 1, out);
 }
 
 int ui_ctx_menu_place_submenu(const UIRect *parent, int item_screen_row,

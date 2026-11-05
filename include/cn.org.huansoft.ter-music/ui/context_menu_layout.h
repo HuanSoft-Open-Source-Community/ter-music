@@ -14,6 +14,10 @@
  *   - 终端太小（宽 < UI_CTX_MENU_MIN_W 或可用高 < UI_CTX_MENU_MIN_H）
  *     返回失败，调用方不打开菜单。
  *
+ * `ui_popup_place_rect()` 是同一套翻转/钳制逻辑的通用版：调用方给出显式
+ * 可用边界（例如设置页的“内容区、且不压状态行/提示条”），供选择弹层等
+ * 锚定在某个已绘制条目上的弹层复用。
+ *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
 
@@ -39,6 +43,29 @@
  */
 int ui_ctx_menu_place_rect(int anchor_y, int anchor_x, int w, int h,
                            int screen_rows, int screen_cols, UIRect *out);
+
+/**
+ * @brief 把锚定在某个已绘制元素上的弹层放进显式可用区域。
+ *
+ * 优先级与右键菜单一致：先以锚点作为弹层左上角；下方放不下就上翻到
+ * 锚点上方，右侧放不下就左移到锚点左侧，最后钳制进
+ * [min_top, max_bottom] × [min_left, max_right]（闭区间）。宽高超过可用
+ * 区域时先收紧到区域尺寸。
+ *
+ * @param anchor_y   锚点屏幕行（0 基，可越界）
+ * @param anchor_x   锚点屏幕列（0 基，可越界）
+ * @param w          期望宽度；超界时收紧
+ * @param h          期望高度；超界时收紧
+ * @param min_top    可用区域首行（含）
+ * @param max_bottom 可用区域末行（含）
+ * @param min_left   可用区域首列（含）
+ * @param max_right  可用区域末列（含）
+ * @param out        结果矩形
+ * @return 1 = 已放置；0 = 参数/区域非法（调用方不得创建窗口）
+ */
+int ui_popup_place_rect(int anchor_y, int anchor_x, int w, int h,
+                        int min_top, int max_bottom,
+                        int min_left, int max_right, UIRect *out);
 
 /**
  * @brief 子菜单矩形：优先父菜单右侧，越界放左侧；纵向与条目行对齐并钳制。

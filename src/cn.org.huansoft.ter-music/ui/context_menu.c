@@ -783,12 +783,9 @@ int ui_context_menu_handle_mouse(const UIMouseEvent *ev,
     if (idx != level->selected) {
         level->selected = idx;
         ensure_top_visible();
-        draw_level(g_ctx_menu.level_count - 1);
-        (void)ui_refresh_window(g_ctx_menu.wins[g_ctx_menu.level_count - 1]);
-        if (ev->click_count < 2) {
-            return 1;
-        }
     }
+    /* 单击即执行：动作项直接运行，子菜单项直接进入下一层。
+     * 不在这里先画一帧“只选中”的状态——那会让一次点击变成两段语义。 */
     activate_current();
     return 1;
 }

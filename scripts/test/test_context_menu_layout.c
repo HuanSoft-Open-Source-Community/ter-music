@@ -6,6 +6,7 @@
  *   - 根菜单在四角/边缘的上翻与左翻，结果完整落在
  *     [0, screen_cols) × [0, screen_rows-1)（末行提示条除外）；
  *   - 超宽/超高收缩与极小终端拒绝；
+ *   - 通用弹层放置：显式可用边界内的锚定、上翻/左移、宽高收紧与非法区域拒绝；
  *   - 子菜单右侧优先、右侧溢出放左侧、底部溢出上移、最终钳制；
  *   - 菜单框本地行 → 条目下标（边框/页脚/越界返回 -1）；
  *   - 滚动偏移保持选中项可见；
@@ -89,6 +90,59 @@ static void test_place_too_small(void)
           "place: zero width refused");
 }
 
+static int inside_bounds(const UIRect *r, int min_top, int max_bottom,
+                         int min_left, int max_right)
+{
+    return r->top >= min_top && r->left >= min_left &&
+           r->top + r->rows - 1 <= max_bottom &&
+           r->left + r->cols - 1 <= max_right;
+}
+
+static void test_popup_place(void)
+{
+    UIRect r;
+
+    /* 正常：锚点即左上角，完整落在内容区边界内 */
+    CHECK(ui_popup_place_rect(10, 27, 20, 8, 2, 26, 27, 97, &r) == 1,
+          "popup: normal accepted");
+    CHECK(r.top == 10 && r.left == 27 && r.rows == 8 && r.cols == 20,
+          "popup: normal keeps anchor");
+    CHECK(inside_bounds(&r, 2, 26, 27, 97), "popup: normal inside bounds");
+
+    /* 底部溢出：整体上翻到锚点上方 */
+    CHECK(ui_popup_place_rect(20, 27, 20, 12, 2, 26, 27, 97, &r) == 1 &&
+          r.top == 8, "popup: bottom overflow flips above anchor");
+    CHECK(inside_bounds(&r, 2, 26, 27, 97), "popup: bottom overflow inside bounds");
+
+    /* 锚点靠近顶部且菜单很高：钳到可用区首行，底部不越界 */
+    CHECK(ui_popup_place_rect(0, 27, 20, 20, 2, 26, 27, 97, &r) == 1 &&
+          r.top == 2 && r.rows == 20, "popup: top clamp");
+    CHECK(inside_bounds(&r, 2, 26, 27, 97), "popup: top clamp inside bounds");
+
+    /* 右侧溢出：整体左移到锚点左侧 */
+    CHECK(ui_popup_place_rect(10, 96, 20, 8, 2, 26, 27, 97, &r) == 1 &&
+          r.left == 76, "popup: right overflow flips left of anchor");
+    CHECK(inside_bounds(&r, 2, 26, 27, 97), "popup: right overflow inside bounds");
+
+    /* 超宽/超高：先收紧到可用区域，再落位 */
+    CHECK(ui_popup_place_rect(10, 27, 500, 500, 2, 26, 27, 97, &r) == 1 &&
+          r.cols == 71 && r.rows == 25, "popup: oversize shrinks to bounds");
+    CHECK(r.top == 2 && r.left == 27 && inside_bounds(&r, 2, 26, 27, 97),
+          "popup: oversize placed inside bounds");
+
+    /* 非法参数/区域 */
+    CHECK(ui_popup_place_rect(10, 27, 0, 8, 2, 26, 27, 97, &r) == 0,
+          "popup: zero width refused");
+    CHECK(ui_popup_place_rect(10, 27, -5, 8, 2, 26, 27, 97, &r) == 0,
+          "popup: negative width refused");
+    CHECK(ui_popup_place_rect(10, 27, 20, 8, 27, 26, 27, 97, &r) == 0,
+          "popup: inverted rows refused");
+    CHECK(ui_popup_place_rect(10, 27, 20, 8, 2, 26, 98, 97, &r) == 0,
+          "popup: inverted cols refused");
+    CHECK(ui_popup_place_rect(10, 27, 20, 8, 2, 26, 27, 97, NULL) == 0,
+          "popup: null output refused");
+}
+
 static void test_submenu(void)
 {
     UIRect parent = {5, 10, 10, 20};   /* 行 5..14，列 10..29 */
@@ -164,6 +218,7 @@ int main(void)
     test_place_edges();
     test_place_oversize();
     test_place_too_small();
+    test_popup_place();
     test_submenu();
     test_item_index();
     test_scroll();

@@ -84,8 +84,10 @@ static UIRect rect_of_window(WINDOW *win)
  * 会合并；这里只认 PRESSED 位，并把它当作一格增量。
  *
  * 点击：优先认 CLICKED/DOUBLE/TRIPLE；只有 RELEASED（某些终端不合成
- * click）时按一次单击处理。滚轮位优先于点击位——一次滚动绝不允许
- * 既滚动又点击。
+ * click）时按一次单击处理。**无论终端上报单击、双击还是三击，本程序都
+ * 归一成"一次点击"**：click_count 只写进调试日志，任何归属者都不得据此
+ * 改变行为——单击即选中并执行，双击不会执行两次。滚轮位优先于点击位——
+ * 一次滚动绝不允许既滚动又点击。
  */
 static void normalize_mouse_event(const MEVENT *event, UIMouseEvent *out)
 {
