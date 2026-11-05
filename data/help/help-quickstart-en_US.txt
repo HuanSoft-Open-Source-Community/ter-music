@@ -136,7 +136,8 @@ ter-music Quick Start Guide
       button and the progress row only take the focus, like the keyboard); the
       wheel on the progress row seeks ∓5 s, on the Volume button adjusts ±5 %,
       on the Speed button steps through the speed presets (wrapping at both
-      ends); other buttons do nothing.
+      ends); other buttons do nothing — the Karaoke one included, its level is
+      picked from the popup only.
     · Lyrics pane: a click jumps to the line under the cursor; the wheel seeks to
       the next / previous lyric line (it does not toggle lyric seek mode).
     · Info, spectrum and vinyl panes: nothing is defined there, and the event is
@@ -151,9 +152,10 @@ ter-music Quick Start Guide
       entry, so the wheel there is only claimed and moves nothing. The highlight
       follows the pointer: scrolling or clicking in the content column also moves
       the keyboard focus there.
-    · While a popup is open (control-bar play mode / speed / volume menus, the
-      settings option picker, the layout editor's modal menus): the wheel scrolls
-      the popup wherever the pointer is; a click inside selects that entry, and
+    · While a popup is open (control-bar play mode / speed / volume / karaoke
+      menus, the settings option picker, the layout editor's modal menus): the
+      wheel scrolls the popup wherever the pointer is; a click inside selects
+      that entry, and
       clicking the selected entry again or double-clicking is Enter (Space, i.e.
       tick the field, in the multi-select picker); a click outside only closes the
       popup — that click is swallowed and never reaches the pane behind it.
@@ -202,6 +204,7 @@ ter-music Quick Start Guide
   [Mode]     Play mode (the popup lists the modes currently available)
   [Speed]    Playback speed (popup: 0.75x / 1.00x / 1.25x / 1.50x / 2.00x / 3.00x)
   [Vol]      Volume popup (0-100, 5% steps)
+  [Karaoke]  Vocal-removal popup (Off / Faint vocals / No vocals; stereo only)
   [Progress] Current playback progress
 
 6. Play Modes (17 in total)
@@ -496,6 +499,11 @@ ter-music Quick Start Guide
     volume [0-100|+N|-N]          Read or set the volume
     speed  [0.5-3.0]              Read or set the playback rate
     mode   [name|0-16]            Read or set the play mode
+    karaoke [off|soft|full|0-2|cycle]
+                                  Read or set the vocal-removal level (cycle
+                                  steps one level; stereo only — not the
+                                  "karaoke" layout preset, not per-character
+                                  lyric highlighting)
 
   Queue editing (acts on the core's play queue):
     queue list [--offset N] [--count N]  Paged listing (count 0 = default 200,
@@ -544,6 +552,13 @@ ter-music Quick Start Guide
 20. Tips & Tricks
 ------------------
   Press F8 for this help page (/ searches, ↑/↓ scroll three lines).
+  Karaoke (vocal removal) has three levels: Off, Faint vocals and No vocals. It
+  only attenuates what is centred in a stereo signal; the accompaniment, the bass
+  and the top end stay put, and mono tracks play untouched. Three ways to change
+  it: the [Karaoke] button popup in the control bar, Settings -> Playback, or
+  `ter-music karaoke`. Note that "karaoke" names two unrelated things here as
+  well - per-character lyric highlighting, and the `karaoke` layout preset. The
+  level persists as karaoke_mode (0/1/2) in config.xml and returns on restart.
   Press h for the play-history popup; F3 is the folder-history view — they are
   not the same thing.
   Every settings entry opens its option menu with ENTER (no +/- keys needed).
@@ -576,7 +591,7 @@ ter-music Quick Start Guide
 ------------------------------------
   The core publishes /org/mpris/MediaPlayer2 on the session bus as
   org.mpris.MediaPlayer2.ter_music, with MPRIS plus the ter-music interfaces
-  org.yxzl.ter_music.Info / Control / Lyrics / Queue / Config.
+  cn.org.huansoft.ter_music.Info / Control / Lyrics / Queue / Config.
   The handshake reads core.api_version from Info.GetInfo (currently 5; clients
   require at least 4, and a v4 core simply lacks the per-character fields).
 
@@ -595,7 +610,7 @@ ter-music Quick Start Guide
   Read the current A/B lyric snapshot with:
     gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
       --object-path /org/mpris/MediaPlayer2 \
-      --method org.yxzl.ter_music.Lyrics.GetLyrics
+      --method cn.org.huansoft.ter_music.Lyrics.GetLyrics
 
   Full specification: see docs/API_DBUS_en_US.md and docs/API_LYRICS_en_US.md
   in the source tree.

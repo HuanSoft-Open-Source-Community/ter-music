@@ -31,7 +31,7 @@ SIGNAL_NAMES = {
 }
 
 
-SECTION_RE = re.compile(r"^##\s+org\.yxzl\.ter_music\.([A-Za-z]+)")
+SECTION_RE = re.compile(r"^##\s+cn\.org\.huansoft\.ter_music\.([A-Za-z]+)")
 
 
 def documented_methods(text):

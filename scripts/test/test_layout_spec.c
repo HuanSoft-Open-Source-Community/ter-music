@@ -7,7 +7,7 @@
  * 不再导致整份布局被拒绝。
  *
  * 运行：scripts/test/run-unit-tests.sh test_layout_spec
- * 依赖（见同名 .srcs）：src/org.yxzl.ter-music/ui/layout_spec.c
+ * 依赖（见同名 .srcs）：src/cn.org.huansoft.ter-music/ui/layout_spec.c
  */
 
 #include "ui/layout_spec.h"

@@ -5,6 +5,12 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 PROJECT_NAME="ter-music"
+# RPM 包名随组织迁移为 cn.org.huansoft.ter-music；PROJECT_NAME 仍是可执行文件与
+# AppImage 内部 desktop/二进制名，两者不可混用。
+RPM_PACKAGE_NAME="cn.org.huansoft.ter-music"
+# 版本走滚动方案 <yy>.<q>.x.y，与 types.h 的 APP_VERSION 同源；仅在 tag 与 types.h
+# 都读不到时兜底。
+DEFAULT_VERSION="26.4.1.0"
 OUTPUT_DIR="${SCRIPT_DIR}/build/appimage"
 TEMP_DIR="${SCRIPT_DIR}/.appimage_temp"
 APPIMAGETOOL_DIR="${SCRIPT_DIR}/.appimagetool"
@@ -118,7 +124,7 @@ check_environment() {
         exit 1
     fi
 
-    if [ ! -f "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" ]; then
+    if [ ! -f "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" ]; then
         log_error "未找到 types.h 文件"
         log_error "请确保项目结构完整"
         exit 1
@@ -156,20 +162,23 @@ check_download_tool() {
 }
 
 detect_version() {
-    local default_version="2.3.0"
+    local default_version="$DEFAULT_VERSION"
 
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
-        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    # 版本以 types.h 里的 APP_VERSION 为唯一事实源：漏打 tag 或 tag 落后于代码时，
+    # 包版本仍然跟着源码走；git tag 退为次级兜底。
+    if [ -f "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" ]; then
+        local match
+        match=$(grep -E '#define APP_VERSION' "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" | head -1)
+        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
     fi
 
-    if [ -f "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" ]; then
-        local match
-        match=$(grep -E 'APP_VERSION' "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" | head -1)
-        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*)$ ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
@@ -178,12 +187,12 @@ detect_version() {
     if [ -f "${SCRIPT_DIR}/CMakeLists.txt" ]; then
         local match
         match=$(grep -E 'project.*VERSION' "${SCRIPT_DIR}/CMakeLists.txt" | head -1)
-        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         else
             match=$(grep -E 'set.*VERSION' "${SCRIPT_DIR}/CMakeLists.txt" | head -1)
-            if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
                 echo "${BASH_REMATCH[1]}"
                 return
             fi
@@ -245,7 +254,7 @@ find_rpm_package() {
     local rpm_file="$1"
 
     if [ -z "$rpm_file" ]; then
-        rpm_file=$(find "${SCRIPT_DIR}/build/rpm" -name "${PROJECT_NAME}-*.x86_64.rpm" -type f | grep -v debuginfo | grep -v debugsource | head -1)
+        rpm_file=$(find "${SCRIPT_DIR}/build/rpm" -name "${RPM_PACKAGE_NAME}-*.x86_64.rpm" -type f | grep -v debuginfo | grep -v debugsource | head -1)
     fi
 
     if [ -z "$rpm_file" ] || [ ! -f "$rpm_file" ]; then
@@ -596,7 +605,7 @@ main() {
 
     if [ -z "$version" ]; then
         version=$(detect_version)
-        if [ "$version" != "1.0.0" ]; then
+        if [ "$version" != "$DEFAULT_VERSION" ]; then
             log_info "从 Git/types.h 检测到版本: $version"
         else
             log_info "无法检测版本，使用默认版本: $version"
@@ -635,7 +644,7 @@ main() {
         extract_rpm "$rpm_file" "$extract_dir"
 
         if [ -z "$version" ]; then
-            version=$(basename "$rpm_file" | sed -E "s/${PROJECT_NAME}-([0-9]+\.[0-9]+\.[0-9]+).*/\1/")
+            version=$(basename "$rpm_file" | sed -E "s/${RPM_PACKAGE_NAME}-([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*).*\.rpm$/\1/")
             log_info "从RPM文件名提取版本: $version"
         fi
 

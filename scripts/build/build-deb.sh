@@ -4,8 +4,11 @@ set -e
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
-PROJECT_NAME="ter-music"
-DEFAULT_VERSION="2.3.0"
+# 源包名随组织迁移改为 cn.org.huansoft.ter-music：dpkg-buildpackage 要求 orig
+# tarball 与解包目录前缀都跟源包名一致，这些位置一律用 PACKAGE_NAME；可执行
+# 文件名仍是 ter-music，由 CMake 与 debian/rules 决定，不受包名影响。
+PACKAGE_NAME="cn.org.huansoft.ter-music"
+DEFAULT_VERSION="26.4.1.0"
 OUTPUT_DIR="${SCRIPT_DIR}/build/deb"
 TEMP_DIR="${SCRIPT_DIR}/.debbuild_temp"
 SOURCE_OUTPUT_DIR="${OUTPUT_DIR}/source"
@@ -86,18 +89,21 @@ check_dependencies() {
 detect_version() {
     local version="$DEFAULT_VERSION"
 
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
-        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    # 版本以 types.h 里的 APP_VERSION 为唯一事实源：漏打 tag 或 tag 落后于代码时，
+    # 包版本仍然跟着源码走；git tag 退为次级兜底。
+    if [ -f "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" ]; then
+        local match
+        match=$(grep -E '#define APP_VERSION' "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" | head -1)
+        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
     fi
 
-    if [ -f "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" ]; then
-        local match
-        match=$(grep -E 'APP_VERSION' "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" | head -1)
-        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*)$ ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
@@ -141,21 +147,21 @@ build_via_dpkg() {
     local static_build="${5:-false}"
 
     local build_root="${TEMP_DIR}/dpkgbuild"
-    local source_dir="${build_root}/${PROJECT_NAME}-${version}"
+    local source_dir="${build_root}/${PACKAGE_NAME}-${version}"
     mkdir -p "$build_root"
 
     log_info "创建源码压缩包 (.orig.tar.gz)..."
 
     # Step 1: Create .orig.tar.gz via git archive or fallback
-    local orig_tarball="${build_root}/${PROJECT_NAME}_${version}.orig.tar.gz"
+    local orig_tarball="${build_root}/${PACKAGE_NAME}_${version}.orig.tar.gz"
     if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1 && [ "${SKIP_GIT_ARCHIVE:-0}" != "1" ]; then
         if ! git -C "${SCRIPT_DIR}" archive --format=tar.gz \
-            --prefix="${PROJECT_NAME}-${version}/" \
+            --prefix="${PACKAGE_NAME}-${version}/" \
             HEAD > "$orig_tarball" 2>/dev/null || [ ! -s "$orig_tarball" ]; then
             log_warn "git archive 失败，尝试添加 safe.directory..."
             git config --global --add safe.directory "${SCRIPT_DIR}" 2>/dev/null || true
             git -C "${SCRIPT_DIR}" archive --format=tar.gz \
-                --prefix="${PROJECT_NAME}-${version}/" \
+                --prefix="${PACKAGE_NAME}-${version}/" \
                 HEAD > "$orig_tarball"
         fi
     else
@@ -167,7 +173,7 @@ build_via_dpkg() {
         # orig.tar.gz randomly misses files (e.g. CMakeLists.txt). /tmp avoids it.
         local fallback_dir="${TMPDIR:-/tmp}/ter-music-fallback-$$"
         rm -rf "$fallback_dir"
-        mkdir -p "${fallback_dir}/${PROJECT_NAME}-${version}"
+        mkdir -p "${fallback_dir}/${PACKAGE_NAME}-${version}"
         if command -v rsync &>/dev/null; then
             rsync -a --exclude='.git' --exclude='build' --exclude='.tmp' \
                 --exclude='.debbuild_temp' --exclude='.linyaps_temp' \
@@ -176,7 +182,7 @@ build_via_dpkg() {
                 --exclude='.reasonix' --exclude='.claude' --exclude='.trae' \
                 --exclude='.lingma' --exclude='.vscode' \
                 --exclude='*_temp' \
-                "${SCRIPT_DIR}"/ "${fallback_dir}/${PROJECT_NAME}-${version}"/
+                "${SCRIPT_DIR}"/ "${fallback_dir}/${PACKAGE_NAME}-${version}"/
         elif command -v tar &>/dev/null; then
             # tar pipe: supports excludes, avoids copying multi-GB caches
             # (used when rsync is missing, e.g. the deb-static image)
@@ -188,7 +194,7 @@ build_via_dpkg() {
                     --exclude='./.lingma' --exclude='./.vscode' \
                     --exclude='*_temp' \
                     -C "${SCRIPT_DIR}" -cf - . | \
-                    tar -C "${fallback_dir}/${PROJECT_NAME}-${version}" -xf -; then
+                    tar -C "${fallback_dir}/${PACKAGE_NAME}-${version}" -xf -; then
                 log_error "tar 复制源码失败"
                 rm -rf "$fallback_dir"
                 return 1
@@ -196,21 +202,21 @@ build_via_dpkg() {
         else
             # last resort: cp + post-cleanup (target in /tmp is outside
             # SCRIPT_DIR, so no into-itself abort; just slower)
-            cp -a "${SCRIPT_DIR}"/. "${fallback_dir}/${PROJECT_NAME}-${version}"/ 2>/dev/null || true
-            rm -rf "${fallback_dir}/${PROJECT_NAME}-${version}"/.git \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/build \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.tmp \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.debbuild_temp \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.reasonix \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.claude \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.trae \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.lingma \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.appimagetool \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.cache \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.vscode \
-                   "${fallback_dir}/${PROJECT_NAME}-${version}"/.*_temp 2>/dev/null || true
+            cp -a "${SCRIPT_DIR}"/. "${fallback_dir}/${PACKAGE_NAME}-${version}"/ 2>/dev/null || true
+            rm -rf "${fallback_dir}/${PACKAGE_NAME}-${version}"/.git \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/build \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.tmp \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.debbuild_temp \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.reasonix \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.claude \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.trae \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.lingma \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.appimagetool \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.cache \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.vscode \
+                   "${fallback_dir}/${PACKAGE_NAME}-${version}"/.*_temp 2>/dev/null || true
         fi
-        tar -czf "$orig_tarball" -C "$fallback_dir" "${PROJECT_NAME}-${version}"
+        tar -czf "$orig_tarball" -C "$fallback_dir" "${PACKAGE_NAME}-${version}"
         # staging dir is outside TEMP_DIR — remove it explicitly
         rm -rf "$fallback_dir"
     fi
@@ -477,7 +483,7 @@ show_summary() {
     fi
     echo ""
     echo "安装命令:"
-    echo "  sudo dpkg -i ${output_dir}/${PROJECT_NAME}_*_${target_arch}.deb"
+    echo "  sudo dpkg -i ${output_dir}/${PACKAGE_NAME}_*_${target_arch}.deb"
     echo "  如果缺少依赖，请运行: sudo apt install -f"
     echo ""
 }

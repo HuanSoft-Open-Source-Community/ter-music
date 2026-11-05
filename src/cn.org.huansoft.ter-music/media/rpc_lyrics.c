@@ -1,0 +1,484 @@
+/**
+ * @file rpc_lyrics.c
+ * @brief cn.org.huansoft.ter_music.Lyrics —— A/B 两句歌词同步接口
+ *
+ * 本文件只负责 cn.org.huansoft.ter_music.Lyrics 这一个接口：处理器、变更信号与自省片段。
+ * 共享的发送/错误/回复助手与引擎动作见 media/rpc_common.c；
+ * 连接生命周期与 MPRIS 见 media/session.c。
+ *
+ * @author 燕戏竹林 (yxzl666xx@outlook.com)
+ */
+
+#include "media/rpc.h"
+#include "media/session.h"
+
+#include "audio/audio.h"
+#include "audio/play_queue.h"
+#include "config/config.h"
+#include "core/core.h"
+#include "info/info.h"
+#include "logger/logger.h"
+#include "lyrics/lyrics.h"
+#include "queue/backend_queue.h"
+#include "util/json.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifdef HAVE_DBUS
+#include <dbus/dbus.h>
+
+#define MPRIS_OBJECT_PATH "/org/mpris/MediaPlayer2"
+#define LYRICS_API_INTERFACE RPC_IFACE_LYRICS
+
+#define LYRICS_API_JSON_MAX 65536
+
+/* ── 本接口状态（原属 session.c） ─────────────────────────────────── */
+typedef struct {
+    int active_slot;         /* -1=none, 0=A, 1=B */
+    int line_index[2];       /* lyric index in g_lyrics.lines, or -1 */
+    char track_id[96];
+    uint64_t revision;
+    char last_json[LYRICS_API_JSON_MAX];
+} LyricsApiState;
+
+static LyricsApiState g_lyrics_api = {0};
+
+
+void rpc_lyrics_reset(void) {
+    g_lyrics_api.active_slot = -1;
+    g_lyrics_api.line_index[0] = -1;
+    g_lyrics_api.line_index[1] = -1;
+    g_lyrics_api.track_id[0] = '\0';
+    g_lyrics_api.revision = 0;
+    g_lyrics_api.last_json[0] = '\0';
+}
+
+static void lyrics_api_prepare(char *out, size_t out_size, uint64_t revision) {
+    if (!out || out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    char track_id[96] = "";
+    char current_path[MAX_PATH_LEN];
+    if (audio_current_track_path(current_path, sizeof(current_path))) {
+        info_build_track_id(track_id, sizeof(track_id), current_path);
+    } else if (rpc_track_available() &&
+               bq_path_at(g_current_play_index, current_path, sizeof(current_path)) == 0) {
+        info_build_track_id(track_id, sizeof(track_id), current_path);
+    }
+
+    int track_changed = (strcmp(g_lyrics_api.track_id, track_id) != 0);
+    int has_lyrics = 0;
+    int has_timestamps = 0;
+    int line_a = -1;
+    int line_b = -1;
+    double timestamp_a = 0.0;
+    double timestamp_b = 0.0;
+    char text_a[MAX_LYRIC_TEXT_LEN] = "";
+    char text_b[MAX_LYRIC_TEXT_LEN] = "";
+
+    pthread_mutex_lock(&g_lyrics.lock);
+    has_lyrics = g_lyrics.has_lyrics;
+    has_timestamps = g_lyrics.has_timestamps;
+    int current_index = g_lyrics.current_index;
+    int line_count = g_lyrics.count;
+
+    if (!has_lyrics || line_count <= 0 || current_index < 0) {
+        g_lyrics_api.active_slot = -1;
+        g_lyrics_api.line_index[0] = -1;
+        g_lyrics_api.line_index[1] = -1;
+    } else {
+        if (current_index >= line_count) {
+            current_index = line_count - 1;
+        }
+        int next_index = (current_index + 1 < line_count)
+            ? current_index + 1 : -1;
+        int active_slot = g_lyrics_api.active_slot;
+        int current_matches_active = 0;
+        int current_matches_inactive = 0;
+
+        if (active_slot == 0 || active_slot == 1) {
+            current_matches_active =
+                (g_lyrics_api.line_index[active_slot] == current_index);
+            current_matches_inactive =
+                (g_lyrics_api.line_index[1 - active_slot] == current_index);
+        }
+
+        if (track_changed || (!current_matches_active &&
+                              !current_matches_inactive)) {
+            active_slot = 0;
+            g_lyrics_api.line_index[0] = current_index;
+            g_lyrics_api.line_index[1] = next_index;
+        } else if (current_matches_active) {
+            g_lyrics_api.line_index[1 - active_slot] = next_index;
+        } else {
+            active_slot = 1 - active_slot;
+            g_lyrics_api.line_index[active_slot] = current_index;
+            g_lyrics_api.line_index[1 - active_slot] = next_index;
+        }
+        g_lyrics_api.active_slot = active_slot;
+    }
+
+    line_a = g_lyrics_api.line_index[0];
+    line_b = g_lyrics_api.line_index[1];
+    if (line_a >= 0 && line_a < line_count) {
+        timestamp_a = g_lyrics.lines[line_a].timestamp;
+        snprintf(text_a, sizeof(text_a), "%s", g_lyrics.lines[line_a].text);
+    }
+    if (line_b >= 0 && line_b < line_count) {
+        timestamp_b = g_lyrics.lines[line_b].timestamp;
+        snprintf(text_b, sizeof(text_b), "%s", g_lyrics.lines[line_b].text);
+    }
+    pthread_mutex_unlock(&g_lyrics.lock);
+
+    /* 逐字进度（api_version 5）：活动行当前唱到第几个字。取锁外计算，
+     * 使用与 TUI 相同的引擎口径；旧客户端忽略这两个字段即可。 */
+    int active_line = (g_lyrics_api.active_slot == 0) ? line_a
+                     : (g_lyrics_api.active_slot == 1) ? line_b : -1;
+    int char_sung = 0;
+    int char_total = 0;
+    if (has_lyrics && active_line >= 0) {
+        (void)lyrics_char_progress_at(active_line, lyrics_position_ms(),
+                                      &char_sung, &char_total);
+    }
+
+    snprintf(g_lyrics_api.track_id, sizeof(g_lyrics_api.track_id), "%s",
+             track_id);
+
+    size_t pos = 0;
+    pos = json_append_raw(out, out_size, pos, "{\"active_line\":");
+    if (g_lyrics_api.active_slot == 0) {
+        pos = json_append_raw(out, out_size, pos, "\"A\"");
+    } else if (g_lyrics_api.active_slot == 1) {
+        pos = json_append_raw(out, out_size, pos, "\"B\"");
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",\"line_a\":");
+    pos = json_append_line_object(out, out_size, pos, line_a,
+                                  has_timestamps, timestamp_a, text_a);
+    pos = json_append_raw(out, out_size, pos, ",\"line_b\":");
+    pos = json_append_line_object(out, out_size, pos, line_b,
+                                  has_timestamps, timestamp_b, text_b);
+    pos = json_append_raw(out, out_size, pos, ",\"track_id\":");
+    pos = json_append_string_or_null(out, out_size, pos,
+                                     track_id[0] ? track_id : NULL);
+    pos = json_append_raw(out, out_size, pos, ",\"has_lyrics\":");
+    pos = json_append_raw(out, out_size, pos, has_lyrics ? "true" : "false");
+    pos = json_append_raw(out, out_size, pos, ",\"has_timestamps\":");
+    pos = json_append_raw(out, out_size, pos,
+                          has_timestamps ? "true" : "false");
+    pos = json_append_raw(out, out_size, pos, ",\"char_sung\":");
+    pos = json_append_int(out, out_size, pos, char_sung);
+    pos = json_append_raw(out, out_size, pos, ",\"char_total\":");
+    pos = json_append_int(out, out_size, pos, char_total);
+    pos = json_append_raw(out, out_size, pos, ",\"revision\":");
+
+    char revision_text[32];
+    snprintf(revision_text, sizeof(revision_text), "%llu",
+             (unsigned long long)revision);
+    pos = json_append_number(out, out_size, pos, revision_text);
+    pos = json_append_raw(out, out_size, pos, "}");
+    out[pos] = '\0';
+}
+
+static void emit_lyrics_changed(const char *json) {
+    DBusMessage *signal = dbus_message_new_signal(MPRIS_OBJECT_PATH,
+                                                  LYRICS_API_INTERFACE,
+                                                  "LyricsChanged");
+    if (!signal) {
+        return;
+    }
+
+    const char *value = (json && json[0] != '\0') ? json : "{}";
+    rpc_append_string(signal, value);
+    rpc_send(signal);
+}
+
+const char *rpc_lyrics_sync(void) {
+    char next_json[LYRICS_API_JSON_MAX];
+    lyrics_api_prepare(next_json, sizeof(next_json), g_lyrics_api.revision);
+
+    if (strcmp(next_json, g_lyrics_api.last_json) != 0) {
+        g_lyrics_api.revision++;
+        lyrics_api_prepare(next_json, sizeof(next_json), g_lyrics_api.revision);
+        snprintf(g_lyrics_api.last_json, sizeof(g_lyrics_api.last_json),
+                 "%s", next_json);
+        emit_lyrics_changed(next_json);
+    }
+    return g_lyrics_api.last_json;
+}
+
+/* GetDocument 的 timing 字符串（api_version 5） */
+static const char *lyric_timing_id(unsigned char timing)
+{
+    switch (timing) {
+        case LYRIC_TIMING_CHARS: return "chars";
+        case LYRIC_TIMING_LINE:  return "line";
+        default:                 return "none";
+    }
+}
+
+/* 追加一行逐字文档。调用方必须持有 g_lyrics.lock。
+ *
+ * 行对象：
+ *   {"index":n,"timestamp":t|null,"end":t|null,"timing":"chars|line|none",
+ *    "char_total":n,"text":"…"[,"chars":[相对行首毫秒…]]}
+ * 只有 timing="chars" 才附 chars；timing="line" 的客户端可用
+ * timestamp/end 自行按字符数插值。 */
+static size_t append_document_line(char *out, size_t out_size, size_t pos,
+                                   int index)
+{
+    const LyricLine *line = &g_lyrics.lines[index];
+
+    pos = json_append_char(out, out_size, pos, '{');
+
+    pos = json_append_key(out, out_size, pos, "index");
+    pos = json_append_int(out, out_size, pos, index);
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "timestamp");
+    if (line->has_timestamp) {
+        pos = json_append_double(out, out_size, pos, line->timestamp, 3);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "end");
+    if (line->has_timestamp && line->end_timestamp > line->timestamp) {
+        pos = json_append_double(out, out_size, pos, line->end_timestamp, 3);
+    } else {
+        pos = json_append_raw(out, out_size, pos, "null");
+    }
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "timing");
+    pos = json_append_escaped(out, out_size, pos, lyric_timing_id(line->timing));
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "char_total");
+    pos = json_append_int(out, out_size, pos, line->char_count);
+
+    pos = json_append_raw(out, out_size, pos, ",");
+    pos = json_append_key(out, out_size, pos, "text");
+    pos = json_append_string_or_null(out, out_size, pos, line->text);
+
+    if (line->timing == LYRIC_TIMING_CHARS && line->char_count > 0 &&
+        g_lyrics.char_times_ms) {
+        int offset = g_lyrics.line_char_offset[index];
+        int count = line->char_count;
+        if (offset >= 0 && offset + count <= g_lyrics.char_times_count) {
+            int64_t start_ms = (int64_t)(line->timestamp * 1000.0 + 0.5);
+            pos = json_append_raw(out, out_size, pos, ",");
+            pos = json_append_key(out, out_size, pos, "chars");
+            pos = json_append_char(out, out_size, pos, '[');
+            for (int j = 0; j < count; j++) {
+                if (j > 0) {
+                    pos = json_append_char(out, out_size, pos, ',');
+                }
+                int64_t relative = (int64_t)g_lyrics.char_times_ms[offset + j]
+                                   - start_ms;
+                if (relative < 0) {
+                    relative = 0;
+                }
+                pos = json_append_int(out, out_size, pos, relative);
+            }
+            pos = json_append_char(out, out_size, pos, ']');
+        }
+    }
+
+    return json_append_char(out, out_size, pos, '}');
+}
+
+DBusMessage *rpc_lyrics_handle(DBusMessage *message) {
+    const char *member = dbus_message_get_member(message);
+    if (!member) {
+        return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
+                                   "Missing method name");
+    }
+
+    if (strcmp(member, "GetLyrics") == 0) {
+        /* 只读：返回媒体循环上一次同步好的快照。
+         * 这里绝不能再调 rpc_lyrics_sync()——它是“推进修订号 + 广播
+         * LyricsChanged”的同步入口，被一次 getter 触发会让客户端各自把歌词
+         * 向前推一格并产生多余的总线流量。 */
+        const char *json = g_lyrics_api.last_json;
+        DBusMessage *reply = dbus_message_new_method_return(message);
+        if (!reply) {
+            return NULL;
+        }
+
+        const char *value = (json && json[0] != '\0') ? json : "{}";
+        rpc_append_string(reply, value);
+        return reply;
+    }
+
+    if (strcmp(member, "GetDocument") == 0) {
+        dbus_int32_t offset = 0;
+        dbus_int32_t count = RPC_PAGE_DEFAULT;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error,
+                                   DBUS_TYPE_INT32, &offset,
+                                   DBUS_TYPE_INT32, &count,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        int clamped_offset = 0;
+        int clamped_count = 0;
+        if (rpc_page_clamp(offset, count, &clamped_offset, &clamped_count) != 0) {
+            return rpc_error(message, RPC_ERROR_INVALID_ARGS, "count exceeds the page limit");
+        }
+
+        char track_id[96] = "";
+        char current_path[MAX_PATH_LEN];
+        if (audio_current_track_path(current_path, sizeof(current_path))) {
+            info_build_track_id(track_id, sizeof(track_id), current_path);
+        } else if (rpc_track_available() &&
+                   bq_path_at(g_current_play_index, current_path, sizeof(current_path)) == 0) {
+            info_build_track_id(track_id, sizeof(track_id), current_path);
+        }
+
+        /* 逐字文档（chars 数组）会显著增大单页体积：按硬上限分配，
+         * 渲染结束后用 json_writer_overflowed() 判定，绝不再返回半截 JSON。 */
+        size_t capacity = RPC_PAYLOAD_MAX;
+        char *json = malloc(capacity);
+        if (!json) {
+            return rpc_error(message, DBUS_ERROR_NO_MEMORY, "Out of memory");
+        }
+        json[0] = '\0';
+
+        int total = 0;
+        int has_lyrics = 0;
+        int has_timestamps = 0;
+        int current_index = -1;
+        int source = LYRICS_SOURCE_AUTO;
+        int written = 0;
+
+        pthread_mutex_lock(&g_lyrics.lock);
+        total = g_lyrics.count;
+        has_lyrics = g_lyrics.has_lyrics;
+        has_timestamps = g_lyrics.has_timestamps;
+        current_index = g_lyrics.current_index;
+        source = g_lyrics.source;
+
+        size_t pos = 0;
+        pos = json_append_char(json, capacity, pos, '{');
+        pos = json_append_key(json, capacity, pos, "revision");
+        pos = json_append_int(json, capacity, pos, (long long)g_lyrics_api.revision);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "track_id");
+        pos = json_append_string_or_null(json, capacity, pos, track_id[0] ? track_id : NULL);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "has_lyrics");
+        pos = json_append_bool(json, capacity, pos, has_lyrics);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "has_timestamps");
+        pos = json_append_bool(json, capacity, pos, has_timestamps);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "source");
+        pos = json_append_escaped(json, capacity, pos, info_lyrics_source_id(source));
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "total");
+        pos = json_append_int(json, capacity, pos, total);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "offset");
+        pos = json_append_int(json, capacity, pos, clamped_offset);
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "current_index");
+        if (has_lyrics && current_index >= 0 && current_index < total) {
+            pos = json_append_int(json, capacity, pos, current_index);
+        } else {
+            pos = json_append_raw(json, capacity, pos, "null");
+        }
+        pos = json_append_raw(json, capacity, pos, ",");
+        pos = json_append_key(json, capacity, pos, "lines");
+        pos = json_append_char(json, capacity, pos, '[');
+
+        for (int i = clamped_offset; i < total && written < clamped_count; i++) {
+            if (written > 0) {
+                pos = json_append_char(json, capacity, pos, ',');
+            }
+            pos = append_document_line(json, capacity, pos, i);
+            written++;
+        }
+
+        pos = json_append_char(json, capacity, pos, ']');
+        pos = json_append_char(json, capacity, pos, '}');
+        json[pos < capacity ? pos : capacity - 1] = '\0';
+        int overflowed = json_writer_overflowed(capacity, pos);
+        pthread_mutex_unlock(&g_lyrics.lock);
+
+        DBusMessage *reply;
+        if (overflowed) {
+            reply = rpc_error(message, RPC_ERROR_TOO_LARGE,
+                              "lyrics page exceeds the payload limit; request fewer lines");
+        } else {
+            reply = rpc_reply_string(message, json);
+        }
+        free(json);
+        return reply;
+    }
+
+    if (strcmp(member, "SetSource") == 0) {
+        dbus_int32_t source = 0;
+        DBusError error;
+        dbus_error_init(&error);
+        if (!dbus_message_get_args(message, &error,
+                                   DBUS_TYPE_INT32, &source,
+                                   DBUS_TYPE_INVALID)) {
+            DBusMessage *reply = rpc_error(message, DBUS_ERROR_INVALID_ARGS, error.message);
+            dbus_error_free(&error);
+            return reply;
+        }
+        dbus_error_free(&error);
+
+        /* 切换歌词来源（内嵌 / 外部），与界面里的 Ctrl+L → Tab 同一条路。
+         * 来源偏好是**前端的内容库数据**：核心只切换并重新加载，落库由调用方
+         * （前端）负责——核心不认识内容库。 */
+        int rc = lyrics_switch_source((int)source);
+        return rpc_reply_bool(message, rc == 0 ? 1 : 0);
+    }
+
+    return rpc_error(message, DBUS_ERROR_UNKNOWN_METHOD,
+                               "Unknown lyrics method");
+}
+
+/* ── 自省片段（由 session.c 在启动时拼装） ─────────────────────── */
+
+static const char *const k_lyrics_introspection =
+    "  <interface name=\"cn.org.huansoft.ter_music.Lyrics\">\n"
+    "    <method name=\"GetLyrics\">\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"GetDocument\">\n"
+    "      <arg name=\"offset\" type=\"i\" direction=\"in\"/>\n"
+    "      <arg name=\"count\" type=\"i\" direction=\"in\"/>\n"
+    "      <arg name=\"json\" type=\"s\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <method name=\"SetSource\">\n"
+    "      <arg name=\"source\" type=\"i\" direction=\"in\"/>\n"
+    "      <arg name=\"ok\" type=\"b\" direction=\"out\"/>\n"
+    "    </method>\n"
+    "    <signal name=\"LyricsChanged\">\n"
+    "      <arg name=\"json\" type=\"s\"/>\n"
+    "    </signal>\n"
+    "  </interface>\n";
+
+const char *rpc_lyrics_introspection(void)
+{
+    return k_lyrics_introspection;
+}
+
+#endif /* HAVE_DBUS */

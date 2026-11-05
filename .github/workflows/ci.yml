@@ -117,7 +117,7 @@ jobs:
             $TM volume 50
             gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
               --object-path /org/mpris/MediaPlayer2 \
-              --method org.yxzl.ter_music.Info.InstanceInfo >/dev/null
+              --method cn.org.huansoft.ter_music.Info.InstanceInfo >/dev/null
             $TM daemon status
             $TM daemon reload
             $TM daemon stop
@@ -210,6 +210,9 @@ jobs:
 
       - name: Config ownership (the front end must not write the core config)
         run: scripts/test/check-config-ownership.sh
+
+      - name: Package identity (name, version, namespace across packaging files)
+        run: scripts/test/check-package-identity.sh
 
       - name: i18n keys (zh_CN/en_US stay complete and aligned)
         run: python3 scripts/test/check-i18n-keys.py

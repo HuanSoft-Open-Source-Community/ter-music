@@ -1,9 +1,13 @@
 # Maintainer: Zeta <zeta@localhost>
-# Contributor: yxzl
+# Contributor: HuanSoft Open Source Community - yxzl
 
-pkgname=ter-music-cn
-pkgver=2.3.0
+pkgname=cn.org.huansoft.ter-music
+pkgver=26.4.1.0
 pkgrel=1
+# 组织迁移：Arch 包名由 ter-music-cn 改为本名。replaces 让 pacman 在安装新包时接管
+# 旧包的同名文件（两边都装 /usr/bin/ter-music），不需要先手动 remove；AUR 上的
+# 旧包仓库本身要由维护者单独下架，这一步不在本文件的能力范围内。
+replaces=('ter-music-cn')
 pkgdesc="Terminal based music player"
 arch=('x86_64')
 url="https://github.com/HuanSoft-Open-Source-Community/ter-music"

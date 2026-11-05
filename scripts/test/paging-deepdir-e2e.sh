@@ -117,21 +117,21 @@ try: print(json.load(sys.stdin)["track"]["queue_count"])
 except Exception: print("?")' 2>/dev/null)"
 [ "$total" = "21" ] && ok "Queue.Get 报告的总数与内容一致（$total）" || bad "总数=$total"
 
-page_first="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Queue.Get 0 5 2>/dev/null)"
+page_first="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Queue.Get 0 5 2>/dev/null)"
 rows_first="$(printf '%s' "$page_first" | python3 -c '
 import json,sys
 try: print(len(json.load(sys.stdin)["rows"]))
 except Exception: print("?")' 2>/dev/null)"
 [ "$rows_first" = "5" ] && ok "首页 5 行" || bad "首页行数=$rows_first"
 
-page_last="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Queue.Get 20 5 2>/dev/null)"
+page_last="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Queue.Get 20 5 2>/dev/null)"
 rows_last="$(printf '%s' "$page_last" | python3 -c '
 import json,sys
 try: print(len(json.load(sys.stdin)["rows"]))
 except Exception: print("?")' 2>/dev/null)"
 [ "$rows_last" = "1" ] && ok "末页只剩 1 行（不越界）" || bad "末页行数=$rows_last"
 
-page_over="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Queue.Get 1000 5 2>/dev/null)"
+page_over="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Queue.Get 1000 5 2>/dev/null)"
 rows_over="$(printf '%s' "$page_over" | python3 -c '
 import json,sys
 try: print(len(json.load(sys.stdin)["rows"]))
@@ -139,7 +139,7 @@ except Exception: print("?")' 2>/dev/null)"
 [ "$rows_over" = "0" ] && ok "越界页返回 0 行" || bad "越界页行数=$rows_over"
 
 info "单页上限：count 超过 RPC_PAGE_MAX 必须被拒绝"
-over="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Queue.Get 0 5000 2>&1)"
+over="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Queue.Get 0 5000 2>&1)"
 if printf '%s' "$over" | grep -q "InvalidArgs"; then
     ok "超过单页上限的 count 被拒绝（InvalidArgs）"
 else

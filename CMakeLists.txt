@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
-project(ter-music LANGUAGES C)
+project(ter-music LANGUAGES C VERSION 26.4.1.0)
 
 # Linyaps（如意玲珑）应用 ID：与 scripts/build/build-linyaps.sh 的 APP_ID 保持一致
-set(TER_MUSIC_APP_ID "org.yxzl.ter-music")
+set(TER_MUSIC_APP_ID "cn.org.huansoft.ter-music")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -116,108 +116,109 @@ endif()
 
 # 添加可执行文件
 add_executable(${PROJECT_NAME}
-    src/org.yxzl.ter-music/main/main.c
-    src/org.yxzl.ter-music/core/core.c
-    src/org.yxzl.ter-music/player/player.c
-    src/org.yxzl.ter-music/player/player_local.c
-    src/org.yxzl.ter-music/player/player_remote.c
-    src/org.yxzl.ter-music/audio/audio.c
-    src/org.yxzl.ter-music/audio/atempo.c
-    src/org.yxzl.ter-music/audio/equalizer.c
-    src/org.yxzl.ter-music/audio/audio_visualizer.c
-    src/org.yxzl.ter-music/audio/segment_buffer.c
-    src/org.yxzl.ter-music/audio/playback_thread.c
-    src/org.yxzl.ter-music/audio/play_queue.c
-    src/org.yxzl.ter-music/audio/backend_ops.c
-    src/org.yxzl.ter-music/audio/backend/pulse.c
-    src/org.yxzl.ter-music/audio/backend/alsa.c
-    src/org.yxzl.ter-music/audio/backend/pipewire.c
-    src/org.yxzl.ter-music/audio/progress/progress.c
-    src/org.yxzl.ter-music/playlist/playlist.c
-    src/org.yxzl.ter-music/playlist/playlist_queue.c
-    src/org.yxzl.ter-music/queue/backend_queue.c
-    src/org.yxzl.ter-music/playlist/cue_parser.c
-    src/org.yxzl.ter-music/playlist/encoding.c
-    src/org.yxzl.ter-music/playlist/ape_tag.c
-    src/org.yxzl.ter-music/search/search.c
-    src/org.yxzl.ter-music/library/library.c
-    src/org.yxzl.ter-music/library/library_query.c
-    src/org.yxzl.ter-music/library/browser/browser.c
-    src/org.yxzl.ter-music/ui/ui.c
-    src/org.yxzl.ter-music/ui/rainbow.c
-    src/org.yxzl.ter-music/ui/rainbow_gradient.c
-    src/org.yxzl.ter-music/util/utf8.c
-    src/org.yxzl.ter-music/util/utf8_safe.c
-    src/org.yxzl.ter-music/ui/dialog.c
-    src/org.yxzl.ter-music/ui/layout.c
-    src/org.yxzl.ter-music/ui/layout_spec.c
-    src/org.yxzl.ter-music/ui/layout_geometry.c
-    src/org.yxzl.ter-music/ui/layout_state.c
-    src/org.yxzl.ter-music/ui/layout_editor.c
-    src/org.yxzl.ter-music/ui/vinyl.c
-    src/org.yxzl.ter-music/ui/info_bar_layout.c
-    src/org.yxzl.ter-music/ui/cover_art_cells.c
-    src/org.yxzl.ter-music/ui/cover_art.c
-    src/org.yxzl.ter-music/ui/visualizer.c
-    src/org.yxzl.ter-music/ui/controls.c
-    src/org.yxzl.ter-music/ui/progress_ui.c
-    src/org.yxzl.ter-music/ui/playlist_render.c
-    src/org.yxzl.ter-music/ui/mouse.c
-    src/org.yxzl.ter-music/ui/mouse_routing.c
-    src/org.yxzl.ter-music/ui/context_menu.c
-    src/org.yxzl.ter-music/ui/context_menu_layout.c
-    src/org.yxzl.ter-music/ui/context_menu_main.c
-    src/org.yxzl.ter-music/ui/util.c
-    src/org.yxzl.ter-music/ui/menus.c
-    src/org.yxzl.ter-music/ui/settings.c
-    src/org.yxzl.ter-music/ui/remote_view.c
-    src/org.yxzl.ter-music/ui/history.c
-    src/org.yxzl.ter-music/ui/favorites.c
-    src/org.yxzl.ter-music/ui/playlist_view.c
-    src/org.yxzl.ter-music/ui/info_view.c
-    src/org.yxzl.ter-music/ui/help_view.c
-    src/org.yxzl.ter-music/ui/language_view.c
-    src/org.yxzl.ter-music/i18n/i18n.c
-    src/org.yxzl.ter-music/lyrics/lyrics.c
-    src/org.yxzl.ter-music/ui/lyrics.c
-    src/org.yxzl.ter-music/ui/cover/text_cover.c
-    src/org.yxzl.ter-music/ui/cover/cover_image.c
-    src/org.yxzl.ter-music/ui/scrollbar.c
-    src/org.yxzl.ter-music/media/session.c
-    src/org.yxzl.ter-music/media/rpc_common.c
-    src/org.yxzl.ter-music/media/rpc_info.c
-    src/org.yxzl.ter-music/media/rpc_control.c
-    src/org.yxzl.ter-music/media/rpc_lyrics.c
-    src/org.yxzl.ter-music/media/rpc_queue.c
-    src/org.yxzl.ter-music/media/rpc_config.c
-    src/org.yxzl.ter-music/info/info.c
-    src/org.yxzl.ter-music/info/info_format.c
-    src/org.yxzl.ter-music/cli/cli.c
-    src/org.yxzl.ter-music/cli/cli_client.c
-    src/org.yxzl.ter-music/cli/help.c
-    src/org.yxzl.ter-music/cli/daemon.c
-    src/org.yxzl.ter-music/cli/keys.c
-    src/org.yxzl.ter-music/cli/lang.c
-    src/org.yxzl.ter-music/app/open.c
-    src/org.yxzl.ter-music/util/json.c
-    src/org.yxzl.ter-music/util/keyname.c
-    src/org.yxzl.ter-music/keymap/actions.c
-    src/org.yxzl.ter-music/ui/keymap.c
-    src/org.yxzl.ter-music/remote/remote.c
-    src/org.yxzl.ter-music/remote/remote_store.c
-    src/org.yxzl.ter-music/remote/remote_cache.c
-    src/org.yxzl.ter-music/config/config.c
-    src/org.yxzl.ter-music/config/config_diff.c
-    src/org.yxzl.ter-music/config/migration.c
-    src/org.yxzl.ter-music/config/crypto.c
-    src/org.yxzl.ter-music/config/config_json.c
-    src/org.yxzl.ter-music/logger/logger.c
+    src/cn.org.huansoft.ter-music/main/main.c
+    src/cn.org.huansoft.ter-music/core/core.c
+    src/cn.org.huansoft.ter-music/player/player.c
+    src/cn.org.huansoft.ter-music/player/player_local.c
+    src/cn.org.huansoft.ter-music/player/player_remote.c
+    src/cn.org.huansoft.ter-music/audio/audio.c
+    src/cn.org.huansoft.ter-music/audio/atempo.c
+    src/cn.org.huansoft.ter-music/audio/equalizer.c
+    src/cn.org.huansoft.ter-music/audio/karaoke.c
+    src/cn.org.huansoft.ter-music/audio/audio_visualizer.c
+    src/cn.org.huansoft.ter-music/audio/segment_buffer.c
+    src/cn.org.huansoft.ter-music/audio/playback_thread.c
+    src/cn.org.huansoft.ter-music/audio/play_queue.c
+    src/cn.org.huansoft.ter-music/audio/backend_ops.c
+    src/cn.org.huansoft.ter-music/audio/backend/pulse.c
+    src/cn.org.huansoft.ter-music/audio/backend/alsa.c
+    src/cn.org.huansoft.ter-music/audio/backend/pipewire.c
+    src/cn.org.huansoft.ter-music/audio/progress/progress.c
+    src/cn.org.huansoft.ter-music/playlist/playlist.c
+    src/cn.org.huansoft.ter-music/playlist/playlist_queue.c
+    src/cn.org.huansoft.ter-music/queue/backend_queue.c
+    src/cn.org.huansoft.ter-music/playlist/cue_parser.c
+    src/cn.org.huansoft.ter-music/playlist/encoding.c
+    src/cn.org.huansoft.ter-music/playlist/ape_tag.c
+    src/cn.org.huansoft.ter-music/search/search.c
+    src/cn.org.huansoft.ter-music/library/library.c
+    src/cn.org.huansoft.ter-music/library/library_query.c
+    src/cn.org.huansoft.ter-music/library/browser/browser.c
+    src/cn.org.huansoft.ter-music/ui/ui.c
+    src/cn.org.huansoft.ter-music/ui/rainbow.c
+    src/cn.org.huansoft.ter-music/ui/rainbow_gradient.c
+    src/cn.org.huansoft.ter-music/util/utf8.c
+    src/cn.org.huansoft.ter-music/util/utf8_safe.c
+    src/cn.org.huansoft.ter-music/ui/dialog.c
+    src/cn.org.huansoft.ter-music/ui/layout.c
+    src/cn.org.huansoft.ter-music/ui/layout_spec.c
+    src/cn.org.huansoft.ter-music/ui/layout_geometry.c
+    src/cn.org.huansoft.ter-music/ui/layout_state.c
+    src/cn.org.huansoft.ter-music/ui/layout_editor.c
+    src/cn.org.huansoft.ter-music/ui/vinyl.c
+    src/cn.org.huansoft.ter-music/ui/info_bar_layout.c
+    src/cn.org.huansoft.ter-music/ui/cover_art_cells.c
+    src/cn.org.huansoft.ter-music/ui/cover_art.c
+    src/cn.org.huansoft.ter-music/ui/visualizer.c
+    src/cn.org.huansoft.ter-music/ui/controls.c
+    src/cn.org.huansoft.ter-music/ui/progress_ui.c
+    src/cn.org.huansoft.ter-music/ui/playlist_render.c
+    src/cn.org.huansoft.ter-music/ui/mouse.c
+    src/cn.org.huansoft.ter-music/ui/mouse_routing.c
+    src/cn.org.huansoft.ter-music/ui/context_menu.c
+    src/cn.org.huansoft.ter-music/ui/context_menu_layout.c
+    src/cn.org.huansoft.ter-music/ui/context_menu_main.c
+    src/cn.org.huansoft.ter-music/ui/util.c
+    src/cn.org.huansoft.ter-music/ui/menus.c
+    src/cn.org.huansoft.ter-music/ui/settings.c
+    src/cn.org.huansoft.ter-music/ui/remote_view.c
+    src/cn.org.huansoft.ter-music/ui/history.c
+    src/cn.org.huansoft.ter-music/ui/favorites.c
+    src/cn.org.huansoft.ter-music/ui/playlist_view.c
+    src/cn.org.huansoft.ter-music/ui/info_view.c
+    src/cn.org.huansoft.ter-music/ui/help_view.c
+    src/cn.org.huansoft.ter-music/ui/language_view.c
+    src/cn.org.huansoft.ter-music/i18n/i18n.c
+    src/cn.org.huansoft.ter-music/lyrics/lyrics.c
+    src/cn.org.huansoft.ter-music/ui/lyrics.c
+    src/cn.org.huansoft.ter-music/ui/cover/text_cover.c
+    src/cn.org.huansoft.ter-music/ui/cover/cover_image.c
+    src/cn.org.huansoft.ter-music/ui/scrollbar.c
+    src/cn.org.huansoft.ter-music/media/session.c
+    src/cn.org.huansoft.ter-music/media/rpc_common.c
+    src/cn.org.huansoft.ter-music/media/rpc_info.c
+    src/cn.org.huansoft.ter-music/media/rpc_control.c
+    src/cn.org.huansoft.ter-music/media/rpc_lyrics.c
+    src/cn.org.huansoft.ter-music/media/rpc_queue.c
+    src/cn.org.huansoft.ter-music/media/rpc_config.c
+    src/cn.org.huansoft.ter-music/info/info.c
+    src/cn.org.huansoft.ter-music/info/info_format.c
+    src/cn.org.huansoft.ter-music/cli/cli.c
+    src/cn.org.huansoft.ter-music/cli/cli_client.c
+    src/cn.org.huansoft.ter-music/cli/help.c
+    src/cn.org.huansoft.ter-music/cli/daemon.c
+    src/cn.org.huansoft.ter-music/cli/keys.c
+    src/cn.org.huansoft.ter-music/cli/lang.c
+    src/cn.org.huansoft.ter-music/app/open.c
+    src/cn.org.huansoft.ter-music/util/json.c
+    src/cn.org.huansoft.ter-music/util/keyname.c
+    src/cn.org.huansoft.ter-music/keymap/actions.c
+    src/cn.org.huansoft.ter-music/ui/keymap.c
+    src/cn.org.huansoft.ter-music/remote/remote.c
+    src/cn.org.huansoft.ter-music/remote/remote_store.c
+    src/cn.org.huansoft.ter-music/remote/remote_cache.c
+    src/cn.org.huansoft.ter-music/config/config.c
+    src/cn.org.huansoft.ter-music/config/config_diff.c
+    src/cn.org.huansoft.ter-music/config/migration.c
+    src/cn.org.huansoft.ter-music/config/crypto.c
+    src/cn.org.huansoft.ter-music/config/config_json.c
+    src/cn.org.huansoft.ter-music/logger/logger.c
 )
 
 # 包含头文件目录
 target_include_directories(${PROJECT_NAME} PRIVATE
-    include/org.yxzl.ter-music/
-    include/org.yxzl.ter-music/i18n/
+    include/cn.org.huansoft.ter-music/
+    include/cn.org.huansoft.ter-music/i18n/
     ${AVCODEC_INCLUDE_DIRS}
     ${AVFORMAT_INCLUDE_DIRS}
     ${SWRESAMPLE_INCLUDE_DIRS}
@@ -343,7 +344,7 @@ install(FILES data/layouts/layouts.json
 if(INSTALL_LINYAPS_INTEGRATION)
     # $PREFIX/lib/systemd/user → 构建时被拷贝到 share/systemd/user 并导出到
     # 宿主 $XDG_DATA_DIRS/systemd/user，ExecStart 被重写为 ll-cli run 形式
-    install(FILES data/linyaps/org.yxzl.ter-music.service
+    install(FILES data/linyaps/cn.org.huansoft.ter-music.service
             DESTINATION lib/systemd/user
     )
     # $PREFIX/share/dbus-1/services → 被 ll-builder 导出到宿主的

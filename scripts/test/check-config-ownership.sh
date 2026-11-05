@@ -47,7 +47,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SRC_ROOT="$REPO_ROOT/src/org.yxzl.ter-music"
+SRC_ROOT="$REPO_ROOT/src/cn.org.huansoft.ter-music"
 
 MODE="strict"
 [ "${1:-}" = "--report" ] && MODE="report"

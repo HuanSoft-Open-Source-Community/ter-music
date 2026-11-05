@@ -208,6 +208,38 @@ got_vol="$("$TM_BIN" config get volume_percent 2>/dev/null)"
 "$TM_BIN" config set not_a_real_key 1 >/dev/null 2>&1
 [ "$?" -eq 1 ] && ok "config set 未知键 → USAGE(1)" || bad "config set 未知键未返回 1"
 
+# ── karaoke（消人声）子命令 ───────────────────────────────────────
+info "karaoke 子命令"
+"$TM_BIN" karaoke >/dev/null 2>&1 && ok "karaoke（查询）退出码 0" || bad "karaoke 查询失败"
+kq="$("$TM_BIN" karaoke 2>/dev/null)"
+case "$kq" in
+    off*|soft*|full*) ok "karaoke 查询输出以档位 id 开头：'$kq'" ;;
+    *) bad "karaoke 查询输出异常：'$kq'" ;;
+esac
+"$TM_BIN" karaoke full >/dev/null 2>&1 && ok "karaoke full 退出码 0" || bad "karaoke full 失败"
+[ "$("$TM_BIN" karaoke 2>/dev/null)" = "full (2) 消除人声" ] \
+    && ok "karaoke full 已生效（回读带编号与中文显示名）" \
+    || bad "karaoke full 回读异常：'$("$TM_BIN" karaoke 2>/dev/null)'"
+"$TM_BIN" karaoke 0 >/dev/null 2>&1 && ok "karaoke 数字 0 退出码 0" || bad "karaoke 数字档位失败"
+[ "$("$TM_BIN" karaoke 2>/dev/null)" = "off (0) 不启用" ] \
+    && ok "karaoke 0 已生效" || bad "karaoke 0 回读异常：'$("$TM_BIN" karaoke 2>/dev/null)'"
+# cycle：off→soft（0→1），再 cycle→full
+"$TM_BIN" karaoke cycle >/dev/null 2>&1 && ok "karaoke cycle 退出码 0" || bad "karaoke cycle 失败"
+[ "$("$TM_BIN" karaoke 2>/dev/null)" = "soft (1) 人声较弱" ] \
+    && ok "karaoke cycle 推进一档（off→soft）" || bad "karaoke cycle 后档位异常：'$("$TM_BIN" karaoke 2>/dev/null)'"
+# 非法档位 → USAGE(1)
+"$TM_BIN" karaoke bogus_level >/dev/null 2>&1
+[ "$?" -eq 1 ] && ok "karaoke 非法档位 → USAGE(1)" || bad "karaoke 非法档位未返回 1"
+# 档位是持久化配置：写进 config.xml 的就是 2（上面 cycle 后为 1，这里显式设 full）
+"$TM_BIN" karaoke full >/dev/null 2>&1
+sleep 1.5   # 核心去抖落盘（CORE_CONFIG_SAVE_DEBOUNCE_MS=500，留一倍余量）
+grep -q "<karaoke_mode>2</karaoke_mode>" "$XDG_CONFIG_HOME/ter-music/config.xml" 2>/dev/null \
+    && ok "preferences.karaoke_mode 已落盘为 2" || bad "config.xml 里未见 karaoke_mode=2"
+"$TM_BIN" karaoke off >/dev/null 2>&1
+"$TM_BIN" config get karaoke_mode >/dev/null 2>&1
+[ "$("$TM_BIN" config get karaoke_mode 2>/dev/null)" = "0" ] \
+    && ok "config get karaoke_mode 与 karaoke 子命令同源" || bad "config get karaoke_mode 回读异常"
+
 # ── lyrics / track / cover 只读输出 ───────────────────────────────
 info "lyrics / track / cover"
 # 先播一首，让 track/cover 有当前曲目

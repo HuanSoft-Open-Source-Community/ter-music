@@ -1,2 +1,2 @@
-src/org.yxzl.ter-music/keymap/actions.c
-src/org.yxzl.ter-music/util/keyname.c
+src/cn.org.huansoft.ter-music/keymap/actions.c
+src/cn.org.huansoft.ter-music/util/keyname.c

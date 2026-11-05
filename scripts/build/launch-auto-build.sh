@@ -12,7 +12,7 @@
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 PROJECT_NAME="ter-music"
-DEFAULT_VERSION="2.3.0"
+DEFAULT_VERSION="26.4.1.0"
 
 # ── 颜色输出 ──────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -104,19 +104,22 @@ JOB_STATUS=()          # "" / "OK" / "FAIL" / "SKIP"
 detect_version() {
     local version="$DEFAULT_VERSION"
 
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
-        local git_version
-        git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    # 版本以 types.h 里的 APP_VERSION 为唯一事实源：漏打 tag 或 tag 落后于代码时，
+    # 包版本仍然跟着源码走；git tag 退为次级兜底。
+    if [ -f "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" ]; then
+        local match
+        match=$(grep -E '#define APP_VERSION' "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" | head -1)
+        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
     fi
 
-    if [ -f "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" ]; then
-        local match
-        match=$(grep -E 'APP_VERSION' "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" | head -1)
-        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+        local git_version
+        git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*)$ ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
@@ -599,8 +602,8 @@ build_artifact_path() {
             local narch
             narch=$(native_arch "$arch")
             # UAB 优先，layer 兜底（Docker 容器内缺 uab-header）；两者都清理
-            echo "${SCRIPT_DIR}/build/linyaps/${narch}/org.yxzl.ter-music_${VERSION}_${narch}.uab"
-            echo "${SCRIPT_DIR}/build/linyaps/${narch}/org.yxzl.ter-music_${VERSION}.0_${narch}_binary.layer"
+            echo "${SCRIPT_DIR}/build/linyaps/${narch}/cn.org.huansoft.ter-music_${VERSION}_${narch}.uab"
+            echo "${SCRIPT_DIR}/build/linyaps/${narch}/cn.org.huansoft.ter-music_${VERSION}.0_${narch}_binary.layer"
             ;;
         appimage)
             local narch
@@ -775,7 +778,7 @@ main() {
     fi
 
     # 验证版本号格式（防止注入）
-    if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*$ ]]; then
         log_error "无效的版本号格式: $VERSION（必须为 X.Y.Z 格式）"
         exit 1
     fi

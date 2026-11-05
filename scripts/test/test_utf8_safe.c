@@ -9,7 +9,7 @@
  *   - 本次《四重罪孽》崩溃的 75 字节状态消息放入 64 字节缓冲区的回归用例。
  *
  * 运行：scripts/test/run-unit-tests.sh test_utf8_safe
- * 依赖（见同名 .srcs）：src/org.yxzl.ter-music/util/utf8_safe.c
+ * 依赖（见同名 .srcs）：src/cn.org.huansoft.ter-music/util/utf8_safe.c
  */
 
 #include "util/utf8_safe.h"

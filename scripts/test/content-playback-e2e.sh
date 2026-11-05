@@ -115,7 +115,7 @@ tone 750 "$WORK_DIR/dir2/11-zulu.wav"
 
 # ── 观测助手 ──────────────────────────────────────────────────────
 queue_json() {   # $1 = offset, $2 = count
-    python3 "$RPC" call org.yxzl.ter_music.Queue.Get "${1:-0}" "${2:-50}" 2>/dev/null
+    python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get "${1:-0}" "${2:-50}" 2>/dev/null
 }
 
 play_state() {   # 门面上的播放状态（show 经 D-Bus 取核心快照）

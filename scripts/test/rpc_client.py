@@ -106,7 +106,7 @@ def cmd_attach(argv):
     seconds = float(argv[1]) if len(argv) > 1 else 0
     connection = _connection()
 
-    result = connection.call_sync(BUS_NAME, OBJECT_PATH, "org.yxzl.ter_music.Control",
+    result = connection.call_sync(BUS_NAME, OBJECT_PATH, "cn.org.huansoft.ter_music.Control",
                                   "Attach", GLib.Variant("(s)", (role,)), None,
                                   Gio.DBusCallFlags.NONE, 10000, None)
     token = json.loads(_variant_to_python(result)[0])["token"]
@@ -114,12 +114,12 @@ def cmd_attach(argv):
 
     deadline = time.time() + seconds
     while time.time() < deadline:
-        connection.call_sync(BUS_NAME, OBJECT_PATH, "org.yxzl.ter_music.Control",
+        connection.call_sync(BUS_NAME, OBJECT_PATH, "cn.org.huansoft.ter_music.Control",
                              "Ping", GLib.Variant("(s)", (token,)), None,
                              Gio.DBusCallFlags.NONE, 10000, None)
         time.sleep(2)
 
-    connection.call_sync(BUS_NAME, OBJECT_PATH, "org.yxzl.ter_music.Control",
+    connection.call_sync(BUS_NAME, OBJECT_PATH, "cn.org.huansoft.ter_music.Control",
                          "Detach", GLib.Variant("(s)", (token,)), None,
                          Gio.DBusCallFlags.NONE, 10000, None)
     print("detached")

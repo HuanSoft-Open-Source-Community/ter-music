@@ -26,8 +26,8 @@ except Exception as exc:                                        # noqa: BLE001
     raise SystemExit(3)
 
 OBJECT_PATH = "/org/mpris/MediaPlayer2"
-IFACE_INFO = "org.yxzl.ter_music.Info"
-IFACE_CONTROL = "org.yxzl.ter_music.Control"
+IFACE_INFO = "cn.org.huansoft.ter_music.Info"
+IFACE_CONTROL = "cn.org.huansoft.ter_music.Control"
 
 
 def connect(bus_name):

@@ -1,3 +1,59 @@
+cn.org.huansoft.ter-music (26.4.1.0-1) unstable; urgency=medium
+
+  * Karaoke mode (centre-vocal removal) with three levels: off, "weak vocals"
+    and "no vocals". The new audio module subtracts the band-limited mono
+    component from both channels: m=(L+R)/2 is split by two 4th-order
+    Butterworth crossovers (180 Hz low pass, 6 kHz high pass), the shared band
+    m-lo-hi is scaled by alpha (0 / 0.60 / 1.00) and removed from m, while
+    d=(L-R)/2 is passed through untouched, so the side information, the bass
+    and the stereo image survive. Level switching ramps over 30 ms to avoid a
+    step, filters are re-primed on activation and re-designed when the output
+    sample rate changes, mono streams and the off level are bit-exact
+    passthroughs, and the stage runs before the equaliser in the playback
+    thread (measured 16.7 ns per frame at 44.1 kHz stereo, under 0.1% of one
+    core). It is reachable from four places, all through player_set_karaoke_
+    mode(): the new eighth button in the main control pane with its own popup
+    (mouse, wheel and Enter/Esc), a popup-only row at the end of the playback
+    settings page, the new "ter-music karaoke [off|soft|full|0-2|cycle]"
+    command, and Control.SetKaraoke/GetKaraoke. The level is stored as the new
+    integer key preferences.karaoke_mode (0-2, out-of-range input is clamped
+    by Config.Set and reset to 0 by the XML loader); the configuration
+    contract stays at version 9 because an absent element already defaults
+    to 0.
+
+  * Organization migration: the Debian source and binary package, the
+    src/include directory trees, the Linyaps application id, the systemd user
+    unit, the build scripts and every document move from org.yxzl to
+    cn.org.huansoft.ter-music, and the D-Bus interface and error namespace
+    moves with them to cn.org.huansoft.ter_music.*. That namespace is part of
+    the wire protocol, so api_version 7 is a breaking change rather than an
+    increment: a pre-7 front end calling the new core gets UnknownInterface
+    and a new front end cannot reach an old core at all, therefore
+    TER_MUSIC_API_MIN_VERSION rises from 4 to 7 and core and front ends must
+    be upgraded as a pair. Unchanged on purpose: the standard MPRIS bus name
+    org.mpris.MediaPlayer2.ter_music (and its .instance<pid> fallback), the
+    executable name ter-music, /usr/share/ter-music data files, the
+    ~/.config/ter-music directory and the configuration contract version.
+    The renamed package replaces the previous ter-music package in place, so
+    upgrading does not require removing the old one first.
+
+  * Rolling release versioning: the version scheme is now <yy>.<q>.x.y (two
+    digits of the year, the quarter, the line, the fix), so this release is
+    26.4.1.0. It is written once in types.h APP_VERSION and mirrored in the
+    CMake project VERSION, the PKGBUILD pkgver and this changelog. The
+    packaging scripts' detect_version now reads APP_VERSION first and only
+    then falls back to a git tag, because the newest tag in the repository
+    (v2.1.0) is older than the code and used to decide the package version;
+    all six builders also accept four-component versions - with the old
+    three-component pattern 26.4.1.0 was silently truncated to 26.4.1.
+
+  * Cover lookup fix: in the directory cover scan, a directory and entry name
+    that overflow the path buffer are now discarded as a candidate instead of
+    being stat'ed after snprintf truncated them, which could pick up an
+    unrelated image whose prefix matched.
+
+ -- HuanSoft Open Source Community - yxzl <yxzl666xx@outlook.com>  Thu, 05 Nov 2026 15:12:28 +0800
+
 ter-music (2.4.0-1) unstable; urgency=medium
 
   * Stop the playback core when a front end exits. New boolean config key

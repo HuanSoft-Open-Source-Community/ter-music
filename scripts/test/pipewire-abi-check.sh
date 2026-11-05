@@ -3,7 +3,7 @@
 # PipeWire ABI 漂移守卫
 #
 # 仓库为了 dlopen 而不依赖 PipeWire 头文件，在
-# include/org.yxzl.ter-music/audio/backend/pipewire.h 里手写了一份 SPA/PipeWire
+# include/cn.org.huansoft.ter-music/audio/backend/pipewire.h 里手写了一份 SPA/PipeWire
 # ABI 子集。本脚本用两份同源的 C 探针分别对着“系统真实头文件”和“仓库手写头
 # 文件”编译运行，逐项打印 key=value，再 diff 两份输出：常量、结构体尺寸、
 # 字段偏移的任何漂移都会暴露出来。
@@ -24,7 +24,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-REPO_HEADER_DIR="$REPO_ROOT/include/org.yxzl.ter-music"
+REPO_HEADER_DIR="$REPO_ROOT/include/cn.org.huansoft.ter-music"
 REPO_HEADER="$REPO_HEADER_DIR/audio/backend/pipewire.h"
 
 PASS=0
@@ -216,7 +216,7 @@ if ! compile_probe probe_repo -I "$REPO_HEADER_DIR"; then
     printf '%d 通过, %d 失败, %d 跳过\n' "$PASS" "$FAIL" "$SKIP"
     exit 1
 fi
-ok "probe_repo.c 编译通过（对着 include/org.yxzl.ter-music）"
+ok "probe_repo.c 编译通过（对着 include/cn.org.huansoft.ter-music）"
 
 # ── 运行 ──────────────────────────────────────────────────────────
 run_probe() {   # $1 = 名字

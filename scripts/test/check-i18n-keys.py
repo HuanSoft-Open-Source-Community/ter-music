@@ -94,7 +94,7 @@ def main():
         if key not in pq_keys:
             errors.append(f"zh-PQ missing (i18n_get) '{key}'")
 
-    settings_c = ROOT / "src" / "org.yxzl.ter-music" / "ui" / "settings.c"
+    settings_c = ROOT / "src" / "cn.org.huansoft.ter-music" / "ui" / "settings.c"
     text = settings_c.read_text(encoding="utf-8", errors="replace")
     match = re.search(r"static const char \*settings_options\[\]\s*=\s*\{(.*?)\};",
                       text, re.S)
@@ -109,7 +109,7 @@ def main():
             if key not in pq_keys:
                 errors.append(f"zh-PQ missing (settings_options) '{key}'")
 
-    editor_c = ROOT / "src" / "org.yxzl.ter-music" / "ui" / "layout_editor.c"
+    editor_c = ROOT / "src" / "cn.org.huansoft.ter-music" / "ui" / "layout_editor.c"
     text = editor_c.read_text(encoding="utf-8", errors="replace")
     match = re.search(r"static const char \*const k_action_keys\[\]\s*=\s*\{(.*?)\};",
                       text, re.S)
@@ -124,7 +124,7 @@ def main():
             if key not in pq_keys:
                 errors.append(f"zh-PQ missing (layout_editor actions) '{key}'")
 
-    actions_c = ROOT / "src" / "org.yxzl.ter-music" / "keymap" / "actions.c"
+    actions_c = ROOT / "src" / "cn.org.huansoft.ter-music" / "keymap" / "actions.c"
     text = strip_comments(actions_c.read_text(encoding="utf-8", errors="replace"))
     ids = ACT_ID.findall(text)
     if not ids:

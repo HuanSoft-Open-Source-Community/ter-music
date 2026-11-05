@@ -1,7 +1,8 @@
-pkgbase = ter-music-cn
+pkgbase = cn.org.huansoft.ter-music
 	pkgdesc = Terminal based music player
-	pkgver = 2.3.0
+	pkgver = 26.4.1.0
 	pkgrel = 1
+	replaces = ter-music-cn
 	url = https://github.com/HuanSoft-Open-Source-Community/ter-music
 	arch = x86_64
 	license = GPL-3.0-only
@@ -22,7 +23,7 @@ pkgbase = ter-music-cn
 	optdepends = alsa-lib: ALSA audio output
 	optdepends = libpipewire: PipeWire audio output
 	optdepends = dbus: MPRIS media session integration
-	source = ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#tag=v2.3.0
+	source = ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#tag=v26.4.1.0
 	sha256sums = SKIP
 
-pkgname = ter-music-cn
+pkgname = cn.org.huansoft.ter-music

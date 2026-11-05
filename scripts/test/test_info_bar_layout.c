@@ -7,7 +7,7 @@
  * 另含手工构造的非法布局，确保 info_bar_layout_validate() 能拒绝它们。
  *
  * 运行：scripts/test/run-unit-tests.sh test_info_bar_layout
- * 依赖（见同名 .srcs）：src/org.yxzl.ter-music/ui/info_bar_layout.c
+ * 依赖（见同名 .srcs）：src/cn.org.huansoft.ter-music/ui/info_bar_layout.c
  */
 
 #include "ui/info_bar_layout.h"

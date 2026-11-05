@@ -20,7 +20,7 @@ The bottom row (`LINES - 1`) is reserved for the `F1:... F9:...` hint bar.
 | --- | --- |
 | `playlist` | Song list / play queue |
 | `info` | Playback state, track metadata, audio parameters, colored half-block character cover (256/8/mono fallback) |
-| `controls` | Progress bar and transport buttons |
+| `controls` | Progress bar and transport buttons; the loop-mode, speed, volume and karaoke (vocal removal) buttons open a pop-up list |
 | `spectrum` | Audio-reactive bar spectrum |
 | `lyrics` | Current lyric lines |
 | `vinyl` | Colored half-block vinyl disc with a rotating album-cover center label and colored spectrum bars (falls back to the glyph animation when colors are unavailable; split out of the lyrics pane) |

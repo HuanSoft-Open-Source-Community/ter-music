@@ -7,7 +7,7 @@
  * 黑胶标签的圆形掩码与旋转采样，以及非法参数。
  *
  * 运行：scripts/test/run-unit-tests.sh test_cover_art_cells
- * 依赖（见同名 .srcs）：src/org.yxzl.ter-music/ui/cover_art_cells.c
+ * 依赖（见同名 .srcs）：src/cn.org.huansoft.ter-music/ui/cover_art_cells.c
  * 链接（见同名 .env）：-lm（标签旋转采样使用 sin/cos/lround）
  */
 

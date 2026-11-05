@@ -95,6 +95,15 @@ int main(void)
     diff_of(&before, &f, buf, sizeof(buf));
     CHECK(strstr(buf, "\"default_playback_speed\":1.50") != NULL, "浮点键带两位小数");
 
+    /* 4b. karaoke_mode（api/配置契约 v9 新增，取值域 0..2）：
+     *     只登记在 config_fields.h 的 k_fields[] 里就会自动进补丁——
+     *     本条断言就是那根"登记表即生效"的探针。 */
+    AppConfig k = before;
+    k.karaoke_mode = 2;
+    diff_of(&before, &k, buf, sizeof(buf));
+    CHECK(strstr(buf, "\"preferences\"") != NULL, "karaoke_mode 落在 preferences 分区");
+    CHECK(strstr(buf, "\"karaoke_mode\":2") != NULL, "karaoke_mode 键与值正确");
+
     /* 5. 多分区多键 */
     AppConfig m = before;
     m.volume_percent = 55;

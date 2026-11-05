@@ -5,7 +5,9 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 PROJECT_NAME="ter-music"
-APP_ID="org.yxzl.ter-music"
+APP_ID="cn.org.huansoft.ter-music"
+# 版本走滚动方案 <yy>.<q>.x.y，与 types.h 的 APP_VERSION 同源，仅检测失败时兜底
+DEFAULT_VERSION="26.4.1.0"
 OUTPUT_DIR="${SCRIPT_DIR}/build/linyaps"
 TEMP_DIR="${TER_MUSIC_LINYAPS_TEMP:-${SCRIPT_DIR}/.tmp/linyaps-temp}"
 
@@ -134,20 +136,23 @@ check_dependencies() {
 }
 
 detect_version() {
-    local default_version="2.3.0"
+    local default_version="$DEFAULT_VERSION"
 
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
-        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    # 版本以 types.h 里的 APP_VERSION 为唯一事实源：漏打 tag 或 tag 落后于代码时，
+    # 包版本仍然跟着源码走；git tag 退为次级兜底。
+    if [ -f "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" ]; then
+        local match
+        match=$(grep -E '#define APP_VERSION' "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" | head -1)
+        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
     fi
 
-    if [ -f "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" ]; then
-        local match
-        match=$(grep -E 'APP_VERSION' "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" | head -1)
-        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*)$ ]]; then
             echo "${BASH_REMATCH[1]}"
             return
         fi
@@ -710,7 +715,7 @@ main() {
 
     if [ -z "$version" ]; then
         version=$(detect_version)
-        if [ "$version" != "1.0.0" ]; then
+        if [ "$version" != "$DEFAULT_VERSION" ]; then
             log_info "从 Git/CMakeLists.txt 检测到版本: $version"
         else
             log_info "无法检测版本，使用默认版本: $version"

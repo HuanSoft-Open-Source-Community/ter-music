@@ -14,7 +14,8 @@
 #   5. 断言 v7 → v9：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 9
 #      （经 v7→v8→v9 迁移链）；属性 8 显式 0 的文件连续启停不回卷；
 #      JSON v1 → XML 的迁移产出同样含 stop_core_on_exit=1（该键在 JSON
-#      时代不存在显式值，按缺省补写）。
+#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 9 内的普通新键，
+#      旧文件缺元素即按 0 加载并随首存补写，不另升版本。
 #   6. 断言属性 8 夹具文件（含 theme playlist_bg=0）连续启停不触发
 #      file_version<4 的主题迁移块：版本属性数字化后，bg 0→-1 只对老文件
 #      （<4）一次性生效；首启同时完成 v8→v9 迁移；
@@ -161,7 +162,7 @@ DAEMON_PID="$pid"
 sleep 1
 
 info "断言：config.xml 升级到当前版本且不再含远程段"
-cfg_version="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Config.GetAll 2>/dev/null |
+cfg_version="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Config.GetAll 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", "?"))' 2>/dev/null || echo "?")"
 if [ "$cfg_version" = "9" ]; then
     ok "核心配置版本为 9（Config.GetAll version=$cfg_version）"
@@ -254,7 +255,7 @@ wait_core_down() {
     return 1
 }
 stop_live() {   # 核心现在内存镜像里的 stop_core_on_exit（经 Config.GetAll）
-    python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Config.GetAll 2>/dev/null |
+    python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Config.GetAll 2>/dev/null |
         python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"].get("stop_core_on_exit","?"))' 2>/dev/null || echo "?"
 }
 
@@ -319,6 +320,11 @@ if grep -q "<stop_core_on_exit>0</stop_core_on_exit>" "$CONFIG"; then
     ok "落盘文件保持 <stop_core_on_exit>0</stop_core_on_exit>（v8→v9 迁移后不再触发 <8 迁移块）"
 else
     bad "落盘文件的 stop_core_on_exit 被回卷：$(grep -o '<stop_core_on_exit>[0-9]*</stop_core_on_exit>' "$CONFIG" | head -1)"
+fi
+if grep -q "<karaoke_mode>0</karaoke_mode>" "$CONFIG"; then
+    ok "v8 旧文件缺 karaoke_mode：按默认 0 加载并补写落盘（契约版本未升）"
+else
+    bad "karaoke_mode 未补写：$(grep -o '<karaoke_mode>[0-9]*</karaoke_mode>' "$CONFIG" | head -1)"
 fi
 if grep -q "<volume_percent>33</volume_percent>" "$CONFIG"; then
     ok "显式 volume_percent=33 同样跨启停保留"

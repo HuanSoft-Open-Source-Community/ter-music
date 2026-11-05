@@ -50,8 +50,8 @@ for name in "${names[@]}"; do
     fi
 
     if ! "$CC" -std=gnu99 -D_GNU_SOURCE -Wall -Wextra \
-            -I "$REPO_ROOT/include/org.yxzl.ter-music" \
-            "$src" "$REPO_ROOT/src/org.yxzl.ter-music/util/json.c" "${extra[@]}" \
+            -I "$REPO_ROOT/include/cn.org.huansoft.ter-music" \
+            "$src" "$REPO_ROOT/src/cn.org.huansoft.ter-music/util/json.c" "${extra[@]}" \
             "${flags[@]}" \
             -o "$bin" 2>"$OUT_DIR/$name.build.log"; then
         echo "FAIL $name 编译失败："
