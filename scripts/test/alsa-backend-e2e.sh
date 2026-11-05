@@ -278,7 +278,7 @@ core_status_message() {
     timeout 10 gdbus call --session \
         --dest org.mpris.MediaPlayer2.ter_music \
         --object-path /org/mpris/MediaPlayer2 \
-        --method org.yxzl.ter_music.Info.GetStatus 2>/dev/null \
+        --method cn.org.huansoft.ter_music.Info.GetStatus 2>/dev/null \
     | python3 -c '
 import json, re, sys
 raw = sys.stdin.read()

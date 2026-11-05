@@ -213,7 +213,7 @@ else
 fi
 
 info "断言：前端设置改动经门面到达核心（配置归属）"
-core_last_path="$(python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Config.GetAll 2>/dev/null |
+core_last_path="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Config.GetAll 2>/dev/null |
     python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()

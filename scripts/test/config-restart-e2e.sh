@@ -88,14 +88,14 @@ done
 
 # ── 观测助手 ──────────────────────────────────────────────────────
 call() {   # $1 = IFACE.METHOD，其余参数原样给 rpc_client
-    python3 "$RPC" call "org.yxzl.ter_music.$1" "${@:2}" 2>&1
+    python3 "$RPC" call "cn.org.huansoft.ter_music.$1" "${@:2}" 2>&1
 }
 
 gdbus_call() {   # $1 = IFACE.METHOD，其余参数原样给 gdbus（错误名会打在输出里）
     local iface_method="$1"; shift
     gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
         --object-path /org/mpris/MediaPlayer2 \
-        --method "org.yxzl.ter_music.$iface_method" "$@" 2>&1
+        --method "cn.org.huansoft.ter_music.$iface_method" "$@" 2>&1
 }
 
 config_get() {   # $1 = 形如 preferences.volume_percent 的路径

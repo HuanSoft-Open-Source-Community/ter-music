@@ -1,4 +1,4 @@
-Source: ter-music
+Source: cn.org.huansoft.ter-music
 Section: sound
 Priority: optional
 Maintainer: 浣软科技（HuanSoft） <yxzl666xx@outlook.com>
@@ -25,11 +25,14 @@ Standards-Version: 4.7.0
 Homepage: https://github.com/HuanSoft-Open-Source-Community/ter-music
 Rules-Requires-Root: no
 
-Package: ter-music
+Package: cn.org.huansoft.ter-music
 Architecture: any
 Depends:
  ${misc:Depends},
  ${shlibs:Depends}
+Provides: ter-music (= ${binary:Version})
+Breaks: ter-music (<< 26.4.1.0)
+Replaces: ter-music (<< 26.4.1.0)
 Description: terminal-based music player
  Ter-Music is a lightweight terminal-based music player for Linux systems.
  It uses FFmpeg for audio decoding, PulseAudio or ALSA for audio output,

@@ -8,11 +8,11 @@ and change the configuration:
 
 | Interface | Purpose |
 | --------- | ------- |
-| `org.yxzl.ter_music.Info` | Read-only snapshots: track, progress, cover art, lyric lines, visualizer, last status message, rendered info block |
-| `org.yxzl.ter_music.Control` | Transport, seek, volume, speed, play mode, opening paths, front-end registration, quitting |
-| `org.yxzl.ter_music.Lyrics` | A/B lyric line snapshot plus per-character timing (see [API_LYRICS_en_US.md](API_LYRICS_en_US.md)) |
-| `org.yxzl.ter_music.Queue` | Play queue contents and editing |
-| `org.yxzl.ter_music.Config` | Configuration read/write (the only writer) |
+| `cn.org.huansoft.ter_music.Info` | Read-only snapshots: track, progress, cover art, lyric lines, visualizer, last status message, rendered info block |
+| `cn.org.huansoft.ter_music.Control` | Transport, seek, volume, speed, play mode, opening paths, front-end registration, quitting |
+| `cn.org.huansoft.ter_music.Lyrics` | A/B lyric line snapshot plus per-character timing (see [API_LYRICS_en_US.md](API_LYRICS_en_US.md)) |
+| `cn.org.huansoft.ter_music.Queue` | Play queue contents and editing |
+| `cn.org.huansoft.ter_music.Config` | Configuration read/write (the only writer) |
 
 `org.freedesktop.DBus.Introspectable`, `.Peer` and `.Properties` are
 implemented as well, and the MPRIS interfaces (`org.mpris.MediaPlayer2`,
@@ -26,6 +26,7 @@ integration.
 | Bus name (primary) | `org.mpris.MediaPlayer2.ter_music` |
 | Object path | `/org/mpris/MediaPlayer2` |
 | Fallback bus name | `org.mpris.MediaPlayer2.ter_music.instance<pid>` (secondary instances only) |
+| Interface namespace | `cn.org.huansoft.ter_music.*` — the organization namespace since `api_version` 7 |
 
 The interfaces exist while a process owns the primary bus name, and that process
 is the **core**: a `daemon` instance, a `play --foreground` process, or a TUI
@@ -40,11 +41,11 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
   know.
 - **Payload cap.** A single response never exceeds 256 KB
   (`core.payload_max`). A method that would exceed it fails with
-  `org.yxzl.ter_music.Error.TooLarge` instead of truncating.
+  `cn.org.huansoft.ter_music.Error.TooLarge` instead of truncating.
 - **Paging.** Methods that can return many rows take `offset` and `count`.
   `count` of `0` means "default page" (200 rows, `core.page_default`); the
   largest page is 1000 rows (`core.page_max`). Asking for more — or passing a
-  negative `count` — returns `org.yxzl.ter_music.Error.InvalidArgs` instead of
+  negative `count` — returns `cn.org.huansoft.ter_music.Error.InvalidArgs` instead of
   silently truncating. A negative `offset` is clamped to `0`, and an `offset` at
   or past the end returns an empty page, not an error. If the rendered page
   still does not fit the payload cap, the call fails with `Error.TooLarge`
@@ -53,23 +54,38 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
 
   | Name | Meaning |
   | ---- | ------- |
-  | `org.yxzl.ter_music.Error.InvalidArgs` | Malformed argument, unknown key or enum value, page limit exceeded |
-  | `org.yxzl.ter_music.Error.OutOfRange` | Index or position outside the current data |
-  | `org.yxzl.ter_music.Error.TooLarge` | Response would exceed the payload cap |
-  | `org.yxzl.ter_music.Error.Busy` | A fixed-size table is full — today that means `Control.Attach` finding every front-end registration slot taken (the registry holds a fixed maximum; detach an unused front end first) |
-  | `org.yxzl.ter_music.Error.Unsupported` | Known method, unsupported request (e.g. an unknown config key or section in a `Config.Set` patch) |
-  | `org.yxzl.ter_music.Error.Failed` | The operation ran and failed inside the core (e.g. applying an MPRIS rate, rendering the configuration). The asynchronous `Control.Error` signal also defaults to this name |
+  | `cn.org.huansoft.ter_music.Error.InvalidArgs` | Malformed argument, unknown key or enum value, page limit exceeded |
+  | `cn.org.huansoft.ter_music.Error.OutOfRange` | Index or position outside the current data |
+  | `cn.org.huansoft.ter_music.Error.TooLarge` | Response would exceed the payload cap |
+  | `cn.org.huansoft.ter_music.Error.Busy` | A fixed-size table is full — today that means `Control.Attach` finding every front-end registration slot taken (the registry holds a fixed maximum; detach an unused front end first) |
+  | `cn.org.huansoft.ter_music.Error.Unsupported` | Known method, unsupported request (e.g. an unknown config key or section in a `Config.Set` patch) |
+  | `cn.org.huansoft.ter_music.Error.Failed` | The operation ran and failed inside the core (e.g. applying an MPRIS rate, rendering the configuration). The asynchronous `Control.Error` signal also defaults to this name |
 
   Protocol-level problems still use the standard
   `org.freedesktop.DBus.Error.*` names.
 
 - **Handshake.** `Info.GetInfo` carries a `core` object. Read
-  `core.api_version` before using anything else; version 5 is described here.
-  The new front end accepts cores with `api_version >= 4`: version 4 cores lack
-  the per-character lyric fields, and those clients simply degrade to whole-line
-  highlighting. Version 5 added the lyric timing fields listed under
-  `org.yxzl.ter_music.Lyrics` (`end`, `timing`, `char_total`, `chars`,
-  `char_sung`); they are additive, so version 4 clients keep working unchanged.
+  `core.api_version` before using anything else; version 7 is described here.
+  Version 7 is the **namespace migration**: the interfaces and the error names
+  moved from `org.yxzl.ter_music.*` to `cn.org.huansoft.ter_music.*` together
+  with the package name. Nothing else about the surface changed, but a namespace
+  is part of the wire protocol, so this one breaks in both directions: a client
+  built for the old namespace gets `UnknownInterface` from the new core, and a
+  new client cannot even reach `Control.Attach` on an old core. There is no
+  dual-stack period and no downgrade path — the accepted floor is
+  `api_version >= 7`, and core plus clients must be upgraded as a pair. The
+  MPRIS bus name `org.mpris.MediaPlayer2.ter_music` (and its `.instance<pid>`
+  fallback) is standard and did not change.
+  Version 5 added the lyric timing fields listed under
+  `cn.org.huansoft.ter_music.Lyrics` (`end`, `timing`, `char_total`, `chars`,
+  `char_sung`); they were additive, so version 4 clients kept working unchanged.
+  Version 6 added karaoke (centre-vocal removal): `Control.SetKaraoke` /
+  `Control.GetKaraoke` and the `preferences.karaoke_mode` config key. This is
+  additive as well — a version 5 client never calls those methods, and a version
+  6 front end talking to a version 5 core gets `UnknownMethod`, logs it and shows
+  the level as *Off* (the older core has no such key, so *Off* is also what it
+  actually does). Neither `Config.Set` patches nor the required-method list
+  changed, so attaching to an older core still succeeds.
   Version 4 handed **all content** to the front end: the `Playlist`, `Library`,
   `Favorites`, `History` and `DirHistory` interfaces, the background scan job and
   `Control.OpenPath`/`Control.PlayIndex`/`Control.GetPlaylist`/`Queue.Rebuild`
@@ -85,7 +101,7 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
 
   ```json
   "core": {
-    "api_version": 5, "payload_max": 262144,
+    "api_version": 7, "payload_max": 262144,
     "page_default": 200, "page_max": 1000,
     "methods": ["Info.GetInfo", "Control.Play", "Queue.Set", "…"]
   }
@@ -100,7 +116,7 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
 
   * `scripts/test/dbus-rpc-check.sh` cross-checks `core.methods` against the
     introspection XML **in both directions** — a declared method that is not
-    introspectable fails, and an introspectable `org.yxzl.ter_music.*` method
+    introspectable fails, and an introspectable `cn.org.huansoft.ter_music.*` method
     missing from the list fails too (the standard `org.freedesktop.DBus.*` and
     `org.mpris.*` surfaces are exempt from the reverse check).
   * The same script asserts the interface set itself: the five `Info`,
@@ -115,7 +131,7 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
   `media/rpc_common.c` and this document together.
 - **Local paths only.** Every path in a queue payload must be a local path or a
   `file://` URI; anything with another scheme is rejected with
-  `org.yxzl.ter_music.Error.InvalidArgs`. Remote sources (SMB/SFTP/FTP/WebDAV/
+  `cn.org.huansoft.ter_music.Error.InvalidArgs`. Remote sources (SMB/SFTP/FTP/WebDAV/
   HTTP) belong to the front end: it lists and downloads them itself, then hands
   the resulting local file paths to the core through `Queue.Set`.
 - **No background jobs.** The core runs no asynchronous jobs of its own any more
@@ -124,7 +140,7 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
   failures still surface through `Info.GetStatus` / `Control.StatusMessage` and
   the change signals, and the media loop never blocks on a client call.
 
-## org.yxzl.ter_music.Info
+## cn.org.huansoft.ter_music.Info
 
 ### Methods
 
@@ -174,9 +190,9 @@ separated by `;`. Keys may be combined; later keys win:
   "schema": 1,
   "revision": 7,
   "running": true,
-  "instance": { "mode": "daemon", "pid": 1234, "version": "v2.3.0",
+  "instance": { "mode": "daemon", "pid": 1234, "version": "v26.4.1.0",
                 "bus": "org.mpris.MediaPlayer2.ter_music", "has_primary_name": true },
-  "core": { "api_version": 5, "payload_max": 262144, "page_default": 200,
+  "core": { "api_version": 7, "payload_max": 262144, "page_default": 200,
             "page_max": 1000, "methods": ["Info.GetInfo", "…"] },
   "playback": {
     "state": "playing", "position_ms": 83400, "duration_ms": 296000,
@@ -238,7 +254,7 @@ Field notes:
 - `revision` increases when the non-position part of the snapshot changes; use
   it to discard stale data. Missing values are `null`.
 
-## org.yxzl.ter_music.Lyrics
+## cn.org.huansoft.ter_music.Lyrics
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
@@ -269,7 +285,7 @@ in seconds, or `null` when it cannot be derived. `Lyrics.GetDocument` pages that
 would exceed the 256 KB payload cap fail with `Error.TooLarge`; request fewer
 lines when a document is unusually dense.
 
-## org.yxzl.ter_music.Control
+## cn.org.huansoft.ter_music.Control
 
 Transport methods return a boolean (`true` when the request was accepted).
 
@@ -285,9 +301,10 @@ Transport methods return a boolean (`true` when the request was accepted).
 | `SetVolume` / `GetVolume` | `(i percent) -> b` / `() -> i` | Volume (0-100) |
 | `SetSpeed` / `GetSpeed` | `(d rate) -> b` / `() -> d` | Playback speed (0.5-3.0) |
 | `SetPlayMode` / `GetPlayMode` / `GetPlayModeName` | `(i mode) -> b` / `() -> i` / `() -> s` | Play mode (0-16, stable name, localized name) |
+| `SetKaraoke` / `GetKaraoke` | `(i mode) -> b` / `() -> i` | Karaoke centre-vocal removal level (0 off, 1 soft, 2 full); since `api_version` 6. Out-of-range `mode` replies `false`, it is not an error. `GetKaraoke` reports the level the DSP is actually running, which is also mirrored into `preferences.karaoke_mode` |
 | `ReloadConfig` | `() -> b` | Re-read `config.xml` (same as `SIGHUP`); `Config.Reload` is the newer equivalent |
 | `Quit` | `() -> b` | Gracefully stop this instance (persists the playback session) |
-| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":5,"ping_interval_ms":2000,"frontends":n}` |
+| `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":7,"ping_interval_ms":2000,"frontends":n}` |
 | `Ping` | `(s token) -> b` | Keep the registration alive. `false` means the token is unknown or expired: attach again |
 | `Detach` | `(s token) -> b` | Leave explicitly |
 | `FrontendInfo` | `() -> s` | `{"frontends":[{"token":"…","role":"tui","pid":n,"last_ping_ms":n}],"count":n}` |
@@ -333,7 +350,7 @@ deliberately **not** part of the required handshake methods, a core that lacks
 it still connects, and a failed call only logs — it never blocks the front end's
 exit.
 
-## org.yxzl.ter_music.Queue
+## cn.org.huansoft.ter_music.Queue
 
 The queue is a list of **local file paths** executed by the core. The front end
 owns content: it scans directories, extracts metadata and hands the result over.
@@ -366,7 +383,7 @@ Rules:
 
 * A single `Set`, `Append` or `InsertAfter` call carries at most **500** entries
   (`BQ_SET_MAX`). A payload with more is rejected **as a whole** with
-  `org.yxzl.ter_music.Error.InvalidArgs` — nothing is stored and no partial
+  `cn.org.huansoft.ter_music.Error.InvalidArgs` — nothing is stored and no partial
   prefix is accepted — and the error text tells the caller to chunk it: one
   `Queue.Set` with at most 500 entries, then `Queue.Append` for the rest. That
   is exactly what the front end does (`playlist_queue_foreach_chunk()` walks the
@@ -387,7 +404,7 @@ Rules:
   `duration_seconds` is deliberately sent as `0`: the core reads the duration
   from the file itself, so front end and core never disagree.
 * Positions are checked: `RemoveAt`, `MoveUp`, `MoveDown` and `PlayAt` outside
-  `0 … count-1` answer `org.yxzl.ter_music.Error.OutOfRange`.
+  `0 … count-1` answer `cn.org.huansoft.ter_music.Error.OutOfRange`.
 
 Signal `QueueChanged(u revision, i count, i current_position)` after every edit.
 The revision is `bq_revision()`, the same counter `Get` reports, so a client can
@@ -401,7 +418,7 @@ introspection XML **and** listed in `core.methods`; `scripts/test/dbus-rpc-check
 diffs the two in both directions, so the read path cannot quietly disappear from
 one of them.
 
-## org.yxzl.ter_music.Config
+## cn.org.huansoft.ter_music.Config
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
@@ -511,7 +528,7 @@ never disagree. Property access (the standard
   `GetAll` includes `Rate`, `MinimumRate` and `MaximumRate`, which an earlier
   build dropped), `PropertiesChanged` fires when it changes, and `Set` applies it
   to the running stream. A rate outside `MinimumRate…MaximumRate` answers
-  `org.yxzl.ter_music.Error.OutOfRange`; a rate the core cannot apply answers
+  `cn.org.huansoft.ter_music.Error.OutOfRange`; a rate the core cannot apply answers
   `Error.Failed`. `Control.SetSpeed`/`GetSpeed` are the same thing on the
   ter-music interface.
 - **LoopStatus and Shuffle switch whole play modes** rather than storing two
@@ -537,7 +554,7 @@ never disagree. Property access (the standard
   it through `Queue.Set` plus `Queue.PlayAt`. A non-local URI is rejected with its
   own message ("remote sources belong to the front end").
 - On the root interface `Raise` is accepted as a no-op and `Quit` answers
-  `NotSupported`. To stop an instance use `org.yxzl.ter_music.Control.Quit` (or
+  `NotSupported`. To stop an instance use `cn.org.huansoft.ter_music.Control.Quit` (or
   `ter-music daemon stop`), which also persists the playback session.
 
 ## Removed in api_version 4: the content interfaces
@@ -557,7 +574,7 @@ Consequences for a client:
 * Calls to a removed interface or method now get
   `org.freedesktop.DBus.Error.UnknownMethod` immediately instead of a timeout.
 
-## Removed: org.yxzl.ter_music.Remote
+## Removed: cn.org.huansoft.ter_music.Remote
 
 Removed in `core.api_version` 3. Remote music sources (SMB/SFTP/FTP/WebDAV/
 HTTP) are a **front-end** feature: the front end stores its own server list
@@ -572,24 +589,24 @@ standard `org.freedesktop.DBus.Error.UnknownMethod`.
 # Handshake and snapshot
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Info.GetInfo
+  --method cn.org.huansoft.ter_music.Info.GetInfo
 
 # Deliver a queue (the front end scanned this list itself), then play entry 1
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Queue.Set \
+  --method cn.org.huansoft.ter_music.Queue.Set \
   '{"entries":[{"path":"/home/user/Music/a.flac","title":"A","artist":"X","album":"AL"}]}'
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Queue.PlayAt 1
+  --method cn.org.huansoft.ter_music.Queue.PlayAt 1
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Queue.Get 0 50
+  --method cn.org.huansoft.ter_music.Queue.Get 0 50
 
 # Change a setting (unknown keys fail without changing anything)
 gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Config.Set '{"preferences":{"volume_percent":40}}'
+  --method cn.org.huansoft.ter_music.Config.Set '{"preferences":{"volume_percent":40}}'
 
 # Watch everything that changes
 gdbus monitor --session --dest org.mpris.MediaPlayer2.ter_music
@@ -603,21 +620,24 @@ cannot express (negative integer arguments, one connection across calls):
 
 ```bash
 scripts/test/rpc_client.py attach tui 5                 # attach, ping, detach
-scripts/test/rpc_client.py call org.yxzl.ter_music.Queue.Get 0 20
+scripts/test/rpc_client.py call cn.org.huansoft.ter_music.Queue.Get 0 20
 scripts/test/rpc_client.py monitor 3                    # list signals seen
 ```
 
 ## Compatibility
 
 - Interface name components cannot contain hyphens, hence the underscores in
-  `org.yxzl.ter_music.*`.
+  `cn.org.huansoft.ter_music.*`.
 - `Info` JSON `schema` is `1`; the interface surface is versioned separately by
-  `core.api_version` (currently `5`). Consumers must ignore unknown fields.
+  `core.api_version` (currently `7`). Consumers must ignore unknown fields.
   Version 5 added the lyric timing fields (`end`, `timing`, `char_total`,
-  `chars`, `char_sung`) additively; a front end built for version 4 still
-  attaches to a version 5 core, and the version 5 front end accepts a version 4
-  core (per-character highlighting degrades to whole-line). Version 3 removed
-  `org.yxzl.ter_music.Remote` and the `track.is_remote` field and made every
+  `chars`, `char_sung`) additively, and version 6 added
+  `Control.SetKaraoke`/`Control.GetKaraoke` plus `preferences.karaoke_mode`, also
+  additively — a version 5 core answered those two methods with `UnknownMethod`
+  and never had the config key, so the level read as off. Version 7 then moved
+  the entire namespace to `cn.org.huansoft.ter_music.*`, which is breaking
+  rather than additive (see **Handshake** above). Version 3 had removed
+  `cn.org.huansoft.ter_music.Remote` and the `track.is_remote` field and made every
   path argument local-only; version 2 added the `core` object and the
   Playlist/Queue/Library/Favorites/History/DirHistory/Config interfaces.
 - The API shares the MPRIS lifecycle: it exists while the process owns the bus

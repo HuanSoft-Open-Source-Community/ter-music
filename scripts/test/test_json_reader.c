@@ -5,8 +5,8 @@
  * 覆盖：路径取值、缺失键、类型不符、数组/对象遍历、转义与 \uXXXX、
  * 畸形输入、越界（未闭合容器）、深层嵌套深度上限。
  *
- * 构建：gcc -std=gnu99 -D_GNU_SOURCE -I include/org.yxzl.ter-music \
- *         .tmp/tests/test_json_reader.c src/org.yxzl.ter-music/util/json.c -o /tmp/test_json
+ * 构建：gcc -std=gnu99 -D_GNU_SOURCE -I include/cn.org.huansoft.ter-music \
+ *         .tmp/tests/test_json_reader.c src/cn.org.huansoft.ter-music/util/json.c -o /tmp/test_json
  */
 
 #include "util/json.h"

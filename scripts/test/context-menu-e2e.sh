@@ -158,7 +158,7 @@ except Exception:
 play_name() { show_get '(d["track"].get("path") or "?").split("/")[-1]'; }
 
 queue_count() {
-    python3 "$RPC" call org.yxzl.ter_music.Queue.Get 0 100 2>/dev/null |
+    python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get 0 100 2>/dev/null |
         python3 -c 'import json,sys; print(json.load(sys.stdin).get("count"))' 2>/dev/null ||
         printf 'ERR'
 }

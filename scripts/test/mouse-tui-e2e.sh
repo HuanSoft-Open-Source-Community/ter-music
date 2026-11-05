@@ -13,6 +13,12 @@
 #      （既不动列表也不动控制区），并且外点收起后一切恢复正常。
 #   S8 底部功能键栏点击 = 切页（与按 F1..F8 同一条 execute_global_action 链路）。
 #   S9 子视图（设置）侧栏与内容区各自认领滚轮，归属不串台。
+#   S10 控制区第 8 个按钮（卡拉OK/消人声）：点击开弹层、弹层滚轮移选、
+#       Enter 落定写进核心，Esc 取消则不改档。
+#   S11 设置页「播放设置」子页末行的消人声档位（键盘路径：F2 → 侧栏 →
+#       内容区 → 弹层选定），并用弹层标题反证行序没有变。
+#
+# 排障开关：TM_DUMP=1 时，弹层检测失败会把当时的屏幕网格片段打到结果里。
 #
 # 判定依据有两路，互相印证：
 #   · D-Bus 事实：`ter-music show --json` 的 playback.{position_ms,volume_percent,
@@ -154,6 +160,26 @@ play_spd()  { show_get 'd["playback"]["speed"]'; }
 play_mode() { show_get 'd["playback"]["play_mode"]'; }
 play_name() { show_get '(d["track"].get("path") or "?").split("/")[-1]'; }
 play_state() { show_get 'd["playback"]["state"]'; }
+# 消人声档位只走 Control.GetKaraoke（不是 info 字段），故用 CLI 取编号：
+# 输出形如 "soft (1) 人声较弱"，只取括号里的数字，与界面语言无关。
+kar_level() { "$TM_BIN" karaoke 2>/dev/null | sed -n 's/^[a-z]* (\([0-9]\)).*/\1/p'; }
+kar_wait() {   # $1 = 期望档位；CLI 走一次 D-Bus 往返，给最多 5 秒收敛
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        [ "$(kar_level)" = "$1" ] && return 0
+        sleep 0.5
+    done
+    return 1; }
+screen_has() {  # 在当前屏幕网格上做正则搜索（宽字符被 vt_grid 按列展开，故模式里允许空格）
+    python3 "$SCRIPT_DIR/vt_grid.py" --cols "${TERM_COLS:-100}" --rows "${TERM_ROWS:-30}" \
+        --has "$1" "$WORK_DIR/tui.log" >/dev/null 2>&1; }
+karaoke_popup_on_screen() {   # 认弹层标题那一行：╭─ 消人声 ─╮（英文 Vocal Removal，先秦汰聲之等）
+    local _i                  # pty 收屏比界面慢一拍，单次抓取会假失败，故重试约 3 秒
+    for _i in 1 2 3 4 5 6; do
+        screen_has "─ ?(消 ?人 ?声|Vocal ?Removal|汰 ?聲 ?之 ?等)" && return 0
+        sleep 0.5
+    done
+    return 1; }
 ensure_track() {   # $1 = 期望文件名, $2 = 该文件的 SGR 行
     send "<click:6:3>" 1.0 || true          # 先点首行，确保索引发生变化
     wait_name 01-alpha.wav 8 || true
@@ -424,6 +450,101 @@ if [ "$wrap" = "1" ]; then
 else
     bad "倍速连续下滚 8 次没回到 ${s0}x（末值 $prev）"
 fi
+
+# ── S10 卡拉OK按钮：点击开弹层 → 滚轮移选 → Enter 生效 ──────────
+#       新增的第 8 个按钮（CONTROL_IDX_KARAOKE=7）走的正是模式/倍速/音量
+#       那一套弹层机制。这里既验它没被 100 列布局挤掉（命中表里得有格7），
+#       也验"鼠标开层 + 弹层滚轮选定 + Enter 落定"真的把档位写进了核心。
+info "S10 控制区卡拉OK按钮：弹层选档写进核心"
+KARA_CELL="$(cell 7)"
+if [ -z "$KARA_CELL" ]; then
+    bad "命中表里没有格7（卡拉OK按钮在当前宽度下被丢弃，按钮排布需重新测量）"
+else
+    "$TM_BIN" karaoke off >/dev/null 2>&1
+    if kar_wait 0; then
+        ok "S10 前置：档位为 off（0）"
+    else
+        bad "S10 前置档位不是 0（实测 $(kar_level)）"
+    fi
+    KR_ROW="${KARA_CELL%% *}"; KR_COL="${KARA_CELL##* }"
+    send "<click:$KR_COL:$KR_ROW>" 1.0
+    # 点击归属看日志（块缓冲可能滞后，故最多重试 3 秒）；弹层是否真开看屏幕：
+    # 锚点取标题行的制表符 "─ 消人声"，这样按钮自身的文案"卡拉OK（消人声）"
+    # 不会被误判成弹层已开（vt_grid 重建网格，不受日志块缓冲影响）。
+    route=""
+    for _ in 1 2 3 4 5 6; do
+        route="$(last_route)"
+        [ "$route" = "target=9" ] && break
+        sleep 0.5
+    done
+    if [ "$route" = "target=9" ]; then
+        ok "卡拉OK按钮点击归控制区（target=9）"
+    else
+        bad "卡拉OK按钮点击归属异常（$route）"
+    fi
+    if karaoke_popup_on_screen; then
+        ok "点击卡拉OK按钮打开了消人声弹层（屏上见弹层标题）"
+    else
+        bad "点击卡拉OK按钮没打开消人声弹层"
+        [ -n "${TM_DUMP:-}" ] && python3 "$SCRIPT_DIR/vt_grid.py" --cols 100 --rows 30 \
+            "$WORK_DIR/tui.log" | sed -n 20,30p
+    fi
+    send "<Esc>" 0.8
+    if kar_wait 0; then
+        ok "Esc 取消弹层不改档位（仍 0）"
+    else
+        bad "Esc 取消把档位改成了 $(kar_level)"
+    fi
+    # 重新开层：selected_index 复位为当前档位 0，两格下滚到第三档，Enter 落定
+    send "<click:$KR_COL:$KR_ROW>" 1.0
+    send "<wheel-down:50:20>" 0.5
+    send "<wheel-down:50:20>" 0.5
+    send "<Enter>" 1.0
+    if kar_wait 2; then
+        ok "弹层选定第三档后核心档位为 full（2）"
+    else
+        bad "弹层选定没写进核心（档位 $(kar_level)，期望 2）"
+    fi
+    # 末档上再开一层：滚轮被钳制在最后一项，Esc 取消仍不该改档
+    send "<click:$KR_COL:$KR_ROW>" 1.0
+    send "<wheel-down:50:20>" 0.5
+    send "<Esc>" 0.8
+    if kar_wait 2; then
+        ok "末档钳制 + Esc 取消后档位仍为 2"
+    else
+        bad "末档取消流程把档位改成了 $(kar_level)"
+    fi
+    "$TM_BIN" karaoke off >/dev/null 2>&1
+fi
+
+# ── S11 设置页「播放设置」里的消人声档位 ─────────────────────────
+#       设置页是纯键盘路径（弹层只有 Enter，没有 ←/→ 微调），所以这里
+#       走完"进视图 → 侧栏切子页 → 移到末行 → Enter 开层 → 选定"整条链。
+#       行号对不对，用弹层标题的制表符锚点来验：开错行就没有 "─ 消人声" 这行。
+info "S11 设置页：播放设置子页的消人声档位"
+"$TM_BIN" karaoke off >/dev/null 2>&1
+kar_wait 0 >/dev/null 2>&1
+send "<F2>" 1.4                      # 进设置视图（侧栏复位到第 0 项）
+send "<Down>" 0.6; send "<Down>" 0.6 # 侧栏 0→2 = 播放设置
+send "<Right>" 0.8                   # 焦点进内容区，选中项回到本组第 0 行
+send "<Up>" 0.8                      # 第 0 行再往上＝回绕到本组末行（消人声）
+send "<Enter>" 1.0                   # 弹出三档选择层
+if karaoke_popup_on_screen; then
+    ok "设置页末行的弹层标题是消人声（行序正确）"
+else
+    bad "设置页末行开出来的弹层不是消人声（子页项序变了，需重新数行）"
+    send "<Esc>" 0.5
+fi
+send "<Down>" 0.6; send "<Down>" 0.6 # 0→2 = 消除人声
+send "<Enter>" 1.2                   # 落定：走 player_set_karaoke_mode 门面
+if kar_wait 2; then
+    ok "设置页选定「消除人声」后核心档位为 2"
+else
+    bad "设置页的选定没写进核心（档位 $(kar_level)，期望 2）"
+fi
+send "<Esc>" 0.8                     # 退出设置视图，恢复主页给后面的用例
+"$TM_BIN" karaoke off >/dev/null 2>&1
+kar_wait 0 >/dev/null 2>&1
 
 # ── 收尾 ──────────────────────────────────────────────────────────
 if kill -0 "$(cat "$WORK_DIR/tui.pid" 2>/dev/null)" 2>/dev/null; then

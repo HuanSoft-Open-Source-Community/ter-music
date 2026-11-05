@@ -5,7 +5,7 @@
  * 覆盖读写、空白裁剪、覆盖写、缺失文件与非法参数。
  *
  * 运行：scripts/test/run-unit-tests.sh test_layout_state
- * 依赖（见同名 .srcs）：src/org.yxzl.ter-music/ui/layout_state.c
+ * 依赖（见同名 .srcs）：src/cn.org.huansoft.ter-music/ui/layout_state.c
  */
 
 #include "ui/layout_spec.h"

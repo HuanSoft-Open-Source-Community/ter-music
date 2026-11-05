@@ -100,11 +100,11 @@ gdbus_call() {   # $1 = IFACE.METHOD, 其余为参数（原样传给 gdbus）
     local iface_method="$1"; shift
     gdbus call --session --dest org.mpris.MediaPlayer2.ter_music \
         --object-path /org/mpris/MediaPlayer2 \
-        --method "org.yxzl.ter_music.$iface_method" "$@" 2>&1
+        --method "cn.org.huansoft.ter_music.$iface_method" "$@" 2>&1
 }
 
 queue_total() {   # Queue.Get 的 count 字段（与分页 offset/count 无关，是总数）
-    python3 "$RPC" call org.yxzl.ter_music.Queue.Get "${1:-0}" "${2:-1}" 2>/dev/null |
+    python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get "${1:-0}" "${2:-1}" 2>/dev/null |
         python3 -c '
 import json, sys
 try:
@@ -114,7 +114,7 @@ except Exception:
 }
 
 queue_row_path() {   # $1 = position
-    python3 "$RPC" call org.yxzl.ter_music.Queue.Get "$1" 1 2>/dev/null |
+    python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get "$1" 1 2>/dev/null |
         python3 -c '
 import json, sys
 try:
@@ -125,7 +125,7 @@ except Exception:
 }
 
 cur_position() {
-    python3 "$RPC" call org.yxzl.ter_music.Queue.Get 0 1 2>/dev/null |
+    python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get 0 1 2>/dev/null |
         python3 -c '
 import json, sys
 try:
@@ -135,7 +135,7 @@ except Exception:
 }
 
 info_json() {
-    python3 "$RPC" call org.yxzl.ter_music.Info.GetInfo 2>/dev/null
+    python3 "$RPC" call cn.org.huansoft.ter_music.Info.GetInfo 2>/dev/null
 }
 
 play_state() {
@@ -159,9 +159,9 @@ except Exception:
 diag() {   # $1 = 场景名
     printf '       诊断[%s]\n' "$1"
     printf '         daemon: %s\n' "$("$TM_BIN" daemon status 2>&1 | head -1)"
-    printf '         Queue.Get(0,2): %s\n' "$(python3 "$RPC" call org.yxzl.ter_music.Queue.Get 0 2 2>/dev/null | head -c 400)"
+    printf '         Queue.Get(0,2): %s\n' "$(python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get 0 2 2>/dev/null | head -c 400)"
     printf '         Queue.Get(%d,2): %s\n' "$((BIG_COUNT - 2))" \
-        "$(python3 "$RPC" call org.yxzl.ter_music.Queue.Get $((BIG_COUNT - 2)) 2 2>/dev/null | head -c 400)"
+        "$(python3 "$RPC" call cn.org.huansoft.ter_music.Queue.Get $((BIG_COUNT - 2)) 2 2>/dev/null | head -c 400)"
     printf '         show --json: %s\n' "$("$TM_BIN" show --json 2>/dev/null | head -c 400)"
     [ -f "$WORK_DIR/tui.log" ] && python3 - "$WORK_DIR/tui.log" <<'PY'
 import re, sys

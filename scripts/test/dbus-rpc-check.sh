@@ -3,7 +3,7 @@
 # ter-music D-Bus RPC 接口面单点验证（里程碑 M2）
 #
 # 验证内容：
-#   1. 自省 XML 中 org.yxzl.ter_music.* 各接口及方法齐备；
+#   1. 自省 XML 中 cn.org.huansoft.ter_music.* 各接口及方法齐备；
 #   2. core.methods 声明与自省 XML 双向核对（正向防漏方法、反向防漏声明）；
 #   3. 各接口的 schema、分页边界与超大响应拒绝（随 M2 逐步补充）；
 #   4. 退出时不留残留进程。
@@ -30,20 +30,25 @@ FAIL=0
 # M2 完成后应存在的接口（随里程碑推进逐个加入本清单）
 # api_version 5：内容接口（Playlist/Library/Favorites/History/DirHistory）整体
 # 撤下——曲库与播放列表内容归前端，核心只发布播放面。
+# api_version 6：新增 Control.SetKaraoke/GetKaraoke 与 preferences.karaoke_mode
+# （卡拉OK／消人声）。纯新增，向后兼容，故 MIN_VERSION 仍为 4。
+# api_version 7：接口与错误前缀整体迁到 cn.org.huansoft.ter_music.*（组织迁移）。
+# 这是破坏性变更：方法面与 6 相同，但跨命名空间双方互相看不见，故 MIN_VERSION
+# 同步抬到 7，核心与前端必须成对升级。本脚本因此只认新前缀。
 EXPECTED_INTERFACES=(
-    "org.yxzl.ter_music.Lyrics"
-    "org.yxzl.ter_music.Info"
-    "org.yxzl.ter_music.Control"
-    "org.yxzl.ter_music.Queue"
-    "org.yxzl.ter_music.Config"
+    "cn.org.huansoft.ter_music.Lyrics"
+    "cn.org.huansoft.ter_music.Info"
+    "cn.org.huansoft.ter_music.Control"
+    "cn.org.huansoft.ter_music.Queue"
+    "cn.org.huansoft.ter_music.Config"
 )
 REMOVED_INTERFACES=(
-    "org.yxzl.ter_music.Playlist"
-    "org.yxzl.ter_music.Library"
-    "org.yxzl.ter_music.Favorites"
-    "org.yxzl.ter_music.History"
-    "org.yxzl.ter_music.DirHistory"
-    "org.yxzl.ter_music.Remote"
+    "cn.org.huansoft.ter_music.Playlist"
+    "cn.org.huansoft.ter_music.Library"
+    "cn.org.huansoft.ter_music.Favorites"
+    "cn.org.huansoft.ter_music.History"
+    "cn.org.huansoft.ter_music.DirHistory"
+    "cn.org.huansoft.ter_music.Remote"
 )
 
 usage() {
@@ -185,12 +190,31 @@ check_interfaces() {
             bad "接口缺失 $iface"
         fi
     done
+
+    # api_version 6 引入、7 随命名空间迁移保留：卡拉OK（消人声）的两个方法必须
+    # 在自省里发布，
+    # 否则前端握手能过、但 Control.SetKaraoke 会回 UnknownMethod。
+    # gdbus introspect 默认输出树形（"SetKaraoke(in  i mode, ...)"），
+    # --xml 才是 method name="..."；两种形态都认。
+    if printf '%s' "$xml" | grep -q "org.yxzl."; then
+        bad "自省里残留旧命名空间 org.yxzl.（迁移未闭合）"
+    else
+        ok "自省不含旧命名空间 org.yxzl.（迁移闭合）"
+    fi
+
+    for method in SetKaraoke GetKaraoke; do
+        if printf '%s' "$xml" | grep -qE "(method name=\"$method\"|^[[:space:]]*${method}\()"; then
+            ok "自省含 Control.$method（api_version 6 起）"
+        else
+            bad "自省缺 Control.$method（api_version 6 起）"
+        fi
+    done
 }
 
 # ── 检查 2：声明的方法清单与实际发布一致 ───────────────────────────
 check_method_list() {
     local json
-    json="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    json="$(dbus_call cn.org.huansoft.ter_music.Info GetInfo)"
     if ! printf '%s' "$json" | grep -q '"api_version"'; then
         echo "  skip core.methods 尚未实现（M2.2 起生效）"
         return
@@ -245,7 +269,7 @@ print("\n".join(methods))
     #   - org.freedesktop.* 标准接口的方法（Properties 的 Get/Set/GetAll、
     #     Introspectable.Introspect、Peer.Ping/GetMachineId）；
     #   - org.mpris.* 的 MPRIS 桌面标准面（Raise/Quit/Play/…/OpenUri）。
-    # 凡 org.yxzl.ter_music.<Iface>.<Member> 而 core.methods 缺
+    # 凡 cn.org.huansoft.ter_music.<Iface>.<Member> 而 core.methods 缺
     # "<Iface>.<Member>" 者，逐条记 bad。
     printf '%s\n' "$declared" > "$WORK_DIR/declared-methods.txt"
     local reverse published rev_missed=0
@@ -254,7 +278,7 @@ import re, sys
 
 declared = {l.strip() for l in open(sys.argv[1]) if l.strip()}
 STANDARD_PREFIXES = ("org.freedesktop.", "org.mpris.")
-PREFIX = "org.yxzl.ter_music."
+PREFIX = "cn.org.huansoft.ter_music."
 iface = section = None
 published = 0
 undeclared = []
@@ -323,12 +347,12 @@ except Exception as exc:
 
 check_info_extensions() {
     local info api_version
-    info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    info="$(dbus_call cn.org.huansoft.ter_music.Info GetInfo)"
     api_version="$(json_field "$info" 'doc["core"]["api_version"]')"
-    if [ "$api_version" = "5" ]; then
-        ok "core.api_version=5（歌词逐字时间；兼容 >=4）"
+    if [ "$api_version" = "7" ]; then
+        ok "core.api_version=7（消人声在 6 引入；7 为命名空间硬切，要求 >=7）"
     else
-        bad "core.api_version 期望 5，实际 '$api_version'"
+        bad "core.api_version 期望 7，实际 '$api_version'"
     fi
 
     local methods
@@ -340,7 +364,7 @@ check_info_extensions() {
 
     # GetVisualizer：bands 数量与数组长度必须一致
     local viz bands levels
-    viz="$(dbus_call org.yxzl.ter_music.Info GetVisualizer)"
+    viz="$(dbus_call cn.org.huansoft.ter_music.Info GetVisualizer)"
     bands="$(json_field "$viz" 'doc["bands"]')"
     levels="$(json_field "$viz" 'len(doc["levels"])')"
     if [ "$bands" = "$levels" ] && [ -n "$bands" ]; then
@@ -351,7 +375,7 @@ check_info_extensions() {
 
     # GetStatus：seq 为整数且 message 为字符串
     local status seq
-    status="$(dbus_call org.yxzl.ter_music.Info GetStatus)"
+    status="$(dbus_call cn.org.huansoft.ter_music.Info GetStatus)"
     seq="$(json_field "$status" 'doc["seq"]')"
     case "$seq" in
         ''|ERR:*) bad "GetStatus 缺少 seq：$seq" ;;
@@ -360,7 +384,7 @@ check_info_extensions() {
 
     # GetCoverArt：非法字符集必须被拒绝
     local err
-    err="$(dbus_call org.yxzl.ter_music.Info GetCoverArt bogus 8 4)"
+    err="$(dbus_call cn.org.huansoft.ter_music.Info GetCoverArt bogus 8 4)"
     if printf '%s' "$err" | grep -q "InvalidArgs"; then
         ok "GetCoverArt 拒绝未知字符集"
     else
@@ -370,7 +394,7 @@ check_info_extensions() {
     # GetCoverArt：三种字符集都要能用（无封面时返回空串也算通过）
     local charset out
     for charset in braille ascii half; do
-        out="$(dbus_call org.yxzl.ter_music.Info GetCoverArt "$charset" 8 4)"
+        out="$(dbus_call cn.org.huansoft.ter_music.Info GetCoverArt "$charset" 8 4)"
         if printf '%s' "$out" | grep -q "^(\|('"; then
             ok "GetCoverArt charset=$charset 可调用"
         else
@@ -383,7 +407,7 @@ check_info_extensions() {
 # ── 检查 4：前端注册表（Attach/Ping/Detach/FrontendInfo） ───────────
 check_frontends() {
     local attached token
-    attached="$(dbus_call org.yxzl.ter_music.Control Attach tui)"
+    attached="$(dbus_call cn.org.huansoft.ter_music.Control Attach tui)"
     token="$(json_field "$attached" 'doc["token"]')"
     if [ -z "$token" ] || [ "${token#ERR:}" != "$token" ]; then
         bad "Attach 未返回 token：$(printf '%s' "$attached" | head -1)"
@@ -393,16 +417,16 @@ check_frontends() {
 
     local version
     version="$(json_field "$attached" 'doc["api_version"]')"
-    [ "$version" = "5" ] && ok "Attach 返回 api_version=5" || bad "Attach api_version=$version"
+    [ "$version" = "7" ] && ok "Attach 返回 api_version=7" || bad "Attach api_version=$version"
 
     # 第二个前端
     local attached2
-    attached2="$(dbus_call org.yxzl.ter_music.Control Attach cli)"
+    attached2="$(dbus_call cn.org.huansoft.ter_music.Control Attach cli)"
     local token2
     token2="$(json_field "$attached2" 'doc["token"]')"
 
     local list count
-    list="$(dbus_call org.yxzl.ter_music.Control FrontendInfo)"
+    list="$(dbus_call cn.org.huansoft.ter_music.Control FrontendInfo)"
     count="$(json_field "$list" 'doc["count"]')"
     if [ "$count" -ge 2 ] 2>/dev/null; then
         ok "FrontendInfo 列出 $count 个前端"
@@ -412,7 +436,7 @@ check_frontends() {
 
     # 角色校验
     local bad_role
-    bad_role="$(dbus_call org.yxzl.ter_music.Control Attach robot)"
+    bad_role="$(dbus_call cn.org.huansoft.ter_music.Control Attach robot)"
     if printf '%s' "$bad_role" | grep -q "InvalidArgs"; then
         ok "Attach 拒绝非法 role"
     else
@@ -421,7 +445,7 @@ check_frontends() {
 
     # 未知 token 的 Ping 返回 false（前端应重新 Attach）
     local ping_unknown
-    ping_unknown="$(dbus_call org.yxzl.ter_music.Control Ping ":1.99999")"
+    ping_unknown="$(dbus_call cn.org.huansoft.ter_music.Control Ping ":1.99999")"
     if printf '%s' "$ping_unknown" | grep -q "false"; then
         ok "Ping 对未知 token 返回 false"
     else
@@ -430,7 +454,7 @@ check_frontends() {
 
     # 已知 token 的 Ping 返回 true
     local ping_known
-    ping_known="$(dbus_call org.yxzl.ter_music.Control Ping "$token")"
+    ping_known="$(dbus_call cn.org.huansoft.ter_music.Control Ping "$token")"
     if printf '%s' "$ping_known" | grep -q "true"; then
         ok "Ping 刷新已登记 token"
     else
@@ -438,9 +462,9 @@ check_frontends() {
     fi
 
     # Detach 后不再列出
-    dbus_call org.yxzl.ter_music.Control Detach "$token" >/dev/null
-    dbus_call org.yxzl.ter_music.Control Detach "$token2" >/dev/null
-    list="$(dbus_call org.yxzl.ter_music.Control FrontendInfo)"
+    dbus_call cn.org.huansoft.ter_music.Control Detach "$token" >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Control Detach "$token2" >/dev/null
+    list="$(dbus_call cn.org.huansoft.ter_music.Control FrontendInfo)"
     count="$(json_field "$list" 'doc["count"]')"
     if [ "$count" = "0" ]; then
         ok "Detach 后注册表清空"
@@ -449,13 +473,13 @@ check_frontends() {
     fi
 
     # 心跳超时：登记后不再 Ping，超过 RPC_FRONTEND_TIMEOUT_MS(6s) 应被清除
-    attached="$(dbus_call org.yxzl.ter_music.Control Attach app)"
+    attached="$(dbus_call cn.org.huansoft.ter_music.Control Attach app)"
     token="$(json_field "$attached" 'doc["token"]')"
     local waited=0
     while [ "$waited" -lt 9 ]; do
         sleep 1
         waited=$((waited + 1))
-        count="$(json_field "$(dbus_call org.yxzl.ter_music.Control FrontendInfo)" 'doc["count"]')"
+        count="$(json_field "$(dbus_call cn.org.huansoft.ter_music.Control FrontendInfo)" 'doc["count"]')"
         [ "$count" = "0" ] && break
     done
     if [ "$count" = "0" ]; then
@@ -478,18 +502,18 @@ check_queue() {
     payload="$payload{\"path\":\"$music/tone3.wav\",\"title\":\"T3\",\"artist\":\"B\",\"album\":\"BL\"}]}"
 
     # 空队列起步
-    dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Clear >/dev/null
     local qcount
-    qcount="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 0 10)" 'doc["count"]')"
+    qcount="$(json_field "$(dbus_call cn.org.huansoft.ter_music.Queue Get 0 10)" 'doc["count"]')"
     [ "$qcount" = "0" ] && ok "Queue.Get 空队列 count=0" || bad "Queue.Get 空队列 count=$qcount"
 
     # Set：整表下发，返回写入条目数
     local rc
-    rc="$(dbus_call org.yxzl.ter_music.Queue Set "$payload")"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue Set "$payload")"
     printf '%s' "$rc" | grep -q "(3,)" && ok "Queue.Set 写入 3 条" || bad "Queue.Set 返回 $rc"
 
     local queue
-    queue="$(dbus_call org.yxzl.ter_music.Queue Get 0 10)"
+    queue="$(dbus_call cn.org.huansoft.ter_music.Queue Get 0 10)"
     qcount="$(json_field "$queue" 'doc["count"]')"
     [ "$qcount" = "3" ] && ok "Queue.Get count=3" || bad "Queue.Get count=$qcount"
     printf '%s' "$queue" | grep -q "tone2.wav" && ok "Queue.Get 行内含路径" || bad "Queue.Get 行内缺路径"
@@ -499,14 +523,14 @@ check_queue() {
 
     # 分页：offset 越界返回空行集而不是报错
     local page_count
-    page_count="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 100000 10)" 'doc["rows"]' 2>/dev/null || true)"
+    page_count="$(json_field "$(dbus_call cn.org.huansoft.ter_music.Queue Get 100000 10)" 'doc["rows"]' 2>/dev/null || true)"
     local rows
-    rows="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 100000 10)" 'len(doc["rows"])')"
+    rows="$(json_field "$(dbus_call cn.org.huansoft.ter_music.Queue Get 100000 10)" 'len(doc["rows"])')"
     [ "$rows" = "0" ] && ok "Queue.Get 越界 offset 返回空页" || bad "Queue.Get 越界返回 rows=$rows"
 
     # 分页：count 超上限应被拒绝
     local over_limit
-    over_limit="$(dbus_call org.yxzl.ter_music.Queue Get 0 5000)"
+    over_limit="$(dbus_call cn.org.huansoft.ter_music.Queue Get 0 5000)"
     if printf '%s' "$over_limit" | grep -q "InvalidArgs"; then
         ok "Queue.Get 拒绝超过上限的 count（1000）"
     else
@@ -514,33 +538,33 @@ check_queue() {
     fi
 
     # 编辑：InsertAfter / MoveUp / RemoveAt / PlayAt
-    rc="$(dbus_call org.yxzl.ter_music.Queue InsertAfter 1 "{\"entries\":[{\"path\":\"$music/tone4.wav\",\"title\":\"T4\"}]}")"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue InsertAfter 1 "{\"entries\":[{\"path\":\"$music/tone4.wav\",\"title\":\"T4\"}]}")"
     printf '%s' "$rc" | grep -q "(1,)" && ok "Queue.InsertAfter 插入 1 条" || bad "Queue.InsertAfter 返回 $rc"
 
-    rc="$(dbus_call org.yxzl.ter_music.Queue MoveDown 0)"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue MoveDown 0)"
     printf '%s' "$rc" | grep -q "true" && ok "Queue.MoveDown 接受合法位置" || bad "Queue.MoveDown 失败：$rc"
 
-    rc="$(dbus_call org.yxzl.ter_music.Queue MoveUp 999999)"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue MoveUp 999999)"
     printf '%s' "$rc" | grep -q "OutOfRange" && ok "Queue.MoveUp 拒绝越界位置" || bad "Queue.MoveUp 未拒绝越界：$rc"
 
-    rc="$(dbus_call org.yxzl.ter_music.Queue InsertAfter 999999 "{\"entries\":[{\"path\":\"$music/tone4.wav\"}]}")"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue InsertAfter 999999 "{\"entries\":[{\"path\":\"$music/tone4.wav\"}]}")"
     printf '%s' "$rc" | grep -q "InvalidArgs" && ok "Queue.InsertAfter 拒绝越界位置" || bad "Queue.InsertAfter 未拒绝越界：$rc"
 
     # 非本地路径必须被拒绝（核心只播放本地文件）
-    rc="$(dbus_call org.yxzl.ter_music.Queue Set '{"entries":[{"path":"smb://host/share/a.mp3"}]}')"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue Set '{"entries":[{"path":"smb://host/share/a.mp3"}]}')"
     printf '%s' "$rc" | grep -q "InvalidArgs" && ok "Queue.Set 拒绝非本地路径" || bad "Queue.Set 未拒绝非本地路径：$rc"
 
     # 非法 JSON 必须被拒绝
-    rc="$(dbus_call org.yxzl.ter_music.Queue Set 'not-json')"
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue Set 'not-json')"
     printf '%s' "$rc" | grep -q "InvalidArgs" && ok "Queue.Set 拒绝非法 JSON" || bad "Queue.Set 未拒绝非法 JSON：$rc"
 
     # PlayAt：置游标并开始播放
-    dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
-    dbus_call org.yxzl.ter_music.Queue Set "$payload" >/dev/null
-    rc="$(dbus_call org.yxzl.ter_music.Queue PlayAt 2)"
+    dbus_call cn.org.huansoft.ter_music.Queue Clear >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Set "$payload" >/dev/null
+    rc="$(dbus_call cn.org.huansoft.ter_music.Queue PlayAt 2)"
     printf '%s' "$rc" | grep -q "true" && ok "Queue.PlayAt 置游标" || bad "Queue.PlayAt 失败：$rc"
     local info
-    info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    info="$(dbus_call cn.org.huansoft.ter_music.Info GetInfo)"
     printf '%s' "$info" | grep -q "tone3.wav" && ok "Info.GetInfo 反映队列游标曲目" || bad "Info.GetInfo 未反映 PlayAt 结果"
 
     # 队列变更信号
@@ -548,7 +572,7 @@ check_queue() {
         --object-path /org/mpris/MediaPlayer2 > "$WORK_DIR/queue-monitor.txt" 2>&1 &
     local monitor_pid=$!
     sleep 0.8
-    dbus_call org.yxzl.ter_music.Queue Append "{\"entries\":[{\"path\":\"$music/tone5.wav\"}]}" >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Append "{\"entries\":[{\"path\":\"$music/tone5.wav\"}]}" >/dev/null
     sleep 0.8
     kill "$monitor_pid" 2>/dev/null
     if grep -q "QueueChanged" "$WORK_DIR/queue-monitor.txt"; then
@@ -558,21 +582,21 @@ check_queue() {
     fi
 
     # Queue.Set 前缀契约：同一张表重发时游标跟随路径，不回到 0
-    dbus_call org.yxzl.ter_music.Queue Set "$payload" >/dev/null
-    dbus_call org.yxzl.ter_music.Queue PlayAt 1 >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Set "$payload" >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue PlayAt 1 >/dev/null
     sleep 0.2
-    dbus_call org.yxzl.ter_music.Queue Set "$payload" >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Set "$payload" >/dev/null
     local prefix_pos
-    prefix_pos="$(json_field "$(dbus_call org.yxzl.ter_music.Queue Get 0 10)" 'doc["current_position"]')"
+    prefix_pos="$(json_field "$(dbus_call cn.org.huansoft.ter_music.Queue Get 0 10)" 'doc["current_position"]')"
     [ "$prefix_pos" = "1" ] && ok "Queue.Set 相同前缀保持游标（position=1）" \
         || bad "Queue.Set 前缀后游标=$prefix_pos（期望 1）"
 
     # Queue.Shuffle 契约：当前条目置首、其余打乱（不是只打乱游标之后）
-    dbus_call org.yxzl.ter_music.Queue PlayAt 1 >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue PlayAt 1 >/dev/null
     sleep 0.2
-    dbus_call org.yxzl.ter_music.Queue Shuffle >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Shuffle >/dev/null
     local shuffled
-    shuffled="$(dbus_call org.yxzl.ter_music.Queue Get 0 10)"
+    shuffled="$(dbus_call cn.org.huansoft.ter_music.Queue Get 0 10)"
     local shuf_pos shuf_first
     shuf_pos="$(json_field "$shuffled" 'doc["current_position"]')"
     shuf_first="$(json_field "$shuffled" 'doc["rows"][0]["path"]')"
@@ -582,8 +606,8 @@ check_queue() {
         bad "Queue.Shuffle 未保持当前条目：position=$shuf_pos first=$shuf_first"
     fi
 
-    dbus_call org.yxzl.ter_music.Control Stop >/dev/null
-    dbus_call org.yxzl.ter_music.Queue Clear >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Control Stop >/dev/null
+    dbus_call cn.org.huansoft.ter_music.Queue Clear >/dev/null
 }
 
 
@@ -595,14 +619,14 @@ check_lyrics() {
         return
     fi
 
-    rpc_py call org.yxzl.ter_music.Queue.Clear >/dev/null 2>&1 || true
-    rpc_py call org.yxzl.ter_music.Queue.Set \
+    rpc_py call cn.org.huansoft.ter_music.Queue.Clear >/dev/null 2>&1 || true
+    rpc_py call cn.org.huansoft.ter_music.Queue.Set \
         "json:{\"entries\":[{\"path\":\"$music/karaoke.wav\",\"title\":\"Karaoke\",\"artist\":\"T\"}]}" >/dev/null
-    rpc_py call org.yxzl.ter_music.Queue.PlayAt 0 >/dev/null
+    rpc_py call cn.org.huansoft.ter_music.Queue.PlayAt 0 >/dev/null
 
     local doc="" loaded=0
     for _ in $(seq 1 30); do
-        doc="$(rpc_py call org.yxzl.ter_music.Lyrics.GetDocument 0 10)"
+        doc="$(rpc_py call cn.org.huansoft.ter_music.Lyrics.GetDocument 0 10)"
         if printf '%s' "$doc" | python3 -c '
 import json, sys
 doc = json.load(sys.stdin)
@@ -615,7 +639,7 @@ raise SystemExit(0 if doc.get("has_lyrics") else 1)
     done
     if [ "$loaded" -ne 1 ]; then
         bad "karaoke 夹具未加载歌词：$(printf '%s' "$doc" | head -1)"
-        rpc_py call org.yxzl.ter_music.Control.Stop >/dev/null 2>&1 || true
+        rpc_py call cn.org.huansoft.ter_music.Control.Stop >/dev/null 2>&1 || true
         return
     fi
     ok "Lyrics.GetDocument 加载逐字歌词"
@@ -639,7 +663,7 @@ assert abs(b["end"] - 2.6) < 0.01, b
     fi
 
     local snapshot
-    snapshot="$(rpc_py call org.yxzl.ter_music.Lyrics.GetLyrics)"
+    snapshot="$(rpc_py call cn.org.huansoft.ter_music.Lyrics.GetLyrics)"
     if printf '%s' "$snapshot" | python3 -c '
 import json, sys
 doc = json.load(sys.stdin)
@@ -652,7 +676,7 @@ int(doc["char_sung"]); int(doc["char_total"])
     fi
 
     local info
-    info="$(rpc_py call org.yxzl.ter_music.Info.GetInfo)"
+    info="$(rpc_py call cn.org.huansoft.ter_music.Info.GetInfo)"
     if printf '%s' "$info" | python3 -c '
 import json, sys
 doc = json.load(sys.stdin)
@@ -663,8 +687,8 @@ assert "char_sung" in doc["lyrics"] and "char_total" in doc["lyrics"]
         bad "Info.GetInfo lyrics 缺逐字字段"
     fi
 
-    rpc_py call org.yxzl.ter_music.Control.Stop >/dev/null 2>&1 || true
-    rpc_py call org.yxzl.ter_music.Queue.Clear >/dev/null 2>&1 || true
+    rpc_py call cn.org.huansoft.ter_music.Control.Stop >/dev/null 2>&1 || true
+    rpc_py call cn.org.huansoft.ter_music.Queue.Clear >/dev/null 2>&1 || true
 }
 
 
@@ -682,16 +706,16 @@ check_utf8_status() {
     local payload
     payload="{\"entries\":[{\"path\":\"$music/tone1.wav\",\"title\":\"$title\",\"artist\":\"$artist\"}]}"
 
-    if ! rpc_py call org.yxzl.ter_music.Queue.Set "json:$payload" >/dev/null; then
+    if ! rpc_py call cn.org.huansoft.ter_music.Queue.Set "json:$payload" >/dev/null; then
         bad "UTF-8 回归：Queue.Set 失败（核心可能已被非法状态消息杀死）"
     fi
-    if ! rpc_py call org.yxzl.ter_music.Queue.PlayAt 0 >/dev/null; then
+    if ! rpc_py call cn.org.huansoft.ter_music.Queue.PlayAt 0 >/dev/null; then
         bad "UTF-8 回归：Queue.PlayAt 失败"
     fi
     sleep 0.5
 
     local status message
-    status="$(rpc_py call org.yxzl.ter_music.Info.GetStatus)"
+    status="$(rpc_py call cn.org.huansoft.ter_music.Info.GetStatus)"
     if message="$(printf '%s' "$status" | python3 -c '
 import json, sys
 doc = json.load(sys.stdin)
@@ -712,15 +736,15 @@ sys.exit(0 if title in msg and artist in msg else 1)
     local long_artist
     long_artist="$(python3 -c 'print("A" + "言" * 200)')"
     payload="{\"entries\":[{\"path\":\"$music/tone2.wav\",\"title\":\"超长元数据\",\"artist\":\"$long_artist\"}]}"
-    if ! rpc_py call org.yxzl.ter_music.Queue.Set "json:$payload" >/dev/null; then
+    if ! rpc_py call cn.org.huansoft.ter_music.Queue.Set "json:$payload" >/dev/null; then
         bad "超长元数据：Queue.Set 失败"
     fi
-    if ! rpc_py call org.yxzl.ter_music.Queue.PlayAt 0 >/dev/null; then
+    if ! rpc_py call cn.org.huansoft.ter_music.Queue.PlayAt 0 >/dev/null; then
         bad "超长元数据：Queue.PlayAt 失败"
     fi
     sleep 0.5
 
-    status="$(rpc_py call org.yxzl.ter_music.Info.GetStatus)"
+    status="$(rpc_py call cn.org.huansoft.ter_music.Info.GetStatus)"
     if printf '%s' "$status" | python3 -c '
 import json, sys
 doc = json.load(sys.stdin)
@@ -732,7 +756,7 @@ doc["message"].encode("utf-8")
     fi
 
     local info
-    info="$(rpc_py call org.yxzl.ter_music.Info.GetInfo)"
+    info="$(rpc_py call cn.org.huansoft.ter_music.Info.GetInfo)"
     if printf '%s' "$info" | python3 -c 'import json, sys; json.load(sys.stdin)'; then
         ok "超长/中间截断元数据下 Info.GetInfo JSON 可解析"
     else
@@ -752,15 +776,15 @@ doc["message"].encode("utf-8")
         ok "daemon.log 无 libdbus UTF-8 断言"
     fi
 
-    rpc_py call org.yxzl.ter_music.Control.Stop >/dev/null 2>&1 || true
-    rpc_py call org.yxzl.ter_music.Queue.Clear >/dev/null 2>&1 || true
+    rpc_py call cn.org.huansoft.ter_music.Control.Stop >/dev/null 2>&1 || true
+    rpc_py call cn.org.huansoft.ter_music.Queue.Clear >/dev/null 2>&1 || true
 }
 
 
 # ── 检查 7：Config / Remote ─────────────────────────────────────────
 check_config_remote() {
     local all volume
-    all="$(rpc_py call org.yxzl.ter_music.Config.GetAll)"
+    all="$(rpc_py call cn.org.huansoft.ter_music.Config.GetAll)"
     volume="$(printf '%s' "$all" | python3 -c '
 import json,sys
 try:
@@ -775,11 +799,11 @@ except Exception as exc:
     esac
 
     # 局部设置：落盘 + 运行时生效
-    rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":37,"default_playback_speed":1.75}}' >/dev/null
+    rpc_py call cn.org.huansoft.ter_music.Config.Set 'json:{"preferences":{"volume_percent":37,"default_playback_speed":1.75}}' >/dev/null
     local applied
-    applied="$(rpc_py call org.yxzl.ter_music.Control.GetSpeed)"
+    applied="$(rpc_py call cn.org.huansoft.ter_music.Control.GetSpeed)"
     local stored
-    stored="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c '
+    stored="$(rpc_py call cn.org.huansoft.ter_music.Config.GetAll | python3 -c '
 import json,sys
 doc = json.load(sys.stdin)
 print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["default_playback_speed"]))
@@ -792,10 +816,10 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
 
     # 未知键整体失败且不生效
     local before after
-    before="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
+    before="$(rpc_py call cn.org.huansoft.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
     local unknown_rc
-    unknown_rc="$(rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":91,"nope":1}}')"
-    after="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
+    unknown_rc="$(rpc_py call cn.org.huansoft.ter_music.Config.Set 'json:{"preferences":{"volume_percent":91,"nope":1}}')"
+    after="$(rpc_py call cn.org.huansoft.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
     if printf '%s' "$unknown_rc" | grep -q "Unsupported" && [ "$before" = "$after" ]; then
         ok "未知键被拒绝且整体不生效（volume 仍为 $after）"
     else
@@ -803,17 +827,17 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
     fi
 
     # 越界值钳制
-    rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":999}}' >/dev/null
+    rpc_py call cn.org.huansoft.ter_music.Config.Set 'json:{"preferences":{"volume_percent":999}}' >/dev/null
     local clamped
-    clamped="$(rpc_py call org.yxzl.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
+    clamped="$(rpc_py call cn.org.huansoft.ter_music.Config.GetAll | python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"]["volume_percent"])')"
     [ "$clamped" = "100" ] && ok "越界值被钳制到 100" || bad "钳制失败：$clamped"
 
     # 远程音乐源已移交前端：核心不得再发布 Remote 接口，也不得出现在方法清单里
     local remote_iface remote_methods
     remote_iface="$(introspect)"
-    remote_methods="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    remote_methods="$(dbus_call cn.org.huansoft.ter_music.Info GetInfo)"
     if printf '%s' "$remote_iface" | grep -q "ter_music.Remote"; then
-        bad "自省 XML 仍含 org.yxzl.ter_music.Remote"
+        bad "自省 XML 仍含 cn.org.huansoft.ter_music.Remote"
     else
         ok "自省 XML 不含 Remote 接口（远程音乐源属前端）"
     fi
@@ -826,8 +850,8 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
     # 内容接口与内容加载已撤下：这两条调用必须回 UnknownMethod，
     # 而不是“接受一个路径然后自己扫描”。
     local reject_load reject_open
-    reject_load="$(dbus_call org.yxzl.ter_music.Playlist Load 'ftp://127.0.0.1/pub' false false)"
-    reject_open="$(dbus_call org.yxzl.ter_music.Control OpenPath 'smb://host/share' false)"
+    reject_load="$(dbus_call cn.org.huansoft.ter_music.Playlist Load 'ftp://127.0.0.1/pub' false false)"
+    reject_open="$(dbus_call cn.org.huansoft.ter_music.Control OpenPath 'smb://host/share' false)"
     printf '%s' "$reject_load" | grep -qE "UnknownMethod|Unknown" \
         && ok "Playlist.Load 已撤下（内容归前端）" \
         || bad "Playlist.Load 仍可调用：$reject_load"
@@ -837,14 +861,14 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
 
     # 远程 URL 仍必须被队列拒绝（核心只播放本地文件）
     local reject_queue
-    reject_queue="$(dbus_call org.yxzl.ter_music.Queue Set '{"entries":[{"path":"smb://host/share/a.mp3"}]}')"
+    reject_queue="$(dbus_call cn.org.huansoft.ter_music.Queue Set '{"entries":[{"path":"smb://host/share/a.mp3"}]}')"
     printf '%s' "$reject_queue" | grep -q "InvalidArgs" \
         && ok "Queue.Set 拒绝远程路径" \
         || bad "Queue.Set 未拒绝远程路径：$reject_queue"
 
     # 配置面：remote_connections 段已随接口一起消失
     local config_all
-    config_all="$(rpc_py call org.yxzl.ter_music.Config.GetAll)"
+    config_all="$(rpc_py call cn.org.huansoft.ter_music.Config.GetAll)"
     printf '%s' "$config_all" | grep -q "remote_connections" \
         && bad "Config.GetAll 仍含 remote_connections" \
         || ok "Config.GetAll 不含 remote_connections"
@@ -853,13 +877,13 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
     (rpc_py attach tui 5 >/dev/null 2>&1 &)
     sleep 1
     local frontends
-    frontends="$(rpc_py call org.yxzl.ter_music.Control.FrontendInfo | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')"
+    frontends="$(rpc_py call cn.org.huansoft.ter_music.Control.FrontendInfo | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')"
     [ "${frontends:-0}" -ge 1 ] 2>/dev/null && ok "长连接前端登记成功（count=$frontends）" || bad "长连接前端未登记：$frontends"
 
     # 信号：Config.Set 应同时广播 ConfigChanged 与 StatusMessage
     (rpc_py monitor 3 > "$WORK_DIR/m26-signals.txt" 2>&1 &)
     sleep 0.6
-    rpc_py call org.yxzl.ter_music.Config.Set 'json:{"preferences":{"volume_percent":52}}' >/dev/null
+    rpc_py call cn.org.huansoft.ter_music.Config.Set 'json:{"preferences":{"volume_percent":52}}' >/dev/null
     sleep 2.6
     if grep -q "Config.ConfigChanged" "$WORK_DIR/m26-signals.txt" &&
        grep -q "Control.StatusMessage" "$WORK_DIR/m26-signals.txt"; then
@@ -868,14 +892,14 @@ print("%s/%s" % (doc["preferences"]["volume_percent"], doc["preferences"]["defau
         bad "未捕获预期信号：$(tr '\n' ' ' < "$WORK_DIR/m26-signals.txt")"
     fi
 
-    rpc_py call org.yxzl.ter_music.Config.Reset >/dev/null
+    rpc_py call cn.org.huansoft.ter_music.Config.Reset >/dev/null
 }
 
 
 # ── 检查 8：docs/API_DBUS_en_US.md 与 core.methods 一致 ─────────────
 check_doc_matches_code() {
     local info
-    info="$(dbus_call org.yxzl.ter_music.Info GetInfo)"
+    info="$(dbus_call cn.org.huansoft.ter_music.Info GetInfo)"
     if ! printf '%s' "$info" | grep -q '"api_version"'; then
         echo "  skip 缺少 core.methods"
         return

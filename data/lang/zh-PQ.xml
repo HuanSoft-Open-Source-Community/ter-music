@@ -93,6 +93,8 @@
   <string key="settings.backend.hint">音聲後端將於次啟而效</string>
   <string key="settings.sort.applied">序次已行</string>
   <string key="settings.cue.saved">CUE編已存</string>
+  <string key="settings.karaoke.saved">汰聲之等已存</string>
+  <string key="settings.karaoke.unsupported">汰聲不可行：中樞過舊，未具此能</string>
   <string key="settings.color.prompt">入色值 (0-255)：</string>
   <string key="settings.color.same_error">前景與背景之色不可同</string>
   <string key="settings.hotkeys.volume">+ / -：調聲量</string>
@@ -126,6 +128,7 @@
   <string key="settings.opt.audio_backend">音聲後端</string>
   <string key="settings.opt.sort_mode">序次</string>
   <string key="settings.opt.cue_encoding">CUE編</string>
+  <string key="settings.opt.karaoke_mode">汰聲（卡拉OK）</string>
   <string key="settings.opt.info_preset">信息顯明預設</string>
   <string key="settings.opt.info_fields">基本諸域（格/CLI）</string>
   <string key="settings.opt.info_cover">顯面（格/CLI）</string>
@@ -259,10 +262,17 @@
   <string key="controls.label.loop">循環</string>
   <string key="controls.label.speed">迅疾</string>
   <string key="controls.label.volume">聲量</string>
+  <string key="controls.label.karaoke">汰聲</string>
   <string key="controls.label.progress">音程</string>
+  <!-- ===== 汰聲（卡拉OK）：等差之名與主面之示 ===== -->
+  <string key="karaoke.level.off">勿汰</string>
+  <string key="karaoke.level.soft">微汰</string>
+  <string key="karaoke.level.full">盡汰</string>
+  <string key="karaoke.hint">汰聲：惟兩聲並列者有效，樂聲如故</string>
   <string key="popup.play_mode"> 播弄之制 </string>
   <string key="popup.speed"> 播弄之疾 </string>
   <string key="popup.volume"> 聲量 </string>
+  <string key="popup.karaoke"> 汰聲之等 </string>
   <string key="popup.color"> 色 </string>
   <string key="popup.lang"> 語 </string>
   <string key="popup.backend"> 音聲後端 </string>
@@ -808,6 +818,9 @@
   <string key="cli.help.cmd.mode.summary">詢或節度播弄之制</string>
   <string key="cli.help.cmd.mode.usage">用法：{prog} mode [名|0-16]</string>
   <string key="cli.help.cmd.mode.detail">不帶參數時出今制（名、編號與顯名）；帶參數時按穩定名或編號節度制，如 list_repeat、folder_shuffle_repeat。</string>
+  <string key="cli.help.cmd.karaoke.summary">詢或節度汰聲之等</string>
+  <string key="cli.help.cmd.karaoke.usage">用法：{prog} karaoke [off|soft|full|0-2|cycle]</string>
+  <string key="cli.help.cmd.karaoke.detail">不帶參數時出今等（名、編號與顯名）；帶參數時按穩定名或編號節度等；cycle 則自 0 歷 1、2 而復歸於 0。惟兩聲並列者有效（單聲之曲一如其故）。此等入 preferences.karaoke_mode，即行於方播之曲。</string>
   <string key="cli.help.cmd.show.summary">出今播弄信息之塊</string>
   <string key="cli.help.cmd.show.usage">用法：{prog} show [選項]</string>
   <string key="cli.help.cmd.show.detail">出中樞提供的今曲信息，含基本信息、字面、音程和歌辭行；諸選項惟對本次調用生效，不改已存的節度。</string>
@@ -980,9 +993,9 @@ offset 從 0 始；count 爲 0 時用中樞默頁大小 200，最大 1000。</st
   <string key="main.err.facade_init">誤：不能初始化播弄之器門面。</string>
   <string key="cli.err.sandbox.fork_default">誤：Linyaps 打包環境下不能自行分叉背景役。</string>
   <string key="cli.msg.sandbox.guidance_title">請改用下列方式之一（均在宿主機執行）：</string>
-  <string key="cli.msg.sandbox.guidance_service">  · 常駐役（推薦）：systemctl --user enable --now org.yxzl.ter-music</string>
-  <string key="cli.msg.sandbox.guidance_foreground">  · 前臺運行：ll-cli run org.yxzl.ter-music -- ter-music daemon foreground</string>
-  <string key="cli.msg.sandbox.guidance_play">  · 直接播弄：ll-cli run org.yxzl.ter-music -- ter-music play &lt;途徑&gt; --foreground</string>
+  <string key="cli.msg.sandbox.guidance_service">  · 常駐役（推薦）：systemctl --user enable --now cn.org.huansoft.ter-music</string>
+  <string key="cli.msg.sandbox.guidance_foreground">  · 前臺運行：ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground</string>
+  <string key="cli.msg.sandbox.guidance_play">  · 直接播弄：ll-cli run cn.org.huansoft.ter-music -- ter-music play &lt;途徑&gt; --foreground</string>
   <string key="cli.err.daemon.not_ready_10s">誤：已請求啓動背景播弄，但役未在 10 秒內就緒。</string>
   <string key="cli.err.sandbox.fork_detached">誤：Linyaps 打包環境下不能自行分叉背景役（脫離的役會隨容器退而被回收）。</string>
   <string key="cli.err.attach_only.no_service">誤：無方運行的播弄之役（已指定 --attach-only，不自運啓動）。</string>
@@ -1074,6 +1087,7 @@ offset 從 0 始；count 爲 0 時用中樞默頁大小 200，最大 1000。</st
   <string key="cli.err.seek_failed">誤：跳轉敗（無曲或時長未知）。</string>
   <string key="cli.err.speed_range">誤：迅疾需在 0.5 - 3.0 之間。</string>
   <string key="cli.err.mode_unknown_fmt">誤：未知播弄之制 '%s'。可用值：sequential, single_repeat, list_repeat, shuffle_once, shuffle_repeat, folder_*, album_*, artist_* 或 0-16。</string>
+  <string key="cli.err.karaoke.unknown_level_fmt">誤：未知汰聲之等 '%s'。可用值：off、soft、full、0-2 或 cycle。</string>
   <string key="cli.err.oom">誤：內存不足。</string>
   <string key="cli.err.watch_json_conflict">誤：--watch 與 --json 不能同時用。</string>
   <string key="cli.err.watch_requires_tty">誤：--watch 須在端闈裏直接運行（請勿重定向出）。</string>

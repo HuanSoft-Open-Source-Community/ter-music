@@ -49,13 +49,13 @@ linyaps 与 appimage/portable 一样是原生构建（前者由 `ll-builder`/`ll
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本，构建全部包（amd64 默认）
-./scripts/build/launch-auto-build.sh -v 2.2.0
+./scripts/build/launch-auto-build.sh -v 26.4.1.0
 
 # 指定包类型
-./scripts/build/launch-auto-build.sh -v 2.2.0 -t deb,rpm
+./scripts/build/launch-auto-build.sh -v 26.4.1.0 -t deb,rpm
 
 # 跳过 Docker 镜像预构建（镜像已存在时加速）
-./scripts/build/launch-auto-build.sh -v 2.2.0 --skip-images
+./scripts/build/launch-auto-build.sh -v 26.4.1.0 --skip-images
 
 # 仅构建 Docker 镜像，不构建包
 ./scripts/build/launch-auto-build.sh --rebuild-images --skip-builds
@@ -97,7 +97,7 @@ linyaps 与 appimage/portable 一样是原生构建（前者由 `ll-builder`/`ll
 - 默认只生成主包，使用 `--with-debuginfo` 选项可同时生成 debuginfo 包和 debugsource 包
 **安装：**
 ```bash
-sudo dnf install build/rpm/x86_64/ter-music-*.x86_64.rpm
+sudo dnf install build/rpm/x86_64/cn.org.huansoft.ter-music-*.x86_64.rpm
 ```
 
 ### 7. tools/start-server.py — 测试服务器工具
@@ -141,7 +141,7 @@ python3 tools/start-server.py
 ./build-appimage.sh -v 1.4.1
 
 # 从指定 RPM 包文件转换
-./build-appimage.sh -r build/rpm/x86_64/ter-music-1.0.0-1.x86_64.rpm
+./build-appimage.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-26.4.1.0-1.x86_64.rpm
 
 # 保留临时文件用于调试
 ./build-appimage.sh --keep-temp
@@ -155,11 +155,11 @@ python3 tools/start-server.py
 **使用：**
 ```bash
 # 直接运行
-./build/appimage/ter-music-1.0.0-x86_64.AppImage
+./build/appimage/x86_64/ter-music-26.4.1.0-x86_64.AppImage
 
 # 或者先添加执行权限
-chmod +x build/appimage/ter-music-1.0.0-x86_64.AppImage
-./build/appimage/ter-music-1.0.0-x86_64.AppImage
+chmod +x build/appimage/x86_64/ter-music-26.4.1.0-x86_64.AppImage
+./build/appimage/x86_64/ter-music-26.4.1.0-x86_64.AppImage
 ```
 
 **注意：**
@@ -178,7 +178,7 @@ chmod +x build/appimage/ter-music-1.0.0-x86_64.AppImage
 ./build-portable.sh -v 1.4.1
 
 # 从指定 RPM 包文件转换
-./build-portable.sh -r build/rpm/x86_64/ter-music-1.0.0-1.x86_64.rpm
+./build-portable.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-26.4.1.0-1.x86_64.rpm
 
 # 保留临时文件用于调试
 ./build-portable.sh --keep-temp
@@ -192,7 +192,7 @@ chmod +x build/appimage/ter-music-1.0.0-x86_64.AppImage
 **使用：**
 ```bash
 # 解压
-tar -xzf build/portable/ter-music-1.0.0-portable-x86_64.tar.gz
+tar -xzf build/portable/ter-music-26.4.1.0-portable-x86_64.tar.gz
 
 # 进入目录
 cd ter-music-portable
@@ -225,10 +225,10 @@ cd ter-music-portable
 **使用方法：**
 ```bash
 # 推荐：通过 launch-auto-build.sh 一键构建（linyaps 任务已是原生构建，不经 Docker）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0
+./scripts/build/launch-auto-build.sh -t linyaps -v 26.4.1.0
 
 # 或直接调用构建脚本
-./scripts/build/build-linyaps.sh -v 2.3.0 -a x86_64
+./scripts/build/build-linyaps.sh -v 26.4.1.0 -a x86_64
 ```
 
 **选项（直接调用 build-linyaps.sh 时）：**
@@ -243,23 +243,23 @@ cd ter-music-portable
 > `--in-container` 已废弃：参数仍被识别，但只会打印提示并被忽略。
 
 **输出：**
-- UAB 包输出到: `build/linyaps/<arch>/org.yxzl.ter-music_<version>_<arch>.uab`
+- UAB 包输出到: `build/linyaps/<arch>/cn.org.huansoft.ter-music_<version>_<arch>.uab`
 - 同步复制到: `build/release/`
 
 **安装：**
 ```bash
-ll-cli install build/linyaps/x86_64/org.yxzl.ter-music_2.2.0_x86_64.uab
+ll-cli install build/linyaps/x86_64/cn.org.huansoft.ter-music_26.4.1.0_x86_64.uab
 
 # 运行（容器内二进制通过 ll-cli 调用）
-ll-cli run org.yxzl.ter-music                              # TUI
-ll-cli run org.yxzl.ter-music -- ter-music show            # CLI 信息显示
-ll-cli run org.yxzl.ter-music -- ter-music play ~/Music    # 播放（无实例时经 D-Bus 激活后台播放）
+ll-cli run cn.org.huansoft.ter-music                              # TUI
+ll-cli run cn.org.huansoft.ter-music -- ter-music show            # CLI 信息显示
+ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music    # 播放（无实例时经 D-Bus 激活后台播放）
 
 # 后台播放（宿主侧）
-systemctl --user enable --now org.yxzl.ter-music           # 常驻用户服务
-systemctl --user status org.yxzl.ter-music
+systemctl --user enable --now cn.org.huansoft.ter-music           # 常驻用户服务
+systemctl --user status cn.org.huansoft.ter-music
 ll-cli ps                                                  # 查看容器
-ll-cli kill org.yxzl.ter-music                             # 结束容器
+ll-cli kill cn.org.huansoft.ter-music                             # 结束容器
 ```
 
 **Linyaps 专用集成文件**（由 `-DINSTALL_LINYAPS_INTEGRATION=ON` 控制，仅 Linyaps 包安装，
@@ -267,7 +267,7 @@ ll-cli kill org.yxzl.ter-music                             # 结束容器
 
 | 包内路径 | 导出到宿主 | 作用 |
 | --- | --- | --- |
-| `files/lib/systemd/user/org.yxzl.ter-music.service` | `entries/lib/systemd/user/`（经 `$XDG_DATA_DIRS/systemd/user` 链接，`systemctl --user daemon-reload` 后可见） | 常驻后台播放服务；`ExecStart` 被 ll-builder 重写为 `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground` |
+| `files/lib/systemd/user/cn.org.huansoft.ter-music.service` | `entries/lib/systemd/user/`（经 `$XDG_DATA_DIRS/systemd/user` 链接，`systemctl --user daemon-reload` 后可见） | 常驻后台播放服务；`ExecStart` 被 ll-builder 重写为 `ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground` |
 | `files/share/dbus-1/services/org.mpris.MediaPlayer2.ter_music.service` | `$XDG_DATA_DIRS/dbus-1/services/`（导出为 `entries/share/dbus-1/services/`） | D-Bus 按需激活后台播放；沙箱内 `ter-music daemon start` / `play` 依赖它 |
 
 > 沙箱内不能使用 `fork()+setsid()` 制造脱离进程（会随容器回收），因此
@@ -280,9 +280,9 @@ ll-cli kill org.yxzl.ter-music                             # 结束容器
 > 读取状态请用 `ll-cli enter`（终端保持连接，容器内无 `DBUS_SESSION_BUS_ADDRESS`，
 > CLI 会自行解析会话总线）：
 ```bash
-ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show
 # 或用日志查看容器输出
-journalctl --user -u org.yxzl.ter-music -f
+journalctl --user -u cn.org.huansoft.ter-music -f
 ```
 
 **构建缓存（避免重复下载）**
@@ -301,15 +301,15 @@ Linyaps 构建需要 base/runtime 环境（数百 MB～1 GB 级），`ll-builder
 du -sh ~/.cache/linglong-builder
 
 # 常规构建：缓存非空时自动离线，不重复下载（推荐）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0
+./scripts/build/launch-auto-build.sh -t linyaps -v 26.4.1.0
 
 # 强制离线（缓存为空时快速失败，便于断言“不联网”）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0 -e "--offline"
+./scripts/build/launch-auto-build.sh -t linyaps -v 26.4.1.0 -e "--offline"
 # 或直接调用
-./scripts/build/build-linyaps.sh -v 2.3.0 -a x86_64 --offline
+./scripts/build/build-linyaps.sh -v 26.4.1.0 -a x86_64 --offline
 
 # 强制刷新依赖（例如 linglong.yaml 中 base 版本变更后）
-./scripts/build/launch-auto-build.sh -t linyaps -v 2.3.0 -e "--refresh"
+./scripts/build/launch-auto-build.sh -t linyaps -v 26.4.1.0 -e "--refresh"
 
 # 清空缓存（下次构建会重新下载）
 rm -rf ~/.cache/linglong-builder
@@ -392,7 +392,7 @@ UAB 是 ELF 包：`linglong.meta` 段放元数据，`.note.uab.sig` 段的 note 
 - DEB 包将输出到: `build/deb/<arch>/` 目录
 **安装：**
 ```bash
-sudo dpkg -i build/deb/amd64/ter-music_*_amd64.deb
+sudo dpkg -i build/deb/amd64/cn.org.huansoft.ter-music_*_amd64.deb
 # 如果缺少依赖，请运行：
 sudo apt install -f
 ```
@@ -401,9 +401,9 @@ sudo apt install -f
 将项目构建为标准的 Arch Linux 包，适合 Arch Linux 和 Arch-based 发行版。
 **使用方法：**
 ```bash
-# 从 AUR 克隆 PKGBUILD
-git clone https://aur.archlinux.org/ter-music-cn.git
-cd ter-music-cn
+# 从 AUR 克隆 PKGBUILD（包名已随组织迁移，AUR 上的项目需维护者同步新建/改名）
+git clone https://aur.archlinux.org/cn.org.huansoft.ter-music.git
+cd cn.org.huansoft.ter-music
 
 # 构建并安装
 makepkg -si
@@ -412,7 +412,7 @@ makepkg -si
 makepkg
 
 # 安装已构建的包
-sudo pacman -U ter-music-cn-*.pkg.tar.zst
+sudo pacman -U cn.org.huansoft.ter-music-*.pkg.tar.zst
 ```
 **支持的架构：**
 - x86_64: Intel/AMD 64位
@@ -422,7 +422,7 @@ sudo pacman -U ter-music-cn-*.pkg.tar.zst
 
 **安装：**
 ```bash
-sudo pacman -U ter-music-cn-*.pkg.tar.zst
+sudo pacman -U cn.org.huansoft.ter-music-*.pkg.tar.zst
 ```
 
 **优点：**
@@ -528,10 +528,10 @@ sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev lib
 ./scripts/build/launch-auto-build.sh
 
 # 指定版本，自动构建全部包
-./scripts/build/launch-auto-build.sh -v 2.2.0
+./scripts/build/launch-auto-build.sh -v 26.4.1.0
 
 # 跳过 Docker 镜像预构建（镜像已存在时加速）
-./scripts/build/launch-auto-build.sh -v 2.2.0 --skip-images
+./scripts/build/launch-auto-build.sh -v 26.4.1.0 --skip-images
 ```
 
 如果只需构建单个包类型，也可以直接使用对应的构建脚本：

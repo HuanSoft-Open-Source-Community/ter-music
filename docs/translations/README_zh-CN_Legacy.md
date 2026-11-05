@@ -25,6 +25,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **CUE分轨之能**：通FLAC/APE/WV之CUE析辞，自动检知编码（GBK/BIG5/Shift-JIS）
 - **内嵌歌辞之能**：斐氏AVDictionary与APE标签之文辞，优先于外.lrc文件
 - **10段图示均衡器**：ISO准频（31Hz-16kHz），双二阶IIR滤波，±12dB调幅，设中可视化条图，具**均衡器预设**与**软限幅**之能
+- **卡拉OK之制（汰聲）**：等有三——曰勿汰、曰微汰、曰盡汰。其术乃限频带而削居中者：以四阶Butterworth分频（每倍频廿四分贝，一分于180Hz、一分于6kHz），惟削此两分之间，故樂聲之下沉与清越者俱存，不相位抵消也。惟兩聲並列者行之；單聲之曲一仍其旧，逐位不差。其所自出有四：主控之格弹层、节度页之「播弄之度」、符令 `ter-music karaoke`、D-Bus `Control.SetKaraoke`。又：此名与逐字歌辞之highlighting、与名曰 `karaoke` 之局度预设（歌辞优先）皆非一事，读者辨之
 - **17种播弄之制**：自基础（序进、单曲回环、全帙周流、乱序一度、乱序杂陈）至进阶（按文件夹/专辑/艺术家分组）
 - 契LRC歌辞之文，循音程以同辉，逐字以昭焕（逐字之签、行首尾之签、相邻行时之插值，三体皆通）；**内嵌歌辞**（斐氏AVDictionary与APE标签）先于外.lrc文件。可于歌词定位模式中切换来源（Ctrl+L → Tab）
 - 迅疾之度有六：曰迟、曰常、曰稍疾、曰疾、曰倍、曰三倍，任君节度
@@ -39,7 +40,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - **数据驭局**：7 个 JSON 预设以分栏树定诸窗格之位、比例与色；强制平铺为结构之保，旧几何自动适配而不见拒；黑胶与歌辞之格可并存，曲无歌辞则歌辞格暂退而余格补其位，更至有歌辞之曲则其还自至（不待易视，亦不待改其尺寸；惟存歌辞一格者，仍于格内退作黑胶之戏）
 - **恒存之储**：SQLite一统（珍存、往迹、曲帙），自动从v1 JSON迁移
 - 专辑封面显明之能，可于格中以彩色半块之字绘封面之图，色自二百五十六而降于八、终归于黑白；控制区之封面由播弄总开关主之，信息窗格之封面别有节度开关，黑胶之格取其面裁为圆标，随碟而转
-- **符令行之制与背景播弄**：诸符令子目咸备（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），兼有离脱背景之播弄役使，端闱既闭而乐声不绝；Linyaps 封缄之态亦可用——背景播弄或经 D-Bus 按需唤起，或凭随包之 systemd 用户役使常驻
+- **符令行之制与背景播弄**：诸符令子目咸备（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`karaoke`/`show`/`daemon`），兼有离脱背景之播弄役使，端闱既闭而乐声不绝；Linyaps 封缄之态亦可用——背景播弄或经 D-Bus 按需唤起，或凭随包之 systemd 用户役使常驻
 - **信息显明之可自定**：主页信息窗格之诸域、预设与封面，及 `ter-music show` 所出之基本信息、点阵／ASCII／半块文书封面、音程之行与歌辞二行（当前及其次），俱可于文界节度中厘定
 - **MPRIS 与歌词 API**：经D-Bus而通桌面媒体之制、`mpris:artUrl`封面、开放歌辞之接口，兼有 `Info`（曲目／音程／文书封面）与 `Control` 二接口，以惠他器
 - 全凭键符捷操，迅疾无伦
@@ -52,7 +53,7 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 - 分曹列伍，部伍明晰，易于缮治增益
 - 遵西土Unix之哲，专一事而工，与他器协契无间
 - 略无窥伺，不录用户毫末之迹，深敬私隐
-- 前后二面，各司其职：**核心**惟供播弄之役（音声之器、传输之令、音量／迅疾／播弄之制，及奉行前端所授之径表）；**前端**掌文件之统与内容（曲库、扫描、曲帙、珍存、往迹、远方之源、文墨之界）。详见 [二之三 前端与核心](#二之三-前端与核心)
+- 前后二面，各司其职：**核心**惟供播弄之役（音声之器、传输之令、音量／迅疾／播弄之制、卡拉OK汰聲，及奉行前端所授之径表）；**前端**掌文件之统与内容（曲库、扫描、曲帙、珍存、往迹、远方之源、文墨之界）。详见 [二之三 前端与核心](#二之三-前端与核心)
 
 ### 三 殊胜之德
 | 殊德 | 诠解 |
@@ -66,14 +67,15 @@ Ter-Music者，清简端闱之符令乐部也，专为麟纳克斯御统而造�
 | 🔧 CMake营构 | 当世营构之制，跨御统之性尤善 |
 | 🔊 音声传布 | 通PipeWire、PulseAudio、ALSA三枢；自动之式启时历探诸枢（PipeWire > Pulse > ALSA，ALSA者实启常器而调其度），探之不中者不选、设界面亦不列之；播时建流不遂，则复探余枢而退就，状语明其所迁 |
 | 🎛️ 10段均衡器 | ISO准图示均衡器，设中可视化条图 |
+| 🎤 卡拉OK之制 | 汰聲三等（勿汰／微汰／盡汰），限频带而削居中者；惟兩聲並列者有效，樂聲不改；弹层、节度页「播弄之度」、`ter-music karaoke`、`Control.SetKaraoke` |
 | ⏩ 迅疾节度 | 六档迅迟之度，播弄中可随意迁转 |
 | 🌐 远程播乐 | 通SMB/SFTP/FTP/WebDAV/HTTP诸般远器之约，由前端览之、下载于本地之藏 |
 | 🎨 专辑封面 | 端闱中显乐集之面，彩色半块之字，色竭则归于黑白；控制区由播弄总开关主之，信息窗格别有节度开关，黑胶之格取封面为旋转圆标 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体之制、`mpris:artUrl`封面，及基于D-Bus之JSON歌辞接口 |
-| 🖥️ 符令行之制 | `ter-music play/pause/next/seek/volume/speed/mode/show` 诸令皆役当下所行之实例；`show` 则出可自定之信息块 |
+| 🖥️ 符令行之制 | `ter-music play/pause/next/seek/volume/speed/mode/karaoke/show` 诸令皆役当下所行之实例；`show` 则出可自定之信息块 |
 | 🌙 背景播弄 | `ter-music daemon start` 行无文界之播弄，任于何端闱皆得御之，不待文墨之界 |
 | 🖼️ 经D-Bus出文书封面 | `Info.GetCoverArt` 为他器出点阵或ASCII之封面 |
-| 📦 Linyaps 符令 | 同一套符令可于 Linyaps 容器内经 `ll-cli run org.yxzl.ter-music -- ter-music …` 行之；背景播弄有 D-Bus 按需唤起与常驻 systemd 用户役使二途 |
+| 📦 Linyaps 符令 | 同一套符令可于 Linyaps 容器内经 `ll-cli run cn.org.huansoft.ter-music -- ter-music …` 行之；背景播弄有 D-Bus 按需唤起与常驻 systemd 用户役使二途 |
 
 ### 四 施用之境
 - 无图之御宇、幽隐之服器，无轩窗界面而欲播乐者
@@ -165,10 +167,10 @@ sudo apt update
 **自 AUR 纳置（荐举）：**
 ```bash
 # 用 yay（AUR 助手）
-yay -S ter-music-cn
+yay -S cn.org.huansoft.ter-music
 
 # 用 paru（AUR 助手）
-paru -S ter-music-cn
+paru -S cn.org.huansoft.ter-music
 ```
 
 **用 ZPM（MengXi OS 包管器）纳置：**
@@ -178,16 +180,20 @@ git clone https://aur.archlinux.org/zetapm.git
 cd zetapm
 makepkg -si
 
-# 继用 ZPM 纳置 ter-music-cn
-zpm -S ter-music-cn
+# 继用 ZPM 纳置 cn.org.huansoft.ter-music
+zpm -S cn.org.huansoft.ter-music
 ```
 
 **自 AUR 手工纳置：**
 ```bash
-git clone https://aur.archlinux.org/ter-music-cn.git
-cd ter-music-cn
+git clone https://aur.archlinux.org/cn.org.huansoft.ter-music.git
+cd cn.org.huansoft.ter-music
 makepkg -si
 ```
+
+> 说：今徙组织之名，Arch 之包自 `ter-music-cn` 更为 `cn.org.huansoft.ter-music`。
+> `PKGBUILD` 具在库中，然 AUR 之库必俟守者新之，上命乃可行；未及此，请以下手工
+> 营构之法，即用库中之 `PKGBUILD`。
 
 **自源本手工营构：**
 ```bash
@@ -354,6 +360,7 @@ ter-music --help
 | `volume [0-100\|+N\|-N]` | 查询或设音量 |
 | `speed [0.5-3.0]` | 查询或设迅疾之度 |
 | `mode [NAME\|0-16]` | 查询或设播弄之制（如 `list_repeat`、`folder_shuffle_repeat` 之定名） |
+| `karaoke [off\|soft\|full\|0-2\|cycle]` | 询或设汰聲之等（`cycle` 则 0→1→2→0 迭进）；惟兩聲並列者有效，樂聲不改 |
 | `show [OPTIONS]` | 出当下之信息块（基本信息／文书封面／音程／歌辞二行） |
 | `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | 察改核心所执之活队列 |
 | `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | 读改核心节度（键名同 `config.xml`；`reset` 必带 `--yes`） |
@@ -410,6 +417,7 @@ ter-music next
 ter-music seek +10
 ter-music volume +5
 ter-music mode shuffle_repeat
+ter-music karaoke soft    # 微汰其聲，居中者存其概
 
 # 背景役使之管摄
 ter-music daemon start --open ~/Music
@@ -433,35 +441,35 @@ ter-music 以 Linyaps（如意玲珑）之包纳置者，其可执行之文居�
 
 ```bash
 # 诸符令皆如是行之
-ll-cli run org.yxzl.ter-music -- ter-music show
-ll-cli run org.yxzl.ter-music -- ter-music pause
-ll-cli run org.yxzl.ter-music -- ter-music play ~/Music
+ll-cli run cn.org.huansoft.ter-music -- ter-music show
+ll-cli run cn.org.huansoft.ter-music -- ter-music pause
+ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 # 容器既行之时读取其状（说见下）
-ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show
 
 # 交互端闱之便（置于 ~/.bashrc）
-ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
+ter-music() { ll-cli run cn.org.huansoft.ter-music -- ter-music "$@"; }
 ```
 
 **背景播弄。** 自离之进程（`ter-music daemon start`）将随容器而收，故于沙箱中禁之：`daemon start` 与 `play` 改为请会话总线唤起背景之播弄者，不可唤起，则退而以具列命令之告示示人。可循之途有三：
 
 | 途 | 用之法 | 所成之事 |
 | --- | --- | --- |
-| D-Bus 按需唤起 | `ter-music play <path>` 或 `ter-music daemon start` | 会话总线于宿主行 `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground --no-autoplay`，而符令归于彼 |
-| systemd 用户役使（常驻） | `systemctl --user enable --now org.yxzl.ter-music`（于宿主行之） | 播弄之器随会话而启，常驻于背景，乐声不绝 |
-| 前台运行 | `ll-cli run org.yxzl.ter-music -- ter-music play <path> --foreground` | 于前台而播；符令行一日未毕，则容器一日存（宜于 tmux／screen） |
+| D-Bus 按需唤起 | `ter-music play <path>` 或 `ter-music daemon start` | 会话总线于宿主行 `ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground --no-autoplay`，而符令归于彼 |
+| systemd 用户役使（常驻） | `systemctl --user enable --now cn.org.huansoft.ter-music`（于宿主行之） | 播弄之器随会话而启，常驻于背景，乐声不绝 |
+| 前台运行 | `ll-cli run cn.org.huansoft.ter-music -- ter-music play <path> --foreground` | 于前台而播；符令行一日未毕，则容器一日存（宜于 tmux／screen） |
 
 注意：
 
 - 容器之内不达 `systemctl --user`，故役使必于宿主之端闱启之；`play` 与 `daemon` 察知沙箱者，亦印此提示。
 - `ter-music daemon stop` 如常而行，终其实例；事毕容器见收，故 `ll-cli ps` 不复列其应用。
 - `ll-cli run` 于诸般失败之码，尽以 `255` 为归；宿主之脚本宜改读 `ter-music show --json` 之 `"running"` 字段，而不恃退去之码。
-- 若应用之器**已行**（背景之役使，或文墨之界），则 `ll-cli run … -- <符令>` 尽以其所出归于*方行之容器*之常出，端闱遂空无一字。可假 `journalctl --user -u org.yxzl.ter-music` 观之，或改由 `ll-cli enter`（端闱犹接）：
-  `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show`。
+- 若应用之器**已行**（背景之役使，或文墨之界），则 `ll-cli run … -- <符令>` 尽以其所出归于*方行之容器*之常出，端闱遂空无一字。可假 `journalctl --user -u cn.org.huansoft.ter-music` 观之，或改由 `ll-cli enter`（端闱犹接）：
+  `ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show`。
   所入之境不传 `DBUS_SESSION_BUS_ADDRESS`，符令乃自寻会话总线（先试 `$XDG_RUNTIME_DIR/bus`，次试 `/run/user/<uid>/bus`）；若明设其址，则明设者为先。
 - 宿主之径（`$HOME`、`/tmp`、`/media`）于容器之内如故可见；所提之封面，凭 `mpris:artUrl` 为宿主之器所读。
-- 节度之文、曲库与会话存于 `$XDG_CONFIG_HOME/ter-music`。若玲珑之运行时重定 XDG 之变数（见玲珑之 FAQ「应用数据保存到哪里」），则落于 `~/.linglong/org.yxzl.ter-music/…`，与 deb 之装各不相犯。
+- 节度之文、曲库与会话存于 `$XDG_CONFIG_HOME/ter-music`。若玲珑之运行时重定 XDG 之变数（见玲珑之 FAQ「应用数据保存到哪里」），则落于 `~/.linglong/cn.org.huansoft.ter-music/…`，与 deb 之装各不相犯。
 - `--watch` 须有端闱（用 ANSI 光标之制），勿经管道而行，宜于端闱之中直行之。
 - `Info`／`Control` 即寻常会话总线之役，故宿主之器（`gdbus`、媒体之件、`busctl`）可视可御其玲珑之实例，与寻常之装无异。
 
@@ -471,7 +479,7 @@ Ter-Music 分为二役，二者经会话总线而相语：
 
 | 役 | 谁行之 | 所掌之事 |
 | --- | --- | --- |
-| **核心**（播弄之役） | `ter-music daemon start` ／ `daemon foreground` | 音声之器、播弄之状与音程、传输之令、音量／迅疾／播弄之制、**奉行前端所授之径表**、当下曲目之文（歌辞、文书封面、频谱）、节度之文、前端之登记与心跳 |
+| **核心**（播弄之役） | `ter-music daemon start` ／ `daemon foreground` | 音声之器、播弄之状与音程、传输之令、音量／迅疾／播弄之制、卡拉OK汰聲、**奉行前端所授之径表**、当下曲目之文（歌辞、文书封面、频谱）、节度之文、前端之登记与心跳 |
 | **前端**（文件之统与内容） | 文墨之界（`ter-music`、`ter-music tui`）、符令行（`ter-music play/show/…`）及他客 | 曲库（SQLite）、扫描与元数据、曲帙之内容、自定曲帙、珍存／往迹／目录往迹、排序／筛择／搜求、远方之源与其下载之藏、文墨之界 |
 
 核心绝不扫描目录、绝不藏曲库、绝不解析远方之URL：其所播者惟**本地之径**，次第由前端所授。前端绝不启音声之器：其所绘者，乃自 D-Bus 读回之状，而以内容付于核心。
@@ -487,14 +495,14 @@ ter-music -o ~/Music      # 同上，且先开一目录
 
 ```bash
 ter-music --attach-only   # 无核心在行，则以退去之码 3 终
-ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
+ter-music --bus org.mpris.MediaPlayer2.ter_music.instance12345   # 指所接入之实例
 ```
 
 **退其前端。** 闭文墨之界止不止播弄，决于前端自守之节度副本（镜像）里 `preferences.stop_core_on_exit`（`0`/`1`，默 `1`；可于设置页之开关易之，或于 `config.xml`、经 D-Bus `Config.Set`／`ter-music config set` 设之）。副本者，启器之时已取之于策，设置页一有改易亦即时下于核心，故退之际不暇复问核心。默既启，前端凡退之道（`q`、F9、Ctrl+C、SIGTERM、端闱之断）皆发 `Control.Quit`：核心先籍会话／resume 于策，乃止乐而退。置 `0` 则前端惟发 `Control.Detach`——核心仍行仍播，乐声不辍，`ter-music show` ／ `ter-music next` 于任何端闱皆能御之。然此二者，必其前端实已接入核心（握手既成，执 `Attach` 之凭符）乃发；未尝接入者，退时一札不传，绝不妄动他人所御之核心。别有所谓 `core_exit_when_no_frontend` 者：若欲最后一个前端既去而核心自退，则于 `config.xml` 中设为 `true`（或经 D-Bus `Config.Set` 设之）——前端尽去而后逾十秒之宽限，核心乃退；若核心自始未有前端接入，则终不退出。又：核心所执之会话总线既亡，亦自退——其时已无前端可联故也。
 
 **断而复续。** 核心亡时（崩溃、见 `kill`、会话注销），前端不退：入于断线之状，按指数退避而重试（1／2／4／8／15／30 秒），一有核心应答即复接入，并补推其内容之队列。于文墨之界中按 `R`，可即重启已亡之核心而重推其队列。
 
-**相容之度。** 总线之面为 `api_version 5`（于第四版之上增其文，仍通第四版之前端与核心）。内容之接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`、`Remote`）已撤：此皆前端之职也。他客当用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五接口，详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
+**相容之度。** 总线之面为 `api_version 7`。第七版徙接口之名，自 `org.yxzl.ter_music.*` 更为 `cn.org.huansoft.ter_music.*`；此非增益，乃破故也——旧客触新核心，但得 `UnknownInterface`；新客触旧核心，并 `Control.Attach` 而不可即。故核心与前端必同时并易，不能偏其一。其方法之面，犹第四、五版累增之旧（第六版增益卡拉OK之目）。内容之接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`、`Remote`）已撤：此皆前端之职也。他客当用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五接口，详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
 
 ### 三 文界局度
 主界之局，今以**分栏之树**为定：每局皆为一二叉之树，叶者窗格之类也。分栏之节，剖其矩为二子，故局必为强制平铺，铺满主区（终端去底部菜单栏后之全域）——不许空白、不许缝隙、不许重叠。比例以千分比为度，终端伸缩则按比例重算，形制不漂。旧自由矩之文仍可读，且自动适配，不复全份见拒。
@@ -606,7 +614,7 @@ ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
 | 底下功能键之栏 | 发其键之事，与亲按其键无异 | 无所为（然其役已于此销之） |
 | 曲帙之格 | 择其行；一击则弄其曲，于文件之树则如 `Enter` 之启闭其目录 | 所选上下迁一行；索得之目、播弄之队列、文件之树皆同此，且**不**发播弄 |
 | 乐库之览（开则代曲帙之格，`M` 启闭） | 择其目；再击其所择或双发之则入其内；`[S]`／`[R]` 之行致扫描重扫 | 迁其所择（与 `↑`／`↓` 同） |
-| 控御之格 | 按其光标所在之钮；音量之钮与音程之行惟移其焦，与键无异 | 音程之行：进退五秒；音量之钮：损益百分之五；迅疾之钮：历预设之速而周流不殆；余钮：无所为 |
+| 控御之格 | 按其光标所在之钮；音量之钮与音程之行惟移其焦，与键无异 | 音程之行：进退五秒；音量之钮：损益百分之五；迅疾之钮：历预设之速而周流不殆；余钮——汰聲之钮与焉，其等惟由弹层择之——无所为 |
 | 歌辞之格 | 跃至光标所在之一句 | 进至次句／却至上句（不改歌辞定位之启闭） |
 | 信息、频谱、黑胶三格 | 其处无定之事（役已销之，故不漏入他格） | 无所为（销之） |
 | 子视之侧栏（节度、往迹、曲帙、珍存、关于、助览、语音） | 择其目；再击其所择或双发之等于 `Enter` | 迁侧栏之所择 |
@@ -615,7 +623,7 @@ ter-music --bus org.yxzl.ter_music.instance1   # 指所接入之实例
 高亮随指针而迁：于内容之区滚、击者，并其键盘之焦而移焉，故目所见之明标，即次一 `Enter` 所加者也。
 无所迁者二处：关于之视，其内容惟可读之文；语音之视，侧栏惟一「返回」之目——此二处之轮但收之，不迁任何选中。
 
-**幕与择单（向者一役两受之弊）**。幕方开之际——控御栏之弹出菜单（播弄之制、迅疾之度、音量）、节度页之择目幕（兼颜色、均衡预设与可多选者信息显目）、局度编辑之模态菜单——凡鼠之役皆归于幕：
+**幕与择单（向者一役两受之弊）**。幕方开之际——控御栏之弹出菜单（播弄之制、迅疾之度、音量、汰聲之等）、节度页之择目幕（兼颜色、均衡预设与可多选者信息显目）、局度编辑之模态菜单——凡鼠之役皆归于幕：
 
 - 轮惟滚其幕，不问指针在屏之何处；
 - 击于幕内则择其目；再击其所择或双发之等于 `Enter`（多选之幕则等于 `Space`，勾其目也）；
@@ -704,6 +712,41 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 
 **术之解：** 迅疾节度凭斐氏FFmpeg之atempo滤镜而成，可变速而音调不变。
 
+### 六之一 卡拉OK之制（汰聲）
+
+卡拉OK之制者，削樂聲居中的人聲而存其群音，使学者得与原曲同歌。此乃**播弄之时**之治也：不返写于文件，盘中本聲未尝改一字节。
+
+| 其等 | 节度之值 | 所为 |
+| ---- | -------- | ---- |
+| 勿汰 | `0` | 一不治之，样本直过 |
+| 微汰 | `1` | 去中置频带者十之六，故犹有人聲如薄雾 |
+| 盡汰 | `2` | 中置频带去至此术所能去之极 |
+
+**其术如何（限频带而削居中者）：**
+
+1. 中置之道 `m = (L + R) / 2` 以两段四阶Butterworth（每倍频廿四分贝）分之：低通于180Hz，高通于6kHz。
+2. 惟此两拐点之间——人聲多居之——自中置道减去：`m' = m - α · (m - lo - hi)`；三等之 α 为 0 / 0.6 / 1.0。
+3. 侧置之道 `d = (L - R) / 2` 一仍其旧，立体复成于 `L' = m' + d`、`R' = m' - d`。
+
+所以必限频带者，正为下听与清越之声也。若尽削中置之道，则低音与钹镲同归乌有矣。播弄之际易其等，α 于三十毫秒之内渐移而不骤变，故不闻爆音；同时分频二段之延时线皆以当下之聲重新起测；输出惟样本逾数字满量程者乃以tanh软限之。
+
+**其限也（不敢隐）：**
+
+- 惟兩聲並列者行之。單聲之曲无中置侧置之可分，逐位直过（引擎中 `channels != 2` 即返）。
+- 凡居中者皆与人聲同削——居中底鼓、军鼓、单声道铺满之吉他皆然。此术之固然，非可修之失。
+- 双轨叠唱或大左右分置者不去，以其不在中置道也。
+- 汰聲治解码之样本，序在均衡器**之先**；故均衡、频谱、可视化所见皆既治之聲。
+
+**易等之门有四：**
+
+- 主控之格：卡拉OK之钮显其等（如「汰聲:盡汰」）。焦点在钮而按 `Enter`／`Space`（或以鼠击之），则弹三者之择单；钮下狀行回报其实效者。
+- 节度（F2）→「播弄之度」：曰「汰聲（卡拉OK）」，按 `Enter` 开同一择单。←/→ 不改此目，必由择单。
+- 符令：`ter-music karaoke` 询其等；`ter-music karaoke soft`（或 `full`／`off`／`1`／`cycle`）设其等。
+- D-Bus：`Control.SetKaraoke`／`Control.GetKaraoke`；或以 `Config.Set` 写 `preferences.karaoke_mode`（`api_version` 6；命名空间徙于第七版）。
+- 其等存于 `config.xml` 之 `<karaoke_mode>`，次启自回灌于引擎；0–2 之外者钳归于0。
+
+**同名之异指：** *karaoke* 在此器复有二义——逐字歌辞之highlighting（`Lyrics.GetDocument` 之 `timing="chars"`），与名曰 `karaoke` 之局度预设（歌辞优先之排布）。三者非一事，本节所言惟汰聲而已。
+
 ### 七 歌辞显明
 本器通自动加载LRC式歌辞之文，且支持内嵌歌词：
 - **内嵌歌词优先**：器先读取音声文件中的内嵌歌词（FFmpeg/APE标签），其键有 `lyrics`、`LYRICS`、`lyrics-eng`、`UNSYNCEDLYRICS`、`©lyr`，兼覆 ID3 `USLT`／iTunes `lyrics-eng` 与常键；若不得，则回退加载外部`.lrc`文件
@@ -729,7 +772,7 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 - 封面先读音声内嵌之图；无者，则按 `cover`、`folder`、`front`、`album`（不辨大小写，扩展名 `.jpg`、`.jpeg`、`.png`、`.webp`）寻同目录之封面。
 - 提取之面统为受管之 `/tmp/ter-music-cover-*.jpg` 暂存，留最近十曲之MRU缓存，退器时净之。
 
-同一D-Bus对象亦供开放歌辞接口：接口 `org.yxzl.ter_music.Lyrics`，方法
+同一D-Bus对象亦供开放歌辞接口：接口 `cn.org.huansoft.ter_music.Lyrics`，方法
 `GetLyrics`、`GetDocument` 与 `SetSource`（于内嵌歌辞与外部歌辞之间切换），
 信号 `LyricsChanged`。自 `api_version 5` 始，A/B之快照增 `char_sung`／
 `char_total`，`GetDocument` 之每行增 `end`、`timing`、`char_total`，逐字之LRC
@@ -738,20 +781,20 @@ Ter-Music具迅疾节度之能，可依需调音程之迟疾：
 
 同一对象之路，复布四接口，俾他器得读曲目之文、文书封面与音程，且得御其器：
 
-- `org.yxzl.ter_music.Info`（唯读）：`GetInfo`、`GetTrackInfo`、`GetProgress`、
+- `cn.org.huansoft.ter_music.Info`（唯读）：`GetInfo`、`GetTrackInfo`、`GetProgress`、
   `GetLyricsLines`、`GetCoverArt(charset, cols, rows)`、`GetDisplay(options)`
   （即 `ter-music show` 所出之文，毫厘不异）、`InstanceInfo`，及信号
   `InfoChanged`、`ProgressChanged`（每秒至多一发）与 `CoverChanged`。
-- `org.yxzl.ter_music.Control`：传输、跳转、音量、迅疾之度、播弄之制、
+- `cn.org.huansoft.ter_music.Control`：传输、跳转、音量、迅疾之度、播弄之制、汰聲之等，
   `ReloadConfig` 与 `Quit`。载入内容**不**在其列——内容由前端以队列之形下付。
-- `org.yxzl.ter_music.Queue`：核心之**径表队列**——
+- `cn.org.huansoft.ter_music.Queue`：核心之**径表队列**——
   `Set`/`Append`/`InsertAfter`/`RemoveAt`/`MoveUp`/`MoveDown`/`Clear`/
   `Shuffle`/`PlayAt` 与分页读取 `Get(offset, count)`，并广播 `QueueChanged`
   （条目之数、当下之标、版本之号）。惟受本地之径；一次所写不逾五百条，
   一次所读不逾千条。
-- `org.yxzl.ter_music.Config`：惟此一门可改核心之制。远方服务器之条目**不**在其中，
+- `cn.org.huansoft.ter_music.Config`：惟此一门可改核心之制。远方服务器之条目**不**在其中，
   乃前端所守（见下文）。
-- `Info.GetInfo` 以 `core.api_version`（今为 `5`）与所备方法之目相质，客可先验其合否。
+- `Info.GetInfo` 以 `core.api_version`（今为 `7`）与所备方法之目相质，客可先验其合否。
   第三版去 `Remote` 接口与 `track.is_remote` 之目，且凡路径之参惟受本地者；
   第四版以径表语义之 `Queue` 代内容之接口（`Playlist`、`Library`、`Favorites`、
   `History`、`DirHistory`）——内容归于前端。第五版增歌辞逐字之时
@@ -792,6 +835,7 @@ ter-music 以 Linyaps 包行时亦发此诸接口：容器用宿主会话总线�
 - `audio_backend`：音声后枢（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）。自动之式启时历探诸枢；明择之枢倘实不可用，播时退就余枢并以状语告之，不默然而败
 - `sort_mode`：排序之式（0=默、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
+- `karaoke_mode`：卡拉OK汰聲之等（0=勿汰、1=微汰、2=盡汰，说在「六之一」）。惟兩聲並列者有效；越此范围者退归于0。此键随 `api_version` 6 而来（第七版徙接口之名，未尝动此键），而节度之文之版号**未**易（尚为9）——旧者见之不理，缺之亦以为0
 - `core_exit_when_no_frontend`：无前端接入时，令核心自退（0/1，默 0）。
   置 1 者，最后一个前端既去、逾十秒之宽限，核心乃退
 - `stop_core_on_exit`：前端退时止核心之播弄——前端改发 `Control.Quit`，
@@ -1106,31 +1150,32 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 
 | 面 | 进程 | 所掌之事 |
 | --- | --- | --- |
-| **核心／播弄之役** | `ter-music daemon foreground`（由 `daemon start` 或文墨之界拉起；Linyaps 封缄之包另可经 D-Bus 按需唤起、或以其 systemd 用户役使常驻，deb／RPM 皆不随包予此二类文件） | 音声之器与解绎、奉行播弄之队列（**惟识径**）、传输之令、音量／迅疾／播弄之制、均衡器、当下曲目之文（歌辞、文书封面、频谱）、所布之 `Lyrics`／`Info`／`Control`／`Queue`／`Config` 接口、前端之登记与心跳、节度之文 |
+| **核心／播弄之役** | `ter-music daemon foreground`（由 `daemon start` 或文墨之界拉起；Linyaps 封缄之包另可经 D-Bus 按需唤起、或以其 systemd 用户役使常驻，deb／RPM 皆不随包予此二类文件） | 音声之器与解绎、奉行播弄之队列（**惟识径**）、传输之令、音量／迅疾／播弄之制、卡拉OK汰聲、均衡器、当下曲目之文（歌辞、文书封面、频谱）、所布之 `Lyrics`／`Info`／`Control`／`Queue`／`Config` 接口、前端之登记与心跳、节度之文 |
 | **前端／内容之客** | `ter-music`（文墨之界）、`ter-music play\|show\|…`（符令行） | 目录之扫描与元数据、SQLite曲库与FTS5搜求、自定曲帙、珍存／往迹／目录往迹、排序／筛择、远方之源与其下载之藏、ncurses文墨之界 |
 
 其接缝刻意至薄，亦便于验：
 
 - **`player/` 门面**：`player.c` 分付于 `player_local.c`（进程内播弄，留作迁移之基线）或 `player_remote.c`（D-Bus之客，默用者）。界面惟呼门面，故前端可独立营构，同一套文墨之界亦得御任一面。
 - **`queue/backend_queue.c`**：核心之径表——序次、游标与版本之号，兼条目之元数据（径、标题、艺术家、专辑、时长、CUE之偏与轨号、歌辞之源）。`audio/play_queue.c` 乃进程内后端所用之薄转发，`playlist/playlist_queue.c` 乃惟一的「内容 → 核心队列」之桥。
-- **D-Bus之面，`api_version 5`**：`Queue.Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **惟受本地之径**（远方之URL见拒），一次所写不逾五百条，分页所读以 `RPC_PAGE_MAX`（千条）为限；`QueueChanged` 广播条目之数／当下之标／版本之号，故任意多之前端皆得同其步。歌辞之接口复带逐字之时（`GetDocument` 之 `end`／`timing`／`chars`，`GetLyrics` 之 `char_sung`／`char_total`）。
+- **D-Bus之面，`api_version 7`**：`Queue.Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **惟受本地之径**（远方之URL见拒），一次所写不逾五百条，分页所读以 `RPC_PAGE_MAX`（千条）为限；`QueueChanged` 广播条目之数／当下之标／版本之号，故任意多之前端皆得同其步。歌辞之接口复带逐字之时（`GetDocument` 之 `end`／`timing`／`chars`，`GetLyrics` 之 `char_sung`／`char_total`）。
 - **前端之登记**：每前端皆当登记而心跳，`core_exit_when_no_frontend` 与 `Info.GetInfo.frontends` 皆本于此。断线非致命：前端按指数退避（1／2／4／8／15／30 秒）而复接，并补推其内容之队列——盖核心自身无内容也。
 
 ### 二 架构门禁
 
-三脚本守此分界，皆已入于CI：
+四脚本守此分界，皆已入于CI：
 
 | 门禁 | 符令 | 律 |
 | --- | --- | --- |
 | 后端之纯 | `scripts/test/check-core-purity.sh` | 后端之目（`audio config core info lyrics media queue` 与 `cli/daemon.c`）不得有远方乐源之符号，亦不得引内容／界面（playlist、library、search、界面渲染、前端之首文） |
 | 前端之纯 | `scripts/test/check-ui-purity.sh` | 界面之达播弄之面，**惟**经 `player` 门面——不得直连引擎播弄之全局或播弄之令 |
+| 包之身份 | `scripts/test/check-package-identity.sh` | 打包之身份必处处相合：应用之 ID 在 `debian/control`、`PKGBUILD`、`.SRCINFO`、`scripts/build/*` 与 systemd 之单元当同值；版号在 `APP_VERSION`（唯一之本源）、CMake `project VERSION`、`pkgver`、`debian/changelog` 首条当同值，而合于滚动之制 `<yy>.<q>.x.y`；`TER_MUSIC_API_VERSION` 当与 `dbus-rpc-check.sh` 所断者一也；旧名 `org.yxzl` 不得存于 `#include`、接口之字符串与打包之链；而**故为不改**之身份（ executable `ter-music`、MPRIS 总线之名、配置之目）亦不得顺手而改之 |
 | 配置之属 | `scripts/test/check-config-ownership.sh` | `config.xml` 为核所独有。前端**不得**用 `save_config()`／`config_save_to_xml()`：惟改己之配置镜像，以差异付之门面 `player_config_persist()`（远方之制即 `Config.Set`） |
 
-与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异、布局之 schema／几何／状态、不假 ncurses 之鼠标事件判定表，兼逐格栅格之验，以证诸预设无缝铺满），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、`mouse-tui-e2e.sh`（以真的 SGR 点击／滚轮之节纳于 pty，既断 D-Bus 上所成之果，亦断每事归属之窗格——弹层既张之时，于弹层之外按之，惟收起弹层，不得穿透而及其后之列表）、`lyrics-pane-e2e.sh`（以 pty 真流经 `vt_grid.py` 还原字符之格，验歌辞格于启动即现、无歌辞之曲暂退、复至有歌辞之曲则自还而无需按任何键）、`context-menu-e2e.sh`（以真右键之节验菜单锚点与钳制、三层子单、由单以行队列与页面之事、信息页惟流光一条，及外部改队列后 stale 之拒）；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
+与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异、布局之 schema／几何／状态、不假 ncurses 之鼠标事件判定表，兼逐格栅格之验，以证诸预设无缝铺满），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、`karaoke-e2e.sh`（自符令 `karaoke` 与 `Control.GetKaraoke` 以至节度之文之落盘、核心重启之回灌，并验越界之钳与故文缺键之默）、`mouse-tui-e2e.sh`（以真的 SGR 点击／滚轮之节纳于 pty，既断 D-Bus 上所成之果，亦断每事归属之窗格——弹层既张之时，于弹层之外按之，惟收起弹层，不得穿透而及其后之列表）、`lyrics-pane-e2e.sh`（以 pty 真流经 `vt_grid.py` 还原字符之格，验歌辞格于启动即现、无歌辞之曲暂退、复至有歌辞之曲则自还而无需按任何键）、`context-menu-e2e.sh`（以真右键之节验菜单锚点与钳制、三层子单、由单以行队列与页面之事、信息页惟流光一条，及外部改队列后 stale 之拒）；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
 
 ### 三 模块地图
 
-本器采分曹营治之制。**源文**在 `src/org.yxzl.ter-music/<module>/` 目录；**公首文**在 `include/org.yxzl.ter-music/<module>/` 目录。主干部伍列于左：
+本器采分曹营治之制。**源文**在 `src/cn.org.huansoft.ter-music/<module>/` 目录；**公首文**在 `include/cn.org.huansoft.ter-music/<module>/` 目录。主干部伍列于左：
 
 - **main/main.c**：众部之总持、参数之铨叙、前端启途之分叉（远端之式走 `frontend_init_config()`，本地基线走 `init_all_persistent_data()`）
 - **player/**：播弄之门面——`player.c`（分付）、`player_local.c`（进程内之后端）、
@@ -1144,7 +1189,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 - **queue/backend_queue.c**：核心之径表（序次、游标、版本之号、本地径之验、
   单次下付之限），兼CUE之前瞻
 - **audio/**：**核心**之音声引擎——解绎与播弄之线、环形之缓冲、`play_queue.c`
-  （转发之层，兼本地基线所用之界面之镜）、atempo之变速、10段均衡器、FFT频谱之数、
+  （转发之层，兼本地基线所用之界面之镜）、atempo之变速、卡拉OK汰聲（`karaoke.c`，限频带削居中者，序在均衡器之先）、10段均衡器、FFT频谱之数、
   `backend_ops.c` 与 PipeWire／PulseAudio／ALSA 之输出
 - **lyrics/**：**核心**之歌辞引擎——寻索、内嵌（斐氏）与外部 `.lrc` 之解析、
   来源之偏好、时轴与分页之构

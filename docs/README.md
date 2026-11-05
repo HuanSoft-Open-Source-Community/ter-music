@@ -34,6 +34,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🎼 **CUE Split-track Support**: CUE sheet parsing for FLAC/APE/WV, with auto-detect encoding (GBK/BIG5/Shift-JIS)
 - 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights the current line and, when the LRC carries timing, lights up each character karaoke-style (per-character tags, line start/end tags, or interpolation between consecutive line timestamps); **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files. Switch between embedded/external sources in lyric seek mode (Ctrl+L → Tab)
 - 🎛️ **10-band Graphic Equalizer**: ISO frequencies (31Hz-16kHz) with biquad IIR DSP, ±12dB range, visual bar UI in settings, with **EQ presets** and **soft-clip** support
+- 🎤 **Karaoke Mode (vocal removal)**: Three levels — off, soft (a faint centre vocal is kept) and full. Band-limited centre cancellation: the mid channel is split by a 4th-order Butterworth crossover (24 dB/oct, 180 Hz / 6 kHz) and only the band between the two corners is subtracted, so the bass and the airy top end of the accompaniment stay intact instead of being phase-cancelled. Stereo only — mono tracks are passed through bit-exactly. Available in the main controls pane (pop-up), Settings → Playback, the CLI (`ter-music karaoke`) and D-Bus (`Control.SetKaraoke`). Not to be confused with the *karaoke-style* per-character lyric highlighting above, or with the `karaoke` layout preset (a lyrics-first arrangement)
 - 🎶 **17 Playback Modes**: From basic (Sequential, Single Repeat, List Repeat, Shuffle) to advanced (Folder/Album/Artist-based variants)
 - ⚡ **Playback Speed Control**: Supports 0.75x, 1.0x, 1.25x, 1.5x, 2.0x, 3.0x speed adjustment for efficient listening
 - 📚 **Music Library**: SQLite-backed music library with FTS5 full-text search, **recursive directory scan**, browse by artist/album/genre, incremental tracking
@@ -48,7 +49,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - ⌨️ **Keyboard Shortcuts**: Full keyboard operation, efficient and convenient
 - 📊 **Real-time Progress Bar**: Smooth playback progress display and seeking
 - 🎨 **Album Cover Display**: Supports album art rendering in terminal (PNG/JPEG as colored half-block character art with automatic 256→8→monochrome fallback; the CLI also supports braille/ASCII/half-block). The controls-pane cover follows the playback master switch; the info-pane cover also has its own switch in Settings → Info Display, and the standalone vinyl pane reuses the current cover as a rotating circular center label
-- 🖥️ **CLI Mode & Background Playback**: Full command-line subcommands (`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`) with a detached background playback daemon that keeps playing after you close the terminal — including inside Linyaps packages, where background playback is started through D-Bus activation or the shipped systemd user service
+- 🖥️ **CLI Mode & Background Playback**: Full command-line subcommands (`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`karaoke`/`show`/`daemon`) with a detached background playback daemon that keeps playing after you close the terminal — including inside Linyaps packages, where background playback is started through D-Bus activation or the shipped systemd user service
 - 📋 **Configurable Info Display**: The main info pane (fields, preset and cover), plus the braille/ASCII/half-block text cover, progress line and two lyric lines (current + next) printed by `ter-music show`, are configurable in the TUI settings
 - 🎵 **MPRIS & Lyrics API**: Desktop media controls with album art, an open D-Bus lyrics API, plus a `Info` interface (track / progress / text cover) and a `Control` interface for other programs
 
@@ -76,15 +77,16 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🔧 **CMake Build**: Modern build system, good cross-platform compatibility | <br /> |
 | 🔊 **Audio Backend**: Supports PipeWire, PulseAudio and ALSA output. Auto mode probes each candidate at startup (PipeWire > Pulse > ALSA — service connectable, or for ALSA: the default device really opens and configures); a backend whose probe fails is neither auto-selected nor listed in Settings. If the chosen backend cannot open the stream at play time, the core re-probes the remaining candidates and falls back, announcing the switch in the status line | <br /> |
 | 🎛️ **10-band Equalizer**: ISO graphic equalizer with visual bar chart UI in settings | <br /> |
+| 🎤 **Karaoke Mode**: Three-level vocal removal (off / soft / full) by band-limited centre cancellation; stereo only, accompaniment kept; controls pop-up, Settings → Playback, `ter-music karaoke`, `Control.SetKaraoke` | <br /> |
 | ⏩ **Playback Speed Control**: 6 levels of speed adjustment (0.75x-3.0x), switchable during playback | <br /> |
 | 📊 **Info Pane**: Displays state/mode, current-track metadata, sample rate, bit depth, bitrate and codec | <br /> |
 | 🌐 **Remote Playback**: SMB/SFTP/FTP/WebDAV/HTTP sources, browsed and downloaded by the front end into a local cache | <br /> |
 | 🎨 **Album Cover**: Colored half-block album art (256→8→mono fallback), toggleable in Settings | <br /> |
 | 🎵 **MPRIS / Lyrics API**: Desktop media controls, album art via `mpris:artUrl`, and a JSON lyrics API over D-Bus | <br /> |
-| 🖥️ **CLI Mode**: `ter-music play/pause/next/seek/volume/speed/mode/show` works against the running instance; `show` prints the configurable info block | <br /> |
+| 🖥️ **CLI Mode**: `ter-music play/pause/next/seek/volume/speed/mode/karaoke/show` works against the running instance; `show` prints the configurable info block | <br /> |
 | 🌙 **Background Playback**: `ter-music daemon start` runs headless playback; control it from any terminal, no TUI needed | <br /> |
 | 🖼️ **Text Cover over D-Bus**: `Info.GetCoverArt` returns braille or ASCII cover art for other applications | <br /> |
-| 📦 **Linyaps CLI**: the same CLI runs inside the Linyaps container (`ll-cli run org.yxzl.ter-music -- ter-music …`); on-demand background playback via D-Bus activation, always-on via a systemd user service | <br /> |
+| 📦 **Linyaps CLI**: the same CLI runs inside the Linyaps container (`ll-cli run cn.org.huansoft.ter-music -- ter-music …`); on-demand background playback via D-Bus activation, always-on via a systemd user service | <br /> |
 
 ### 1.4 Use Cases
 
@@ -190,10 +192,10 @@ sudo apt update
 
 ```bash
 # Using yay (AUR helper)
-yay -S ter-music-cn
+yay -S cn.org.huansoft.ter-music
 
 # Using paru (AUR helper)
-paru -S ter-music-cn
+paru -S cn.org.huansoft.ter-music
 ```
 
 **Install using ZPM (MengXi OS Package Manager):**
@@ -204,17 +206,23 @@ git clone https://aur.archlinux.org/zetapm.git
 cd zetapm
 makepkg -si
 
-# Then install ter-music-cn using ZPM
-zpm -S ter-music-cn
+# Then install cn.org.huansoft.ter-music using ZPM
+zpm -S cn.org.huansoft.ter-music
 ```
 
 **Manual Installation from AUR:**
 
 ```bash
-git clone https://aur.archlinux.org/ter-music-cn.git
-cd ter-music-cn
+git clone https://aur.archlinux.org/cn.org.huansoft.ter-music.git
+cd cn.org.huansoft.ter-music
 makepkg -si
 ```
+
+> The Arch package was renamed from `ter-music-cn` in the organization
+> migration. The AUR recipe is kept in this repository, but the commands above
+> only work once the AUR project itself has been created or renamed by a
+> maintainer; until then use the manual build below with the in-repository
+> `PKGBUILD`.
 
 **Manual Build from Source:**
 
@@ -410,6 +418,7 @@ path in its own process and delivers the resulting queue to the core.
 | `volume [0-100\|+N\|-N]` | Query or set volume |
 | `speed [0.5-3.0]` | Query or set playback speed |
 | `mode [NAME\|0-16]` | Query or set the play mode (stable names such as `list_repeat`, `folder_shuffle_repeat`) |
+| `karaoke [off\|soft\|full\|0-2\|cycle]` | Query or set the karaoke vocal-removal level (`cycle` steps 0→1→2→0); stereo only, the accompaniment is kept |
 | `show [OPTIONS]` | Print the current info block (basic info / text cover / progress / two lyric lines) |
 | `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | Inspect or edit the live queue held by the core |
 | `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | Read or change the core configuration (keys are `config.xml` names; `reset` requires `--yes`) |
@@ -486,6 +495,8 @@ ter-music next
 ter-music seek +10
 ter-music volume +5
 ter-music mode shuffle_repeat
+ter-music karaoke soft    # keep a faint centre vocal (level 1)
+ter-music karaoke full    # remove it as far as possible (level 2), accompaniment unchanged
 
 # Background daemon management
 ter-music daemon start --open ~/Music
@@ -536,15 +547,15 @@ directory and one set of D-Bus interfaces.
 
 ```bash
 # Any CLI command
-ll-cli run org.yxzl.ter-music -- ter-music show
-ll-cli run org.yxzl.ter-music -- ter-music pause
-ll-cli run org.yxzl.ter-music -- ter-music play ~/Music
+ll-cli run cn.org.huansoft.ter-music -- ter-music show
+ll-cli run cn.org.huansoft.ter-music -- ter-music pause
+ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 # Reading state while a container is already running (see the notes below)
-ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show
 
 # Convenience wrapper for interactive shells (put it in ~/.bashrc)
-ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
+ter-music() { ll-cli run cn.org.huansoft.ter-music -- ter-music "$@"; }
 ```
 
 **Background playback.** A self-detached process (`ter-music daemon start`)
@@ -555,9 +566,9 @@ commands when activation is unavailable. Three supported ways exist:
 
 | Option | How to use | Behaviour |
 | ------ | ---------- | --------- |
-| D-Bus activation (on demand) | `ter-music play <path>` or `ter-music daemon start` | The session bus starts `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground --no-autoplay` on the host and the command is forwarded to it |
-| systemd user service (always on) | `systemctl --user enable --now org.yxzl.ter-music` (on the host) | The player starts with the session and keeps playing in the background |
-| Foreground | `ll-cli run org.yxzl.ter-music -- ter-music play <path> --foreground` | Plays in the foreground; the container lives as long as the command runs (tmux/screen friendly) |
+| D-Bus activation (on demand) | `ter-music play <path>` or `ter-music daemon start` | The session bus starts `ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground --no-autoplay` on the host and the command is forwarded to it |
+| systemd user service (always on) | `systemctl --user enable --now cn.org.huansoft.ter-music` (on the host) | The player starts with the session and keeps playing in the background |
+| Foreground | `ll-cli run cn.org.huansoft.ter-music -- ter-music play <path> --foreground` | Plays in the foreground; the container lives as long as the command runs (tmux/screen friendly) |
 
 Notes:
 
@@ -572,9 +583,9 @@ Notes:
 - When an application container is **already running** (the background daemon, or
   the TUI), `ll-cli run … -- <command>` attaches that command's output to the
   *running container's* stdout, so your terminal stays empty. Read it with
-  `journalctl --user -u org.yxzl.ter-music`, or use `ll-cli enter`, which keeps
+  `journalctl --user -u cn.org.huansoft.ter-music`, or use `ll-cli enter`, which keeps
   the terminal attached:
-  `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show`.
+  `ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show`.
   That entered environment carries no `DBUS_SESSION_BUS_ADDRESS`, so the CLI
   resolves the session bus itself (`$XDG_RUNTIME_DIR/bus`, then
   `/run/user/<uid>/bus`); an explicitly set address always wins.
@@ -584,7 +595,7 @@ Notes:
 - Settings, library and the playback session are stored in
   `$XDG_CONFIG_HOME/ter-music`. If the Linyaps runtime redirects the XDG
   variables (see the Linyaps FAQ, "where is application data saved"), they land
-  in `~/.linglong/org.yxzl.ter-music/…` instead, keeping Linyaps and non-Linyaps
+  in `~/.linglong/cn.org.huansoft.ter-music/…` instead, keeping Linyaps and non-Linyaps
   installations independent.
 - `--watch` requires a terminal (it uses ANSI cursor control) — run it directly
   in a terminal instead of piping it.
@@ -620,7 +631,7 @@ sessions where playback should not be started behind your back:
 
 ```bash
 ter-music --attach-only   # exit code 3 when no core is running
-ter-music --bus org.yxzl.ter_music.instance1   # address a specific instance
+ter-music --bus org.mpris.MediaPlayer2.ter_music.instance12345   # address a specific instance
 ```
 
 **Leaving the front end.** Whether closing the TUI stops playback is decided by
@@ -648,7 +659,12 @@ does not exit: it marks itself offline, retries with exponential backoff
 a core answers again. Pressing `R` in the TUI restarts a dead core and re-pushes
 the queue immediately.
 
-**Compatibility.** The bus surface is `api_version 5`; additive over version 4. Content interfaces
+**Compatibility.** The bus surface is `api_version 7`. Version 7 only moved the
+interface namespace from `org.yxzl.ter_music.*` to `cn.org.huansoft.ter_music.*`,
+and that is breaking rather than additive: a core and its clients must be
+upgraded together, since neither can address the other across the rename. The
+methods themselves are the surface that grew additively over versions 4 and 5
+(version 6 added the karaoke controls). Content interfaces
 (`Playlist`, `Library`, `Favorites`, `History`, `DirHistory`, `Remote`) are
 gone: they belong to the front end. Third-party clients should use the
 `Lyrics`, `Info`, `Control`, `Queue` and `Config` interfaces — see
@@ -860,7 +876,7 @@ ever handled twice.
 | Bottom function-key bar | Fires that key's action, exactly as pressing the key | Nothing (the event is still consumed here) |
 | Playlist pane | Select the row; a click plays that track, or toggles a directory in the file tree, just like `Enter` | Move the selection one row up/down — works on search results, the play queue and the file tree alike, and never starts playback |
 | Library browser (it replaces the playlist pane while open, `M`) | Select the entry; clicking the already-selected entry or double-clicking drills down; `[S]`/`[R]` lines trigger scan/rescan | Move the selection (same as `↑`/`↓`) |
-| Controls pane | Press the button under the cursor. The Volume button and the progress row only take the focus, like the keyboard | Progress row: seek ∓5 s; Volume button: ±5 %; Speed button: step through the speed presets (wraps at both ends); other buttons: nothing |
+| Controls pane | Press the button under the cursor. The Volume button and the progress row only take the focus, like the keyboard | Progress row: seek ∓5 s; Volume button: ±5 %; Speed button: step through the speed presets (wraps at both ends); other buttons — the Karaoke one included, it is pop-up only —: nothing |
 | Lyrics pane | Jump to the line under the cursor | Seek to the previous / next lyric line (it does not switch lyric seek mode on or off) |
 | Info, spectrum and vinyl panes | Nothing defined there (the event is consumed, so it never leaks into another pane) | Nothing (consumed) |
 | Sub-view sidebar (Settings, History, Playlist, Favorites, Info, Help, Language) | Select the menu entry; clicking the selected entry again or double-clicking = `Enter` | Move the sidebar selection |
@@ -985,6 +1001,62 @@ Ter-Music supports playback speed adjustment, allowing you to listen to audio at
 
 **Note:** Speed adjustment is implemented using FFmpeg's atempo filter, which maintains audio pitch while changing playback speed.
 
+### 5.6.1 Karaoke Mode (Vocal Removal)
+
+Karaoke mode attenuates the centre-placed lead vocal while leaving the accompaniment
+practically intact, so you can sing along with an ordinary recording. It is a
+*playback* feature: nothing is written to the file, and the original audio on disk
+never changes.
+
+| Level | Config value | What it does |
+| ----- | ------------ | ------------ |
+| Off | `0` | No processing at all — the buffer is passed through unchanged |
+| Soft | `1` | Subtracts about 60 % of the centre band, so a faint vocal remains |
+| Full | `2` | Subtracts the centre band completely (the vocal is as gone as this method allows) |
+
+**How it works** (band-limited centre cancellation):
+
+1. The mid channel `m = (L + R) / 2` is split by two 4th-order Butterworth sections
+   (24 dB/octave): a low-pass at 180 Hz and a high-pass at 6 kHz.
+2. Only the band between those corners — where a lead vocal mainly lives — is taken
+   away from the mid: `m' = m - α · (m - lo - hi)`, with α = 0 / 0.6 / 1.0 for the three levels.
+3. The side channel `d = (L - R) / 2` is untouched and the stereo pair is rebuilt as
+   `L' = m' + d`, `R' = m' - d`.
+
+Keeping the bass and the top end intact is the point of the band limit: subtracting
+the whole mid channel would thin out the low end and cymbals too. When the level
+changes while playing, α ramps over 30 ms instead of jumping, so no click is
+audible; the two crossover delay lines are re-primed from the current signal at the
+same moment, and the output is soft-limited only when a sample would exceed the
+digital full scale.
+
+**Limitations, stated plainly:**
+
+- Stereo only. A mono track has no centre/side decomposition to work with, so it is
+  passed through bit-exactly (`output_channels == 1` never touches the DSP path).
+- Anything panned centre is removed *with* the vocal — a centred bass drum, a snare,
+  or a mono-panned guitar. This is inherent to the method, not a bug to fix.
+- Doubled or wide-panned vocals survive, because they are not in the mid channel.
+- The DSP runs on the decoded samples before the equalizer, so EQ, spectrum and
+  visualiser all reflect the karaoke output.
+
+**How to change the level:**
+
+- Main controls pane: the Karaoke button shows the current level (e.g. "Karaoke:No vocals").
+  Press `Enter`/`Space` on it (or click it) to open the three-item pop-up; the status
+  line under the buttons confirms what was applied.
+- Settings (F2) → Playback: "Karaoke (vocal removal)" — `Enter` opens the same choice list.
+- CLI: `ter-music karaoke` to query, `ter-music karaoke soft` (or `full`/`off`/`1`/`cycle`) to set.
+- D-Bus: `Control.SetKaraoke` / `Control.GetKaraoke`, or `Config.Set` with
+  `preferences.karaoke_mode` (`api_version` 6; the namespace moved at 7).
+- The level is persisted in `config.xml` as `<karaoke_mode>` and is restored on the
+  next start. Values outside 0–2 clamp back to Off.
+
+**Name collision, on purpose:** *karaoke* also refers to the per-character lyric
+highlighting (`Lyrics.GetDocument` with `timing="chars"`) and to the `karaoke`
+layout preset, which is a lyrics-first arrangement. None of the three are the same
+feature; this section is only about vocal removal.
+
 ### 5.7 Lyrics Display
 
 Ter-Music supports automatic loading of LRC format lyrics files:
@@ -1023,7 +1095,7 @@ session on the session bus:
   up when the player exits.
 
 An open lyrics API is available on the same D-Bus object: interface
-`org.yxzl.ter_music.Lyrics` with the methods `GetLyrics`, `GetDocument` and
+`cn.org.huansoft.ter_music.Lyrics` with the methods `GetLyrics`, `GetDocument` and
 `SetSource` (switch between embedded and external lyrics), and the signal
 `LyricsChanged`. Since `api_version 5` the A/B snapshot carries
 `char_sung`/`char_total`, and each `GetDocument` line carries `end`, `timing`,
@@ -1036,23 +1108,23 @@ Four more interfaces are published on the same object path so that other
 applications can read track data, text cover art and progress, and drive the
 player:
 
-- `org.yxzl.ter_music.Info` (read-only): `GetInfo`, `GetTrackInfo`,
+- `cn.org.huansoft.ter_music.Info` (read-only): `GetInfo`, `GetTrackInfo`,
   `GetProgress`, `GetLyricsLines`, `GetCoverArt(charset, cols, rows)`,
   `GetDisplay(options)` (the exact text printed by `ter-music show`),
   `InstanceInfo`, plus the signals `InfoChanged`, `ProgressChanged` (at most
   1 Hz) and `CoverChanged`.
-- `org.yxzl.ter_music.Control`: transport, seek, volume, speed, play mode,
+- `cn.org.huansoft.ter_music.Control`: transport, seek, volume, speed, play mode,
   `ReloadConfig` and `Quit`. Loading content is **not** part of it — the front
   end delivers a queue instead.
-- `org.yxzl.ter_music.Queue`: the core's **path queue** —
+- `cn.org.huansoft.ter_music.Queue`: the core's **path queue** —
   `Set`/`Append`/`InsertAfter`/`RemoveAt`/`MoveUp`/`MoveDown`/`Clear`/
   `Shuffle`/`PlayAt` and paged `Get(offset, count)`, with the `QueueChanged`
   signal (entries, current position, revision). Local paths only; at most 500
   entries per write and 1000 per read.
-- `org.yxzl.ter_music.Config`: read and patch the core configuration (the only
+- `cn.org.huansoft.ter_music.Config`: read and patch the core configuration (the only
   writer). Remote server entries are **not** part of it: they belong to the
   front end (see below).
-- `Info.GetInfo` advertises `core.api_version` (currently `5`) plus the
+- `Info.GetInfo` advertises `core.api_version` (currently `7`) plus the
   implemented method list, so clients can check compatibility before using
   anything else. Version 3 removed the `Remote` interface and the
   `track.is_remote` field and made every path argument local-only; version 4
@@ -1061,7 +1133,10 @@ player:
   the front end. Version 5 added per-character lyric timing (`char_sung`,
   `char_total`, `end`, `timing`, `chars`) additively: the new front end accepts
   a version 4 core (whole-line fallback) and a version 4 front end accepts a
-  version 5 core.
+  version 5 core. Version 6 added karaoke vocal removal
+  (`Control.SetKaraoke`/`Control.GetKaraoke` and the `karaoke_mode` config key),
+  again additively — a version 5 client never calls them, and a version 6 front
+  end on a version 5 core just reports the level as off.
 - `org.freedesktop.DBus.Introspectable` and `org.freedesktop.DBus.Peer` are
   implemented, so `busctl --user introspect` / `gdbus introspect` work.
 - MPRIS metadata additionally carries `xesam:url` (always a `file://` URI,
@@ -1103,6 +1178,7 @@ The configuration file is stored at `~/.config/ter-music/config.xml`. The progra
 - `audio_backend`: Audio output backend (0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire). Auto probes every candidate at startup; if an explicitly chosen backend turns out unavailable it falls back to the next working one at play time and the switch is announced in the status line
 - `sort_mode`: Playlist sort mode (0=Default, 1=Title, 2=Artist, 3=Album, 4=Filename)
 - `cue_encoding`: CUE file character encoding (0=Auto, 1=UTF-8, 2=GB18030, 3=GBK, 4=BIG5, 5=Shift-JIS)
+- `karaoke_mode`: Karaoke vocal-removal level (0=off, 1=soft, 2=full; see 5.6.1). Stereo only; anything outside 0-2 is reset to 0. Added with the application's `api_version` 6 — `api_version` 7 renamed the D-Bus namespace but left this key alone — and the configuration file format itself did **not** change version (still 9) — older builds simply ignore the element, and a missing element means 0
 - `core_exit_when_no_frontend`: let the core exit by itself once no front end has been attached for 10 s (0/1, default 0)
 - `stop_core_on_exit`: stop the playback core when a front end exits — the front end sends `Control.Quit` instead of `Control.Detach`, and only when it really attached to that core (handshake done, `Attach` token held) (0/1, default 1 — with 0, closing the TUI keeps the music playing in the background). The key arrived with configuration contract version 8; the `version` attribute of `config.xml` now carries the current contract number (9) instead of the old `2.2`; downgrading to an older build does not fail, but that build ignores the key and writes `2.2` back on its next save, so the explicit value is lost and the upgrade re-applies the default
 - Keybinding overrides live in the optional `<keybindings>` section (contract v9). Only overrides are stored; actions without an entry use their built-in keys. See [5.12 Shortcut Cheat Sheet](#512-shortcut-cheat-sheet) for the XML example and the key-name grammar
@@ -1515,7 +1591,7 @@ facade and the D-Bus surface:
 
 | Plane | Process | Owns |
 | ----- | ------- | ---- |
-| **Core / playback service** | `ter-music daemon foreground` (started by `daemon start` or by a TUI front end; the Linyaps package can also start it via D-Bus activation or its systemd user service — deb/RPM ship neither file) | Audio device and decoding, play queue execution (**paths only**), transport, volume / speed / play mode, equalizer, current-track info (lyrics, text cover, spectrum), the published `Lyrics` / `Info` / `Control` / `Queue` / `Config` interfaces, front-end registry and heartbeat, configuration |
+| **Core / playback service** | `ter-music daemon foreground` (started by `daemon start` or by a TUI front end; the Linyaps package can also start it via D-Bus activation or its systemd user service — deb/RPM ship neither file) | Audio device and decoding, play queue execution (**paths only**), transport, volume / speed / play mode, karaoke vocal removal, equalizer, current-track info (lyrics, text cover, spectrum), the published `Lyrics` / `Info` / `Control` / `Queue` / `Config` interfaces, front-end registry and heartbeat, configuration |
 | **Front end / content client** | `ter-music` (TUI), `ter-music play\|show\|…` (CLI) | Directory scanning and metadata, SQLite library and FTS5 search, user playlists, favorites / history / directory history, sorting / filtering, remote sources and their download cache, the ncurses UI |
 
 The seam is deliberately thin and testable:
@@ -1529,7 +1605,7 @@ The seam is deliberately thin and testable:
   offset/track number, lyric source). `audio/play_queue.c` is a thin forwarder
   used by the in-process backend, and `playlist/playlist_queue.c` is the only
   bridge that renders front-end content into a core queue.
-- **D-Bus surface, `api_version 5`** — `Queue.Set/Append/InsertAfter/RemoveAt/
+- **D-Bus surface, `api_version 7`** — `Queue.Set/Append/InsertAfter/RemoveAt/
   MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` accept **local paths only** (remote
   URLs are rejected), batch at most 500 entries per call and page reads at
   `RPC_PAGE_MAX` (1000) entries; `QueueChanged` announces count / current
@@ -1544,13 +1620,14 @@ The seam is deliberately thin and testable:
 
 ### 7.2 Architecture Gates
 
-Three scripts keep the split honest, and all of them run in CI:
+Four scripts keep the split honest, and all of them run in CI:
 
 | Gate | Command | Rule |
 | ---- | ------- | ---- |
 | Backend purity | `scripts/test/check-core-purity.sh` | Core directories (`audio config core info lyrics media queue` + `cli/daemon.c`) must contain **no** remote-source symbol and no content/UI reference (playlist, library, search, UI rendering, front-end headers) |
 | Front-end purity | `scripts/test/check-ui-purity.sh` | The UI must reach the playback surface **only** through the `player` facade — no engine playback globals or engine playback commands |
 | Config ownership | `scripts/test/check-config-ownership.sh` | The core owns `config.xml`. The front end must not call `save_config()` / `config_save_to_xml()` at all: it changes its own mirror and persists the difference through the facade (`player_config_persist()`, which is `Config.Set` in remote mode) |
+| Package identity | `scripts/test/check-package-identity.sh` | The packaging identity must agree everywhere: one application id across `debian/control`, `PKGBUILD`, `.SRCINFO`, `scripts/build/*` and the systemd unit; one version across `APP_VERSION` (the source of truth), CMake `project VERSION`, `pkgver` and the top `debian/changelog` entry, in the rolling `<yy>.<q>.x.y` form; `TER_MUSIC_API_VERSION` must equal what `dbus-rpc-check.sh` asserts; no old `org.yxzl` namespace may survive in includes, interface string literals or the packaging chain; and the deliberately unchanged identity (binary `ter-music`, MPRIS bus name, config dir) must not have been "helpfully" renamed |
 
 Regression suites accompany them: `scripts/test/run-unit-tests.sh` (path queue,
 play-queue contract, lyrics parsing, JSON reader, configuration diff, layout
@@ -1559,7 +1636,10 @@ per-cell rasterisation check that every
 preset tiles without blanks) plus the
 end-to-end scripts `dbus-rpc-check.sh`, `config-migration-check.sh`,
 `lifecycle-e2e.sh`, `offline-reconnect-e2e.sh`, `multi-frontend-e2e.sh`,
-`paging-deepdir-e2e.sh` and `remote-frontend-e2e.sh`, `mouse-tui-e2e.sh`
+`paging-deepdir-e2e.sh` and `remote-frontend-e2e.sh`, `karaoke-e2e.sh`
+(from the `karaoke` CLI and `Control.GetKaraoke` down to `config.xml` persistence and the
+restart re-apply, including out-of-range clamping and the missing-key default),
+`mouse-tui-e2e.sh`
 (whose pty feeds real SGR click/wheel bytes to the TUI and asserts both the
 D-Bus outcome and which pane owned each event — including the popup-expanded
 case where an outside click must dismiss the popup without reaching through
@@ -1578,7 +1658,7 @@ thresholds; CI records the numbers without gating on them).
 
 Ter-Music adopts a modular design, main modules include:
 
-> **Source files** are organized under `src/org.yxzl.ter-music/<module>/`; **public headers** under `include/org.yxzl.ter-music/<module>/`.
+> **Source files** are organized under `src/cn.org.huansoft.ter-music/<module>/`; **public headers** under `include/cn.org.huansoft.ter-music/<module>/`.
 
 - **main/main.c**: Program entry, argument handling, front-end startup split
   (`frontend_init_config()` for the remote mode, `init_all_persistent_data()`
@@ -1597,7 +1677,9 @@ Ter-Music adopts a modular design, main modules include:
   local-path guard, per-call size limit) plus CUE look-ahead
 - **audio/**: Core audio engine — decoding and playback thread, ring buffer,
   `play_queue.c` (forwarder + UI mirror used by the local baseline), atempo
-  speed control, 10-band equalizer, FFT visualizer data, `backend_ops.c` and the
+  speed control, karaoke vocal removal (`karaoke.c`, band-limited centre
+  cancellation, runs before the equalizer), 10-band equalizer, FFT visualizer
+  data, `backend_ops.c` and the
   PipeWire / PulseAudio / ALSA outputs
 - **lyrics/**: Core lyrics engine — discovery, embedded (FFmpeg) and external
   `.lrc` parsing, source preference, timeline and page building

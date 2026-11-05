@@ -5,7 +5,10 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SCRIPT_DIR="$(pwd)"
 PROJECT_NAME="ter-music"
-DEFAULT_VERSION="2.3.0"
+# 包名随组织迁移改为 cn.org.huansoft.ter-music；可执行文件名仍是 ter-music，
+# 所以 spec 里用 %{binname} 指文件、%{name} 指包，两者不得混用。
+PACKAGE_NAME="cn.org.huansoft.ter-music"
+DEFAULT_VERSION="26.4.1.0"
 OUTPUT_DIR="${SCRIPT_DIR}/build/rpm"
 TEMP_DIR="${SCRIPT_DIR}/.rpmbuild_temp"
 
@@ -256,19 +259,22 @@ check_dependencies() {
 detect_version() {
     local version="$DEFAULT_VERSION"
 
-    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
-        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    # 版本以 types.h 里的 APP_VERSION 为唯一事实源：漏打 tag 或 tag 落后于代码时，
+    # 包版本仍然跟着源码走；git tag 退为次级兜底。
+    if [ -f "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" ]; then
+        local match
+        match=$(grep -E '#define APP_VERSION' "${SCRIPT_DIR}/include/cn.org.huansoft.ter-music/types.h" | head -1)
+        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*) ]]; then
             version="${BASH_REMATCH[1]}"
             echo "$version"
             return
         fi
     fi
 
-    if [ -f "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" ]; then
-        local match
-        match=$(grep -E 'APP_VERSION' "${SCRIPT_DIR}/include/org.yxzl.ter-music/types.h" | head -1)
-        if [[ $match =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+
+    if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+        local git_version=$(git describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ $git_version =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*)$ ]]; then
             version="${BASH_REMATCH[1]}"
             echo "$version"
             return
@@ -309,7 +315,7 @@ generate_spec_file() {
     local no_debuginfo="$2"
     local target_arch="$3"
     local static_build="${4:-false}"
-    local spec_file="${TEMP_DIR}/SPECS/${PROJECT_NAME}.spec"
+    local spec_file="${TEMP_DIR}/SPECS/${PACKAGE_NAME}.spec"
 
     log_info "生成 RPM spec file (目标架构: $target_arch)..."
 
@@ -337,7 +343,12 @@ BuildRequires:  pkgconfig(libswscale)"
 
     cat > "$spec_file" << EOF
 ${debuginfo_macro}
-Name:           ${PROJECT_NAME}
+# 组织迁移：包名改为 PACKAGE_NAME，可执行文件与数据文件名保持 binname；
+# Provides/Obsoletes 让 dnf 把旧包原地换成新包，用户不需要手动 remove。
+%global binname ${PROJECT_NAME}
+Name:           ${PACKAGE_NAME}
+Provides:       ${PROJECT_NAME} = %{version}-%{release}
+Obsoletes:      ${PROJECT_NAME} < 26.4.1.0
 Version:        ${version}
 Release:        1%{?dist}
 Summary:        A terminal-based music player with ncurses interface
@@ -397,12 +408,12 @@ mkdir -p %{buildroot}%{_datadir}/icons/hicolor/48x48/apps
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/128x128/apps
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/scalable/apps
 cd build
-install -m 755 %{name} %{buildroot}%{_bindir}/%{name}
-install -m 644 ../data/applications/%{name}.desktop %{buildroot}%{_datadir}/applications/%{name}.desktop
-install -m 644 ../resources/icons/hicolor/32x32/apps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/32x32/apps/%{name}.png
-install -m 644 ../resources/icons/hicolor/48x48/apps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/%{name}.png
-install -m 644 ../resources/icons/hicolor/128x128/apps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/%{name}.png
-install -m 644 ../resources/icons/hicolor/scalable/apps/%{name}.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/%{name}.svg
+install -m 755 %{binname} %{buildroot}%{_bindir}/%{binname}
+install -m 644 ../data/applications/%{binname}.desktop %{buildroot}%{_datadir}/applications/%{binname}.desktop
+install -m 644 ../resources/icons/hicolor/32x32/apps/%{binname}.png %{buildroot}%{_datadir}/icons/hicolor/32x32/apps/%{binname}.png
+install -m 644 ../resources/icons/hicolor/48x48/apps/%{binname}.png %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/%{binname}.png
+install -m 644 ../resources/icons/hicolor/128x128/apps/%{binname}.png %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/%{binname}.png
+install -m 644 ../resources/icons/hicolor/scalable/apps/%{binname}.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/%{binname}.svg
 mkdir -p %{buildroot}%{_datadir}/ter-music/help
 install -m 644 ../data/help/help-quickstart-zh_CN.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-zh_CN.txt
 install -m 644 ../data/help/help-quickstart-en_US.txt %{buildroot}%{_datadir}/ter-music/help/help-quickstart-en_US.txt
@@ -415,9 +426,9 @@ mkdir -p %{buildroot}%{_datadir}/ter-music/layouts
 install -m 644 ../data/layouts/layouts.json %{buildroot}%{_datadir}/ter-music/layouts/layouts.json
 
 %files
-%{_bindir}/%{name}
-%{_datadir}/applications/%{name}.desktop
-%{_datadir}/icons/hicolor/*/apps/%{name}.*
+%{_bindir}/%{binname}
+%{_datadir}/applications/%{binname}.desktop
+%{_datadir}/icons/hicolor/*/apps/%{binname}.*
 %{_datadir}/ter-music/*
 
 %changelog
@@ -430,13 +441,13 @@ EOF
 
 create_source_tarball() {
     local version="$1"
-    local tarball_name="${PROJECT_NAME}-${version}.tar.gz"
+    local tarball_name="${PACKAGE_NAME}-${version}.tar.gz"
     local tarball_path="${TEMP_DIR}/SOURCES/${tarball_name}"
     
     log_info "创建源码压缩包..."
     
     if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1 && [ "${SKIP_GIT_ARCHIVE:-0}" != "1" ]; then
-        git -C "${SCRIPT_DIR}" archive --format=tar.gz --prefix="${PROJECT_NAME}-${version}/" HEAD > "$tarball_path"
+        git -C "${SCRIPT_DIR}" archive --format=tar.gz --prefix="${PACKAGE_NAME}-${version}/" HEAD > "$tarball_path"
         if [ $? -eq 0 ]; then
             log_info "源码压缩包已创建: $tarball_path (使用 git archive)"
             return
@@ -445,7 +456,7 @@ create_source_tarball() {
     fi
     
     local source_dir="${TEMP_DIR}/source_package"
-    local package_dir="${source_dir}/${PROJECT_NAME}-${version}"
+    local package_dir="${source_dir}/${PACKAGE_NAME}-${version}"
     
     rm -rf "$source_dir"
     mkdir -p "$package_dir"
@@ -466,7 +477,7 @@ create_source_tarball() {
         return 1
     fi
     
-    tar -czf "$tarball_path" -C "$source_dir" "${PROJECT_NAME}-${version}"
+    tar -czf "$tarball_path" -C "$source_dir" "${PACKAGE_NAME}-${version}"
     
     log_info "源码压缩包已创建: $tarball_path"
 }
@@ -486,7 +497,7 @@ build_rpm() {
     
     # 构建 rpmbuild 命令参数
     local rpmbuild_args=(
-        -ba "${TEMP_DIR}/SPECS/${PROJECT_NAME}.spec"
+        -ba "${TEMP_DIR}/SPECS/${PACKAGE_NAME}.spec"
         --define "_topdir ${TEMP_DIR}"
         --define "_sourcedir ${TEMP_DIR}/SOURCES"
         --define "_specdir ${TEMP_DIR}/SPECS"
@@ -642,7 +653,7 @@ show_summary() {
     ls -lh "${output_dir}"/*.rpm 2>/dev/null || echo "  未找到 RPM 包"
     echo ""
     echo "安装命令:"
-    echo "  sudo dnf install ${output_dir}/${PROJECT_NAME}-*.rpm"
+    echo "  sudo dnf install ${output_dir}/${PACKAGE_NAME}-*.rpm"
     echo ""
 }
 

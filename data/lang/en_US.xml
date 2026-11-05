@@ -108,6 +108,8 @@
   <string key="settings.backend.hint">Audio backend will take effect on next startup</string>
   <string key="settings.sort.applied">Sort mode applied</string>
   <string key="settings.cue.saved">CUE encoding saved</string>
+  <string key="settings.karaoke.saved">Karaoke setting saved</string>
+  <string key="settings.karaoke.unsupported">The running player core does not support karaoke (core too old)</string>
   <string key="settings.color.prompt">Enter color (0-255): </string>
   <string key="settings.color.same_error">Foreground and background colors cannot be the same</string>
   <string key="settings.hotkeys.volume">+ / -: Adjust volume</string>
@@ -144,6 +146,7 @@
   <string key="settings.opt.audio_backend">Audio Backend</string>
   <string key="settings.opt.sort_mode">Sort Mode</string>
   <string key="settings.opt.cue_encoding">CUE Encoding</string>
+  <string key="settings.opt.karaoke_mode">Karaoke (vocal removal)</string>
 
   <!-- ===== Info display (info pane + CLI / D-Bus) ===== -->
   <string key="settings.opt.info_preset">Info Display Preset</string>
@@ -286,12 +289,20 @@
   <string key="controls.label.loop">Loop</string>
   <string key="controls.label.speed">Speed</string>
   <string key="controls.label.volume">Volume</string>
+  <string key="controls.label.karaoke">Karaoke</string>
   <string key="controls.label.progress">Progress</string>
+
+  <!-- ===== Karaoke (vocal removal): level labels and main-page hint ===== -->
+  <string key="karaoke.level.off">Off</string>
+  <string key="karaoke.level.soft">Faint vocals</string>
+  <string key="karaoke.level.full">No vocals</string>
+  <string key="karaoke.hint">Vocal removal: stereo only, accompaniment untouched</string>
 
   <!-- ===== Popup titles ===== -->
   <string key="popup.play_mode"> Play Mode </string>
   <string key="popup.speed"> Speed </string>
   <string key="popup.volume"> Volume </string>
+  <string key="popup.karaoke"> Vocal Removal </string>
   <string key="popup.color"> Color </string>
   <string key="popup.lang"> Lang </string>
   <string key="popup.backend"> Backend </string>
@@ -895,6 +906,9 @@
   <string key="cli.help.cmd.mode.summary">Query or set the play mode</string>
   <string key="cli.help.cmd.mode.usage">Usage: {prog} mode [name|0-16]</string>
   <string key="cli.help.cmd.mode.detail">With no argument, print the current mode (name, number and display name); with an argument, set it by stable name or number, e.g. list_repeat or folder_shuffle_repeat.</string>
+  <string key="cli.help.cmd.karaoke.summary">Show or set the karaoke (vocal removal) level</string>
+  <string key="cli.help.cmd.karaoke.usage">Usage: {prog} karaoke [off|soft|full|0-2|cycle]</string>
+  <string key="cli.help.cmd.karaoke.detail">With no argument, print the current level (name, number and display name); with an argument, set it by stable name or number; cycle steps 0->1->2->0. Only stereo audio is affected (mono tracks play unchanged). The level is stored in preferences.karaoke_mode and applies to the track that is already playing.</string>
   <string key="cli.help.cmd.show.summary">Print the current playback info block</string>
   <string key="cli.help.cmd.show.usage">Usage: {prog} show [options]</string>
   <string key="cli.help.cmd.show.detail">Print the current track information from the core, including basic info, text cover, progress and lyric lines; options apply to this call only and do not change saved settings.</string>
@@ -1040,9 +1054,9 @@
   <!-- ===== cli/cli.c ===== -->
   <string key="cli.err.sandbox.fork_default">Error: cannot fork a background process inside the Linyaps package environment.</string>
   <string key="cli.msg.sandbox.guidance_title">Use one of the following instead (all run on the host):</string>
-  <string key="cli.msg.sandbox.guidance_service">  · Persistent service (recommended): systemctl --user enable --now org.yxzl.ter-music</string>
-  <string key="cli.msg.sandbox.guidance_foreground">  · Run in the foreground: ll-cli run org.yxzl.ter-music -- ter-music daemon foreground</string>
-  <string key="cli.msg.sandbox.guidance_play">  · Play directly: ll-cli run org.yxzl.ter-music -- ter-music play &lt;path&gt; --foreground</string>
+  <string key="cli.msg.sandbox.guidance_service">  · Persistent service (recommended): systemctl --user enable --now cn.org.huansoft.ter-music</string>
+  <string key="cli.msg.sandbox.guidance_foreground">  · Run in the foreground: ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground</string>
+  <string key="cli.msg.sandbox.guidance_play">  · Play directly: ll-cli run cn.org.huansoft.ter-music -- ter-music play &lt;path&gt; --foreground</string>
   <string key="cli.err.daemon.not_ready_10s">Error: background playback start was requested, but the instance did not become ready within 10 seconds.</string>
   <string key="cli.err.sandbox.fork_detached">Error: cannot fork a detached background process inside the Linyaps package environment (detached processes are reclaimed when the container exits).</string>
   <string key="cli.err.attach_only.no_service">Error: no playback service is running (--attach-only was specified, so it will not be started automatically).</string>
@@ -1135,6 +1149,7 @@
   <string key="cli.err.seek_failed">Error: seek failed (no track, or the duration is unknown).</string>
   <string key="cli.err.speed_range">Error: playback speed must be between 0.5 and 3.0.</string>
   <string key="cli.err.mode_unknown_fmt">Error: unknown play mode '%s'. Valid values: sequential, single_repeat, list_repeat, shuffle_once, shuffle_repeat, folder_*, album_*, artist_*, or 0-16.</string>
+  <string key="cli.err.karaoke.unknown_level_fmt">Error: unknown karaoke level '%s'. Valid values: off, soft, full, 0-2, or cycle.</string>
   <string key="cli.err.oom">Error: out of memory.</string>
   <string key="cli.err.watch_json_conflict">Error: --watch and --json cannot be used together.</string>
   <string key="cli.err.watch_requires_tty">Error: --watch must be run directly in a terminal (do not redirect the output).</string>

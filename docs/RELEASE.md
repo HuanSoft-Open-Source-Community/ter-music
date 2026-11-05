@@ -6,8 +6,31 @@
 
 ## 版本准备
 
-1. 更新 `include/org.yxzl.ter-music/types.h` 中的 `APP_VERSION`（例如 `"v2.1.1"`）。
-2. Git tag 名必须与 APP_VERSION 一致（`vX.Y.Z` 格式），发布时按此打 tag。
+1. 更新 `include/cn.org.huansoft.ter-music/types.h` 中的 `APP_VERSION`。版本号为
+   **四段**（例如 `"v26.4.1.0"`）；下文示例一律写作 `X.Y.Z.W`，指本次要发的完整版本号。
+2. Git tag 名必须与 APP_VERSION 一致（`vX.Y.Z.W` 格式），发布时按此打 tag。
+
+### 滚动发行与版本号落点
+
+自 26.4.1.0 起改用**滚动发行**：不再攒大版本，功能合入主线后即可随时发版。版本号方案为
+`<yy>.<q>.x.y` 四段——年前两位、季度、本季度主线序、修订位（`26.4.1.0` 即 2026 年第 4
+季度第 1 条主线的 0 号修订）。换季度不要求跳号：`x` 只在本季度内递增，`y` 用于同一条
+主线的 hotfix。
+
+版本号只有**一个事实源**：`types.h` 的 `APP_VERSION`（`ter-music --version`、关于界面、
+日志抬头、`Info.GetInfo` 的 `instance.version` 都读它）。发布时必须同步镜像的四处：
+
+| 位置 | 字段 | 本例取值 |
+| ---- | ---- | -------- |
+| `include/cn.org.huansoft.ter-music/types.h` | `APP_VERSION` | `"v26.4.1.0"` |
+| `CMakeLists.txt` | `project(... VERSION ...)` | `26.4.1.0` |
+| `PKGBUILD` | `pkgver` | `26.4.1.0` |
+| `debian/changelog` | 顶部条目版本 | `26.4.1.0-1` |
+
+`scripts/build/` 六个打包脚本的 `detect_version()` **先读 `types.h`，再退到 git tag**，
+最后才用脚本内的 `DEFAULT_VERSION` 兜底。这个顺序是刻意的：tag 曾落后于代码（仓库里
+最新 tag 是 `v2.1.0`，而 `APP_VERSION` 已是 `v2.3.0`），旧顺序会把包版本打成旧 tag 的
+值。正则同时放宽到四段，否则 `26.4.1.0` 会被截成 `26.4.1`。
 3. 确认 CI 全绿：`gh run list --workflow ci.yml`。
 4. 行为变更登记（架构反转：后端只做播放、前端持有内容的那一版）：
    - **职责边界**：核心（`daemon`）只做播放服务——音频设备、播放状态与进度、
@@ -53,6 +76,38 @@
      （v4 核心缺字段时逐字高亮降级为整行），v4 前端/CLI 也能接入 v5 核心；
      TUI 歌词面板按逐字点亮，旧式只有行首时间戳的歌词按「本行起点 → 下一行
      起点」均分（最后一行沿用前一段时长）。
+    - **D-Bus `api_version` 5 → 6（卡拉OK/消人声，增量兼容）**：
+      新增 `Control.SetKaraoke`（`(i mode) -> b`，越界回 `false` 而不报错）与
+      `Control.GetKaraoke`（`() -> i`，回引擎当前实际生效的档位）；配置新增
+      `preferences.karaoke_mode`（0=不启用、1=人声较弱、2=消除人声，越界钳制到
+      0/2）。两方法都**不**列入 `k_required_methods`，（当时）握手门槛仍是
+      `api_version >= 4`，所以 v5 前端接 v6 核心照旧可用（`api_version` 7 起门槛
+      抬到 `>= 7`，见下条）；v6 前端接 v5 核心时
+      `SetKaraoke` 得到 `UnknownMethod`，记 warn 后把档位显示为「不启用」
+      （v5 核心没有这个能力，这就是它的真实状态）。算法为频带受限的中置消除：
+      中置通道 `m=(L+R)/2` 用两段 4 阶 Butterworth（24dB/倍频，180Hz 低通 +
+      6kHz 高通）分出 `lo`/`hi`，只减带内 `band=m-lo-hi`，即 `m'=m-α·band`
+      （α=0/0.6/1.0），侧置通道 `d=(L-R)/2` 保持不变，`L'=m'+d`、`R'=m'-d`
+      重建立体声；换档时 α 以 30ms 时间常数渐变并重新起测两条分频延时线，仅在
+      样本越过数字满量程时做 tanh 软限幅。**仅立体声生效**，单声道逐比特直通；
+      DSP 在播放线程的写入批次内、**排在 `eq_process` 之前**（seek、换曲、流
+      重开处都调 `karaoke_reset()`）。入口三处：主页控制栏新增第 8 个按钮
+      （弹层选档，滚轮无动作）、设置 → 播放设置新增末项、CLI 新增
+      `ter-music karaoke [off|soft|full|0-2|cycle]`；不新增任何按键动作。
+      **配置契约版本仍为 9**（新增普通键不改版本：旧版忽略该元素，缺元素即 0）。
+      随附回归脚本 `scripts/test/karaoke-e2e.sh` 与单测 `test_karaoke.c`
+      （衰减量、单声道直通、越界钳制）。
+    - **D-Bus `api_version` 6 → 7（组织命名空间迁移，破坏性）**：接口与错误前缀由
+      `org.yxzl.ter_music.*` 整体改为 `cn.org.huansoft.ter_music.*`，方法面本身一字
+      未动。命名空间属于线上协议，故这不是增量：旧前端调新核心每个方法都得
+      `UnknownInterface`，新前端连旧核心连 `Control.Attach`/`Info.GetInfo` 都取不到，
+      不存在双栈期，`TER_MUSIC_API_MIN_VERSION` 因此由 4 抬到 7，核心与前端必须成对
+      升级。总线名 `org.mpris.MediaPlayer2.ter_music`（含 `.instance<pid>` 备用名）、
+      可执行文件名 `ter-music`、`/usr/share/ter-music` 与 `~/.config/ter-music` 均
+      **不变**；同一版本里包名、源码/头文件目录、玲珑 APP_ID、systemd 用户单元一并
+      迁到 `cn.org.huansoft`（对照表与人工待办见「〇、组织迁移」节）。自省清单因此
+      只认新前缀，`scripts/test/dbus-rpc-check.sh` 增加「自省里不得残留
+      `org.yxzl.`」的闭合断言。
     - **外观系统修正（布局底层改为强制平铺分栏树）**：
       - 布局 v2 JSON 以 `tree` 为权威模型：分栏节点按 `row`（左右）或
         `col`（上下）切分，`ratio` 为千分比，叶节点引用窗格种类。任何
@@ -96,7 +151,8 @@
         不写 `config.xml`/`layouts.json`，关闭后重绘即恢复原配色（含碟面色对）。
         阻塞式文本输入/对话框期间动画暂停。
     回归脚本：`scripts/test/check-core-purity.sh`、`check-ui-purity.sh`、
-    `check-config-ownership.sh`、`run-unit-tests.sh`、`dbus-rpc-check.sh`、
+    `check-config-ownership.sh`、`check-package-identity.sh`（包名/版本/命名空间身份矩阵，
+    组织迁移与滚动版本号即由它守门）、`run-unit-tests.sh`、`dbus-rpc-check.sh`、
    `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
    `multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、
    `perf-check.sh`（CI 的 `gates` 作业跑三条门禁与单测，`e2e` 作业跑全部 e2e，
@@ -104,16 +160,55 @@
    - 历史登记（远程音乐源移交前端的那一版）：配置 schema v5 → v6 把旧的
      `<remote_connections>` 段搬到前端自有的 `<configdir>/remote.xml`
      （密码密文原样保留，文件权限 0600），核心配置此后不再含该段；核心不再
-     发布 `org.yxzl.ter_music.Remote`，`core.api_version` 升为 3。
+     发布 `cn.org.huansoft.ter_music.Remote`，`core.api_version` 升为 3。
 
 > **原则：验收通过后才打 tag，绝不提前打 tag。**
 > 构建产物、测试、验收全部在 tag 之前完成（构建脚本用 `git archive HEAD`
 > 取源码，不依赖 tag）；tag 只在确认可发布后创建，且必须打在构建所用的
 > 同一个 commit 上（打 tag 前 `git rev-parse HEAD` 与构建时比对）。
 >
-> **陷阱：打 tag 之前构建必须显式传 `-v X.Y.Z`。**
+> **陷阱：打 tag 之前构建必须显式传 `-v X.Y.Z.W`。**
 > 构建脚本的 `detect_version()` 优先级是「最新 git tag > types.h > 默认值」，
 > 而此刻最新 tag 还是上一个版本——不显式传 `-v` 会打出旧版本号的包。
+
+---
+
+## 〇、组织迁移的对照与人工待办（26.4.1.0 起）
+
+仓库内的痕迹已一次性迁完，下表右侧是**当前真实状态**（可在本机核对）；表外的事本仓库
+改不了，必须由发布方逐项执行，否则文档会与外部现实脱节。
+
+| 项目 | 旧 | 新 | 迁移性质 |
+| ---- | -- | -- | -------- |
+| 源码/头文件目录 | `src/org.yxzl.ter-music/`、`include/org.yxzl.ter-music/` | `src/cn.org.huansoft.ter-music/`、`include/cn.org.huansoft.ter-music/` | 仓库内部，`#include` 前缀同批改 |
+| Debian 源包与二进制包 | `ter-music` | `cn.org.huansoft.ter-music` | `debian/control` 带 `Provides`/`Breaks`/`Replaces`，可原地替换旧包 |
+| Arch 包 | `ter-music-cn` | `cn.org.huansoft.ter-music` | `PKGBUILD` 带 `replaces`；**AUR 侧需人工新建/改名** |
+| 玲珑（Linyaps）应用 ID | `org.yxzl.ter-music` | `cn.org.huansoft.ter-music` | `/opt/apps/<ID>` 安装路径随之变 |
+| systemd 用户单元 | `org.yxzl.ter-music.service` | `cn.org.huansoft.ter-music.service` | 单元名即文件名，旧 enabled 链接需人工处理 |
+| D-Bus 接口与错误前缀 | `org.yxzl.ter_music.*` | `cn.org.huansoft.ter_music.*` | **`api_version` 7，破坏性**；核心与前端成对升级 |
+| MPRIS 总线名 | `org.mpris.MediaPlayer2.ter_music`（含 `.instance<pid>` 备用名） | 不变 | 标准名，桌面媒体键不受影响 |
+| 可执行文件、数据目录、配置目录 | `ter-music`、`/usr/share/ter-music`、`~/.config/ter-music` | 不变 | 用户脚本、快捷键与既有配置一律照旧 |
+| 配置文件契约版本 | `9` | 不变 | 本次只加 `karaoke_mode` 元素，未升版 |
+
+人工待办（本仓库改不了的外部状态）：
+
+1. **打 tag**：`v26.4.1.0` 必须在构建/AUR 推送之前存在——`PKGBUILD` 的 `#tag=v$pkgver`
+   是前向引用，tag 不存在时 AUR 用户直接构建失败。
+2. **AUR**：新建或改名 `cn.org.huansoft.ter-music` 仓库，推送 `PKGBUILD` + `.SRCINFO`；
+   旧 `ter-music-cn` 由维护者决定下架或保留说明。README 里的 `yay/paru/zpm` 命令已按
+   新名写好，AUR 侧未落地前它们不可用（文中已注明）。
+3. **apt / dnf 发布仓库**：把包从旧名迁到新名（索引组件、GPG 策略由发布方决定）。
+   deb 侧已用 `Provides`/`Breaks`/`Replaces` 保证同一台机器上可直接替换，无需先卸载。
+4. **通知第三方 D-Bus 客户端**：接口前缀改为 `cn.org.huansoft.ter_music.*`。这是
+   `api_version` 7 的全部内容，方法面没变；旧客户端不会静默降级，而是每调用都得
+   `UnknownInterface`。
+5. **systemd 用户单元**：老用户升级后执行
+   `systemctl --user disable --now org.yxzl.ter-music.service`，再
+   `systemctl --user enable --now cn.org.huansoft.ter-music.service`，否则开机自启仍
+   指向已消失的旧单元文件。
+6. **玲珑**：应用 ID 变更后它是**另一个应用**，旧版不会被新版覆盖；待新版验收通过后
+   人工 `ll-cli uninstall org.yxzl.ter-music`。用户数据目录是否随 ID 迁移，需按玲珑
+   运行时实际行为验证后再定策略，本文不臆断。
 
 ---
 
@@ -132,13 +227,13 @@ sudo apt install -y \
     libsqlite3-dev libdbus-1-dev zlib1g-dev
 
 # 构建（原生模式，不使用 Docker）
-bash scripts/build/build-deb.sh -v X.Y.Z -a amd64
+bash scripts/build/build-deb.sh -v X.Y.Z.W -a amd64
 ```
 
 产物：
 
-- `build/deb/amd64/ter-music_X.Y.Z-1_amd64.deb`
-- 源码包：`build/deb/source/ter-music_X.Y.Z-1.dsc`、`ter-music_X.Y.Z.orig.tar.gz`、`ter-music_X.Y.Z-1.debian.tar.xz`
+- `build/deb/amd64/cn.org.huansoft.ter-music_X.Y.Z.W-1_amd64.deb`
+- 源码包：`build/deb/source/cn.org.huansoft.ter-music_X.Y.Z.W-1.dsc`、`cn.org.huansoft.ter-music_X.Y.Z.W.orig.tar.gz`、`cn.org.huansoft.ter-music_X.Y.Z.W-1.debian.tar.xz`
 
 ---
 
@@ -155,12 +250,12 @@ sudo dnf install -y \
     sqlite-devel alsa-lib-devel pipewire-devel dbus-devel zlib-devel
 
 # 构建（原生模式，不使用 Docker）
-bash scripts/build/build-rpm.sh -v X.Y.Z -a x86_64
+bash scripts/build/build-rpm.sh -v X.Y.Z.W -a x86_64
 ```
 
 产物：
 
-- `build/rpm/x86_64/ter-music-X.Y.Z-1.<dist>.x86_64.rpm`（`<dist>` 如 `.fc41`）
+- `build/rpm/x86_64/cn.org.huansoft.ter-music-X.Y.Z.W-1.<dist>.x86_64.rpm`（`<dist>` 如 `.fc41`）
 - 对应 `.src.rpm`
 
 ---
@@ -174,7 +269,7 @@ bash scripts/build/build-rpm.sh -v X.Y.Z -a x86_64
 sudo apt install -y linglong-builder linglong-box cmake make
 
 # 构建（原生模式：ll-builder 自带 ll-box 容器，不经过 Docker）
-bash scripts/build/build-linyaps.sh -v X.Y.Z -a x86_64
+bash scripts/build/build-linyaps.sh -v X.Y.Z.W -a x86_64
 ```
 
 > **两条极易踩的前提**（详见 `docs/BUILD_GUIDE.md` 的 Linyaps 章节）：
@@ -189,8 +284,8 @@ bash scripts/build/build-linyaps.sh -v X.Y.Z -a x86_64
 
 产物：
 
-- `build/linyaps/x86_64/org.yxzl.ter-music_X.Y.Z_x86_64.uab`
-- `build/linyaps/x86_64/org.yxzl.ter-music_X.Y.Z.0_x86_64_binary.layer`
+- `build/linyaps/x86_64/cn.org.huansoft.ter-music_X.Y.Z.W_x86_64.uab`
+- `build/linyaps/x86_64/cn.org.huansoft.ter-music_X.Y.Z.W.0_x86_64_binary.layer`
 
 ---
 
@@ -205,16 +300,16 @@ sudo apt install -y squashfs-tools   # Debian/Deepin
 sudo dnf install -y squashfs-tools   # Fedora
 
 # 构建 AppImage（原生）
-bash scripts/build/build-appimage.sh -v X.Y.Z -a x86_64
+bash scripts/build/build-appimage.sh -v X.Y.Z.W -a x86_64
 
 # 构建便携包（原生）
-bash scripts/build/build-portable.sh -v X.Y.Z -a x86_64
+bash scripts/build/build-portable.sh -v X.Y.Z.W -a x86_64
 ```
 
 产物：
 
-- `build/appimage/x86_64/ter-music-X.Y.Z-x86_64.AppImage`
-- `build/portable/x86_64/ter-music-X.Y.Z-portable-x86_64.tar.gz`
+- `build/appimage/x86_64/ter-music-X.Y.Z.W-x86_64.AppImage`
+- `build/portable/x86_64/ter-music-X.Y.Z.W-portable-x86_64.tar.gz`
 
 ---
 
@@ -228,20 +323,20 @@ bash scripts/build/build-portable.sh -v X.Y.Z -a x86_64
 git rev-parse HEAD
 
 # 2. 打 tag（必须与 APP_VERSION 一致）并推送
-git tag vX.Y.Z && git push origin vX.Y.Z
+git tag vX.Y.Z.W && git push origin vX.Y.Z.W
 
 # 3. 创建 Release 并上传产物
-gh release create vX.Y.Z \
+gh release create vX.Y.Z.W \
     build/deb/amd64/*.deb \
-    build/deb/source/ter-music_X.Y.Z-1.dsc \
-    build/deb/source/ter-music_X.Y.Z.orig.tar.gz \
-    build/deb/source/ter-music_X.Y.Z-1.debian.tar.xz \
-    build/rpm/x86_64/ter-music-X.Y.Z-1.*.x86_64.rpm \
-    build/rpm/x86_64/ter-music-X.Y.Z-1.*.src.rpm \
-    build/appimage/x86_64/ter-music-X.Y.Z-x86_64.AppImage \
-    build/portable/x86_64/ter-music-X.Y.Z-portable-x86_64.tar.gz \
-    build/linyaps/x86_64/org.yxzl.ter-music_X.Y.Z_x86_64.uab \
-    build/linyaps/x86_64/org.yxzl.ter-music_X.Y.Z.0_x86_64_binary.layer \
+    build/deb/source/cn.org.huansoft.ter-music_X.Y.Z.W-1.dsc \
+    build/deb/source/cn.org.huansoft.ter-music_X.Y.Z.W.orig.tar.gz \
+    build/deb/source/cn.org.huansoft.ter-music_X.Y.Z.W-1.debian.tar.xz \
+    build/rpm/x86_64/cn.org.huansoft.ter-music-X.Y.Z.W-1.*.x86_64.rpm \
+    build/rpm/x86_64/cn.org.huansoft.ter-music-X.Y.Z.W-1.*.src.rpm \
+    build/appimage/x86_64/ter-music-X.Y.Z.W-x86_64.AppImage \
+    build/portable/x86_64/ter-music-X.Y.Z.W-portable-x86_64.tar.gz \
+    build/linyaps/x86_64/cn.org.huansoft.ter-music_X.Y.Z.W_x86_64.uab \
+    build/linyaps/x86_64/cn.org.huansoft.ter-music_X.Y.Z.W.0_x86_64_binary.layer \
     --generate-notes
 ```
 
@@ -250,30 +345,30 @@ gh release create vX.Y.Z \
 
 ---
 
-## 六、更新 AUR（ter-music-cn，最后一步）
+## 六、更新 AUR（cn.org.huansoft.ter-music，最后一步）
 
 > **AUR 更新必须在 tag 推送之后进行。** 仓库里的 `PKGBUILD` / `.SRCINFO`
-> 早已指向 `#tag=vX.Y.Z`（前向引用），若 tag 尚未推送，AUR 用户构建会
+> 早已指向 `#tag=vX.Y.Z.W`（前向引用），若 tag 尚未推送，AUR 用户构建会
 > 直接失败（历史上曾因乱打 tag / tag 与 AUR 不同步出过构建问题，务必
 > 按顺序执行）。
 
 ```bash
 # 1. 确认 tag 已推送（无输出则说明 tag 不存在，禁止继续）
-git ls-remote --tags origin vX.Y.Z
+git ls-remote --tags origin vX.Y.Z.W
 
 # 2. 拉取 AUR 独立仓库
-git clone ssh://aur@aur.archlinux.org/ter-music-cn.git aur-ter-music-cn
+git clone ssh://aur@aur.archlinux.org/cn.org.huansoft.ter-music.git aur-ter-music
 
 # 3. 同步打包文件（pkgver 应已在本仓库 bump 阶段改好）
-cp PKGBUILD .SRCINFO aur-ter-music-cn/
-cd aur-ter-music-cn
+cp PKGBUILD .SRCINFO aur-ter-music/
+cd aur-ter-music
 
 # 4. 本地完整预演：真实拉取 tag 源并构建，验证可复现
 makepkg -sro
 
 # 5. 提交推送
 git add PKGBUILD .SRCINFO
-git commit -m "Update to X.Y.Z"
+git commit -m "Update to X.Y.Z.W"
 git push
 ```
 
@@ -291,8 +386,8 @@ git push
 bash scripts/build/launch-auto-build.sh --arch amd64
 
 # 或单独构建
-bash scripts/build/build-deb.sh --static -v X.Y.Z -a amd64     # 静态 FFmpeg，兼容 Debian 10-13
-bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux 容器，兼容 EL8/9/10
+bash scripts/build/build-deb.sh --static -v X.Y.Z.W -a amd64     # 静态 FFmpeg，兼容 Debian 10-13
+bash scripts/build/build-rpm.sh --container -v X.Y.Z.W -a x86_64  # Rocky Linux 容器，兼容 EL8/9/10
 ```
 
 > 原生构建（上文一到四节）与 Docker 静态构建互不冲突，产物命名一致，可按需选择。
@@ -304,7 +399,7 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux �
 按执行顺序逐项勾选：
 
 1. [ ] 补全 `debian/changelog` 本次变更条目（不允许只有 "Bump version"）
-2. [ ] `APP_VERSION`（types.h）与待打 tag 一致
+2. [ ] `APP_VERSION`（types.h）与待打 tag 一致，且 CMake `project VERSION`、`PKGBUILD pkgver`、`debian/changelog` 顶部条目四处同值
 3. [ ] CI（ci.yml）全绿
 4. [ ] 5 类产物齐备：.deb、.rpm（+src.rpm）、.AppImage、portable .tar.gz、.uab/.layer
 5. [ ] 在干净 Debian / Fedora 环境各验证一次安装与启动（`--help`）
@@ -317,18 +412,18 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z -a x86_64  # Rocky Linux �
 7. [ ] 在 Linyaps 环境验证 CLI 与后台播放（`ll-cli install` 后执行）：
    - 安装后先确认集成文件已导出（缺一即判失败）：
      - `ls /var/lib/linglong/entries/share/dbus-1/services/org.mpris.MediaPlayer2.ter_music.service`
-     - `grep '^ExecStart' /var/lib/linglong/entries/lib/systemd/user/org.yxzl.ter-music.service`
-     - 两者都应含 `ll-cli run org.yxzl.ter-music`（ll-builder 重写的结果）；
+     - `grep '^ExecStart' /var/lib/linglong/entries/lib/systemd/user/cn.org.huansoft.ter-music.service`
+     - 两者都应含 `ll-cli run cn.org.huansoft.ter-music`（ll-builder 重写的结果）；
        激活文件必须来自包内 `files/share/dbus-1/services/`（放在 `share/services/` 不会被导出）
-   - `ll-cli run org.yxzl.ter-music -- ter-music version`
-   - `ll-cli run org.yxzl.ter-music -- ter-music daemon start`（经 D-Bus 激活；`ll-cli ps` 应列出应用）
+   - `ll-cli run cn.org.huansoft.ter-music -- ter-music version`
+   - `ll-cli run cn.org.huansoft.ter-music -- ter-music daemon start`（经 D-Bus 激活；`ll-cli ps` 应列出应用）
    - 容器已在运行时读取信息须用 `ll-cli enter`（`ll-cli run` 的输出会接到该容器上）：
-     `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show --one-line`
-   - 宿主侧 `systemctl --user start org.yxzl.ter-music`（常驻服务，`ExecStart` 应被重写为 `ll-cli run …`）
+     `ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show --one-line`
+   - 宿主侧 `systemctl --user start cn.org.huansoft.ter-music`（常驻服务，`ExecStart` 应被重写为 `ll-cli run …`）
    - 宿主侧 `busctl --user introspect org.mpris.MediaPlayer2.ter_music /org/mpris/MediaPlayer2`
-     应可见 `org.yxzl.ter_music` 的 `Info`／`Control`／`Lyrics` 三个接口
-   - `ll-cli run org.yxzl.ter-music -- ter-music daemon stop` 后 `ll-cli ps` 不再列出该应用
+     应可见 `cn.org.huansoft.ter_music` 的 `Info`／`Control`／`Lyrics` 三个接口
+   - `ll-cli run cn.org.huansoft.ter-music -- ter-music daemon stop` 后 `ll-cli ps` 不再列出该应用
 8. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
-9. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
+9. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z.W && git push origin vX.Y.Z.W`
 10. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
 11. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）

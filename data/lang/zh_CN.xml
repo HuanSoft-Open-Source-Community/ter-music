@@ -108,6 +108,8 @@
   <string key="settings.backend.hint">音频后端将在下次启动时生效</string>
   <string key="settings.sort.applied">排序方式已生效</string>
   <string key="settings.cue.saved">CUE编码设置已保存</string>
+  <string key="settings.karaoke.saved">卡拉OK设置已保存</string>
+  <string key="settings.karaoke.unsupported">当前播放核心不支持卡拉OK（核心版本过旧）</string>
   <string key="settings.color.prompt">输入颜色值 (0-255)：</string>
   <string key="settings.color.same_error">前景色和背景色不能相同</string>
   <string key="settings.hotkeys.volume">+ / -：调整音量</string>
@@ -144,6 +146,7 @@
   <string key="settings.opt.audio_backend">音频后端</string>
   <string key="settings.opt.sort_mode">排序方式</string>
   <string key="settings.opt.cue_encoding">CUE编码</string>
+  <string key="settings.opt.karaoke_mode">卡拉OK（消人声）</string>
 
   <!-- ===== Info display (info pane + CLI / D-Bus) ===== -->
   <string key="settings.opt.info_preset">信息显示预设</string>
@@ -286,12 +289,20 @@
   <string key="controls.label.loop">循环</string>
   <string key="controls.label.speed">倍速</string>
   <string key="controls.label.volume">音量</string>
+  <string key="controls.label.karaoke">卡拉OK</string>
   <string key="controls.label.progress">进度</string>
+
+  <!-- ===== 卡拉OK（消人声）：档位文案与主页提示 ===== -->
+  <string key="karaoke.level.off">不启用</string>
+  <string key="karaoke.level.soft">人声较弱</string>
+  <string key="karaoke.level.full">消除人声</string>
+  <string key="karaoke.hint">消人声：仅立体声生效，伴奏保持不变</string>
 
   <!-- ===== Popup titles ===== -->
   <string key="popup.play_mode"> 播放模式 </string>
   <string key="popup.speed"> 播放速度 </string>
   <string key="popup.volume"> 音量 </string>
+  <string key="popup.karaoke"> 消人声 </string>
   <string key="popup.color"> 颜色 </string>
   <string key="popup.lang"> 语言 </string>
   <string key="popup.backend"> 音频后端 </string>
@@ -895,6 +906,9 @@
   <string key="cli.help.cmd.mode.summary">查询或设置播放模式</string>
   <string key="cli.help.cmd.mode.usage">用法：{prog} mode [名称|0-16]</string>
   <string key="cli.help.cmd.mode.detail">不带参数时输出当前模式（名称、编号与显示名）；带参数时按稳定名称或编号设置模式，例如 list_repeat、folder_shuffle_repeat。</string>
+  <string key="cli.help.cmd.karaoke.summary">查询或设置卡拉OK（消人声）档位</string>
+  <string key="cli.help.cmd.karaoke.usage">用法：{prog} karaoke [off|soft|full|0-2|cycle]</string>
+  <string key="cli.help.cmd.karaoke.detail">不带参数时输出当前档位（名称、编号与显示名）；带参数时按稳定名称或编号设置档位；cycle 在 0→1→2→0 之间循环一步。仅立体声生效（单声道曲目保持原样），档位写入 preferences.karaoke_mode 并即时作用于正在播放的曲目。</string>
   <string key="cli.help.cmd.show.summary">输出当前播放信息块</string>
   <string key="cli.help.cmd.show.usage">用法：{prog} show [选项]</string>
   <string key="cli.help.cmd.show.detail">输出核心提供的当前曲目信息，包括基本信息、字符封面、进度和歌词行；所有选项仅对本次调用生效，不修改已保存的设置。</string>
@@ -1040,9 +1054,9 @@
   <!-- ===== cli/cli.c ===== -->
   <string key="cli.err.sandbox.fork_default">错误：Linyaps 打包环境下无法自行分叉后台进程。</string>
   <string key="cli.msg.sandbox.guidance_title">请改用下列方式之一（均在宿主机执行）：</string>
-  <string key="cli.msg.sandbox.guidance_service">  · 常驻服务（推荐）：systemctl --user enable --now org.yxzl.ter-music</string>
-  <string key="cli.msg.sandbox.guidance_foreground">  · 前台运行：ll-cli run org.yxzl.ter-music -- ter-music daemon foreground</string>
-  <string key="cli.msg.sandbox.guidance_play">  · 直接播放：ll-cli run org.yxzl.ter-music -- ter-music play &lt;路径&gt; --foreground</string>
+  <string key="cli.msg.sandbox.guidance_service">  · 常驻服务（推荐）：systemctl --user enable --now cn.org.huansoft.ter-music</string>
+  <string key="cli.msg.sandbox.guidance_foreground">  · 前台运行：ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground</string>
+  <string key="cli.msg.sandbox.guidance_play">  · 直接播放：ll-cli run cn.org.huansoft.ter-music -- ter-music play &lt;路径&gt; --foreground</string>
   <string key="cli.err.daemon.not_ready_10s">错误：已请求启动后台播放，但实例未在 10 秒内就绪。</string>
   <string key="cli.err.sandbox.fork_detached">错误：Linyaps 打包环境下无法自行分叉后台进程（脱离的进程会随容器退出而被回收）。</string>
   <string key="cli.err.attach_only.no_service">错误：没有正在运行的播放服务（已指定 --attach-only，不自动启动）。</string>
@@ -1135,6 +1149,7 @@
   <string key="cli.err.seek_failed">错误：跳转失败（无曲目或时长未知）。</string>
   <string key="cli.err.speed_range">错误：倍速需在 0.5 - 3.0 之间。</string>
   <string key="cli.err.mode_unknown_fmt">错误：未知播放模式 '%s'。可用值：sequential, single_repeat, list_repeat, shuffle_once, shuffle_repeat, folder_*, album_*, artist_* 或 0-16。</string>
+  <string key="cli.err.karaoke.unknown_level_fmt">错误：未知消人声档位 '%s'。可用值：off, soft, full, 0-2 或 cycle。</string>
   <string key="cli.err.oom">错误：内存不足。</string>
   <string key="cli.err.watch_json_conflict">错误：--watch 与 --json 不能同时使用。</string>
   <string key="cli.err.watch_requires_tty">错误：--watch 需要在终端里直接运行（请勿重定向输出）。</string>

@@ -1,0 +1,1050 @@
+/**
+ * @file audio.c
+ * @brief 音频框架层 — 全局状态、初始化、播放控制 API
+ *
+ * 底层功能已拆分到：
+ *   - atempo.c         : atempo 倍速滤镜
+ *   - audio_visualizer.c : FFT 频谱分析
+ *   - playback_thread.c  : PCM 队列、解码循环、play_audio_thread
+ *   - backend_ops.c      : 音频后端流操作
+ *
+ * @author 燕戏竹林 (yxzl666xx@outlook.com)
+ * @date 2026-06-02
+ */
+
+#include "types.h"
+#include "audio/audio.h"
+#include "audio/audio_internal.h"
+#include "audio/play_queue.h"
+#include "audio/play_mode_util.h"
+#include "audio/visualizer.h"
+#include "config/config.h"
+#include "core/core.h"
+#include "i18n/i18n.h"
+#include "logger/logger.h"
+#include "media/session.h"
+#include "queue/backend_queue.h"
+#include "audio/progress/progress.h"
+#include "ui/cover/album_cover.h"
+#include "lyrics/lyrics.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <math.h>
+#include <time.h>
+
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/opt.h>
+#include <libavutil/samplefmt.h>
+#include <libavutil/version.h>
+
+#ifndef DT_REG
+#define DT_REG 8
+#endif
+#ifndef DT_UNKNOWN
+#define DT_UNKNOWN 0
+#endif
+
+/* ============================================================
+ * Function pointer tables (backend dispatching)
+ * ============================================================ */
+
+struct pulseaudio_funcs P = {0};
+struct alsa_funcs A = {0};
+struct pipewire_funcs PW = {0};
+
+/* ============================================================
+ * Global state
+ * ============================================================ */
+
+int g_active_backend = AUDIO_BACKEND_AUTO;
+
+/* 本进程是否初始化过音频引擎（core 宿主才会调用 init_audio_device()）。
+ * 远端前端只做 D-Bus 客户端：它绝不能在本进程起播放线程/占音频设备。
+ * 这个标志守住那条边界，详见 play_audio() 的退出闸门。 */
+static int g_audio_engine_initialized = 0;
+
+/* 用户显式指定的后端（初始化时从配置捕获）：运行时回退时优先尝试它 */
+int g_requested_backend = AUDIO_BACKEND_AUTO;
+
+/* 音频后端候选顺序：PipeWire > PulseAudio > ALSA。
+ * AUTO 选择与运行时回退共用这一顺序（定义在此处供 backend_ops.c 复用）。 */
+const int g_backend_candidates[] = {
+    AUDIO_BACKEND_PIPEWIRE,
+    AUDIO_BACKEND_PULSE,
+    AUDIO_BACKEND_ALSA
+};
+
+pthread_mutex_t audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_visualizer_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t  g_play_control_cond = PTHREAD_COND_INITIALIZER;
+
+int g_volume_percent = 100;
+int g_pending_volume_sync = 0;
+int g_output_sample_rate = 44100;
+int g_output_channels = 2;
+
+int g_audio_sample_rate = 0;
+int g_audio_bit_rate = 0;
+int g_audio_bit_depth = 0;
+char g_audio_codec_name[32] = "";
+
+/* ── Playback state ── */
+PlayState g_play_state = PLAY_STATE_STOPPED;
+int g_current_play_index = -1;
+/* 当前出声曲目的路径（身份），与队列位置解耦：队列重排后下标会变，
+ * 但路径仍是同一首歌；当前条目被删除后下标为 -1，路径仍可用于上报/暂停。 */
+char g_current_play_path[MAX_PATH_LEN] = "";
+PlayMode g_play_mode = PLAY_MODE_SEQUENTIAL;
+pthread_t g_play_thread;
+int g_play_thread_running = 0;
+pthread_mutex_t g_play_mutex = PTHREAD_MUTEX_INITIALIZER;
+int g_play_thread_active = 0;
+int g_play_thread_finished = 0;
+int g_pending_playback_index = -1;
+
+/* ── Speed ── */
+float g_playback_speed = 1.0f;
+float g_speed_ratios[] = {0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
+int g_speed_index = 1;
+int g_speed_count = sizeof(g_speed_ratios) / sizeof(g_speed_ratios[0]);
+
+/* ── Seek ── */
+int g_seek_request = 0;
+int g_seek_position = 0;
+int g_initial_seek_position = 0;
+int g_cue_offset = 0;
+
+/* 本次 play_audio() 是否由倍速变更触发。可听位置为 0 时 g_initial_seek_position
+ * 也是 0，不能再拿它当“是否重启”的判别；否则同曲目已在播放时会被直接跳过。 */
+static int g_speed_change_restart_pending = 0;
+
+/* ── Progress ── */
+int g_current_position = 0;
+int g_total_duration = 0;
+pthread_mutex_t g_seek_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* ── Default audio device ── */
+char g_default_audio_device[128] = "default";
+
+/* ============================================================
+ * Helpers
+ * ============================================================ */
+
+static int clamp_volume_percent(int volume) {
+    if (volume < 0) return 0;
+    if (volume > 100) return 100;
+    return volume;
+}
+
+int get_configured_latency_ms(void) {
+    int latency_ms = g_app_config.audio_latency_ms;
+    if (latency_ms < 20) latency_ms = 20;
+    if (latency_ms > 250) latency_ms = 250;
+    return latency_ms;
+}
+
+void apply_volume_to_samples(int32_t *samples, int sample_count)
+{
+    if (g_active_backend == AUDIO_BACKEND_PULSE ||
+        g_active_backend == AUDIO_BACKEND_PIPEWIRE) {
+        (void)samples; (void)sample_count; return;
+    }
+    if (!samples || sample_count <= 0) return;
+    int volume = get_volume_percent();
+    if (volume >= 100) return;
+    if (volume <= 0) { memset(samples, 0, (size_t)sample_count * sizeof(int32_t)); return; }
+    for (int i = 0; i < sample_count; i++)
+        samples[i] = (int32_t)(((int64_t)samples[i] * volume) / 100);
+}
+
+static void signal_playback_thread(void) {
+    pthread_cond_broadcast(&g_play_control_cond);
+}
+
+/* ============================================================
+ * FFmpeg log callback & helpers
+ * ============================================================ */
+
+static void ffmpeg_log_callback(void *ptr, int level, const char *fmt, va_list vl) {
+    (void)ptr; (void)level; (void)fmt; (void)vl;
+}
+
+void init_ffmpeg(void)
+{
+    /* 幂等：daemon 与前端（local/remote）都会调到这里，静音只需生效一次；
+     * 早于任何 avformat 使用才是关键（见 main.c 中的调用时机）。 */
+    static int done;
+    if (done) return;
+    done = 1;
+    log_info("audio", "Initializing FFmpeg");
+    avformat_network_init();
+    av_log_set_level(AV_LOG_QUIET);
+    av_log_set_callback(ffmpeg_log_callback);
+    log_debug("audio", "FFmpeg initialized, log suppressed");
+}
+
+void audio_backend_shutdown(void)
+{
+    if (pulse_loaded && pa_s) { P.stream_disconnect(pa_s); P.stream_unref(pa_s); pa_s = NULL; }
+    if (pulse_loaded && pa_ml) {
+        if (pa_ctx) { P.context_disconnect(pa_ctx); P.context_unref(pa_ctx); pa_ctx = NULL; }
+        P.mainloop_free(pa_ml); pa_ml = NULL;
+    }
+    pa_connected = 0;
+    if (alsa_loaded && alsa_pcm) { A.pcm_drop(alsa_pcm); A.pcm_close(alsa_pcm); alsa_pcm = NULL; }
+    alsa_ready = 0;
+    if (pipewire_loaded) { pw_cleanup_stream(); pipewire_unload(); pipewire_loaded = 0; }
+}
+
+int audio_backend_is_available(int backend) {
+    /* 反映“探测通过”，而不是“库能否加载” */
+    if (backend == AUDIO_BACKEND_PULSE)    return (pulse_loaded && pa_connected) ? 1 : 0;
+    if (backend == AUDIO_BACKEND_ALSA)     return (alsa_loaded && alsa_ready) ? 1 : 0;
+    if (backend == AUDIO_BACKEND_PIPEWIRE) return pipewire_loaded ? 1 : 0;
+    return 0;
+}
+
+/* ============================================================
+ * Audio device initialization
+ * ============================================================ */
+
+/* 启动阶段所有候选都失败时的有限重试：间隔约 500ms、总量约 2s，
+ * 覆盖“音频服务晚启动”的场景。 */
+#define BACKEND_SELECT_ATTEMPTS 5
+#define BACKEND_SELECT_RETRY_MS 500
+
+/* 探测一个候选后端，失败时把可读原因写入 *reason_out */
+static int probe_backend_candidate(int candidate, const char **reason_out)
+{
+    if (audio_backend_probe(candidate, reason_out) == 0) return 0;
+
+    log_info("audio", "%s backend unavailable: %s",
+             audio_backend_display_name(candidate),
+             (reason_out && *reason_out) ? *reason_out : "unknown");
+    return -1;
+}
+
+/* ALSA 设备探测失败 = 该后端在本机不可用：把原因明确告知用户 */
+static void report_alsa_probe_failure(const char *reason)
+{
+    if (!reason) return;
+    char msg[256];
+    audio_backend_format_message(msg, sizeof(msg),
+                                 i18n_get("audio.backend.alsa_probe_failed"),
+                                 NULL, NULL, reason);
+    core_status_push(msg);
+}
+
+/* 统一选择器：
+ *   显式选择 → 只探测该候选；
+ *   AUTO      → 依次探测，选中首个可用者。
+ * 返回选中的后端；AUDIO_BACKEND_AUTO 表示没有可用后端。 */
+static int select_audio_backend(int requested)
+{
+    if (requested != AUDIO_BACKEND_AUTO) {
+        log_info("audio", "Trying %s backend", audio_backend_display_name(requested));
+        const char *reason = NULL;
+        if (probe_backend_candidate(requested, &reason) == 0) {
+            log_info("audio", "%s backend selected", audio_backend_display_name(requested));
+            return requested;
+        }
+        if (requested == AUDIO_BACKEND_ALSA) report_alsa_probe_failure(reason);
+        log_error("audio", "%s backend selected but unavailable",
+                  audio_backend_display_name(requested));
+        return AUDIO_BACKEND_AUTO;
+    }
+
+    int selected = AUDIO_BACKEND_AUTO;
+    const char *alsa_reason = NULL;
+    for (int i = 0; i < BACKEND_CANDIDATE_COUNT; i++) {
+        int candidate = g_backend_candidates[i];
+        log_info("audio", "Trying %s backend", audio_backend_display_name(candidate));
+        const char *reason = NULL;
+        if (probe_backend_candidate(candidate, &reason) == 0) {
+            log_info("audio", "%s backend probe passed", audio_backend_display_name(candidate));
+            if (selected == AUDIO_BACKEND_AUTO) selected = candidate;
+            if (candidate == AUDIO_BACKEND_ALSA) alsa_reason = NULL;
+        } else if (candidate == AUDIO_BACKEND_ALSA) {
+            alsa_reason = reason;
+        }
+    }
+
+    /* 一个后端都选不出来时，ALSA 的失败原因才有诊断价值 */
+    if (selected == AUDIO_BACKEND_AUTO) report_alsa_probe_failure(alsa_reason);
+
+    if (selected != AUDIO_BACKEND_AUTO)
+        log_info("audio", "%s backend selected", audio_backend_display_name(selected));
+    return selected;
+}
+
+int audio_engine_initialized(void)
+{
+    return g_audio_engine_initialized;
+}
+
+void init_audio_device(void)
+{
+    log_info("audio", "Initializing audio device");
+    /* 先置位：即使所有后端探测失败，本进程也已经是 core 宿主，运行时回退
+     * 仍允许在播放时重新探测（见 audio_backend_prepare_stream）。 */
+    g_audio_engine_initialized = 1;
+
+    /* 调用方（main.c / daemon.c）已把配置里的后端写进 g_active_backend */
+    int requested = g_active_backend;
+    g_requested_backend = requested;
+
+    if (pulse_load() == 0) { pulse_loaded = 1; log_info("audio", "PulseAudio library loaded"); }
+    else { pulse_loaded = 0; log_info("audio", "PulseAudio library not available"); }
+    if (alsa_load() == 0) { alsa_loaded = 1; log_info("audio", "ALSA library loaded"); }
+    else { alsa_loaded = 0; log_info("audio", "ALSA library not available"); }
+    if (pipewire_load() == 0) { pipewire_loaded = 1; log_info("audio", "PipeWire library loaded"); }
+    else { pipewire_loaded = 0; log_info("audio", "PipeWire library not available"); }
+
+    /* 统一选择：全部候选都失败时做有限次重试（覆盖“服务晚启动”） */
+    int selected = AUDIO_BACKEND_AUTO;
+    for (int attempt = 1; attempt <= BACKEND_SELECT_ATTEMPTS; attempt++) {
+        selected = select_audio_backend(requested);
+        if (selected != AUDIO_BACKEND_AUTO) break;
+        if (attempt < BACKEND_SELECT_ATTEMPTS) {
+            log_warn("audio", "No audio backend available, retry in %dms (attempt %d/%d)",
+                     BACKEND_SELECT_RETRY_MS, attempt, BACKEND_SELECT_ATTEMPTS);
+            usleep(BACKEND_SELECT_RETRY_MS * 1000);
+        }
+    }
+
+    g_active_backend = selected;
+    if (selected != AUDIO_BACKEND_AUTO) {
+        log_info("audio", "Audio backend in use: %s", audio_backend_display_name(selected));
+        /* 后端名提示不再 printf(stdout)：local 模式下它在 initscr()
+         * 之后执行、会污染 ncurses 屏幕；由调用方定向展示
+         * （daemon 写 daemon.log，TUI 进状态行）。 */
+    } else {
+        log_error("audio", "No audio backend available");
+    }
+
+    /* Initialise equaliser from loaded config */
+    init_equalizer_from_config();
+
+    /* 卡拉OK（消人声）同样从已加载的配置初始化 */
+    init_karaoke_from_config();
+}
+
+/* ============================================================
+ * Equalizer init (called after config is loaded)
+ * ============================================================ */
+
+void init_equalizer_from_config(void)
+{
+    eq_init();
+    eq_set_enabled(g_app_config.eq_enabled);
+    eq_set_preamp(g_app_config.eq_preamp);
+    eq_set_all_gains(g_app_config.eq_band_gains);
+}
+
+/* ============================================================
+ * Karaoke (vocal removal) init (called after config is loaded)
+ * ============================================================ */
+
+void init_karaoke_from_config(void)
+{
+    karaoke_init();
+    karaoke_set_mode(g_app_config.karaoke_mode);
+}
+
+/* ============================================================
+ * Volume management
+ * ============================================================ */
+
+int get_volume_percent(void)
+{
+    int volume = 100;
+    pthread_mutex_lock(&g_volume_mutex);
+    volume = g_volume_percent;
+    pthread_mutex_unlock(&g_volume_mutex);
+    return volume;
+}
+
+void audio_set_initial_seek_position(int seconds)
+{
+    g_initial_seek_position = seconds > 0 ? seconds : 0;
+}
+
+int audio_get_position_seconds(void)
+{
+    return (int)(audio_get_position_ms() / 1000);
+}
+
+int64_t audio_get_position_ms(void)
+{
+    int64_t position = progress_tracker_get_position_ms();
+    if (position <= 0 && g_current_position > 0) {
+        /* 跟踪器尚未就绪（刚切曲/刚恢复）时沿用播放线程写下的整秒位置 */
+        position = (int64_t)g_current_position * 1000;
+    }
+
+    /* progress_tracker 统计的是“已写入后端”的样本：PipeWire 的 1MB 环形
+     * 缓冲会先装下约 3 秒音频再由 process 回调消费，直接返回会把进度、
+     * 断点恢复位置都报得比实际听到的提前一个环（q 退出后再启动会像凭空
+     * 多走了一段）。这里扣除后端尚未消费的帧，让对外位置等于可听位置。 */
+    if (g_play_state != PLAY_STATE_STOPPED && g_output_sample_rate > 0) {
+        int buffered_frames = audio_backend_buffered_frames();
+        if (buffered_frames > 0) {
+            position -= ((int64_t)buffered_frames * 1000) / g_output_sample_rate;
+        }
+    }
+    return position > 0 ? position : 0;
+}
+
+int audio_get_duration_seconds(void)
+{
+    return g_total_duration > 0 ? g_total_duration : 0;
+}
+
+int audio_current_track_path(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return 0;
+    }
+    out[0] = '\0';
+
+    pthread_mutex_lock(&g_play_mutex);
+    snprintf(out, out_size, "%s", g_current_play_path);
+    pthread_mutex_unlock(&g_play_mutex);
+    return out[0] ? 1 : 0;
+}
+
+void audio_sync_queue_position(void)
+{
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_current_play_path[0] != '\0') {
+        int position = bq_position_of_path(g_current_play_path);
+        if (position >= 0) {
+            g_current_play_index = position;
+            /* 非前缀 Queue.Set 可能把游标置 0，但正在出声的路径仍在新表中；
+             * 让游标跟着当前曲目，避免 Queue.Get 与 Info/MPRIS 各说一套。 */
+            if (bq_position() != position) {
+                bq_set_position(position);
+            }
+        } else {
+            g_current_play_index = -1;
+        }
+    }
+    pthread_mutex_unlock(&g_play_mutex);
+}
+
+void set_volume_percent(int volume)
+{
+    int clamped = clamp_volume_percent(volume);
+    int old_volume = g_volume_percent;
+    int changed = 0;
+
+    pthread_mutex_lock(&g_volume_mutex);
+    if (g_volume_percent != clamped) {
+        g_volume_percent = clamped;
+        g_pending_volume_sync = 1;
+        changed = 1;
+    }
+    pthread_mutex_unlock(&g_volume_mutex);
+
+    if (changed) {
+        log_info("audio", "Volume changed: %d%% -> %d%%", old_volume, clamped);
+        g_app_config.volume_percent = clamped;
+        /* 音量是连续小步变化的字段：只置脏，落盘由 core_tick() 去抖合并 */
+        core_config_mark_dirty();
+        char msg[64];
+        snprintf(msg, sizeof(msg), i18n_get("status.volume_fmt"), clamped);
+        core_status_push(msg);
+        core_notify_state_changed();
+        signal_playback_thread();
+    }
+}
+
+void adjust_volume(int delta) {
+    set_volume_percent(get_volume_percent() + delta);
+}
+
+/* ============================================================
+ * Play mode / speed
+ * ============================================================ */
+
+const char *get_play_mode_str(void)
+{
+    return play_mode_display_name(g_play_mode, 0);
+}
+
+PlayMode get_play_mode(void)
+{
+    return g_play_mode;
+}
+
+void set_play_mode(PlayMode mode)
+{
+    if (mode < 0 || mode >= PLAY_MODE_COUNT) return;
+    g_play_mode = mode;
+    log_info("audio", "Play mode changed: %d (%s)", g_play_mode, get_play_mode_str());
+    /* 对已下发的路径队列重建执行顺序；后端不认识内容列表，故锚点用
+     * 当前条目的路径。 */
+    if (bq_count() > 0) {
+        BackendQueueEntry current;
+        char anchor_path[MAX_PATH_LEN];
+        const char *anchor = audio_current_track_path(anchor_path, sizeof(anchor_path))
+                                 ? anchor_path
+                                 : ((bq_current(&current) == 0) ? current.path : NULL);
+        play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
+    }
+    audio_sync_queue_position();
+    g_app_config.default_play_mode = g_play_mode;
+    save_config();
+    core_notify_state_changed();
+}
+
+void cycle_play_mode(void)
+{
+    int next = (g_play_mode + 1) % 5;
+    g_play_mode = (PlayMode)next;
+    log_info("audio", "Play mode changed: %d (%s)", g_play_mode, get_play_mode_str());
+    if (bq_count() > 0) {
+        BackendQueueEntry current;
+        char anchor_path[MAX_PATH_LEN];
+        const char *anchor = audio_current_track_path(anchor_path, sizeof(anchor_path))
+                                 ? anchor_path
+                                 : ((bq_current(&current) == 0) ? current.path : NULL);
+        play_queue_rebuild(&g_play_queue, g_play_mode, anchor);
+    }
+    audio_sync_queue_position();
+    g_app_config.default_play_mode = g_play_mode;
+    save_config();
+    core_notify_state_changed();
+}
+
+void toggle_playback_speed(void)
+{
+    float old_speed = g_playback_speed;
+    g_speed_index = (g_speed_index + 1) % g_speed_count;
+    g_playback_speed = g_speed_ratios[g_speed_index];
+    log_info("audio", "Playback speed changed: %.2fx -> %.2fx", (double)old_speed, (double)g_playback_speed);
+    g_app_config.default_playback_speed = g_playback_speed;
+    /* 与音量同路：配置镜像已更新，落盘交给 core_tick() 去抖 */
+    core_config_mark_dirty();
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%s: %.2fx", i18n_get("controls.label.speed"), (double)g_playback_speed);
+    core_status_push(msg);
+    core_notify_state_changed();
+    apply_playback_speed_change();
+}
+
+/**
+ * @brief 重启当前播放以使倍速变更生效 — 被 toggle_playback_speed()
+ *        和控件窗格 POPUP_SPEED 共用
+ */
+void apply_playback_speed_change(void)
+{
+    if (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED) {
+        pthread_mutex_lock(&g_play_mutex);
+        int was_paused = (g_play_state == PLAY_STATE_PAUSED);
+        int current_idx = g_current_play_index;
+        /* 与 persist_playback_session_state() 同一口径：保存/恢复的是用户
+         * 实际听到的位置，而不是 PipeWire 环里提前写入的几秒。 */
+        int current_pos = audio_get_position_seconds();
+        char current_path[MAX_PATH_LEN];
+        snprintf(current_path, sizeof(current_path), "%s", g_current_play_path);
+        if (current_idx < 0 && current_path[0] != '\0') {
+            current_idx = bq_position_of_path(current_path);
+        }
+        if (current_idx < 0) {
+            pthread_mutex_unlock(&g_play_mutex);
+            /* 当前条目已从队列移除：无法按队列位置重启，但倍速仍会应用到
+             * 下一首。不要用 -1 调 play_audio() 把正在播放的声音打断。 */
+            log_warn("audio", "Speed change: current track is no longer in the queue");
+            return;
+        }
+
+        /* 可听位置可能为 0（刚起播、缓冲还没被消费），此时 g_initial_seek_position
+         * 与“没有倍速重启”无法区分，因此额外记录本次重启意图。 */
+        g_initial_seek_position = current_pos;
+        g_speed_change_restart_pending = 1;
+        g_play_thread_running = 0;
+        pthread_mutex_unlock(&g_play_mutex);
+
+        signal_playback_thread();
+        /* 倍速重启必须先等旧线程完全退出（含后端流清理）再起新线程。
+         * 只 reap 一次时旧线程可能仍 active，play_audio() 会走 pending 异步
+         * 切换；新旧 PipeWire 流在 20ms 窗口内竞争，可导致新线程刚起就退出。 */
+        wait_for_playback_thread_shutdown();
+        play_audio(current_idx);
+        if (was_paused) { usleep(50000); pause_audio(); }
+    }
+}
+
+/* ============================================================
+ * Thread management
+ * ============================================================ */
+
+void reap_finished_playback_thread(void)
+{
+    pthread_t thread_to_join;
+    int should_join = 0;
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_play_thread_active && g_play_thread_finished) {
+        thread_to_join = g_play_thread;
+        g_play_thread_finished = 0;
+        should_join = 1;
+    }
+    pthread_mutex_unlock(&g_play_mutex);
+    if (should_join && !pthread_equal(pthread_self(), thread_to_join)) {
+        pthread_join(thread_to_join, NULL);
+        pthread_mutex_lock(&g_play_mutex);
+        g_play_thread_active = 0;
+        pthread_mutex_unlock(&g_play_mutex);
+    }
+}
+
+void process_pending_playback_action(void)
+{
+    int pending_index = -1;
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_pending_playback_index >= 0 && !g_play_thread_active) {
+        pending_index = g_pending_playback_index;
+        g_pending_playback_index = -1;
+    }
+    pthread_mutex_unlock(&g_play_mutex);
+    if (pending_index >= 0) play_audio(pending_index);
+}
+
+void wait_for_playback_thread_shutdown(void)
+{
+    int timeout_ms = 2000;
+    int waited = 0;
+    while (waited < timeout_ms) {
+        reap_finished_playback_thread();
+        pthread_mutex_lock(&g_play_mutex);
+        int is_running = g_play_thread_running;
+        int is_active  = g_play_thread_active;
+        int is_finished = g_play_thread_finished;
+        pthread_mutex_unlock(&g_play_mutex);
+        if (!is_running && !is_active && !is_finished) break;
+        signal_playback_thread();
+        usleep(10000);
+        waited += 10;
+    }
+    if (waited >= timeout_ms)
+        log_warn("audio", "Playback thread did not stop within %dms, forcing shutdown", timeout_ms);
+}
+
+/* ============================================================
+ * Session persistence
+ * ============================================================ */
+
+static void extract_parent_directory(const char *path, char *dest, size_t dest_size)
+{
+    if (!dest || dest_size == 0) { dest[0] = '\0'; return; }
+    dest[0] = '\0';
+    if (!path || path[0] == '\0') return;
+    const char *slash = strrchr(path, '/');
+    if (!slash) return;
+    size_t length = (size_t)(slash - path);
+    if (length >= dest_size) length = dest_size - 1;
+    memcpy(dest, path, length);
+    dest[length] = '\0';
+}
+
+void persist_playback_session_state(void)
+{
+    int should_resume = 0;
+    int play_index = -1, play_position = 0;
+    char track_path[MAX_PATH_LEN] = "", track_folder_path[MAX_PATH_LEN];
+
+    /* 退出路径：先去抖落盘里攒着的音量/倍速，再写本次会话的恢复字段 */
+    core_config_flush_dirty();
+
+    reap_finished_playback_thread();
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_play_thread_running &&
+        (g_play_state == PLAY_STATE_PLAYING || g_play_state == PLAY_STATE_PAUSED)) {
+        /* 保存可听位置，而不是已写入环形缓冲的提前量（见 audio_get_position_seconds）。 */
+        play_position = audio_get_position_seconds();
+        play_index = g_current_play_index;
+        snprintf(track_path, sizeof(track_path), "%s", g_current_play_path);
+        should_resume = (track_path[0] != '\0' || play_index >= 0);
+    }
+    pthread_mutex_unlock(&g_play_mutex);
+
+    /* 兼容极端时序：路径尚未写入但旧下标仍指向队列条目时，按旧下标补齐。 */
+    if (should_resume && track_path[0] == '\0') {
+        if (play_index >= 0 && bq_path_at(play_index, track_path, sizeof(track_path)) == 0) {
+            /* track_path ready */
+        } else {
+            track_path[0] = '\0';
+        }
+    }
+
+    if (!should_resume || track_path[0] == '\0') {
+        g_app_config.resume_last_playback = 0;
+        g_app_config.last_played_position = 0;
+        g_app_config.last_played_folder_path[0] = '\0';
+        g_app_config.last_played_track_path[0] = '\0';
+        save_config();
+        return;
+    }
+
+    if (play_position < 0) play_position = 0;
+    if (g_total_duration > 0 && play_position >= g_total_duration)
+        play_position = g_total_duration > 1 ? g_total_duration - 1 : 0;
+
+    g_app_config.resume_last_playback = 1;
+    g_app_config.last_played_position = play_position;
+    snprintf(g_app_config.last_played_track_path, sizeof(g_app_config.last_played_track_path), "%s", track_path);
+    extract_parent_directory(track_path, track_folder_path, sizeof(track_folder_path));
+    snprintf(g_app_config.last_played_folder_path, sizeof(g_app_config.last_played_folder_path), "%s", track_folder_path);
+    save_config();
+}
+
+/* 核心换曲时的会话恢复字段记录（Task 4.2）。
+ *
+ * 这是"由核心持久化"的换曲钩子：play_audio() 只在核心宿主进程里运行
+ * （本地模式 TUI 即核心；daemon 与远程前端都经 RPC/播放线程走到这里），
+ * 远程 TUI 前端从不调用 play_audio，因此前端进程不会触达本函数、不会写 config。
+ *
+ * 记录"刚切到的当前曲目"路径与它的起始位置：
+ *   - 普通换曲：起始位置为 0（g_initial_seek_position 已被上一曲线程消费清零）；
+ *   - 断点恢复 / 倍速重启：起始位置为 g_initial_seek_position（本次要跳到的进度）。
+ * 退出路径（persist_playback_session_state）仍会写入精确的实时位置，二者互补。
+ *
+ * 字段语义与 persist_playback_session_state 保持一致：resume_last_playback /
+ * last_played_position / last_played_track_path / last_played_folder_path。 */
+static void persist_playback_session_on_switch(int index)
+{
+    char track_path[MAX_PATH_LEN], track_folder_path[MAX_PATH_LEN];
+
+    if (index < 0 ||
+        bq_path_at(index, track_path, sizeof(track_path)) != 0 ||
+        track_path[0] == '\0') {
+        return;
+    }
+
+    int start_position = g_initial_seek_position > 0 ? g_initial_seek_position : 0;
+
+    g_app_config.resume_last_playback = 1;
+    g_app_config.last_played_position = start_position;
+    snprintf(g_app_config.last_played_track_path,
+             sizeof(g_app_config.last_played_track_path), "%s", track_path);
+    extract_parent_directory(track_path, track_folder_path, sizeof(track_folder_path));
+    snprintf(g_app_config.last_played_folder_path,
+             sizeof(g_app_config.last_played_folder_path), "%s", track_folder_path);
+    save_config();
+}
+
+/* ============================================================
+ * Play audio (public API)
+ * ============================================================ */
+
+/* 取走“本次起播来自倍速变更”的意图。只在队列条目有效、确实要进入起播流程时
+ * 调用；返回 1 时 false 分支也不能再因“同曲目已在播放”而跳过线程重建。 */
+static int take_speed_change_restart(void)
+{
+    int pending;
+    pthread_mutex_lock(&g_play_mutex);
+    pending = g_speed_change_restart_pending;
+    g_speed_change_restart_pending = 0;
+    pthread_mutex_unlock(&g_play_mutex);
+    return pending;
+}
+
+void play_audio(int index)
+{
+    /* 退出闸门：一旦进程被要求退出（Control.Quit / SIGTERM / 总线丢失），
+     * 主循环可能在退出前继续派发同一批 D-Bus 消息。此时若还允许起播，
+     * 就会在“正在收尾的旧核心”里再拉起一个播放线程，与新前端随后接管的
+     * 核心叠在一起。退出一旦开始，播放线程只减不增。 */
+    if (g_should_exit) {
+        log_warn("audio", "play_audio(%d) ignored: process is shutting down", index);
+        return;
+    }
+
+    /* 进程边界：只有 core 宿主（local 模式的 TUI，或 daemon）初始化过音频
+     * 引擎，才允许创建播放线程。远端前端只经 D-Bus 下发命令；如果它在这里
+     * 意外走到本地起播，就会与核心各播一路，形成叠播（重音）。
+     * 注意：此闸门必须在 bq_play_at()/持久化之前，拒绝时不留任何副作用。 */
+    if (!g_audio_engine_initialized) {
+        log_error("audio",
+                  "play_audio(%d) refused: this process is a remote front end "
+                  "without an audio engine", index);
+        return;
+    }
+
+    BackendQueueEntry entry;
+    if (bq_entry_at(index, &entry) != 0) {
+        log_warn("audio", "play_audio(%d): queue position out of range", index);
+        return;
+    }
+    char track_path[MAX_PATH_LEN];
+    snprintf(track_path, sizeof(track_path), "%s", entry.path);
+    log_info("audio", "play_audio(index=%d) track='%s'", index, track_path);
+
+    /* 倍速重启可能在可听位置 0 触发，g_initial_seek_position 此时也是 0；
+     * 必须靠显式意图区分“普通同曲目起播（可跳过）”与“倍速重建线程”。 */
+    int force_speed_restart = take_speed_change_restart();
+
+    /* 队列由前端下发：位置 index 必须与后端游标一致，但前端也可能直接
+     * 指定某个位置（Queue.PlayAt），因此这里以调用方给的位置为准。 */
+    if (bq_position() != index) {
+        bq_play_at(index);
+    }
+
+    reap_finished_playback_thread();
+    pthread_mutex_lock(&g_play_mutex);
+
+    int is_speed_change_restart = force_speed_restart || (g_initial_seek_position > 0);
+    if (!is_speed_change_restart && g_play_state == PLAY_STATE_PLAYING && g_current_play_index == index) {
+        log_debug("audio", "Skipping play: same index=%d already playing", index);
+        snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);
+        pthread_mutex_unlock(&g_play_mutex);
+        return;
+    }
+
+    if (g_play_thread_active) {
+        int was_paused = (g_play_state == PLAY_STATE_PAUSED);
+        log_debug("audio", "Pending play_audio(%d) - thread already active, scheduling switch", index);
+        g_pending_playback_index = index;
+        g_play_thread_running = 0;
+        g_seek_request = 0;
+        g_play_state = PLAY_STATE_STOPPED;
+        pthread_mutex_unlock(&g_play_mutex);
+
+        /* 暂停中切歌：所有后端都要恢复流，否则写线程会一直停在“写不进”上，
+         * 切歌无法完成（ALSA/PipeWire 的写线程不会被 Pulse 的 corked 状态唤醒）。 */
+        audio_backend_resume_stream();
+        signal_playback_thread();
+
+        if (was_paused) {
+            for (int i = 0; i < 50; i++) {
+                reap_finished_playback_thread();
+                pthread_mutex_lock(&g_play_mutex);
+                if (!g_play_thread_active) {
+                    g_pending_playback_index = -1;
+                    g_current_play_index = index;
+                    snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);
+                    g_play_thread_active = 1;
+                    g_play_thread_running = 1;
+                    g_play_thread_finished = 0;
+                    g_play_state = PLAY_STATE_STOPPED;
+                    pthread_mutex_unlock(&g_play_mutex);
+                    goto start_playback;
+                }
+                pthread_mutex_unlock(&g_play_mutex);
+                usleep(10000);
+            }
+            log_warn("audio", "Paused thread did not exit within 500ms, falling back to async switch");
+        }
+        core_notify_state_changed();
+        return;
+    }
+
+    g_pending_playback_index = -1;
+    g_current_play_index = index;
+    snprintf(g_current_play_path, sizeof(g_current_play_path), "%s", track_path);
+    g_play_thread_active = 1;
+    g_play_thread_running = 1;
+    g_play_thread_finished = 0;
+    g_play_state = PLAY_STATE_STOPPED;
+    pthread_mutex_unlock(&g_play_mutex);
+
+start_playback:
+    {
+    /* Set CUE offset for the playback thread */
+    g_cue_offset = entry.cue_offset;
+
+    int *index_ptr = malloc(sizeof(int));
+    if (!index_ptr) {
+        pthread_mutex_lock(&g_play_mutex);
+        g_play_thread_active = 0;
+        g_current_play_index = -1;
+        g_current_play_path[0] = '\0';
+        pthread_mutex_unlock(&g_play_mutex);
+        return;
+    }
+    *index_ptr = index;
+
+    if (pthread_create(&g_play_thread, NULL, play_audio_thread, index_ptr) != 0) {
+        log_error("audio", "Failed to create playback thread for index=%d", index);
+        free(index_ptr);
+        pthread_mutex_lock(&g_play_mutex);
+        g_play_thread_active = 0;
+        g_play_thread_running = 0;
+        g_play_state = PLAY_STATE_STOPPED;
+        g_current_play_index = -1;
+        g_current_play_path[0] = '\0';
+        pthread_mutex_unlock(&g_play_mutex);
+        return;
+    }
+    pthread_mutex_lock(&g_play_mutex);
+    g_play_state = PLAY_STATE_PLAYING;
+    pthread_mutex_unlock(&g_play_mutex);
+    signal_playback_thread();
+
+    /* 歌词来源随队列条目下发（前端扫描时已知）；条目未带时才回落自动。
+     * 歌词与字符封面都是“当前曲目信息”，归后端。 */
+    int lyrics_source = (entry.lyrics_source >= LYRICS_SOURCE_AUTO &&
+                         entry.lyrics_source <= LYRICS_SOURCE_EXTERNAL)
+        ? entry.lyrics_source : LYRICS_SOURCE_AUTO;
+    load_lyrics(track_path, lyrics_source);
+    update_album_cover_for_track(track_path);
+
+    /* 状态消息 = 本地化前缀 + 标题（缺失时退回路径） + " - " + 艺术家。
+     * 缓冲区必须按字段上限预留：曾用 char[64]，75 字节的
+     * “正在播放：四重罪孽 - 洛天依Official、言和、乐正绫、DELA”
+     * 会被 snprintf 切在“正”的 UTF-8 序列中间，最终让 libdbus 断言
+     * 失败并 abort 整个核心。真正的码点边界截断在 core_status_push()。 */
+    char msg[MAX_PATH_LEN + MAX_META_LEN * 2 + 64];
+    snprintf(msg, sizeof(msg), "%s%s - %s",
+             i18n_get("audio.status.playing"),
+             entry.title[0] ? entry.title : entry.path,
+             entry.artist);
+    core_status_push(msg);
+    log_info("audio", "Now playing: '%s' - '%s' (idx=%d)",
+             entry.title, entry.artist, index);
+    /* 换曲持久化改由核心负责（Task 4.2）：记录当前曲目路径与起始位置。
+     * 远程 TUI 前端不会走到这里（其播放经 D-Bus 交给核心），故前端不写 config。 */
+    persist_playback_session_on_switch(index);
+    core_notify_state_changed();
+    }
+}
+
+/* ============================================================
+ * Pause / Resume / Stop
+ * ============================================================ */
+
+void pause_audio(void)
+{
+    log_debug("audio", "pause_audio() called");
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_play_state != PLAY_STATE_PLAYING || !g_play_thread_running) {
+        pthread_mutex_unlock(&g_play_mutex);
+        return;
+    }
+    /* 不检查队列下标：当前条目可能已被 Queue.RemoveAt/Clear 从队列中移除，
+     * 但播放线程仍在出声；此时仍应允许暂停。当前曲目的身份是
+     * g_current_play_path，而不是队列位置。 */
+    g_play_state = PLAY_STATE_PAUSED;
+    audio_backend_pause_stream();
+    pthread_mutex_unlock(&g_play_mutex);
+    signal_playback_thread();
+    progress_tracker_on_pause();
+    core_notify_state_changed();
+}
+
+void resume_audio(void)
+{
+    log_debug("audio", "resume_audio() called");
+    pthread_mutex_lock(&g_play_mutex);
+    if (g_play_state != PLAY_STATE_PAUSED || !g_play_thread_running) {
+        pthread_mutex_unlock(&g_play_mutex);
+        return;
+    }
+    g_play_state = PLAY_STATE_PLAYING;
+    audio_backend_resume_stream();
+    pthread_mutex_unlock(&g_play_mutex);
+    signal_playback_thread();
+    progress_tracker_on_resume();
+    core_notify_state_changed();
+}
+
+void stop_audio(void)
+{
+    log_debug("audio", "stop_audio() called");
+    reap_finished_playback_thread();
+    pthread_mutex_lock(&g_play_mutex);
+    g_play_thread_running = 0;
+    g_pending_playback_index = -1;
+    g_seek_request = 0;
+    g_play_state = PLAY_STATE_STOPPED;
+    g_current_play_index = -1;
+    g_current_play_path[0] = '\0';
+    g_audio_sample_rate = 0;
+    g_audio_bit_rate = 0;
+    g_audio_bit_depth = 0;
+    g_audio_codec_name[0] = '\0';
+    pthread_mutex_unlock(&g_play_mutex);
+    signal_playback_thread();
+
+    g_current_position = 0;
+    progress_tracker_on_stop();
+    clear_lyrics();
+    reset_visualizer_state();
+    core_notify_state_changed();
+}
+
+/* ============================================================
+ * Next / Prev
+ * ============================================================ */
+
+void next_track(void)
+{
+    log_debug("audio", "next_track() called, mode=%d, current_idx=%d", g_play_mode, g_current_play_index);
+    if (bq_count() == 0) return;
+
+    int next_position = play_queue_peek_next(&g_play_queue, g_play_mode);
+    if (next_position < 0) {
+        stop_audio();
+        return;
+    }
+    bq_play_at(next_position);
+    play_audio(next_position);
+}
+
+void prev_track(void)
+{
+    log_debug("audio", "prev_track() called, mode=%d, current_idx=%d", g_play_mode, g_current_play_index);
+    if (bq_count() == 0) return;
+
+    int prev_position = play_queue_peek_prev(&g_play_queue, g_play_mode);
+    if (prev_position < 0) return;
+    bq_play_at(prev_position);
+    play_audio(prev_position);
+}
+
+/* ============================================================
+ * Seek
+ * ============================================================ */
+
+void seek_audio(double position)
+{
+    log_debug("audio", "seek_audio(pos=%.1f) called, total=%d", position, g_total_duration);
+    reap_finished_playback_thread();
+
+    if (position < 0) position = 0;
+    if (g_total_duration > 0 && position > g_total_duration) position = g_total_duration;
+
+    int int_position = (int)position;
+
+    if (g_play_state == PLAY_STATE_STOPPED || !g_play_thread_running) {
+        pthread_mutex_lock(&g_play_mutex);
+        g_current_position = int_position;
+        pthread_mutex_unlock(&g_play_mutex);
+        if (progress_tracker_is_ready()) progress_tracker_seek(int_position);
+        core_notify_state_changed();
+        return;
+    }
+
+    pthread_mutex_lock(&g_seek_mutex);
+    g_seek_position = int_position;
+    g_current_position = int_position;
+    g_seek_request = 1;
+    pthread_mutex_unlock(&g_seek_mutex);
+    signal_playback_thread();
+
+    core_notify_state_changed();
+    media_session_notify_seek((uint64_t)g_current_position * 1000ULL);
+}
+
+int get_and_clear_initial_seek_position(void)
+{
+    int pos = g_initial_seek_position;
+    g_initial_seek_position = 0;
+    return pos;
+}

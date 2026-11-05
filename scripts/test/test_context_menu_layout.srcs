@@ -1,2 +1,2 @@
-src/org.yxzl.ter-music/ui/context_menu_layout.c
-src/org.yxzl.ter-music/ui/mouse_routing.c
+src/cn.org.huansoft.ter-music/ui/context_menu_layout.c
+src/cn.org.huansoft.ter-music/ui/mouse_routing.c

@@ -1,0 +1,137 @@
+/**
+ * @file config_schema.h
+ * @brief XML config schema constants for ter-music v2 config format
+ *
+ * Defines XML element names, attribute names, version identifiers
+ * used by config_xml.c for serialization/deserialization.
+ *
+ * @author ter-music team
+ * @date 2026-06-01
+ */
+
+#ifndef CONFIG_SCHEMA_H
+#define CONFIG_SCHEMA_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ── Version identifiers ──────────────────────────────────────────── */
+/* 根属性现写 CONFIG_CURRENT_VERSION 数字契约版；"2.2" 为旧格式版字面量，
+ * 仅存在于历史文件（atoi 得 2，仍可加载并触发一次性迁移补写）。 */
+#define CONFIG_CURRENT_VERSION      9   /* 与 types.h 保持同步 */
+#define XML_PREF_CORE_EXIT_NO_FRONTEND "core_exit_when_no_frontend"
+/* 前端退出时是否终止核心播放进程，缺省启用（= 与前后端分离前的行为一致） */
+#define XML_PREF_STOP_CORE_ON_EXIT  "stop_core_on_exit"
+#define CONFIG_MIN_SUPPORTED_VER    2
+
+/* ── Root element ─────────────────────────────────────────────────── */
+#define XML_ROOT                    "ter-music-config"
+#define XML_ATTR_VERSION            "version"
+
+/* ── Top-level sections ───────────────────────────────────────────── */
+#define XML_SECTION_PATHS           "paths"
+#define XML_SECTION_THEME           "theme"
+#define XML_SECTION_PREFERENCES     "preferences"
+
+/* ── Paths ────────────────────────────────────────────────────────── */
+#define XML_PATH_DEFAULT_STARTUP    "default_startup_path"
+#define XML_PATH_LAST_OPENED        "last_opened_path"
+#define XML_PATH_LAST_PLAYED_FOLDER "last_played_folder_path"
+#define XML_PATH_LAST_PLAYED_TRACK  "last_played_track_path"
+
+/* ── Theme ────────────────────────────────────────────────────────── */
+#define XML_THEME_PLAYLIST_FG       "playlist_fg"
+#define XML_THEME_PLAYLIST_BG       "playlist_bg"
+#define XML_THEME_CONTROLS_FG       "controls_fg"
+#define XML_THEME_CONTROLS_BG       "controls_bg"
+#define XML_THEME_LYRICS_FG         "lyrics_fg"
+#define XML_THEME_LYRICS_BG         "lyrics_bg"
+#define XML_THEME_SIDEBAR_FG        "sidebar_fg"
+#define XML_THEME_SIDEBAR_BG        "sidebar_bg"
+#define XML_THEME_HIGHLIGHT_FG      "highlight_fg"
+#define XML_THEME_HIGHLIGHT_BG      "highlight_bg"
+#define XML_THEME_BORDER_FG         "border_fg"
+#define XML_THEME_BORDER_BG         "border_bg"
+
+/* ── Preferences ──────────────────────────────────────────────────── */
+#define XML_PREF_AUTO_PLAY          "auto_play_on_start"
+#define XML_PREF_REMEMBER_PATH      "remember_last_path"
+#define XML_PREF_CLEAR_HISTORY      "clear_history_on_startup"
+#define XML_PREF_RESUME_PLAYBACK    "resume_last_playback"
+#define XML_PREF_LAST_POSITION      "last_played_position"
+#define XML_PREF_LANGUAGE           "ui_language"
+#define XML_PREF_VOLUME             "volume_percent"
+#define XML_PREF_AUDIO_LATENCY      "audio_latency_ms"
+#define XML_PREF_SHOW_LYRICS        "show_lyrics_panel"
+#define XML_PREF_LOOP_MODE          "default_loop_mode"
+#define XML_PREF_PLAY_MODE          "default_play_mode"
+#define XML_PREF_ADVANCED_PLAY_MODES "advanced_play_modes_enabled"
+#define XML_PREF_PLAYBACK_SPEED     "default_playback_speed"
+#define XML_PREF_SHOW_COVER         "show_album_cover"
+#define XML_PREF_SEAMLESS_PRELOAD   "seamless_preload"
+#define XML_PREF_LYRICS_ALIGN       "lyrics_alignment"
+#define XML_PREF_AUDIO_BACKEND      "audio_backend"
+#define XML_PREF_SORT_MODE          "sort_mode"
+#define XML_PREF_CUE_ENCODING       "cue_encoding"
+#define XML_PREF_KARAOKE_MODE       "karaoke_mode"
+
+/* ── Info display (CLI `ter-music show` / D-Bus), config v5 ───────── */
+#define XML_PREF_INFO_PRESET         "info_preset"
+#define XML_PREF_INFO_FIELDS         "info_fields"
+#define XML_PREF_INFO_SHOW_COVER     "info_show_cover"
+#define XML_PREF_INFO_COVER_COLS     "info_cover_cols"
+#define XML_PREF_INFO_COVER_ROWS     "info_cover_rows"
+#define XML_PREF_INFO_COVER_CHARSET  "info_cover_charset"
+#define XML_PREF_INFO_SHOW_PROGRESS  "info_show_progress"
+#define XML_PREF_INFO_PROGRESS_STYLE "info_progress_style"
+#define XML_PREF_INFO_LYRICS_LINES   "info_lyrics_lines"
+
+/* ── Equalizer ────────────────────────────────────────────────────── */
+#define XML_SECTION_EQUALIZER       "equalizer"
+#define XML_EQ_ENABLED              "enabled"
+#define XML_EQ_PREAMP               "preamp"
+#define XML_EQ_BAND                 "band"
+#define XML_ATTR_BAND_FREQUENCY     "frequency"
+
+/* ── Keybindings（config v9）───────────────────────────────────────── */
+#define XML_SECTION_KEYBINDINGS     "keybindings"
+#define XML_BINDING                 "binding"
+#define XML_ATTR_ACTION             "action"
+#define XML_ATTR_KEY                "key"
+
+/* ── Legacy remote connections（仅 v5 → v6 一次性搬迁时读取） ─────────
+ * 远程音乐源（SMB/SFTP/FTP/WebDAV/HTTP）已移交前端：核心不再读写该段，
+ * 只在升级时把旧配置里的条目**原样**（含密码密文）搬到前端自有的
+ * <configdir>/remote.xml，随后保存出不含该段的 v6 配置。 */
+#define XML_SECTION_REMOTE_CONNS    "remote_connections"
+#define XML_REMOTE_CONN             "connection"
+#define XML_REMOTE_NAME             "name"
+#define XML_REMOTE_PROTOCOL         "protocol"
+#define XML_REMOTE_HOST             "host"
+#define XML_REMOTE_PORT             "port"
+#define XML_REMOTE_USERNAME         "username"
+#define XML_REMOTE_PASSWORD         "password"
+#define XML_REMOTE_PRIVKEY          "private_key_path"
+#define XML_REMOTE_BASE_PATH        "base_path"
+
+/* Attribute used on <password> to indicate encryption */
+#define XML_ATTR_PASSWORD_ENCRYPTED "encrypted"
+#define XML_VAL_ENCRYPTED           "1"
+
+/* ── File names ───────────────────────────────────────────────────── */
+#define CONFIG_FILE_NAME            "config.xml"
+#define CONFIG_FILE_OLD_NAME        "config.json"
+#define CONFIG_FILE_BACKUP_SUFFIX   ".bak"
+
+/* 前端自有的远程配置（服务器列表与密码密文），与核心配置同目录。
+ * 前端是它唯一的写者；核心只在 v5 → v6 迁移时写一次。 */
+#define REMOTE_FILE_NAME            "remote.xml"
+#define REMOTE_ROOT                 "ter-music-remote"
+#define REMOTE_SECTION_CONNS        "connections"
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* CONFIG_SCHEMA_H */

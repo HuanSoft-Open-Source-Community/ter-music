@@ -97,11 +97,11 @@ cat > "$XDG_CONFIG_HOME/ter-music/config.xml" <<'EOF'
 EOF
 
 queue_count() {
-    python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Queue.Get 0 1 2>/dev/null |
+    python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Queue.Get 0 1 2>/dev/null |
         python3 -c 'import json,sys; print(json.load(sys.stdin).get("count"))' 2>/dev/null
 }
 queue_rows() {
-    python3 "$SCRIPT_DIR/rpc_client.py" call org.yxzl.ter_music.Queue.Get 0 10 2>/dev/null |
+    python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Queue.Get 0 10 2>/dev/null |
         python3 -c '
 import json,sys
 doc=json.load(sys.stdin)

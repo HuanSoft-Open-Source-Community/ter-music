@@ -2,7 +2,7 @@
  * @file test_mouse_routing.c
  * @brief ui/mouse_routing.c 的单元测试：鼠标事件归属与竞争态
  *
- * 覆盖（与 include/org.yxzl.ter-music/ui/mouse.h 头注的规则表逐条对应）：
+ * 覆盖（与 include/cn.org.huansoft.ter-music/ui/mouse.h 头注的规则表逐条对应）：
  *   - ui_rect_contains 的边界与"无效矩形"；
  *   - 优先级 1：模态输入独占（点击与滚轮都吞）；
  *   - 优先级 2：弹层展开时滚轮**只滚弹层**（指针在别的窗格也一样）、
@@ -16,7 +16,7 @@
  *     被吞掉的事件必定有且仅有一个归属者。
  *
  * 运行：scripts/test/run-unit-tests.sh test_mouse_routing
- * 依赖（见同名 .srcs）：src/org.yxzl.ter-music/ui/mouse_routing.c
+ * 依赖（见同名 .srcs）：src/cn.org.huansoft.ter-music/ui/mouse_routing.c
  */
 
 #include "ui/mouse.h"

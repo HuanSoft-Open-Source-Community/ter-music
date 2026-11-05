@@ -27,6 +27,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - **CUE分轨支持**：支持FLAC/APE/WV的CUE分轨，自动检测编码（GBK/BIG5/Shift-JIS）
 - 兼容LRC格式歌词，可精准跟随音频进度同步显示并按字高亮（逐字标签、行首尾标签、相邻行时间戳插值三种写法都支持）；**内嵌歌词**（FFmpeg/APE标签）优先于外部.lrc文件。可在歌词定位模式中切换来源（Ctrl+L → Tab）
 - **10段图示均衡器**：ISO标准频段（31Hz-16kHz），双二阶IIR滤波器，±12dB调节范围，设置中可视化条形UI，支持**均衡器预设**和**软限幅**
+- **卡拉OK模式（消人声）**：三档——不启用、保留较弱人声、完全消除人声。采用频带受限的中置消除：用 4 阶 Butterworth 分频（24dB/倍频，180Hz 与 6kHz）只减去两者之间的中置成分，因此伴奏的低频与高频不会被一并抵消。仅立体声生效，单声道曲目逐比特直通。入口有主页控制窗格弹层、设置→播放、CLI `ter-music karaoke` 与 D-Bus `Control.SetKaraoke`。注意：它与上文的“逐字（karaoke 式）歌词高亮”、以及名为 `karaoke` 的布局预设（歌词优先）都不是一回事
 - **17种播放模式**：从基础（顺序、单曲循环、列表循环、随机一次、随机重复）到高级（按文件夹/专辑/艺术家分组）
 - 支持倍速播放，提供0.75x、1.0x、1.25x、1.5x、2.0x、3.0x六档速度调节，高效收听
 - **音乐库**：SQLite数据库存储，FTS5全文搜索，按艺术家/专辑/流派浏览，支持**递归目录扫描**和增量跟踪
@@ -39,7 +40,7 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 - **数据驱动布局**：7 个 JSON 预设以二叉分栏树定义窗格与比例，强制平铺是结构不变量；旧自由矩形自动适配而不被拒绝；歌词格与黑胶格可以共存，无歌词的曲目会让歌词格临时让位、由其余窗格补位，换到有歌词的曲目时歌词格自动回来（同一个状态轮询周期内，无需切视图或改终端尺寸；只有歌词格时仍在格内回退画黑胶）
 - **持久化存储**：SQLite统一存储（收藏、历史、歌单），自动从v1 JSON迁移
 - 支持专辑封面显示，可在终端中以彩色半块字符渲染封面图片（256 色 → 8 色 → 黑白自动回退）。控制区封面由播放设置的封面总开关控制；信息窗格封面另受信息显示页的开关控制；独立黑胶窗格会把当前封面裁成圆形中心标签并随唱片旋转
-- 🖥️ **CLI 模式与后台播放**：提供完整的命令行子命令（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`show`/`daemon`），并可启动脱离终端的后台播放守护进程，关闭终端后音乐依旧继续播放——Linyaps 打包下同样可用，后台播放经 D-Bus 激活或随包提供的 systemd 用户服务启动
+- 🖥️ **CLI 模式与后台播放**：提供完整的命令行子命令（`play`/`pause`/`seek`/`volume`/`speed`/`mode`/`karaoke`/`show`/`daemon`），并可启动脱离终端的后台播放守护进程，关闭终端后音乐依旧继续播放——Linyaps 打包下同样可用，后台播放经 D-Bus 激活或随包提供的 systemd 用户服务启动
 - 📋 **可配置信息显示**：主页信息窗格的字段、预设与封面，以及 `ter-music show` 输出的基本信息块、盲文/ASCII/半块字符封面、进度行与两行歌词（当前行 + 下一行）均可在 TUI 设置中配置
 - **MPRIS 与歌词 API**：通过 D-Bus 提供桌面媒体控制、`mpris:artUrl` 专辑封面、供其他程序读取的开放歌词接口，以及供其他程序查询曲目、进度与字符封面的 `Info` 接口和驱动播放器的 `Control` 接口
 - 纯键盘快捷键操作，响应迅速
@@ -66,15 +67,16 @@ Ter-Music是一款简洁的终端音乐播放器，专门为Linux系统开发。
 | 🔧 CMake构建 | 采用现代构建方式，跨系统兼容性好 |
 | 🔊 音频后端 | 支持PipeWire、PulseAudio和ALSA输出。自动模式启动时逐个真实探测（PipeWire > Pulse > ALSA，ALSA 会实际打开默认设备并配置参数）；探测不通过的后端不会被自动选中、也不在设置界面列出。播放时若当前后端建流失败，会重新探测其余可用后端并回退，状态栏提示切换结果 |
 | 🎛️ 10段均衡器 | ISO标准图示均衡器，设置中可视化条形图界面 |
+| 🎤 卡拉OK模式 | 三档消人声（不启用/较弱/完全），频带受限中置消除；仅立体声，伴奏保留；主页弹层、设置→播放、`ter-music karaoke`、`Control.SetKaraoke` |
 | ⏩ 倍速播放控制 | 六档速度调节（0.75x-3.0x），播放中可随时切换 |
 | 📊 信息窗格 | 显示播放状态/模式、当前曲目元数据、彩色半块字符封面，以及采样率、位深、比特率、编码格式；字段随“设置 → 信息显示”增减 |
 | 🌐 远程播放 | 支持SMB/SFTP/FTP/WebDAV/HTTP 音乐源；由**前端**列出并逐曲下载到本地缓存，再把本地文件交给核心播放 |
 | 🎨 专辑封面 | 终端彩色半块专辑封面（256→8→黑白回退）；控制区封面由播放设置的封面总开关控制，信息窗格封面另受信息显示页开关控制；黑胶窗格复用当前封面作旋转中心标签 |
 | 🎵 MPRIS / 歌词 API | 桌面媒体控制、`mpris:artUrl` 封面，以及基于 D-Bus 的 JSON 歌词接口 |
-| 🖥️ CLI 模式 | `ter-music play/pause/next/seek/volume/speed/mode/show` 可直接控制正在运行的实例；`show` 打印可配置的信息块 |
+| 🖥️ CLI 模式 | `ter-music play/pause/next/seek/volume/speed/mode/karaoke/show` 可直接控制正在运行的实例；`show` 打印可配置的信息块 |
 | 🌙 后台播放 | `ter-music daemon start` 以无界面方式播放；可从任意终端控制，无需 TUI |
 | 🖼️ 通过 D-Bus 输出字符封面 | `Info.GetCoverArt` 向其他应用程序返回盲文或 ASCII 字符封面 |
-| 📦 Linyaps CLI | 同一套 CLI 可在 Linyaps 容器内经 `ll-cli run org.yxzl.ter-music -- ter-music …` 使用；后台播放支持按需 D-Bus 激活与常驻 systemd 用户服务 |
+| 📦 Linyaps CLI | 同一套 CLI 可在 Linyaps 容器内经 `ll-cli run cn.org.huansoft.ter-music -- ter-music …` 使用；后台播放支持按需 D-Bus 激活与常驻 systemd 用户服务 |
 
 ### 四 适用场景
 - 无图形界面的Linux系统、嵌入式设备，需要播放音乐但没有窗口界面的场景
@@ -166,10 +168,10 @@ sudo apt update
 **从 AUR 安装（推荐）：**
 ```bash
 # 使用 yay（AUR 助手）
-yay -S ter-music-cn
+yay -S cn.org.huansoft.ter-music
 
 # 使用 paru（AUR 助手）
-paru -S ter-music-cn
+paru -S cn.org.huansoft.ter-music
 ```
 
 **使用 ZPM（MengXi OS 包管理器）安装：**
@@ -179,16 +181,20 @@ git clone https://aur.archlinux.org/zetapm.git
 cd zetapm
 makepkg -si
 
-# 然后使用 ZPM 安装 ter-music-cn
-zpm -S ter-music-cn
+# 然后使用 ZPM 安装 cn.org.huansoft.ter-music
+zpm -S cn.org.huansoft.ter-music
 ```
 
 **手动从 AUR 安装：**
 ```bash
-git clone https://aur.archlinux.org/ter-music-cn.git
-cd ter-music-cn
+git clone https://aur.archlinux.org/cn.org.huansoft.ter-music.git
+cd cn.org.huansoft.ter-music
 makepkg -si
 ```
+
+> Arch 包名在本次组织迁移中由 `ter-music-cn` 改为 `cn.org.huansoft.ter-music`。
+> `PKGBUILD` 就在本仓库里，但上面的命令要等 AUR 上的项目由维护者同步新建或改名
+> 之后才可用；在那之前请用下面的手动构建（直接用仓库内的 `PKGBUILD`）。
 
 **手动从源码构建：**
 ```bash
@@ -359,6 +365,7 @@ ter-music --help
 | `volume [0-100\|+N\|-N]` | 查询或设置音量 |
 | `speed [0.5-3.0]` | 查询或设置播放倍速 |
 | `mode [NAME\|0-16]` | 查询或设置播放模式（支持 `list_repeat`、`folder_shuffle_repeat` 等稳定名称） |
+| `karaoke [off\|soft\|full\|0-2\|cycle]` | 查询或设置消人声档位（`cycle` 按 0→1→2→0 进一步）；仅立体声生效，伴奏保持不变 |
 | `show [OPTIONS]` | 打印当前信息块（基本信息 / 字符封面 / 进度 / 两行歌词） |
 | `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | 查看或修改核心持有的活动队列 |
 | `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | 读取或修改核心配置（键名同 `config.xml`；`reset` 必须带 `--yes`） |
@@ -430,6 +437,8 @@ ter-music next
 ter-music seek +10
 ter-music volume +5
 ter-music mode shuffle_repeat
+ter-music karaoke soft    # 保留较弱的人声（1 档）
+ter-music karaoke full    # 尽量消除人声（2 档），伴奏保持不变
 
 # 后台守护进程管理
 ter-music daemon start --open ~/Music
@@ -470,15 +479,15 @@ ter-music daemon stop
 
 ```bash
 # 任意 CLI 命令
-ll-cli run org.yxzl.ter-music -- ter-music show
-ll-cli run org.yxzl.ter-music -- ter-music pause
-ll-cli run org.yxzl.ter-music -- ter-music play ~/Music
+ll-cli run cn.org.huansoft.ter-music -- ter-music show
+ll-cli run cn.org.huansoft.ter-music -- ter-music pause
+ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 # 容器已在运行时读取状态（见下方说明）
-ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show
+ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show
 
 # 交互式 shell 的便捷包装（可写入 ~/.bashrc）
-ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
+ter-music() { ll-cli run cn.org.huansoft.ter-music -- ter-music "$@"; }
 ```
 
 **后台播放。** 自我脱离的进程（`ter-music daemon start`）会随容器一起被回收，
@@ -487,9 +496,9 @@ ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
 
 | 方式 | 用法 | 行为 |
 | --- | --- | --- |
-| D-Bus 按需激活 | `ter-music play <路径>` 或 `ter-music daemon start` | 会话总线在宿主上启动 `ll-cli run org.yxzl.ter-music -- ter-music daemon foreground --no-autoplay`，命令随后转发给它 |
-| systemd 用户服务（常驻） | 在宿主执行 `systemctl --user enable --now org.yxzl.ter-music` | 播放器随会话启动，并在后台持续播放 |
-| 前台运行 | `ll-cli run org.yxzl.ter-music -- ter-music play <路径> --foreground` | 在前台播放；容器与命令同生命周期（适合 tmux/screen） |
+| D-Bus 按需激活 | `ter-music play <路径>` 或 `ter-music daemon start` | 会话总线在宿主上启动 `ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground --no-autoplay`，命令随后转发给它 |
+| systemd 用户服务（常驻） | 在宿主执行 `systemctl --user enable --now cn.org.huansoft.ter-music` | 播放器随会话启动，并在后台持续播放 |
+| 前台运行 | `ll-cli run cn.org.huansoft.ter-music -- ter-music play <路径> --foreground` | 在前台播放；容器与命令同生命周期（适合 tmux/screen） |
 
 注意事项：
 
@@ -501,15 +510,15 @@ ter-music() { ll-cli run org.yxzl.ter-music -- ter-music "$@"; }
   `ter-music show --json` 的 `"running"` 字段，而不要依赖退出码。
 - 当应用容器**已在运行**（后台 daemon 或 TUI）时，`ll-cli run … -- <命令>` 会把该命令
   的输出接到*正在运行的容器*的标准输出上，终端因此看不到任何内容。可用
-  `journalctl --user -u org.yxzl.ter-music` 查看，或改用 `ll-cli enter`（终端保持连接）：
-  `ll-cli enter org.yxzl.ter-music -- /opt/apps/org.yxzl.ter-music/files/bin/ter-music show`。
+  `journalctl --user -u cn.org.huansoft.ter-music` 查看，或改用 `ll-cli enter`（终端保持连接）：
+  `ll-cli enter cn.org.huansoft.ter-music -- /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music show`。
   该进入环境不传 `DBUS_SESSION_BUS_ADDRESS`，CLI 会自行解析会话总线
   （依次尝试 `$XDG_RUNTIME_DIR/bus`、`/run/user/<uid>/bus`）；显式设置的地址始终优先。
 - 宿主路径在容器内原样可见（`$HOME`、`/tmp`、`/media`），提取出的封面通过
   `mpris:artUrl` 仍可被宿主应用读取。
 - 设置、曲库与播放会话存储于 `$XDG_CONFIG_HOME/ter-music`。若 Linyaps 运行时
   重定向了 XDG 变量（参见 Linyaps FAQ「应用数据保存到哪里」），它们会落在
-  `~/.linglong/org.yxzl.ter-music/…`，从而与 deb 安装互不干扰。
+  `~/.linglong/cn.org.huansoft.ter-music/…`，从而与 deb 安装互不干扰。
 - `--watch` 需要终端（它使用 ANSI 光标控制）——请直接在终端中运行，不要经管道
   运行。
 - `Info`/`Control` 就是普通的会话总线服务，因此宿主应用（`gdbus`、媒体组件、
@@ -539,7 +548,7 @@ ter-music -o ~/Music      # 同上，并先打开一个目录
 
 ```bash
 ter-music --attach-only   # 没有核心在跑则以退出码 3 结束
-ter-music --bus org.yxzl.ter_music.instance1   # 指定要接入的实例
+ter-music --bus org.mpris.MediaPlayer2.ter_music.instance12345   # 指定要接入的实例
 ```
 
 **退出前端。** 关闭 TUI 会不会停播，由**前端自己的配置镜像**里的
@@ -560,7 +569,7 @@ Ctrl+C、SIGTERM、终端断开）都会发送 `Control.Quit`：核心先把会�
 断线状态，按指数退避重试（1/2/4/8/15/30 秒），一旦有核心应答就重新接入，并把
 自己的内容队列补推回去。在 TUI 里按 `R` 可以立即重启一个已死的核心并重推队列。
 
-**兼容性。** 总线接口面为 `api_version 5`（在版本 4 基础上增量扩展，兼容 v4 前端/核心）。内容类接口（`Playlist`、`Library`、
+**兼容性。** 总线接口面为 `api_version 7`：第 7 版把接口命名空间从 `org.yxzl.ter_music.*` 换成 `cn.org.huansoft.ter_music.*`，这是破坏性变更而非增量——旧客户端调新核心只会得到 `UnknownInterface`，新客户端也摸不到旧核心的 `Control.Attach`，所以核心与前端必须成对升级。方法面本身仍是 4、5 版增量扩展（6 版加入卡拉OK控制项）的那一套。内容类接口（`Playlist`、`Library`、
 `Favorites`、`History`、`DirHistory`、`Remote`）已撤下：它们属于前端。第三方
 客户端请使用 `Lyrics`、`Info`、`Control`、`Queue`、`Config` 五个接口，详见
 [API_DBUS_en_US.md](../API_DBUS_en_US.md)。
@@ -678,7 +687,7 @@ Ctrl+C、SIGTERM、终端断开）都会发送 `Control.Quit`：核心先把会�
 | 底部功能键栏 | 触发该键对应的动作，与按下这个键完全一样 | 无动作（但事件仍在此被消费） |
 | 歌单窗格 | 选中该行；单击即播放该曲，文件树里则如同 `Enter` 展开/收起目录 | 选中项上下移动一行；搜索结果、播放队列、文件树都同样有效，且**不会**触发播放 |
 | 音乐库浏览器（打开时顶替歌单窗格，`M` 切换） | 选中该条；再点一次已选中的那条或双击即深入；`[S]`/`[R]` 行触发扫描/重扫 | 移动选中项（与 `↑`/`↓` 相同） |
-| 控制区窗格 | 按下光标所在之按钮；音量按钮与进度行只把焦点移过去，与键盘一致 | 进度行：快进/快退 5 秒；音量按钮：±5%；倍速按钮：在预设倍速间切换（首尾循环）；其余按钮：无动作 |
+| 控制区窗格 | 按下光标所在之按钮；音量按钮与进度行只把焦点移过去，与键盘一致 | 进度行：快进/快退 5 秒；音量按钮：±5%；倍速按钮：在预设倍速间切换（首尾循环）；其余按钮——含卡拉OK按钮，它只走弹层——无动作 |
 | 歌词窗格 | 跳到光标所在那一句 | 快进到下一句 / 上一句（不会改变歌词定位模式的开与关） |
 | 信息窗格、频谱窗格、黑胶窗格 | 该处没有定义的动作（事件被消费，因此不会漏进别的窗格） | 无动作（被消费） |
 | 子视图侧栏（设置、历史、歌单、收藏、关于、帮助、语言） | 选中该菜单项；再点一次已选中项或双击等于 `Enter` | 移动侧栏选中项 |
@@ -805,6 +814,49 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 
 **技术说明：** 倍速调节采用FFmpeg的atempo滤镜实现，可在改变播放速度的同时保持音调不变。
 
+### 六之一 卡拉OK模式（消人声）
+
+卡拉OK模式削弱居中的人声，伴奏几乎不变，于是可以跟着原唱一起唱。它是**播放期**的处理：
+不写回任何文件，磁盘上的原始音频不会改变。
+
+| 档位 | 配置取值 | 效果 |
+| ---- | -------- | ---- |
+| 不启用 | `0` | 完全不做处理，样本原样通过 |
+| 人声较弱 | `1` | 减去中置频带约 60%，仍残留一层淡淡的人声 |
+| 消除人声 | `2` | 把中置频带减到该算法能减的极限 |
+
+**原理（频带受限的中置消除）：**
+
+1. 中置通道 `m = (L + R) / 2` 经两段 4 阶 Butterworth（24dB/倍频）分频：低通 180Hz、高通 6kHz。
+2. 只把人声主要所在的这两个拐点之间的频带从中置通道里减去：`m' = m - α · (m - lo - hi)`，
+   三档对应的 α 为 0 / 0.6 / 1.0。
+3. 侧置通道 `d = (L - R) / 2` 保持不变，立体声按 `L' = m' + d`、`R' = m' - d` 重建。
+
+之所以要限定频带，正是为了保住低频与高频：若把整个中置通道减掉，低音与镲片会一起被抵消。
+播放中切换档位时 α 在 30ms 内渐变而不是突变，因此听不到爆音；同一时刻两个分频器的延时线
+会以当前信号重新起测；输出仅在样本越过数字满量程时才做软限幅。
+
+**局限（如实说明）：**
+
+- 只对立体声有效。单声道没有中置/侧置可分，逐比特直通（引擎里 `channels != 2` 直接返回）。
+- 凡是"居中"的声音都会随人声一起被削弱——居中的底鼓、军鼓或单声道铺满的吉他都算。这是
+  该方法的固有性质，不是可修的缺陷。
+- 双轨叠加或大幅左右分置的人声不会被减掉，因为它们不在中置通道里。
+- 消人声作用在解码样本上、排在均衡器**之前**，所以均衡器、频谱与可视化看到的都是处理后的信号。
+
+**如何切换档位：**
+
+- 主页控制窗格：卡拉OK按钮显示当前档位（如"卡拉OK:消除人声"）。焦点在其上时按
+  `Enter`/`Space`（或鼠标点击）弹出三项菜单；按钮下方的状态行会回显实际生效的档位。
+- 设置（F2）→ 播放：「卡拉OK（消人声）」，按 `Enter` 打开同一个选择列表。
+- 命令行：`ter-music karaoke` 查询，`ter-music karaoke soft`（或 `full`/`off`/`1`/`cycle`）设置。
+- D-Bus：`Control.SetKaraoke` / `Control.GetKaraoke`，或用 `Config.Set` 写
+  `preferences.karaoke_mode`（`api_version` 6；命名空间在 7 版迁移）。
+- 档位持久化在 `config.xml` 的 `<karaoke_mode>`，下次启动自动回灌到引擎；0–2 之外的取值钳回 0。
+
+**命名上的巧合：** *karaoke* 在本项目里还另有所指——逐字歌词高亮（`Lyrics.GetDocument` 的
+`timing="chars"`）与名为 `karaoke` 的布局预设（歌词优先排布）。三者不是同一个功能，本节只谈消人声。
+
 ### 七 歌词显示
 本播放器支持自动加载LRC格式歌词，同时支持内嵌歌词：
 - **内嵌歌词优先**：播放器先从音频文件读取内嵌歌词（FFmpeg/APE标签），若无则回退加载外部.lrc文件。识别的键包括 `lyrics`、`LYRICS`、`lyrics-eng`、`UNSYNCEDLYRICS` 和 `©lyr`，覆盖 ID3 `USLT`/iTunes `lyrics-eng` 标签以及普通的 `lyrics`/`UNSYNCEDLYRICS`。
@@ -830,7 +882,7 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - 封面优先读取音频内嵌图片；若没有内嵌图片，则按 `cover`、`folder`、`front`、`album`（不区分大小写，扩展名支持 `.jpg`、`.jpeg`、`.png`、`.webp`）查找同目录封面。
 - 提取后的封面统一保存为受管理的 `/tmp/ter-music-cover-*.jpg` 缓存文件，保留最近 10 首的 MRU 缓存，退出时自动清理。
 
-同一 D-Bus 对象还提供开放歌词接口：接口 `org.yxzl.ter_music.Lyrics`，方法
+同一 D-Bus 对象还提供开放歌词接口：接口 `cn.org.huansoft.ter_music.Lyrics`，方法
 `GetLyrics`、`GetDocument` 与 `SetSource`（在内嵌歌词与外部歌词之间切换），
 信号 `LyricsChanged`。自 `api_version 5` 起，A/B 快照增加
 `char_sung`/`char_total`，`GetDocument` 的每行增加 `end`、`timing`、
@@ -841,21 +893,21 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 同一对象路径上还额外发布了下列接口，便于其他应用程序读取曲目数据、字符封面与
 播放进度，并驱动播放器：
 
-- `org.yxzl.ter_music.Info`（只读）：`GetInfo`、`GetTrackInfo`、
+- `cn.org.huansoft.ter_music.Info`（只读）：`GetInfo`、`GetTrackInfo`、
   `GetProgress`、`GetLyricsLines`、`GetCoverArt(charset, cols, rows)`、
   `GetDisplay(options)`（即 `ter-music show` 打印的原文）、
   `InstanceInfo`，以及信号 `InfoChanged`、`ProgressChanged`（最高 1 Hz）
   和 `CoverChanged`。
-- `org.yxzl.ter_music.Control`：传输控制、跳转、音量、倍速、播放模式、
+- `cn.org.huansoft.ter_music.Control`：传输控制、跳转、音量、倍速、播放模式、
   `ReloadConfig` 与 `Quit`。加载内容**不在**其中——内容由前端以队列形式下发。
-- `org.yxzl.ter_music.Queue`：核心的**路径队列**——
+- `cn.org.huansoft.ter_music.Queue`：核心的**路径队列**——
   `Set`/`Append`/`InsertAfter`/`RemoveAt`/`MoveUp`/`MoveDown`/`Clear`/
   `Shuffle`/`PlayAt` 与分页读取 `Get(offset, count)`，并广播 `QueueChanged`
   （条目数、当前游标、版本号）。只接受本地路径；单次写入 ≤500 条、单次读取
   ≤1000 条。
-- `org.yxzl.ter_music.Config`：核心配置的唯一写入口。远程服务器条目**不**在其中：
+- `cn.org.huansoft.ter_music.Config`：核心配置的唯一写入口。远程服务器条目**不**在其中：
   它属于前端（见下文）。
-- `Info.GetInfo` 通过 `core.api_version`（当前为 `5`）与已实现方法清单做版本握手，
+- `Info.GetInfo` 通过 `core.api_version`（当前为 `7`）与已实现方法清单做版本握手，
   客户端可先校验兼容性再调用。版本 3 移除了 `Remote` 接口与 `track.is_remote`
   字段，并规定所有路径参数只接受本地路径；版本 4 用路径语义的 `Queue` 取代了
   内容接口（`Playlist`、`Library`、`Favorites`、`History`、`DirHistory`）——
@@ -900,6 +952,7 @@ Ter-Music支持倍速播放功能，可根据需要调整音频播放速度：
 - `audio_backend`：音频后端（0=自动、1=PulseAudio、2=ALSA、3=PipeWire）。自动模式启动时逐个真实探测；显式选定的后端若实际不可用，播放时会回退到下一个可用后端并在状态栏提示，而不是静默失败
 - `sort_mode`：排序模式（0=默认、1=标题、2=艺术家、3=专辑、4=文件名）
 - `cue_encoding`：CUE文件字符编码（0=自动、1=UTF-8、2=GB18030、3=GBK、4=BIG5、5=Shift-JIS）
+- `karaoke_mode`：卡拉OK（消人声）档位（0=不启用、1=保留较弱人声、2=完全消除人声，见 5.6.1）。仅立体声生效；越界一律退回 0。该键随 `api_version` 6 加入（7 版只迁命名空间，没动这个键），配置文件格式本身未升版（仍为 9）——旧版程序忽略这个元素，缺元素即 0
 - `core_exit_when_no_frontend`：无人接入时让核心自行退出（0/1，默认 0）。
   置 1 时最后一个前端离开并过 10 秒宽限期后核心退出
 - `stop_core_on_exit`：前端退出时停止播放核心——前端改发 `Control.Quit`
@@ -1246,7 +1299,7 @@ D-Bus 接口面相遇：
 
 | 平面 | 进程 | 掌管什么 |
 | --- | --- | --- |
-| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start` 或 TUI 前端拉起；Linyaps 包还能经 D-Bus 激活或其 systemd 用户服务启动，deb/RPM 不随包提供这两类文件） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
+| **核心 / 播放服务** | `ter-music daemon foreground`（由 `daemon start` 或 TUI 前端拉起；Linyaps 包还能经 D-Bus 激活或其 systemd 用户服务启动，deb/RPM 不随包提供这两类文件） | 音频设备与解码、执行播放队列（**只认路径**）、传输控制、音量/倍速/播放模式、卡拉OK消人声、均衡器、当前曲目信息（歌词、字符封面、频谱）、发布 `Lyrics` / `Info` / `Control` / `Queue` / `Config` 接口、前端注册与心跳、配置 |
 | **前端 / 内容客户端** | `ter-music`（TUI）、`ter-music play\|show\|…`（CLI） | 目录扫描与元数据、SQLite 曲库与 FTS5 搜索、用户歌单、收藏/历史/目录历史、排序/过滤、远程源与下载缓存、ncurses 界面 |
 
 这条接缝刻意做得很薄，也便于测试：
@@ -1258,7 +1311,7 @@ D-Bus 接口面相遇：
   元数据（路径、标题、艺术家、专辑、时长、CUE 偏移/轨号、歌词来源）。
   `audio/play_queue.c` 是进程内后端使用的轻量转发层，
   `playlist/playlist_queue.c` 是唯一的「内容 → 核心队列」桥。
-- **D-Bus 接口面，`api_version 5`**：`Queue.Set/Append/InsertAfter/RemoveAt/
+- **D-Bus 接口面，`api_version 7`**：`Queue.Set/Append/InsertAfter/RemoveAt/
   MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get` **只接受本地路径**（远程 URL 被拒绝），
   单次写入不超过 500 条，分页读取上限 `RPC_PAGE_MAX`（1000）条；`QueueChanged`
   广播条目数/当前游标/版本号，任意多个前端因此保持一致。歌词接口另带逐字时间
@@ -1270,13 +1323,14 @@ D-Bus 接口面相遇：
 
 ### 二 架构门禁
 
-三个脚本守住这条分界，三者都已接入 CI：
+四个脚本守住这条分界，四者都已接入 CI：
 
 | 门禁 | 命令 | 规则 |
 | --- | --- | --- |
 | 后端纯度 | `scripts/test/check-core-purity.sh` | 后端目录（`audio config core info lyrics media queue` 与 `cli/daemon.c`）不得出现任何远程源符号，也不得引用内容/界面（playlist、library、search、界面渲染、前端头文件） |
 | 前端纯度 | `scripts/test/check-ui-purity.sh` | 界面访问播放面**只能**经 `player` 门面——不得直连引擎播放全局或播放命令 |
 | 配置归属 | `scripts/test/check-config-ownership.sh` | `config.xml` 归核心独有。前端**不得**出现 `save_config()` / `config_save_to_xml()`：它只改自己的配置镜像，再经门面 `player_config_persist()` 提交差异（远端模式下即 `Config.Set`） |
+| 包身份一致 | `scripts/test/check-package-identity.sh` | 打包身份必须处处一致：应用 ID 在 `debian/control`、`PKGBUILD`、`.SRCINFO`、`scripts/build/*` 与 systemd 单元上同值；版本在 `APP_VERSION`（唯一事实源）、CMake `project VERSION`、`pkgver`、`debian/changelog` 顶部条目四处同值，且符合滚动方案 `<yy>.<q>.x.y`；`TER_MUSIC_API_VERSION` 必须等于 `dbus-rpc-check.sh` 断言的那个数；`org.yxzl` 旧命名空间不得残留在 `#include`、接口字符串字面量与打包链里；而**刻意不改**的身份（可执行文件 `ter-music`、MPRIS 总线名、配置目录）也不得被顺手改掉 |
 
 与之配套的回归套件：`scripts/test/run-unit-tests.sh`（路径队列、播放队列契约、
 歌词解析、JSON 读取器、配置差异、布局 schema/几何/状态、不依赖 ncurses 的鼠标
@@ -1284,6 +1338,7 @@ D-Bus 接口面相遇：
 校验以证明每个预设无缝铺满），以及端到端脚本 `dbus-rpc-check.sh`、
 `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
 `multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、
+`karaoke-e2e.sh`（从 `karaoke` 子命令与 `Control.GetKaraoke` 一路验到 config.xml 落盘与重启回灌，含越界钳制与旧配置缺键的默认值）、
 `mouse-tui-e2e.sh`（往 pty 里喂真实的 SGR 点击/滚轮字节，既断言 D-Bus 上的结果，
 也断言每个事件归哪个窗格——含弹层展开时在弹层外点击必须只收起弹层、
 不得穿透到背后的列表）、
@@ -1296,7 +1351,7 @@ CI 只记录数值、不做判定）。
 
 ### 三 模块地图
 
-本播放器采用模块化设计。**源文件**位于 `src/org.yxzl.ter-music/<module>/` 目录；**公开头文件**位于 `include/org.yxzl.ter-music/<module>/` 目录。
+本播放器采用模块化设计。**源文件**位于 `src/cn.org.huansoft.ter-music/<module>/` 目录；**公开头文件**位于 `include/cn.org.huansoft.ter-music/<module>/` 目录。
 
 核心代码模块如下：
 
@@ -1313,7 +1368,7 @@ CI 只记录数值、不做判定）。
 - **queue/backend_queue.c**: 核心路径队列（顺序、游标、版本号、本地路径校验、
   单次下发上限）与 CUE 前瞻
 - **audio/**: 核心音频引擎——解码与播放线程、环形缓冲、`play_queue.c`
-  （转发层 + 本地基线使用的界面镜像）、atempo 变速、10 段均衡器、FFT 频谱数据、
+  （转发层 + 本地基线使用的界面镜像）、atempo 变速、卡拉OK消人声（`karaoke.c`，频带受限中置消除，排在均衡器之前）、10 段均衡器、FFT 频谱数据、
   `backend_ops.c` 与 PipeWire / PulseAudio / ALSA 输出
 - **lyrics/**: 核心歌词引擎——发现、内嵌（FFmpeg）与外部 `.lrc` 解析、来源偏好、
   时间轴与分页构建

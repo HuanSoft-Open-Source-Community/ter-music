@@ -1,0 +1,404 @@
+#ifndef TYPES_H
+#define TYPES_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
+
+#include "audio/equalizer.h"
+#include "audio/karaoke.h"   /* KARAOKE_MODE_* 是配置键 karaoke_mode 的取值域 */
+
+#define APP_NAME "ter-music"
+/* 版本号走滚动发行方案 <yy>.<q>.x.y（年前两位 + 季度 + 主线 + 修订），
+ * 规则见 docs/RELEASE.md；APP_VERSION 是全程序唯一的版本字符串来源。 */
+#define APP_VERSION "v26.4.1.0"
+#define APP_AUTHORS "浣软科技（HuanSoft）"
+#define APP_EMAIL "yxzl666xx@outlook.com"
+#define APP_REPO "https://github.com/HuanSoft-Open-Source-Community/ter-music.git"
+
+typedef enum {
+    PLAY_MODE_SEQUENTIAL             = 0,
+    PLAY_MODE_SINGLE_REPEAT          = 1,
+    PLAY_MODE_LIST_REPEAT            = 2,
+    PLAY_MODE_SHUFFLE_ONCE           = 3,
+    PLAY_MODE_SHUFFLE_REPEAT         = 4,
+    PLAY_MODE_FOLDER_SEQUENTIAL      = 5,
+    PLAY_MODE_FOLDER_REPEAT          = 6,
+    PLAY_MODE_FOLDER_SHUFFLE         = 7,
+    PLAY_MODE_FOLDER_SHUFFLE_REPEAT  = 8,
+    PLAY_MODE_ALBUM_SEQUENTIAL       = 9,
+    PLAY_MODE_ALBUM_REPEAT           = 10,
+    PLAY_MODE_ALBUM_SHUFFLE          = 11,
+    PLAY_MODE_ALBUM_SHUFFLE_REPEAT   = 12,
+    PLAY_MODE_ARTIST_SEQUENTIAL      = 13,
+    PLAY_MODE_ARTIST_REPEAT          = 14,
+    PLAY_MODE_ARTIST_SHUFFLE         = 15,
+    PLAY_MODE_ARTIST_SHUFFLE_REPEAT  = 16,
+    PLAY_MODE_COUNT = 17
+} PlayMode;
+
+typedef enum {
+    SORT_DEFAULT = 0,
+    SORT_TITLE   = 1,
+    SORT_ARTIST  = 2,
+    SORT_ALBUM   = 3,
+    SORT_FILENAME = 4
+} SortMode;
+
+typedef enum {
+    PLAY_STATE_STOPPED = 0,
+    PLAY_STATE_PLAYING = 1,
+    PLAY_STATE_PAUSED = 2
+} PlayState;
+
+typedef enum {
+    VIEW_MAIN = 0,
+    VIEW_SETTINGS = 1,
+    VIEW_HISTORY = 2,
+    VIEW_PLAYLIST = 3,
+    VIEW_FAVORITES = 4,
+    VIEW_INFO = 5,
+    VIEW_HELP = 6,
+    VIEW_LANGUAGE = 7
+} ViewMode;
+
+typedef enum {
+    FOCUS_SIDEBAR = 0,
+    FOCUS_CONTENT = 1,
+    FOCUS_CATEGORY = 2
+} FocusArea;
+
+typedef enum {
+    PLAYLIST_MODE_FILE_BROWSER = 0,
+    PLAYLIST_MODE_PLAY_QUEUE   = 1
+} PlaylistViewMode;
+
+typedef enum {
+    POPUP_NONE = 0,
+    POPUP_LOOP_MODE,
+    POPUP_SPEED,
+    POPUP_VOLUME,
+    POPUP_KARAOKE      /* 卡拉OK（消人声）三档选择 */
+} PopupType;
+
+typedef struct {
+    int active;
+    PopupType type;
+    int selected_index;
+    int option_count;
+    int start_row;
+    int start_col;
+    int width;
+    int height;
+    void *popup_win;
+} PopupState;
+
+/* Legacy language IDs (migrated to string-based i18n) */
+#define UI_LANG_ZH 0
+#define UI_LANG_EN 1
+
+#define COLOR_PAIR_BORDER 1
+#define COLOR_PAIR_PLAYLIST 2
+#define COLOR_PAIR_CONTROLS 3
+#define COLOR_PAIR_LYRICS 4
+#define COLOR_PAIR_SIDEBAR 5
+#define COLOR_PAIR_HIGHLIGHT 6
+
+#define UI_DIRTY_PLAYLIST 0x01
+#define UI_DIRTY_CONTROLS 0x02
+#define UI_DIRTY_LYRICS 0x04
+#define UI_DIRTY_INFO 0x08
+
+/* 控制区按钮数（含末尾的进度条格）：见 ui/ui.h 的 ControlIdx，
+ * PROGRESS 必须保持为最后一个下标（按钮行只画前 CONTROL_COUNT-1 个）。 */
+#define CONTROL_COUNT 9
+#define MAX_PATH_LEN 512
+#define MAX_TRACKS 1000
+#define MAX_TREE_NODES 5000
+
+/* 前端队列视图的索引镜像（2026-09-15 架构调整后）。
+ * 真正的队列是**后端**的路径队列（queue/backend_queue.h）：条目内容、执行
+ * 顺序与游标都归它。本结构只供界面渲染队列视图使用，由
+ * audio/play_queue.c 的 play_queue_indices_sync() 从后端队列反查内容列表
+ * 下标后填充；后端代码不得读它。 */
+typedef struct {
+    int indices[MAX_TRACKS];   /* 队列位置 → 内容列表物理下标 */
+    int count;
+    int current_position;
+    int shuffle_generation;
+} PlayQueue;
+
+#define MAX_META_LEN 256
+#define MAX_SEARCH_KEY_LEN (MAX_META_LEN * 8)
+
+/* Library browsing sub-views */
+typedef enum {
+    LIBRARY_HOME = 0,
+    LIBRARY_ARTISTS,
+    LIBRARY_ARTIST_ALBUMS,
+    LIBRARY_ALBUMS,
+    LIBRARY_GENRES,
+    LIBRARY_GENRE_TRACKS,
+    LIBRARY_ALBUM_TRACKS,
+    LIBRARY_ALL_TRACKS,
+    LIBRARY_SEARCH_RESULTS
+} LibraryViewMode;
+
+/* Library browsing state */
+typedef struct {
+    int active;
+    LibraryViewMode view;
+    int selected_index;
+    int scroll_offset;
+    int item_count;
+    int available;
+    char filter_artist[MAX_META_LEN];
+    char filter_album[MAX_META_LEN];
+    char filter_genre[MAX_META_LEN];
+} LibraryState;
+#define MAX_SEARCH_RESULTS 1000
+
+#define MAX_HISTORY_COUNT 100
+#define MAX_FAVORITES_COUNT 200
+#define MAX_DIR_HISTORY_COUNT 50
+#define MAX_PLAYLISTS_COUNT 50
+#define MAX_PLAYLIST_NAME_LEN 64
+#define VISUALIZER_BAND_COUNT 64
+#define MAX_CACHE_SIZE 100
+
+#define MAX_ALBUM_COVER_CACHE 10
+#define ALBUM_COVER_TEMP_PREFIX "/tmp/ter-music-cover-"
+
+#define AUDIO_BACKEND_AUTO      0
+#define AUDIO_BACKEND_PULSE     1
+#define AUDIO_BACKEND_ALSA      2
+#define AUDIO_BACKEND_PIPEWIRE  3
+
+#define CONFIG_CURRENT_VERSION 9   /* 与 config/schema.h 保持同步 */
+
+/* ── 可配置键位覆盖（config v9）────────────────────────────────────
+ * 只保存相对默认键位的覆盖项；action 为稳定动作 ID（见 keymap/actions.h），
+ * key 为规范键名（见 util/keyname.h）。 */
+#define MAX_KEYBINDING_OVERRIDES 160
+#define MAX_KEYBINDING_ACTION_LEN 48
+#define MAX_KEYBINDING_KEY_LEN 24
+
+typedef struct {
+    char action[MAX_KEYBINDING_ACTION_LEN];
+    char key[MAX_KEYBINDING_KEY_LEN];
+} KeyBindingOverride;
+
+/* ── CUE 文件编码偏好（配置项取值域；转换实现见 playlist/encoding.h） ── */
+#define CUE_ENCODING_AUTO      0  /* detect: UTF-8 → preferred → fallback chain */
+#define CUE_ENCODING_UTF8      1  /* always treat as UTF-8 */
+#define CUE_ENCODING_GB18030   2
+#define CUE_ENCODING_GBK       3
+#define CUE_ENCODING_BIG5      4
+#define CUE_ENCODING_SHIFT_JIS 5
+#define CUE_ENCODING_COUNT     6
+
+/* ── Lyrics source preference ── */
+#define LYRICS_SOURCE_AUTO     0   /* default: embedded first, then external */
+#define LYRICS_SOURCE_EMBEDDED 1   /* force embedded lyrics only */
+#define LYRICS_SOURCE_EXTERNAL 2   /* force external .lrc file only */
+
+typedef struct {
+    char path[MAX_PATH_LEN];
+    char title[MAX_META_LEN];
+    char artist[MAX_META_LEN];
+    char album[MAX_META_LEN];
+    int cue_offset;          /* seconds offset within the file (0 = not a CUE sub-track) */
+    int cue_track_number;    /* CUE track number (0 = not a CUE sub-track) */
+    int lyrics_source;       /* LYRICS_SOURCE_AUTO / EMBEDDED / EXTERNAL */
+} Track;
+
+typedef struct {
+    int index;
+    int valid;
+    time_t last_used;
+    char title[MAX_META_LEN];
+    char artist[MAX_META_LEN];
+    char album[MAX_META_LEN];
+    char title_search[MAX_SEARCH_KEY_LEN];
+    char artist_search[MAX_SEARCH_KEY_LEN];
+    char album_search[MAX_SEARCH_KEY_LEN];
+    int cue_offset;
+    int cue_track_number;
+} CachedTrack;
+
+/* ── Tree browsing types ── */
+typedef enum {
+    TREE_NODE_FILE      = 0,
+    TREE_NODE_DIRECTORY = 1
+} TreeNodeType;
+
+typedef struct {
+    TreeNodeType type;
+    char name[MAX_META_LEN];          /* display name (file/dir basename) */
+    char full_path[MAX_PATH_LEN];     /* absolute path */
+    int depth;                        /* indentation level (0 = root) */
+    int expanded;                     /* 1 = showing children, 0 = collapsed (directories only) */
+    int parent_index;                 /* index into tree_nodes[], -1 for root */
+    int track_index;                  /* index into Playlist.tracks[]; -1 for directories */
+} TreeNode;
+
+typedef struct {
+    char path[MAX_PATH_LEN];
+    time_t open_time;
+} DirHistoryEntry;
+
+typedef struct {
+    DirHistoryEntry entries[MAX_DIR_HISTORY_COUNT];
+    int count;
+} DirHistory;
+
+typedef struct {
+    char path[MAX_PATH_LEN];
+    char title[MAX_META_LEN];
+    char artist[MAX_META_LEN];
+    time_t play_time;
+} HistoryEntry;
+
+typedef struct {
+    HistoryEntry entries[MAX_HISTORY_COUNT];
+    int count;
+} PlayHistory;
+
+typedef struct {
+    Track tracks[MAX_FAVORITES_COUNT];
+    int count;
+} Favorites;
+
+typedef struct {
+    int db_id;                       /* SQLite rowid (0 = not persisted) */
+    char name[MAX_PLAYLIST_NAME_LEN];
+    Track tracks[MAX_TRACKS];
+    int track_count;
+    time_t created_time;
+    time_t modified_time;
+} UserPlaylist;
+
+typedef struct {
+    UserPlaylist playlists[MAX_PLAYLISTS_COUNT];
+    int count;
+} PlaylistManager;
+
+typedef struct {
+    int playlist_fg;
+    int playlist_bg;
+    int controls_fg;
+    int controls_bg;
+    int lyrics_fg;
+    int lyrics_bg;
+    int sidebar_fg;
+    int sidebar_bg;
+    int highlight_fg;
+    int highlight_bg;
+    int border_fg;
+    int border_bg;
+} ColorTheme;
+
+typedef struct {
+    char default_startup_path[MAX_PATH_LEN];
+    char last_opened_path[MAX_PATH_LEN];
+    char last_played_folder_path[MAX_PATH_LEN];
+    char last_played_track_path[MAX_PATH_LEN];
+    ColorTheme theme;
+    int auto_play_on_start;
+    int remember_last_path;
+    int clear_history_on_startup;
+    /* 核心生命周期：最后一个前端离开后是否随核心退出（默认否——
+     * “关掉 TUI，音乐继续”是默认体验） */
+    int core_exit_when_no_frontend;
+    /* 退出时停止播放进程：remote 前端退出时经 Control.Quit 终止核心进程
+     * （缺省 1）。与 core_exit_when_no_frontend（无前端 10s 看门狗自退）
+     * 语义独立，互不影响。 */
+    int stop_core_on_exit;
+    int resume_last_playback;
+    int last_played_position;
+    char ui_language[32];   /* language ID, e.g. "zh_CN", "en_US", "zh-PQ" */
+    int volume_percent;
+    int audio_latency_ms;
+    int show_lyrics_panel;
+    int default_play_mode;
+    int advanced_play_modes_enabled;
+    float default_playback_speed;
+    int show_album_cover;
+    int seamless_preload;    // 0=off, 1=pre-decode next track at end of current
+    int lyrics_alignment;  // 0=居左(Left), 1=居中(Center), 2=居右(Right)
+    int audio_backend;     // 0=Auto, 1=PulseAudio, 2=ALSA, 3=PipeWire
+    int sort_mode;         // SortMode value, 0=default (no sort)
+    int cue_encoding;      // CUE_ENCODING_* constant (playlist/encoding.h), 0=auto
+    int config_version;             /* 当前配置契约版本（恒为 CONFIG_CURRENT_VERSION） */
+    int config_file_version;        /* 磁盘上那份文件的版本；0 = 新文件/未读到 */
+    int eq_enabled;              /* 0/1 — equaliser master switch */
+    int eq_preamp;               /* pre-amp gain in dB, -12..12 */
+    int eq_band_gains[EQ_BAND_COUNT]; /* per-band gain in dB, -12..12 */
+
+    /* 卡拉OK（消人声）档位：KARAOKE_MODE_*（0=不启用 1=较弱人声 2=完全消除）。
+     * 只对立体声生效，单声道直通；实现见 audio/karaoke.c。 */
+    int karaoke_mode;
+
+    /* ── 信息显示（主页信息窗格 + CLI/D-Bus，config v5，常量见 info/info.h） ── */
+    int info_preset;             /* 0=全量 1=精简 2=自定义 */
+    int info_fields_mask;        /* INFO_FIELD_* 位掩码（窗格只取可显示子集） */
+    int info_show_cover;         /* 0/1 信息窗格 + CLI 字符封面 */
+    int info_cover_cols;         /* CLI 封面列数 4..40 */
+    int info_cover_rows;         /* CLI 封面行数 2..20 */
+    int info_cover_charset;      /* CLI 封面字符集 0=盲文 1=ASCII 2=半块 */
+    int info_show_progress;      /* 0/1 CLI 进度行 */
+    int info_progress_style;     /* CLI 0=bar 1=time 2=percent 3=time+percent */
+    int info_lyrics_lines;       /* CLI 0=关 1=当前句 2=当前句+下一句 */
+
+    /* ── 键位覆盖（config v9，见 keymap/actions.h） ── */
+    KeyBindingOverride keybinding_overrides[MAX_KEYBINDING_OVERRIDES];
+    int keybinding_override_count;
+    /* 本次加载因非法/冲突被剔除的改绑数（运行时提示用，不落盘） */
+    int keybinding_dropped_count;
+    /* 最近一次 keymap_reload 剔除的改绑数（每次 reload 重算，避免重复累计；
+     * 提示时与 keybinding_dropped_count 相加） */
+    int keybinding_reload_dropped_count;
+} AppConfig;
+
+typedef struct {
+    char tracks[MAX_TRACKS][MAX_PATH_LEN];
+    int count;
+    char folder_path[MAX_PATH_LEN];
+    int is_loaded;
+    int has_multiple_sources;
+    CachedTrack cache[MAX_CACHE_SIZE];
+    int cache_count;
+    int cue_offsets[MAX_TRACKS];        /* per-track CUE offset in seconds (0 if not CUE) */
+    int cue_track_numbers[MAX_TRACKS];  /* per-track CUE track number (0 if not CUE) */
+
+    /* ── Tree browsing fields ── */
+    int tree_mode;                           /* 1 = tree browsing enabled */
+    TreeNode tree_nodes[MAX_TREE_NODES];     /* all tree nodes (files + dirs) */
+    int tree_node_count;                     /* how many tree_nodes are valid */
+    int visible_indices[MAX_TREE_NODES];     /* map visible line → tree_nodes index */
+    int visible_count;                       /* how many visible nodes */
+} Playlist;
+
+typedef struct {
+    int result_indices[MAX_SEARCH_RESULTS];
+    int result_count;
+    int active;
+    int selected_index;
+    int result_offset;
+
+    // 异步搜索字段（由 g_search_mutex 保护）
+    volatile int in_progress;       // 搜索线程正在运行
+    volatile int cancel;            // 设置为 1 以取消搜索
+    int progress;                   // 迄今为止已检查的轨道数
+    pthread_t thread;               // 搜索线程句柄
+    char query[MAX_META_LEN];       // 当前搜索查询
+} SearchState;
+
+typedef struct {
+    int sorted_indices[MAX_TRACKS];
+    int active;
+} SortState;
+
+#endif

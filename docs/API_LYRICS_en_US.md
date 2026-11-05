@@ -20,8 +20,8 @@ There is no separate configuration switch for the lyrics API.
 | ---- | ----- |
 | Bus name | `org.mpris.MediaPlayer2.ter_music` |
 | Object path | `/org/mpris/MediaPlayer2` |
-| Interface | `org.yxzl.ter_music.Lyrics` |
-| API version | `core.api_version = 5` (this document); the interface is additive over version 4 |
+| Interface | `cn.org.huansoft.ter_music.Lyrics` |
+| API version | `core.api_version = 7` (this document); the lyrics surface itself has not changed since version 5 — version 6 added the karaoke methods on `Control`, version 7 moved the interface namespace to `cn.org.huansoft.ter_music.*` — and that namespace move, unlike everything before it, is breaking for every client, lyric consumers included |
 
 ### Methods
 
@@ -89,7 +89,7 @@ by the core tick, roughly 20–50 Hz); clients may throttle or redraw on every
 `GetDocument(offset, count)` returns a page of the whole loaded document. `count`
 is clamped by the core's page limit; `offset` past the end returns an empty
 `lines` array. A page that would exceed the 256 KB payload cap fails with
-`org.yxzl.ter_music.Error.TooLarge` instead of being truncated.
+`cn.org.huansoft.ter_music.Error.TooLarge` instead of being truncated.
 
 ```json
 {
@@ -196,7 +196,7 @@ Read the current snapshot:
 gdbus call --session \
   --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Lyrics.GetLyrics
+  --method cn.org.huansoft.ter_music.Lyrics.GetLyrics
 ```
 
 Read the first page of the document:
@@ -205,7 +205,7 @@ Read the first page of the document:
 gdbus call --session \
   --dest org.mpris.MediaPlayer2.ter_music \
   --object-path /org/mpris/MediaPlayer2 \
-  --method org.yxzl.ter_music.Lyrics.GetDocument 0 200
+  --method cn.org.huansoft.ter_music.Lyrics.GetDocument 0 200
 ```
 
 Monitor lyric updates:
@@ -228,10 +228,16 @@ gdbus monitor --session --dest org.mpris.MediaPlayer2.ter_music
 - The API is additive: `api_version 5` adds `char_sung`, `char_total`, and the
   per-line `end`/`timing`/`char_total`/`chars` fields. A version 4 client
   ignores them; a version 5 front end accepts a version 4 core and degrades to
-  whole-line highlighting when the fields are absent.
+  whole-line highlighting when the fields are absent. `api_version 6` left the
+  lyrics fields exactly as version 5 defined them (it only adds
+  `Control.SetKaraoke`/`Control.GetKaraoke`), so every rule above still held.
+  `api_version 7` did not touch a single lyric field either, but it renamed the
+  interface: `org.yxzl.ter_music.Lyrics` became
+  `cn.org.huansoft.ter_music.Lyrics`, so a pre-7 client must switch its
+  hard-coded interface name (or run the pre-7 core) — no fallback applies.
 - The interface is part of the standard introspection tree, but clients may
   also use the fixed interface, method, and signal names documented above.
-- The interface name uses underscores (`org.yxzl.ter_music.Lyrics`) because
+- The interface name uses underscores (`cn.org.huansoft.ter_music.Lyrics`) because
   D-Bus interface name components cannot contain hyphens.
 - The API follows the existing MPRIS lifecycle: it is available only while the
   player owns the MPRIS bus name and is shut down together with the media
