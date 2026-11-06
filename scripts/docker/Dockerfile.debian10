@@ -1,0 +1,112 @@
+# Debian 10 (glibc 2.28) build image: DEB + AppImage.
+#
+# Debian 10 已 EOL，按约定使用阿里归档源；其他非归档仓库默认 USTC。
+# 只从源码构建静态 FFmpeg；libxml2 只装开发头文件，运行期由
+# util/xml_compat.c 在 .so.2 / .so.16 之间 dlopen。
+
+FROM debian:10
+
+ARG FFMPEG_VERSION=8.1.2
+ARG SQUASHFS_TOOLS_VERSION=4.7.5
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+
+RUN echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until && \
+    printf '%s\n' \
+      'deb http://mirrors.aliyun.com/debian-archive/debian buster main contrib non-free' \
+      'deb http://mirrors.aliyun.com/debian-archive/debian-security buster/updates main contrib non-free' \
+      'deb http://mirrors.aliyun.com/debian-archive/debian buster-updates main contrib non-free' \
+      > /etc/apt/sources.list
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        binutils \
+        cmake \
+        pkg-config \
+        rsync \
+        git \
+        curl \
+        ca-certificates \
+        xz-utils \
+        libncurses-dev \
+        libcurl4-openssl-dev \
+        libpng-dev \
+        libjpeg-dev \
+        libsqlite3-dev \
+        libdbus-1-dev \
+        libxml2-dev \
+        zlib1g-dev \
+        liblzma-dev \
+        liblzo2-dev \
+        liblz4-dev \
+        libzstd-dev \
+        squashfs-tools \
+        file \
+        libfuse2 \
+        desktop-file-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# FFmpeg 源码由 docker-build.sh 从宿主 .cache/sources 复制进构建上下文，
+# 只下载一次；这里不再 curl 远端。
+COPY ffmpeg-${FFMPEG_VERSION}.tar.gz /tmp/ffmpeg.tar.gz
+
+# FFmpeg 静态库（audio-only，最小依赖）
+RUN tar -xzf /tmp/ffmpeg.tar.gz -C /tmp && \
+    cd /tmp/ffmpeg-${FFMPEG_VERSION} && \
+    ./configure \
+        --enable-static --disable-shared \
+        --disable-programs --disable-doc \
+        --disable-everything \
+        --enable-decoder="mp3*,aac*,flac,vorbis*,opus,wavpack*,wmav*,ape,alac,pcm*,libopus" \
+        --enable-demuxer="mp3,aac,flac,ogg,opus,wav,wv,wma*,ape,alac,mov,m4a,rm,aiff" \
+        --enable-parser="mpegaudio,aac,flac,vorbis,opus" \
+        --enable-protocol="file" \
+        --enable-filter="aresample" \
+        --disable-network --disable-iconv \
+        --disable-libxcb --disable-xlib --disable-zlib --disable-bzlib \
+        --disable-vaapi --disable-vdpau --disable-cuda \
+        --disable-x86asm \
+        --disable-ffplay --disable-ffprobe --disable-ffmpeg && \
+    make -j"$(nproc)" && \
+    make install && \
+    rm -rf /tmp/ffmpeg-${FFMPEG_VERSION} /tmp/ffmpeg.tar.gz
+
+# Debian 打包工具（buster-backports 提供 debhelper 13）
+RUN printf '%s\n' \
+      'deb http://mirrors.aliyun.com/debian-archive/debian buster-backports main' \
+      >> /etc/apt/sources.list && \
+    apt-get update && apt-get install -y -t buster-backports \
+        debhelper \
+        dpkg-dev \
+        fakeroot \
+        devscripts \
+    && rm -rf /var/lib/apt/lists/*
+
+# squashfs-tools：buster 自带的 4.3 不认 appimagetool 新版传入的 -mkfs-time，
+# 从源码编译最新的 release，装到 /usr/local/bin（PATH 中先于 /usr/bin）。
+COPY squashfs-tools-${SQUASHFS_TOOLS_VERSION}.tar.gz /tmp/squashfs-tools.tar.gz
+RUN tar -xzf /tmp/squashfs-tools.tar.gz -C /tmp && \
+    make -C /tmp/squashfs-tools-${SQUASHFS_TOOLS_VERSION}/squashfs-tools -j"$(nproc)" && \
+    install -m 0755 /tmp/squashfs-tools-${SQUASHFS_TOOLS_VERSION}/squashfs-tools/mksquashfs /usr/local/bin/mksquashfs && \
+    rm -rf /tmp/squashfs-tools-${SQUASHFS_TOOLS_VERSION} /tmp/squashfs-tools.tar.gz && \
+    /usr/local/bin/mksquashfs -version
+
+# appimagetool（AppImage 构建复用）：由 docker-build.sh 从宿主 .cache/tools 复制，
+# 解包到 /opt/appimagetool/squashfs-root，供 build-appimage.sh 使用。
+# 解包会保留 squashfs 内的权限（usr/bin 可能是 0700），构建容器以宿主 UID
+# 运行，必须放开读/执行权限，否则非 root 用户判定工具“不存在”。
+COPY appimagetool-x86_64.AppImage /opt/appimagetool/appimagetool-x86_64.AppImage
+RUN chmod +x /opt/appimagetool/appimagetool-x86_64.AppImage && \
+    cd /opt/appimagetool && \
+    ./appimagetool-x86_64.AppImage --appimage-extract && \
+    rm -f appimagetool-x86_64.AppImage && \
+    chmod -R a+rX /opt/appimagetool && \
+    test -x /opt/appimagetool/squashfs-root/usr/bin/appimagetool
+
+# type2 runtime：appimagetool 默认联网下载，容器内常失败；宿主缓存后随镜像提供。
+COPY runtime-x86_64 /opt/appimagetool/runtime-x86_64
+RUN chmod 0755 /opt/appimagetool/runtime-x86_64 && \
+    test -s /opt/appimagetool/runtime-x86_64
+
+WORKDIR /workspace

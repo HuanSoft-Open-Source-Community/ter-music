@@ -12,10 +12,8 @@ void remote_set_progress_hook(void (*hook)(void)) {
     g_remote_progress_hook = hook;
 }
 
-static int progress_cb(void *clientp,
-                       curl_off_t dltotal, curl_off_t dlnow,
-                       curl_off_t ultotal, curl_off_t ulnow) {
-    (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
+/* 进度回调只关心"距上次刷新是否满 500ms"，与 libcurl 的进度参数无关。 */
+static int progress_tick(void *clientp) {
     if (!g_remote_progress_hook) return 0;
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -27,6 +25,35 @@ static int progress_cb(void *clientp,
     }
     return 0;
 }
+
+/* libcurl < 7.32（如 EL7 的 7.29）没有 CURLOPT_XFERINFOFUNCTION /
+ * CURLOPT_XFERINFODATA，只能退回旧的 double 参数进度回调；
+ * CURLOPT_NOPROGRESS 两个版本都有，调用方共用。 */
+#if LIBCURL_VERSION_NUM < 0x072000
+static int progress_cb_legacy(void *clientp, double dltotal, double dlnow,
+                              double ultotal, double ulnow) {
+    (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
+    return progress_tick(clientp);
+}
+#define TM_SET_PROGRESS_CB(handle, data)                                    \
+    do {                                                                    \
+        curl_easy_setopt((handle), CURLOPT_PROGRESSFUNCTION,                \
+                         progress_cb_legacy);                               \
+        curl_easy_setopt((handle), CURLOPT_PROGRESSDATA, (data));           \
+    } while (0)
+#else
+static int progress_cb(void *clientp,
+                       curl_off_t dltotal, curl_off_t dlnow,
+                       curl_off_t ultotal, curl_off_t ulnow) {
+    (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
+    return progress_tick(clientp);
+}
+#define TM_SET_PROGRESS_CB(handle, data)                                    \
+    do {                                                                    \
+        curl_easy_setopt((handle), CURLOPT_XFERINFOFUNCTION, progress_cb);   \
+        curl_easy_setopt((handle), CURLOPT_XFERINFODATA, (data));            \
+    } while (0)
+#endif
 
 /* ---------- error reporting ---------- */
 
@@ -1048,8 +1075,7 @@ int remote_fetch_to_buffer(const char *url, unsigned char **data, size_t *size) 
     uint64_t last_refresh = 0;
     if (g_remote_progress_hook) {
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_cb);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &last_refresh);
+        TM_SET_PROGRESS_CB(curl, &last_refresh);
     }
 
     CURLcode res = curl_easy_perform(curl);
@@ -1199,8 +1225,7 @@ int remote_fetch_to_file(const char *url, const char *dest_path) {
     uint64_t last_refresh = 0;
     if (g_remote_progress_hook) {
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_cb);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &last_refresh);
+        TM_SET_PROGRESS_CB(curl, &last_refresh);
     }
 
     CURLcode res = curl_easy_perform(curl);

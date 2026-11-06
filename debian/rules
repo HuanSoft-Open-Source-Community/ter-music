@@ -4,7 +4,8 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_CFLAGS_MAINT_APPEND = -Wall -Wno-format-truncation -Wno-unused
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
 
-include /usr/share/dpkg/architecture.mk
+# 包版本来自 changelog（构建脚本会在临时副本里按 -v 重写），去掉 Debian 修订号。
+VERSION := $(shell dpkg-parsechangelog -SVersion | sed -E 's/-[^-]+$$//')
 
 %:
 	dh $@ --buildsystem=cmake --builddirectory=build
@@ -13,18 +14,20 @@ override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_PREFIX=/usr \
-		$(if $(filter-out $(DEB_BUILD_ARCH),$(DEB_HOST_ARCH)),-DCMAKE_TOOLCHAIN_FILE=$(CURDIR)/cmake/toolchain-$(DEB_HOST_GNU_TYPE).cmake)
+		-DSTATIC_LINKING=ON \
+		-DTER_MUSIC_VERSION=$(VERSION)
 
-# Cross-distro soname dependency compatibility:
-# Debian/Deepin -> libjpeg62-turbo,  Ubuntu 24.04 -> libjpeg62   (same soname libjpeg.so.62)
-# Debian/Deepin -> libpng16-16,      Ubuntu 24.04+ -> libpng16-16t64 (time64 transition, same soname libpng16.so.16)
+override_dh_auto_test:
+	@:
+
+# 跨发行版包名兼容：这些差异是同一个 soname、不同包名。
+# libxml2 不在此列：二进制不链接 libxml2，运行期 dlopen .so.2/.so.16，
+# 依赖由 debian/control 的 "libxml2 | libxml2-16" 表达。
 override_dh_shlibdeps:
 	dh_shlibdeps
 	# libjpeg: Debian → libjpeg62-turbo, Ubuntu 24.04+ → libjpeg62 (same soname libjpeg.so.62)
 	sed -i 's/libjpeg62-turbo[^,]*/libjpeg62-turbo (>= 1.3.1) | libjpeg62/g' debian/*.substvars
 	# libpng16: t64 transition — Ubuntu 24.04+ → libpng16-16t64 (same soname libpng16.so.16)
 	sed -i 's/libpng16-16[^,]*/libpng16-16 (>= 1.6.2-1) | libpng16-16t64/g' debian/*.substvars
-	# libxml2: Debian → libxml2, Ubuntu 26.04+ → libxml2-16 (same soname libxml2.so.2)
-	sed -i 's/libxml2[^,]*/libxml2 (>= 2.7.4) | libxml2-16/g' debian/*.substvars
 	# libcurl4: t64 transition — Ubuntu 24.04+ → libcurl4t64 (same soname libcurl.so.4)
 	sed -i 's/libcurl4[^,]*/libcurl4 (>= 7.16.2) | libcurl4t64/g' debian/*.substvars

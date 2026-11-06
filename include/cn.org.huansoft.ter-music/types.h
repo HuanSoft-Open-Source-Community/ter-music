@@ -12,8 +12,11 @@
 
 #define APP_NAME "ter-music"
 /* 版本号走滚动发行方案 <yy>.<q>.x.y（年前两位 + 季度 + 主线 + 修订），
- * 规则见 docs/RELEASE.md；APP_VERSION 是全程序唯一的版本字符串来源。 */
+ * 规则见 docs/RELEASE.md。打包脚本通过 -DTER_MUSIC_VERSION 注入
+ * APP_VERSION，使二进制版本与包版本一致；这里保留 CMake 之外的兜底值。 */
+#ifndef APP_VERSION
 #define APP_VERSION "v26.4.1.0"
+#endif
 #define APP_AUTHORS "浣软科技（HuanSoft）"
 #define APP_EMAIL "yxzl666xx@outlook.com"
 #define APP_REPO "https://github.com/HuanSoft-Open-Source-Community/ter-music.git"

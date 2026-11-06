@@ -52,11 +52,7 @@ Ter-Music者，端闱之乐部也。以斐氏FFmpeg解声，纽氏ncursesw绘界
 
 ### Arch Linux
 
-```bash
-yay -S cn.org.huansoft.ter-music
-# 或
-paru -S cn.org.huansoft.ter-music
-```
+AUR之方已备为`cn.org.huansoft.ter-music`，然**尚未投递**。可由下方源码营构，或用 [BUILD_GUIDE.md](../BUILD_GUIDE.md) 所述本地封装之产。
 
 ### 由源码营构
 
@@ -106,7 +102,7 @@ make -j"$(nproc)"
 sudo make install   # 可择
 ```
 
-可执行在`build/ter-music`（于营构之舍则`./ter-music`）。DEB、RPM、AppImage、可移植之包与Linyaps封装，见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
+可执行在`build/ter-music`（于营构之舍则`./ter-music`）。本地产物：DEB一（Debian 10–13 / Ubuntu 20.04–26.04）、RPM四（EL7–10）、AppImage一（glibc 2.28）、Linyaps之UAB与layer各一；DEB/RPM之源码包与调试包为可择。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
 ## 四、速上手
 

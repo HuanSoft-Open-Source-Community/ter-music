@@ -1,0 +1,28 @@
+# Arch Linux/AUR 构建与验收镜像。默认 USTC 源。
+FROM archlinux:latest
+
+RUN printf '%s\n' \
+        'Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch' \
+        > /etc/pacman.d/mirrorlist && \
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
+    pacman -Syu --noconfirm --needed \
+        base-devel \
+        cmake \
+        git \
+        pkgconf \
+        ffmpeg \
+        ncurses \
+        libxml2 \
+        libpng \
+        libjpeg-turbo \
+        curl \
+        sqlite \
+        zlib \
+        dbus \
+        rsync \
+    && pacman -Scc --noconfirm
+
+RUN useradd -m -u 1000 builder
+
+WORKDIR /workspace

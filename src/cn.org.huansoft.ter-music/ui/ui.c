@@ -56,6 +56,11 @@
 #include <limits.h>
 #include <wchar.h>
 #include <wctype.h>
+
+/* ncurses 5.x（EL7，mouse version 1）没有第 5 键，滚轮下滚退化为不可用。 */
+#ifndef BUTTON5_PRESSED
+#define BUTTON5_PRESSED 0
+#endif
 #include <locale.h>
 #include <langinfo.h>
 #include <math.h>

@@ -42,6 +42,12 @@
 #include "ui/vinyl.h"
 
 #include <ncursesw/ncurses.h>
+
+/* ncurses 5.x（EL7）没有 NCURSES_PAIRS_T 与 ext_color，这里做最小兼容：
+ * 色对编号仍是 short；未启用 ext_colors 时色对编码在 attr 的 A_COLOR 位。 */
+#ifndef NCURSES_PAIRS_T
+#define NCURSES_PAIRS_T short
+#endif
 #include <stdint.h>
 #include <wchar.h>
 
@@ -220,7 +226,11 @@ static void rainbow_paint_window(WINDOW *win, int offset)
             }
 
             /* 字符封面/黑胶 label/频谱柱：保持原配色，避免破坏图像。 */
+#ifdef NCURSES_EXT_COLORS
             int pair = cell.ext_color;
+#else
+            int pair = PAIR_NUMBER(cell.attr);
+#endif
             if (pair >= COVER_ART_PAIR_BASE && pair < RAINBOW_PAIR_BASE) {
                 x += span;
                 continue;

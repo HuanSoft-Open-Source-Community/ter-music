@@ -199,7 +199,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
+            build-essential pkg-config libxml2-dev \
             libavcodec-dev libavformat-dev libavutil-dev
 
       - name: Backend purity (core serves playback, not content)

@@ -5,15 +5,8 @@ Maintainer: 浣软科技（HuanSoft） <yxzl666xx@outlook.com>
 Build-Depends:
  cmake,
  debhelper-compat (= 13),
- libavcodec-dev,
- libavfilter-dev,
- libavformat-dev,
- libavutil-dev,
  libdbus-1-dev,
  libncursesw5-dev | libncurses-dev,
- libpulse-dev,
- libswresample-dev,
- libswscale-dev,
  libpng-dev,
  libjpeg-dev,
  libxml2-dev,
@@ -29,7 +22,8 @@ Package: cn.org.huansoft.ter-music
 Architecture: any
 Depends:
  ${misc:Depends},
- ${shlibs:Depends}
+ ${shlibs:Depends},
+ libxml2 | libxml2-16
 Provides: ter-music (= ${binary:Version})
 Breaks: ter-music (<< 26.4.1.0)
 Replaces: ter-music (<< 26.4.1.0)
