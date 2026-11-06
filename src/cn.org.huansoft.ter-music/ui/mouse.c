@@ -38,6 +38,11 @@
 #include <pthread.h>
 #include <string.h>
 
+/* ncurses 5.x（EL7，mouse version 1）没有第 5 键，滚轮下滚退化为不可用。 */
+#ifndef BUTTON5_PRESSED
+#define BUTTON5_PRESSED 0
+#endif
+
 extern WINDOW *win_playlist;
 extern WINDOW *win_controls;
 extern WINDOW *win_lyrics;
