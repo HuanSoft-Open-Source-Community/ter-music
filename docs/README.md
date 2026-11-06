@@ -912,12 +912,17 @@ or the layout editor's modal menus — the popup owns every mouse event:
   the row under it".
 
 The settings option picker opens where its option is: its first row is the
-option's row and its left edge is the option text's starting column. Near the
-bottom or right edge it flips above/left and is clamped so the whole box stays
+option's row and its left edge is the value column — the column right after
+the option's label and colon separator — so the option name stays visible to
+the left of the box instead of being covered by it. Near the bottom edge it
+flips above and is clamped; near the right edge the box shrinks to the space
+left after that value column, and only when even that space is unusably narrow
+does it fall back to starting at the option text's column. The whole box stays
 inside the terminal — clear of the status line, the bottom key-hint row, the
 scrollbar column and the right border. The same rule applies to every settings
-section, including the colour palette, playback pickers, info-display pickers
-and the Equalizer preset picker.
+section with option rows, including the colour palette, playback pickers and
+info-display pickers; the Equalizer preset picker keeps its frequency-band
+column anchor.
 
 Text input boxes are modal (search, scan directory, layout rename, hotkey capture,
 numeric colour entry): mouse events there are ignored outright, so a stray wheel

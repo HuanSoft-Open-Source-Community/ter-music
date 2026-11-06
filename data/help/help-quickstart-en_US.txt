@@ -158,9 +158,10 @@ ter-music Quick Start Guide
       that entry and runs it immediately (Enter; Space, i.e. tick the field, in
       the multi-select picker); a click outside only closes the popup — that
       click is swallowed and never reaches the pane behind it. The settings
-      picker opens at the option that triggered it (same row, aligned with the
-      option text) and flips/clamps at the edges so it stays inside the terminal,
-      clear of the status line, bottom hint row, scrollbar and right border.
+      picker opens at the option that triggered it (same row, starting right
+      after the option's label and colon so the name stays visible) and
+      flips/clamps/shrinks at the edges so it stays inside the terminal, clear
+      of the status line, bottom hint row, scrollbar and right border.
     · Text input boxes are modal (search, scan directory, layout rename, hotkey
       capture, numeric colour entry): mouse events inside them are ignored, so a
       stray wheel event cannot corrupt the text being typed.
