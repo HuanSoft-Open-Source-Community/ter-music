@@ -21,6 +21,13 @@
 #       提示 stale 且队列数不变；
 #   R15 菜单展开 2 s（动画继续）不自行关闭；
 #   R16 播放中动画窗格刷新时，菜单不被擦除（合成刷新 + 菜单快照）；
+#   R16b 修饰左键备选触发（pty 语义）：Ctrl/Alt+左键打开/收起菜单、只开一次、
+#        跨格按下/松开也只开一次、不播放；
+#   R16c 中键备选触发：中键打开/收起菜单、不播放；带修饰的中键被忽略；
+#   R16d 带修饰的右键一律不触发 TUI 菜单，裸右键不受影响。
+#        注意：本脚本直接把 SGR 字节写进 pty，绕过终端模拟器；它只证明
+#        ncurses 层的归一化语义，不证明 deepin-terminal 会转发修饰位
+#        （该终端实测只转发按钮号，Ctrl/Alt+左键等同普通左键，请用中键）。
 #   R17 全程前端存活。
 #
 # 判定依据：
@@ -181,6 +188,20 @@ item_idx() {   # $1 = level, $2 = grep 片段
 }
 
 log_count() { grep -c "$1" "$LOG_FILE" 2>/dev/null || true; }
+
+# 只数"普通左键点击"（[mouse] ... click wheel=...），不含 right-click。
+# 新备选触发用例用它证明一次修饰键/中键事件没有被降级成普通左键（播放）。
+plain_click_count() {
+    grep -c '\[mouse\].* click wheel' "$LOG_FILE" 2>/dev/null || true
+}
+
+# 按"日志行号标记 → 只读新增的菜单 open/close 行"判断本次按键的效果。
+# 比全局计数稳：不会把上一击/下一击的 close 读进来，也不依赖 grep 的时序。
+menu_mark() { wc -l < "$LOG_FILE" 2>/dev/null || printf '0'; }
+menu_new() {
+    tail -n +"$(( ${1:-0} + 1 ))" "$LOG_FILE" 2>/dev/null |
+        grep '\[context_menu\] \(open\|close\)' || true
+}
 
 # 最新一层菜单里，目标下标之前有多少个"可选且启用"的条目（用于键盘导航）。
 selectable_before() {
@@ -654,6 +675,172 @@ if [ "$(play_name)" = "$playing" ]; then
     ok "菜单期间没有误切曲目（仍 $playing）"
 else
     bad "菜单期间曲目被切走：$playing → $(play_name)"
+fi
+
+# ── R16b 修饰左键备选触发（pty 语义） ───────────────────────────
+# 本段只验证 ncurses 层的归一化：Ctrl/Alt+左键被转成右键菜单。
+# 注意 deepin-terminal 6.5.40 转发时只发按钮号、不带修饰位，故它上面的
+# Ctrl/Alt+左键等同普通左键（会播放）——该终端的可靠入口是 R16c 的中键。
+info "R16b Ctrl/Alt+左键等同于右键（只开一次、不播放）"
+sleep 0.6  # 等 R16 最后一次 Esc 的 close 落盘后再取 marker
+plain_before="$(plain_click_count)"
+
+# 1) Ctrl+左键：新增日志里只有 open，没有紧跟的 close（防双触发）。
+mark="$(menu_mark)"
+send "<ctrl-click:6:3>" 0.9
+sleep 1.0
+new="$(menu_new "$mark")"
+last="$(printf '%s\n' "$new" | tail -1)"
+if printf '%s' "$last" | grep -q 'open'; then
+    ok "Ctrl+左键打开了右键菜单（新增日志末条为 open）"
+else
+    bad "Ctrl+左键没有打开右键菜单（末条：${last:-空}）"
+fi
+if printf '%s' "$new" | grep -q 'close'; then
+    bad "一次 Ctrl+左键紧跟了 close（双触发）"
+else
+    ok "一次 Ctrl+左键没有紧跟一次关闭（无双触发）"
+fi
+sleep 0.4
+
+# 2) 菜单展开时 Ctrl+左键只收起，不叠加新菜单。
+mark="$(menu_mark)"
+send "<ctrl-click:6:3>" 0.9
+sleep 1.0
+new="$(menu_new "$mark")"
+if printf '%s' "$new" | grep -q 'close' && \
+        ! printf '%s' "$new" | grep -q 'open'; then
+    ok "菜单展开时 Ctrl+左键只收起菜单（与右键一致）"
+else
+    bad "菜单展开时 Ctrl+左键没有只收起菜单"
+fi
+sleep 0.4
+
+# 3) Alt+左键同样打开。
+mark="$(menu_mark)"
+send "<alt-click:6:3>" 0.9
+sleep 1.0
+new="$(menu_new "$mark")"
+last="$(printf '%s\n' "$new" | tail -1)"
+if printf '%s' "$last" | grep -q 'open'; then
+    ok "Alt+左键同样打开右键菜单"
+else
+    bad "Alt+左键没有打开右键菜单"
+fi
+send "<esc>" 0.9
+sleep 0.6
+
+# 4) 指针跨格：press/release 不合并，只认 RELEASED，仍只开一次。
+#    原始 SGR：16 = 左键+Ctrl，M=按下，m=松开；按下@(6,3)，松开@(6,4)。
+mark="$(menu_mark)"
+send "\x1b[<16;6;3M\x1b[<16;6;4m" 0.9
+sleep 1.0
+new="$(menu_new "$mark")"
+last="$(printf '%s\n' "$new" | tail -1)"
+if printf '%s' "$last" | grep -q 'open' && ! printf '%s' "$new" | grep -q 'close'; then
+    ok "按下/松开跨格仍只打开一次菜单"
+else
+    bad "按下/松开跨格触发了多次打开/关闭"
+fi
+send "<esc>" 0.9
+sleep 0.6
+
+if [ "$(plain_click_count)" -eq "$plain_before" ]; then
+    ok "修饰左键全程没有降级成普通左键（无播放）"
+else
+    bad "修饰左键被当成了普通左键（$plain_before → $(plain_click_count)）"
+fi
+
+# ── R16c 中键备选触发 ──────────────────────────────────────────
+# deepin-terminal 把中键原样转发，且不为中键弹终端自家菜单；程序把中键
+# 归一成右键菜单（见 mouse.c）。带修饰的中键刻意不认，留给终端。
+info "R16c 中键等同于右键，带修饰的中键被忽略"
+plain_before="$(plain_click_count)"
+
+mark="$(menu_mark)"
+send "<middle:6:3>" 0.9
+sleep 1.0
+new="$(menu_new "$mark")"
+last="$(printf '%s\n' "$new" | tail -1)"
+if printf '%s' "$last" | grep -q 'open'; then
+    ok "中键打开了右键菜单（新增日志末条为 open）"
+else
+    bad "中键没有打开右键菜单（末条：${last:-空}）"
+fi
+if printf '%s' "$new" | grep -q 'close'; then
+    bad "一次中键紧跟了 close（双触发）"
+else
+    ok "一次中键没有紧跟一次关闭"
+fi
+sleep 0.4
+
+mark="$(menu_mark)"
+send "<middle:6:3>" 0.9
+sleep 1.0
+new="$(menu_new "$mark")"
+if printf '%s' "$new" | grep -q 'close' && \
+        ! printf '%s' "$new" | grep -q 'open'; then
+    ok "菜单展开时中键只收起菜单"
+else
+    bad "菜单展开时中键没有只收起菜单"
+fi
+sleep 0.4
+
+for ev in ctrl-middle alt-middle shift-middle; do
+    mark="$(menu_mark)"
+    send "<$ev:6:3>" 0.7
+    sleep 0.6
+    new="$(menu_new "$mark")"
+    if [ -z "$new" ]; then
+        ok "$ev 不触发 TUI 菜单（无新增 open/close）"
+    else
+        bad "$ev 触发了 TUI 菜单"
+    fi
+done
+send "<esc>" 0.9
+sleep 0.6
+if [ "$(plain_click_count)" -eq "$plain_before" ]; then
+    ok "中键用例全程没有降级成普通左键（无播放）"
+else
+    bad "中键用例被当成了普通左键（$plain_before → $(plain_click_count)）"
+fi
+
+# ── R16d 带修饰的右键一律不认 ───────────────────────────────────
+# 终端对同一组合键也弹自家菜单；TUI 再认就会两张菜单、overlay 错位。
+info "R16d Ctrl/Alt/Shift+右键不触发 TUI 菜单，裸右键不受影响"
+plain_before="$(plain_click_count)"
+for ev in ctrl-right alt-right shift-right; do
+    # 连续两次：第一次不能开，第二次也不能在"第一次已开"的假象下关。
+    for _ in 1 2; do
+        mark="$(menu_mark)"
+        send "<$ev:6:3>" 0.7
+        sleep 0.6
+        new="$(menu_new "$mark")"
+        if [ -z "$new" ]; then
+            ok "$ev 不触发 TUI 菜单（无新增 open/close）"
+        else
+            bad "$ev 触发了 TUI 菜单"
+        fi
+    done
+done
+
+# 裸右键仍照旧（终端把右键转发给程序且不弹自家菜单时走这条老路）
+mark="$(menu_mark)"
+right_at 6 3
+sleep 0.6
+new="$(menu_new "$mark")"
+last="$(printf '%s\n' "$new" | tail -1)"
+if printf '%s' "$last" | grep -q 'open'; then
+    ok "裸右键菜单未受影响"
+else
+    bad "裸右键菜单被改坏了"
+fi
+send "<esc>" 0.9
+sleep 0.6
+if [ "$(plain_click_count)" -eq "$plain_before" ]; then
+    ok "带修饰右键用例全程没有降级成普通左键（无播放）"
+else
+    bad "带修饰右键用例被当成了普通左键（$plain_before → $(plain_click_count)）"
 fi
 
 # ── R17 前端存活 ───────────────────────────────────────────────

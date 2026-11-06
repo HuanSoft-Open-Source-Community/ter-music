@@ -926,10 +926,15 @@ column anchor.
 
 Text input boxes are modal (search, scan directory, layout rename, hotkey capture,
 numeric colour entry): mouse events there are ignored outright, so a stray wheel
-event cannot corrupt the text being typed. Mouse modifier keys are not read —
-Shift/Ctrl held while clicking behaves exactly like a plain click. Only the wheel
-up/down is requested; horizontal wheel and pointer motion (hover) are not
-reported to the program.
+event cannot corrupt the text being typed. Modifier keys change behaviour in
+exactly one place: **Ctrl+left click and Alt+left click open the right-click
+context menu** (see "Fallback trigger" below), but only on terminals that
+forward modifier bits; a plain left click is never affected. The **middle mouse
+button** opens the same menu without any modifier. Everything else is classified
+by its button bits alone: a modified right click (Ctrl/Alt/Shift+right) or a
+modified middle click is deliberately **not** claimed by ter-music and is left to
+the terminal/window manager. Only the wheel up/down is requested; horizontal
+wheel and pointer motion (hover) are not reported to the program.
 
 **Right-click context menus.** A right click opens a menu anchored at the pointer;
 the layout is chosen so the whole menu stays on screen (it flips up/left at the
@@ -971,6 +976,40 @@ edges and never covers the bottom key-hint row):
   the menu before their redraw; if a queue, history or library row changes after
   the menu was opened, row-specific actions are rejected with "the list changed;
   please try again" instead of acting on a shifted row.
+
+**Fallback triggers on hostile terminals.** Some terminal emulators hard-wire the
+bare (or a modified) right button to their own context menu and either never
+forward it or forward it while their menu is also shown. ter-music cannot suppress
+another program's menu, so the context menu has two alternate mouse triggers:
+
+- **Middle mouse button.** Pressing the middle button (the wheel) opens exactly
+  the same menu as a right click, at the pointer, and the row under the pointer is
+  only selected, never played. This is the reliable trigger on deepin-terminal:
+  it forwards middle clicks to the application and does not show its own menu for
+  them. (Terminals that do not forward middle clicks simply never deliver it;
+  nothing else changes.)
+- **Ctrl+left click or Alt+left click**, on terminals that forward keyboard
+  modifier bits to the application (xterm, VTE-based terminals, kitty, ...). The
+  event is turned into a right click before any hit-testing, so the very same menu
+  opens at the pointer at every right-click entry point listed above, and the row
+  under the pointer is only selected, never played. **deepin-terminal 6.5.40
+  strips the modifier bits before forwarding** (its `mouseSignal` carries the
+  button number only), so there Ctrl/Alt+left is indistinguishable from a plain
+  left click — it selects/plays instead of opening the menu. Use the middle
+  button on that terminal.
+
+While a menu is open, the middle button or Ctrl/Alt+left click closes it exactly
+like another right click does; a plain left click outside also closes it. Do
+**not** add Shift to these chords: many terminals use Shift+left for text
+selection and never forward it. A modified right click (Ctrl/Alt/Shift+right) is
+deliberately **not** claimed by ter-music, and neither is a modified middle click
+— a terminal that owns such a chord would otherwise show a second menu, and the
+TUI overlay would get out of sync with what is on screen. A bare right click
+still opens the menu wherever the terminal forwards it without showing a menu of
+its own; if it also shows its own menu (deepin-terminal does), use the middle
+button. If the middle button is unavailable and the terminal does not forward
+modifiers either, there is no clean mouse trigger left: use another terminal or
+request a keyboard fallback.
 
 ### 5.5 Play Mode Description
 

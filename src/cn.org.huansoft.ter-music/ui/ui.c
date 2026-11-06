@@ -284,15 +284,28 @@ void init_ncurses(void)
     noecho();
     keypad(stdscr, TRUE);
     /* 鼠标上报：主键点击（单击/双击/三击/release，均归一成一次点击）+
-     * 右键按下 + 滚轮。
+     * 中键点击 + 右键按下 + 滚轮。
      * 滚轮在 xterm 协议里只有 BUTTON4/BUTTON5_PRESSED（无 release 语义），
      * 横向滚轮 BUTTON6/BUTTON7 有意不申请——本程序没有横向滚动区域。
      * 右键只申请 BUTTON3_PRESSED：按下即一条事件，不依赖终端合成 CLICKED，
      * 不会出现"press+click 两条"让刚开的右键菜单立刻被第二条关掉。
+     * 中键申请 CLICKED/DOUBLE/TRIPLE + RELEASED：它是右键被终端自家菜单占住
+     * 时的鼠标备选（deepin-terminal 会原样转发中键且不弹自家菜单）。与左键
+     * 同理，不申请 BUTTON2_PRESSED：同格按下/松开由 ncurses 合成 CLICKED，
+     * 跨格时只多一条 RELEASED，normalize 只认这两类，一次点击只开一次。
+     * 修饰位（BUTTON_SHIFT/BUTTON_ALT/BUTTON_CTRL）有意不申请：ncurses 只在
+     * 事件与掩码有交集时投递，修饰位会随 bstate 一起保留，不需要为了收修饰位
+     * 而把它们加进掩码。normalize 只让 Ctrl/Alt+左键读修饰位（且只对会转发
+     * 修饰位的终端有效；deepin-terminal 会剥掉修饰位，故那里请用中键）；
+     * 带修饰的右键/中键一律不认，留给终端/窗口管理器，避免同一组合键出现
+     * 两张菜单、overlay 状态与屏幕所见脱节。
      * REPORT_MOUSE_POSITION 同样不申请：鼠标移动会淹没事件循环，且界面
      * 不需要 hover 状态。 */
     mousemask(BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED | BUTTON1_TRIPLE_CLICKED |
-              BUTTON1_RELEASED | BUTTON3_PRESSED |
+              BUTTON1_RELEASED |
+              BUTTON2_CLICKED | BUTTON2_DOUBLE_CLICKED | BUTTON2_TRIPLE_CLICKED |
+              BUTTON2_RELEASED |
+              BUTTON3_PRESSED |
               BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
     curs_set(0);
     clear();
