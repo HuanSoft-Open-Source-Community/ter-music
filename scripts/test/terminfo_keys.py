@@ -89,9 +89,30 @@ _BYTE_ESCAPES = {
 #   · 两次快速左击      → 只报一个 BUTTON1_DOUBLE_CLICKED（第一次的 CLICKED
 #                       被合掉），所以整段必须一次写入 pty 才能触发双击；
 #   · 右键按下          → 程序只申请 BUTTON3_PRESSED，按下即一条事件；
+#   · 修饰右键          → 按下码 = 2 + 修饰位（Shift=4、Alt=8、Ctrl=16），
+#                       ncurses 投递为 BUTTON3_PRESSED|BUTTON_CTRL 等；程序
+#                       **刻意不认**带修饰的右键（留给终端自家菜单），只有
+#                       裸右键开菜单；
+#   · 中键              → 按钮号 1；同格按下+松开合并成 BUTTON2_CLICKED，
+#                       程序把它当右键菜单。deepin-terminal 会原样转发中键
+#                       且不弹自家菜单，所以这是该终端上的可靠备选；
+#   · 修饰左键          → 按下码 = 0 + 修饰位，同格按下+松开投递**一条**
+#                       BUTTON1_CLICKED|修饰位，程序把它转成右键菜单；跨格时
+#                       press/release 不合并，程序只认 RELEASED（不认 PRESSED），
+#                       仍只开一次。注意：这是 pty 层语义；deepin-terminal
+#                       6.5.40 的 mouseSignal/sendMouseEvent 只编码按钮号，
+#                       **不会**把 Ctrl/Alt/Shift 传给程序，故该终端上
+#                       Ctrl/Alt+左键等同普通左键（会播放），请用中键；
+#   · mask              → 修饰位不必申请：事件与掩码有交集即投递，修饰位随
+#                       bstate 保留。BUTTON1_PRESSED/BUTTON2_PRESSED 也不申请，
+#                       点击由 CLICKED 合成；掩码保持最小；
 #   · 滚轮              → 按下时报 BUTTON4/BUTTON5_PRESSED，松开不再报；
 #   · 老式 X10 编码（ESC [ M 三字节）在该 terminfo 下不被解析，故只用 SGR。
 _MOUSE_BUTTONS = {"click": 0, "double": 0, "right": 2, "right-click": 2,
+                  "middle": 1,
+                  "ctrl-click": 16, "alt-click": 8, "shift-click": 4,
+                  "ctrl-middle": 17, "alt-middle": 9, "shift-middle": 5,
+                  "ctrl-right": 18, "alt-right": 10, "shift-right": 6,
                   "wheel-up": 64, "wheelup": 64,
                   "wheel-down": 65, "wheeldown": 65}
 
@@ -103,7 +124,10 @@ def _sgr_mouse_event(button, col, row):
 
 
 def mouse_sequence(token):
-    """`<click:列:行>` / `<double:列:行>` / `<right:列:行>` /
+    """`<click:列:行>` / `<double:列:行>` / `<right:列:行>` / `<middle:列:行>` /
+    `<ctrl-click:列:行>` / `<alt-click:列:行>` /
+    `<ctrl-middle:列:行>` / `<alt-middle:列:行>` / `<shift-middle:列:行>` /
+    `<ctrl-right:列:行>` / `<alt-right:列:行>` / `<shift-right:列:行>` /
     `<wheel-up:列:行>` / `<wheel-down:列:行>` → 写入 pty 的字节串；
     不是鼠标键时返回 None。
 

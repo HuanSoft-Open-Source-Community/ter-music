@@ -10,7 +10,8 @@
  *
  * 覆盖范围：主视图（播放列表/曲库浏览器、控制区、歌词、信息、频谱、黑胶、
  * 提示条）与全部子视图（侧栏与内容区）、设置页各分区、选择弹层、
- * 布局编辑器（含其模态菜单）。右键/中键与鼠标移动一律忽略。
+ * 布局编辑器（含其模态菜单）。裸右键与中键都按"在该点开右键菜单"处理；
+ * 带修饰的右键/中键一律让给终端/窗口管理器；鼠标移动忽略。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  * @date 2026-06-02
@@ -106,10 +107,53 @@ static void normalize_mouse_event(const MEVENT *event, UIMouseEvent *out)
         return;
     }
 
-    /* 右键：只申请 BUTTON3_PRESSED（见 ui.c 的 mousemask）。按下即触发，
+    /* 右键：只认**不带修饰**的 BUTTON3_PRESSED（掩码见 ui.c）。按下即触发，
      * 不依赖终端合成 CLICKED，因此不会出现"一次右键收到 press+click 两条"
-     * 导致刚开的菜单立刻被第二条关掉的竞态。 */
-    if (event->bstate & BUTTON3_PRESSED) {
+     * 导致刚开的菜单立刻被第二条关掉的竞态。
+     *
+     * 带 Ctrl/Alt/Shift 的右键一律不认，留给终端/窗口管理器。原因不是洁癖：
+     * 有的终端（deepin-terminal 6.5.40）对任何右键都弹自家菜单，同时又把
+     * 右键转发给程序；程序再认，就会同时出现两张菜单，且 TUI 的 overlay 会
+     * 在终端菜单关闭后残留，下一次同键被 overlay 当成"取消"——正是
+     * "第一次两张、第二次只剩终端菜单"的由来。终端把修饰位剥掉时（deepin-
+     * terminal 就是如此），Ctrl+右键与裸右键在程序侧无法区分，故备选入口只能
+     * 另找（中键；见下一个分支）。 */
+    if ((event->bstate & BUTTON3_PRESSED) &&
+        !(event->bstate & (BUTTON_CTRL | BUTTON_ALT | BUTTON_SHIFT))) {
+        out->right_click = 1;
+        return;
+    }
+
+    /* 中键（滚轮按下）= 右键菜单：语义与右键完全相同（在指针处开同一张菜单，
+     * 指针下的行只选中、绝不播放）。这是右键被终端自家菜单占住时的鼠标备选：
+     * deepin-terminal 在程序开启鼠标上报后会把中键原样转发，且不为中键弹
+     * 终端菜单（见 TerminalDisplay::mousePressEvent 的 MID_BTN 分支）。
+     *
+     * 只认 CLICKED/DOUBLE/TRIPLE/RELEASED，不认 BUTTON2_PRESSED：同格按下+
+     * 松开由 ncurses 合成 CLICKED；指针跨格时合并不成立，会分别投递 PRESSED
+     * 与 RELEASED，只认后者才能保证一次点击只开一次（否则开完又被关）。
+     * 带修饰的中键同样不认，留给终端（xterm 的 Ctrl+中键字体菜单等）。 */
+    if (!(event->bstate & (BUTTON_CTRL | BUTTON_ALT | BUTTON_SHIFT)) &&
+        (event->bstate & (BUTTON2_CLICKED | BUTTON2_DOUBLE_CLICKED |
+                          BUTTON2_TRIPLE_CLICKED | BUTTON2_RELEASED))) {
+        out->right_click = 1;
+        return;
+    }
+
+    /* Ctrl/Alt + 左键 = 右键上下文菜单：全程序唯一让修饰位改变语义的地方。
+     * 它只对**会转发修饰位**的终端有效（xterm、VTE 系、kitty 等）。deepin-
+     * terminal 6.5.40 的 mouseSignal/sendMouseEvent 只编码按钮号、不附加
+     * 修饰位，所以那里 Ctrl/Alt+左键等同普通左键（会选中/播放）；该终端
+     * 请用上面的中键备选。
+     *
+     * 只认左键的点击位与 RELEASED，不认 BUTTON1_PRESSED：同格按下+松开会由
+     * ncurses 合并成 BUTTON1_CLICKED|修饰位；指针在按下/松开间跨格时合并不
+     * 成立，会分别投递 PRESSED 与 RELEASED，只认 RELEASED 正好开一次。
+     * 若把 PRESSED 也认了，跨格/长按就会"开一次、关一次"——掩码也刻意不
+     * 申请 BUTTON1_PRESSED（见 ui.c）。 */
+    if ((event->bstate & (BUTTON_CTRL | BUTTON_ALT)) &&
+        (event->bstate & (BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED |
+                          BUTTON1_TRIPLE_CLICKED | BUTTON1_RELEASED))) {
         out->right_click = 1;
         return;
     }
@@ -127,8 +171,8 @@ static void normalize_mouse_event(const MEVENT *event, UIMouseEvent *out)
         out->click = 1;
         out->click_count = 1;
     }
-    /* 其余按钮（中键）与移动：click/wheel/right_click 都为 0，
-     * ui_mouse_resolve 直接判为"无事可做"。 */
+    /* 其余输入（鼠标移动、带修饰的中键/右键等）：click/wheel/right_click
+     * 都为 0，ui_mouse_resolve 直接判为"无事可做"。 */
 }
 
 /* ============================================================

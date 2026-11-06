@@ -165,13 +165,23 @@ ter-music Quick Start Guide
     · Text input boxes are modal (search, scan directory, layout rename, hotkey
       capture, numeric colour entry): mouse events inside them are ignored, so a
       stray wheel event cannot corrupt the text being typed.
-    · Mouse modifier keys are not read — Shift/Ctrl held while clicking behaves
-      like a plain click. Only wheel up/down is requested; the horizontal wheel
-      and pointer motion (hover) are never reported to the program.
+    · Modifier keys change behaviour in exactly one place: Ctrl+left and Alt+left
+      open the right-click context menu, but only on terminals that forward
+      modifier bits. A plain left click is unaffected. The **middle mouse
+      button** (the wheel) opens the same menu without any modifier. Everything
+      else is classified by button bits alone: a modified right click or a
+      modified middle click is deliberately not claimed and is left to the
+      terminal/window manager. Only wheel up/down is requested; the horizontal
+      wheel and pointer motion (hover) are never reported to the program.
     · A right click opens a context menu at the pointer: the menu is clamped to
       the screen (it flips up/left at the edges and never covers the bottom hint
-      row). At most one overlay exists at a time; while a popup or menu is open a
-      right click only closes it and is swallowed — no stacking and no pass-through.
+      row). The middle button is the reliable alternative on deepin-terminal: it
+      forwards middle clicks and does not show its own menu for them. Ctrl/Alt+
+      left click only works where the terminal forwards modifier bits —
+      deepin-terminal 6.5.40 strips them, so there Ctrl/Alt+left is a plain click
+      (it plays), and you should use the middle button. At most one overlay
+      exists at a time; while a popup or menu is open a right click (or middle
+      click) only closes it and is swallowed — no stacking and no pass-through.
       Inside a menu a left click selects and runs that entry; the wheel moves the
       selection and submenus open to the side; Up/Down/Enter/Esc/Right work from
       the keyboard, any other key closes and swallows. The list pane menu covers
