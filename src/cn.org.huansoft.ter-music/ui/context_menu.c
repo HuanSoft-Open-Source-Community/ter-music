@@ -17,6 +17,7 @@
 #include "ui/context_menu_layout.h"
 #include "ui/keymap.h"
 #include "ui/layout_editor.h"
+#include "ui/menu_anim.h"
 #include "ui/menu_internal.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
@@ -317,6 +318,9 @@ static void destroy_windows(void)
 {
     for (int i = 0; i < UI_CTX_MAX_LEVELS; i++) {
         if (g_ctx_menu.wins[i]) {
+            /* 进入动画可能还在半途：先摘掉 borrowed 记录再销毁窗口，
+             * 否则 registry 会留下悬空 WINDOW*。 */
+            ui_menu_anim_cancel_window(g_ctx_menu.wins[i]);
             delwin(g_ctx_menu.wins[i]);
             g_ctx_menu.wins[i] = NULL;
         }
@@ -420,6 +424,10 @@ static int create_window_for(int index)
         return 0;
     }
     g_ctx_menu.wins[index] = win;
+    /* 菜单从指针方向对角线滑入；tier 为 OFF 或起终点相同时 begin_enter
+     * 返回 0，窗口留在最终位置，行为与旧版一致。 */
+    (void)ui_menu_anim_begin_enter(win, UI_MENU_ANIM_DIAGONAL,
+                                   level->rect.top, level->rect.left);
     return 1;
 }
 
@@ -540,6 +548,10 @@ static void pop_submenu(void)
     }
     const int index = g_ctx_menu.level_count - 1;
     if (g_ctx_menu.wins[index]) {
+        /* 子菜单退场：复制一份 ghost 滑回父层，再销毁原窗口。 */
+        (void)ui_menu_anim_begin_exit(g_ctx_menu.wins[index],
+                                      UI_MENU_ANIM_DIAGONAL, index);
+        ui_menu_anim_cancel_window(g_ctx_menu.wins[index]);
         delwin(g_ctx_menu.wins[index]);
         g_ctx_menu.wins[index] = NULL;
     }
@@ -611,10 +623,38 @@ void ui_context_menu_close(int repaint)
     if (!g_ctx_menu.active) {
         return;
     }
+
+    /* 右边菜单逐层退场：先为每层复制 ghost（按层号登记保证 z 序），
+     * 再统一销毁原窗口。tier 为 OFF 时 begin_exit 返回 0，等价于旧版
+     * 瞬时关闭。 */
+    int animated = 0;
+    for (int i = 0; i < g_ctx_menu.level_count; i++) {
+        if (g_ctx_menu.wins[i]) {
+            animated |= ui_menu_anim_begin_exit(g_ctx_menu.wins[i],
+                                                UI_MENU_ANIM_DIAGONAL, i);
+        }
+    }
+
     destroy_windows();
     g_ctx_menu.active = 0;
     g_ctx_menu.level_count = 0;
-    log_debug("context_menu", "close repaint=%d", repaint ? 1 : 0);
+    log_debug("context_menu", "close repaint=%d animated=%d",
+              repaint ? 1 : 0, animated);
+
+    if (repaint) {
+        repaint_underlying();
+    }
+}
+
+void ui_context_menu_close_now(int repaint)
+{
+    if (!g_ctx_menu.active) {
+        return;
+    }
+    destroy_windows();
+    g_ctx_menu.active = 0;
+    g_ctx_menu.level_count = 0;
+    log_debug("context_menu", "close-now repaint=%d", repaint ? 1 : 0);
     if (repaint) {
         repaint_underlying();
     }
@@ -632,8 +672,10 @@ int ui_context_menu_open(UIContextMenuBuilder build,
     if (!build || !ctx) {
         return 0;
     }
+    /* 新 overlay 打开前把上一轮退场 ghost 收干净，避免两层菜单叠影。 */
+    ui_menu_anim_finish_exits(1);
     if (g_ctx_menu.active) {
-        ui_context_menu_close(0);
+        ui_context_menu_close_now(0);
     }
 
     memset(&g_ctx_menu, 0, sizeof(g_ctx_menu));
@@ -678,7 +720,12 @@ void ui_context_menu_refresh(void)
         return;
     }
     if (!ui_context_menu_active()) {
-        ui_context_menu_close(1);
+        /* 视图/编辑器已经变了：界面变更不播消失动画。 */
+        ui_context_menu_close_now(1);
+        return;
+    }
+    if (ui_menu_anim_active()) {
+        /* 动画帧由 ui_menu_anim_frame() 统一合成，别在这里另刷一帧。 */
         return;
     }
     render_refresh();
@@ -833,7 +880,16 @@ int ui_context_menu_intersects_rect(int top, int left, int rows, int cols)
     const UIRect rect = { .top = top, .left = left,
                           .rows = rows, .cols = cols };
     for (int i = 0; i < g_ctx_menu.level_count; i++) {
-        if (ui_rect_intersects(&rect, &g_ctx_menu.levels[i].rect)) {
+        WINDOW *win = g_ctx_menu.wins[i];
+        if (!win) {
+            continue;
+        }
+        /* 动画期间菜单窗口会被 mvwin 移走；相交判定必须用**当前**窗口
+         * 矩形，否则窗格刷新会在移动路径上留下旧像素。 */
+        UIRect current;
+        getbegyx(win, current.top, current.left);
+        getmaxyx(win, current.rows, current.cols);
+        if (ui_rect_intersects(&rect, &current)) {
             return 1;
         }
     }

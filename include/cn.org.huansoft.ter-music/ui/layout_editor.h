@@ -47,6 +47,14 @@ int layout_editor_menu_open(void);
 /** @brief 取模态菜单框的屏幕矩形；未展开时返回 0。 */
 int layout_editor_menu_rect(UIRect *out);
 
+/** @brief 当前模态菜单窗口（void * 即 WINDOW *）；未展开时为 NULL。
+ * 菜单进入/消失动画期间由 ui/menu_anim 负责移动；合成层据此把实时窗口
+ * 压到 stdscr 之上。 */
+void *layout_editor_menu_window(void);
+
+/** @brief 丢弃当前模态菜单窗口（不播动画），供编辑器关闭/清理使用。 */
+void layout_editor_close_menu(void);
+
 /**
  * @brief 右键入口：在指针位置打开"窗格操作"菜单（贴边翻转/钳制）。
  *

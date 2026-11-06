@@ -924,6 +924,40 @@ section with option rows, including the colour palette, playback pickers and
 info-display pickers; the Equalizer preset picker keeps its frequency-band
 column anchor.
 
+**Menu motion and graceful fallbacks.** Drop-down selection menus (the
+control-bar popups and the settings option picker, including the colour,
+Equalizer-preset and info-field pickers) slide in vertically and slide back out
+when dismissed. Right-click context menus slide in diagonally, level by level,
+and retract diagonally; the same applies when the menu is opened by the middle
+button or by Ctrl/Alt+left click (see the fallback triggers below). Inside the
+layout editor, the action/kind/colour/help modal menus animate too — vertically
+when centred (`Enter`, `?`, `t`, `c`) and diagonally when the actions menu is
+opened at the pointer by right-click; the editor's own close and the rename
+prompt take over instantly. The motion is a front-end, session-local effect; it
+writes no configuration.
+
+Whenever the interface itself changes — F1–F8/page switches, a terminal resize,
+a layout rebuild, configuration or language reload, opening or closing the
+layout editor, or a modal text input taking over the screen — any open overlay
+is closed instantly and no exit animation is played. While a menu animates, the
+event loop polls input every 1 ms and composes a frame at every changed cell
+position (no artificial frame cap); the other pane animations (spectrum, vinyl,
+lyrics, progress) are paused for that moment so they cannot tear the moving
+menu. Menus are logically usable immediately: keyboard input works at once, and
+mouse hit-testing uses the settled (logical) rectangle rather than the moving
+pixels. Any key or mouse event arriving during an exit animation snaps it to
+completion before the event is dispatched, so input is never blocked.
+
+If the terminal cannot render the full effect the motion degrades gracefully:
+full movement → a shorter one-row/one-column slide (reduced) → no animation at
+all (off). Terminals without colour or using the ASCII fallback take the
+reduced tier; a non-TTY, `TERM=dumb`, a very small terminal, or a measured frame
+cost above the budget disables menu motion. With the Konami aurora flow active,
+the moving and exiting menu layers are composed by the flow's full-screen pass
+(one `doupdate` per frame), and the flow's own vinyl/lyric phase re-render is
+paused while a menu animation runs; toggling the flow re-probes the animation
+tier.
+
 Text input boxes are modal (search, scan directory, layout rename, hotkey capture,
 numeric colour entry): mouse events there are ignored outright, so a stray wheel
 event cannot corrupt the text being typed. Modifier keys change behaviour in
@@ -1709,7 +1743,8 @@ Four scripts keep the split honest, and all of them run in CI:
 
 Regression suites accompany them: `scripts/test/run-unit-tests.sh` (path queue,
 play-queue contract, lyrics parsing, JSON reader, configuration diff, layout
-schema/geometry/state, the ncurses-free mouse-event routing table, including a
+schema/geometry/state, menu-animation geometry/easing/tier fallback, the
+ncurses-free mouse-event routing table, including a
 per-cell rasterisation check that every
 preset tiles without blanks) plus the
 end-to-end scripts `dbus-rpc-check.sh`, `config-migration-check.sh`,
@@ -1774,7 +1809,10 @@ Ter-Music adopts a modular design, main modules include:
   ncurses-free ownership rules, unit-tested in `scripts/test/test_mouse_routing.c`;
   `context_menu.c`/`context_menu_main.c`: right-click menu stack, rendering and
   the main-list menu; `context_menu_layout.c`: ncurses-free placement/scroll
-  maths, unit-tested in `scripts/test/test_context_menu_layout.c`),
+  maths, unit-tested in `scripts/test/test_context_menu_layout.c`; `menu_anim.c`:
+  menu enter/exit state machine, ghost snapshots and overlay composition;
+  `menu_anim_math.c`: ncurses-free motion geometry/easing/tier maths, unit-tested
+  in `scripts/test/test_menu_anim_math.c`),
   scrollbar, shared widgets
 - **media/**: Core D-Bus session — `session.c` (bus name, introspection,
   dispatch), `rpc_common.c` (reply helpers, paging), `rpc_info.c`,

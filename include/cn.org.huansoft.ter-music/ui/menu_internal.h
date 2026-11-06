@@ -136,6 +136,9 @@ int settings_hotkey_capture_active(void);
 /* 设置页选项/颜色选择弹层的窗口；未激活时 NULL。
  * 流光彩蛋用它把弹层纳入整屏合成，避免刷新底层窗口时把弹层擦掉。 */
 WINDOW *settings_sel_window(void);
+/* 选择弹层的**逻辑**矩形（最终锚点；动画期间不随移动中的窗口变化）。
+ * 鼠标归属用逻辑矩形，渲染/流光彩蛋用 settings_sel_window()。 */
+int settings_sel_rect(UIRect *out);
 int handle_history_input(int ch);
 int handle_playlist_input(int ch);
 int handle_favorites_input(int ch);
@@ -185,6 +188,9 @@ void help_free_lines(void);
 
 extern PopupState g_popup;
 int popup_handle_mouse_click(int screen_y, int screen_x);
+/* 焦点切换/用户取消时的弹层关闭（纵向消失动画）；布局重建仍用
+ * controls_reset_popup() 的瞬时路径。 */
+void controls_popup_dismiss(void);
 
 /* 弹层展开状态与屏幕矩形：全局鼠标分发用它决定"这次事件归谁"。
  * rect 取自 PopupState 的 start_row/start_col/height/width（弹层画在 stdscr 上，

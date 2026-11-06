@@ -21,6 +21,7 @@
 #include "ui/context_menu_layout.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/menu_anim.h"
 #include "ui/keymap.h"
 #include "ui/rainbow.h"
 #include "ui/scrollbar.h"
@@ -69,6 +70,7 @@ static int g_sel_src   = -1;    /* SETTINGS_IDX_* that triggered it */
 static int g_sel_idx   = 0;     /* currently highlighted option index */
 static int g_sel_count = 0;     /* total option count */
 static WINDOW *g_sel_win = NULL; /* popup sub-window */
+static UIRect g_sel_rect;        /* 逻辑最终矩形：鼠标归属用，不随动画移动 */
 static int g_sel_multiselect = 0; /* 1 = 多选模式（信息显示字段） */
 static int g_sel_work_mask = 0;   /* 多选模式下的工作掩码 */
 
@@ -350,7 +352,9 @@ static const int settings_info_option_indices[] = {
 
 /* Forward declarations for sel menu / re-render helpers */
 static void create_sel_window(void);
-static void close_sel_menu(int apply);
+/* animate=1：accept/cancel/自定义颜色收尾走纵向消失动画；
+ * animate=0：视图切换、替换旧弹层、重开窗口时瞬时关闭。 */
+static void close_sel_menu(int apply, int animate);
 static void rerender_settings_view(void);
 
 /* Forward declarations for EQ visual UI */
@@ -363,7 +367,7 @@ static int handle_settings_action(ActionId action);
 void reset_settings_view(void)
 {
     if (g_sel_active)
-        close_sel_menu(0);
+        close_sel_menu(0, 0);
     g_settings_current_option = 0;
     g_hotkey_selected = 0;
     g_hotkey_offset = 0;
@@ -1438,11 +1442,12 @@ static void colour_sel_option_text(const ColourRow *row, int i,
  * Selection menu — close / apply
  * ============================================================ */
 
-static void close_sel_menu(int apply)
+static void close_sel_menu(int apply, int animate)
 {
     if (!g_sel_active) return;
 
-    log_debug("settings", "sel menu close apply=%d", apply);
+    log_debug("settings", "sel menu close apply=%d animate=%d",
+              apply, animate);
 
     if (apply) {
         switch (g_sel_src) {
@@ -1600,11 +1605,17 @@ static void close_sel_menu(int apply)
         }
     }
 
-    /* Destroy popup sub-window */
+    /* Destroy popup sub-window. 消失动画先复制 ghost，再销毁原窗口；
+     * animate=0 的界面变更路径不产生 ghost。 */
     if (g_sel_win) {
+        if (animate) {
+            (void)ui_menu_anim_begin_exit(g_sel_win, UI_MENU_ANIM_VERTICAL, 0);
+        }
+        ui_menu_anim_cancel_window(g_sel_win);
         delwin(g_sel_win);
         g_sel_win = NULL;
     }
+    memset(&g_sel_rect, 0, sizeof(g_sel_rect));
 
     g_sel_active = 0;
     g_sel_src = -1;
@@ -1619,7 +1630,10 @@ static void close_sel_menu(int apply)
 
 static void open_sel_menu(int option_index)
 {
-    if (g_sel_active) close_sel_menu(0);
+    if (g_sel_active) close_sel_menu(0, 0);
+
+    /* 新弹层打开前收掉上一轮消失动画，避免两层叠影。 */
+    ui_menu_anim_finish_exits(1);
 
     int count = 0, cur = 0;
 
@@ -1821,9 +1835,17 @@ static void settings_sel_anchor(int src, int *out_y, int *out_x, int *out_colon)
 static void create_sel_window(void)
 {
     /* Destroy any existing window first */
-    if (g_sel_win) { delwin(g_sel_win); g_sel_win = NULL; }
+    if (g_sel_win) {
+        ui_menu_anim_cancel_window(g_sel_win);
+        delwin(g_sel_win);
+        g_sel_win = NULL;
+    }
+    memset(&g_sel_rect, 0, sizeof(g_sel_rect));
 
     if (!g_sel_active) return;
+
+    /* 重开窗口（resize 等）前先收掉旧的退场 ghost。 */
+    ui_menu_anim_finish_exits(1);
 
     const int src = g_sel_src;
     const int cnt = g_sel_count;
@@ -2009,6 +2031,12 @@ static void create_sel_window(void)
         return;
     }
 
+    /* 逻辑矩形固定为最终锚点：动画期间鼠标仍按这里命中，不追移动窗口。 */
+    g_sel_rect = rect;
+    /* 下拉式选择器：纵向滑入；tier=OFF/无位移时留在最终位置。 */
+    (void)ui_menu_anim_begin_enter(g_sel_win, UI_MENU_ANIM_VERTICAL,
+                                   rect.top, rect.left);
+
     g_sel_term_rows = max_y;
     g_sel_term_cols = max_x;
     log_debug("settings", "sel menu open src=%d anchor=%d,%d rect=%d,%d,%d,%d",
@@ -2019,6 +2047,16 @@ static void create_sel_window(void)
 WINDOW *settings_sel_window(void)
 {
     return g_sel_active ? g_sel_win : NULL;
+}
+
+/* 选择弹层的逻辑矩形：入口动画把窗口移走后，鼠标归属仍用最终锚点。 */
+int settings_sel_rect(UIRect *out)
+{
+    if (!out || !g_sel_active || !g_sel_win) {
+        return 0;
+    }
+    *out = g_sel_rect;
+    return 1;
 }
 
 static void draw_sel_menu(void)
@@ -2266,7 +2304,7 @@ static int handle_sel_action(ActionId action)
             /* fall through */
         case ACTION_SELECT_ACCEPT:
             if (g_sel_multiselect) {
-                close_sel_menu(1);
+                close_sel_menu(1, 1);
                 rerender_settings_view();
                 return 1;
             }
@@ -2295,15 +2333,17 @@ static int handle_sel_action(ActionId action)
                 } else if (v == paired_val) {
                     show_status_message(i18n_get("settings.color.same_error"));
                 }
-                close_sel_menu(0);
+                /* 自定义颜色输入框会先用 stdscr 的 prompt 覆盖弹层；
+                 * 此时不播消失动画，避免已不可见的弹层又闪出来。 */
+                close_sel_menu(0, 0);
                 rerender_settings_view();
                 return 1;
             }
-            close_sel_menu(1);
+            close_sel_menu(1, 1);
             rerender_settings_view();
             return 1;
         case ACTION_SELECT_CANCEL:
-            close_sel_menu(0);
+            close_sel_menu(0, 1);
             rerender_settings_view();
             return 1;
         default:

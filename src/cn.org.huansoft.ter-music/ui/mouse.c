@@ -242,11 +242,11 @@ static void build_regions(UIMouseRegions *r)
         r->overlay = UI_MOUSE_TARGET_POPUP;
         controls_popup_rect(&r->overlay_rect);
     } else if (r->view == VIEW_SETTINGS) {
-        WINDOW *sel = settings_sel_window();
-        if (sel) {
+        /* 选择弹层用逻辑最终矩形：入场动画期间窗口在移动，鼠标命中
+         * 仍以它落定后的位置为准（不追移动目标）。 */
+        if (settings_sel_rect(&r->overlay_rect)) {
             r->overlay_expanded = 1;
             r->overlay = UI_MOUSE_TARGET_SEL_MENU;
-            r->overlay_rect = rect_of_window(sel);
         } else if (layout_editor_menu_open()) {
             r->overlay_expanded = 1;
             r->overlay = UI_MOUSE_TARGET_EDITOR_MENU;

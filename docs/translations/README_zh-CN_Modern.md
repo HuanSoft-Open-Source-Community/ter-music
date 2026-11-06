@@ -774,6 +774,26 @@ Alt 再左键，打开右键上下文菜单（见下文“备选触发”），�
 请用中键。若中键不可用、终端又不转发修饰位，鼠标侧已无干净入口：请换终端，或要求补一个
 键盘兜底。
 
+**菜单动画与逐级回退。** 下拉式选择菜单（控制区弹层与设置页选项选择器，含颜色、
+均衡器预设、信息字段多选）纵向滑入，关闭时反向滑出；右键上下文菜单的每一层都沿对角线
+滑入、沿对角线退场；由中键或 Ctrl/Alt+左键打开的同一张菜单也走同样的动画（见上文
+"备选触发"）。布局编辑器内的动作/换类型/颜色/帮助模态菜单同样有动画：居中打开
+（`Enter`、`?`、`t`、`c`）走纵向，右键在指针处打开动作菜单走对角；编辑器关闭或
+重命名输入框接管时瞬时收起。动画只是前端本会话的视觉效果，不写任何配置。
+
+界面本身发生变化时——F1–F8／页面跳转、终端 resize、布局重建、配置／语言重载、布局
+编辑器开／关、模态文本输入接管——已打开的 overlay 一律瞬时关闭，不播放消失动画。
+动画进行期间事件循环按 1ms 轮询输入，每变化一格立即合成一帧（不设人为帧率上限）；
+频谱、黑胶、歌词、进度等其它窗格动画暂停，避免抢同一拍。菜单在逻辑上立即可用：键盘
+马上生效，鼠标命中使用落定的逻辑矩形而不是移动中的像素。消失动画期间收到任何
+键／鼠标事件，先立即收尾动画再分发，输入不会被阻塞。
+
+终端不支持完整效果时逐级回退：完整位移 → 缩短为一格／一列（减弱档）→ 完全无动画。
+无彩色或 ASCII 回退终端使用减弱档；非 TTY、`TERM=dumb`、终端过小或实测单帧合成过慢
+时关闭动画。科乐美流光模式下，动画帧的合成由流光的整屏合成路径完成（含退场 ghost，
+一帧一次 `doupdate`），并在菜单动画期间暂停流光对黑胶／歌词的相位重染；启闭流光会
+重新探测动画档位。
+
 #### 功能键（全局可用）
 **功能键（F1-F9）**
 | 按键 | 功能 |
@@ -1380,8 +1400,8 @@ D-Bus 接口面相遇：
 | 包身份一致 | `scripts/test/check-package-identity.sh` | 打包身份必须处处一致：应用 ID 在 `debian/control`、`PKGBUILD`、`.SRCINFO`、`scripts/build/*` 与 systemd 单元上同值；版本在 `APP_VERSION`（唯一事实源）、CMake `project VERSION`、`pkgver`、`debian/changelog` 顶部条目四处同值，且符合滚动方案 `<yy>.<q>.x.y`；`TER_MUSIC_API_VERSION` 必须等于 `dbus-rpc-check.sh` 断言的那个数；`org.yxzl` 旧命名空间不得残留在 `#include`、接口字符串字面量与打包链里；而**刻意不改**的身份（可执行文件 `ter-music`、MPRIS 总线名、配置目录）也不得被顺手改掉 |
 
 与之配套的回归套件：`scripts/test/run-unit-tests.sh`（路径队列、播放队列契约、
-歌词解析、JSON 读取器、配置差异、布局 schema/几何/状态、不依赖 ncurses 的鼠标
-事件路由判定表，其中含逐格栅格化
+歌词解析、JSON 读取器、配置差异、布局 schema/几何/状态、菜单动画的几何/缓动/降级、
+不依赖 ncurses 的鼠标事件路由判定表，其中含逐格栅格化
 校验以证明每个预设无缝铺满），以及端到端脚本 `dbus-rpc-check.sh`、
 `config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、
 `multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、
@@ -1429,7 +1449,10 @@ CI 只记录数值、不做判定）。
   ncurses 边缘层，量取各窗格矩形；`mouse_routing.c`：不依赖 ncurses 的归属判定，
   由 `scripts/test/test_mouse_routing.c` 单元测试覆盖；`context_menu.c` /
   `context_menu_main.c`：右键菜单栈、渲染与主列表菜单；`context_menu_layout.c`：
-  不依赖 ncurses 的摆放/滚动几何，由 `scripts/test/test_context_menu_layout.c` 覆盖）、
+  不依赖 ncurses 的摆放/滚动几何，由 `scripts/test/test_context_menu_layout.c` 覆盖；
+  `menu_anim.c`：菜单进入/消失状态机、ghost 快照与 overlay 合成；
+  `menu_anim_math.c`：不依赖 ncurses 的位移几何/缓动/降级推导，由
+  `scripts/test/test_menu_anim_math.c` 覆盖）、
   滚动条与共享控件
 - **media/**: 核心 D-Bus 会话——`session.c`（总线名、自省、分发）、
   `rpc_common.c`（回复助手、分页）、`rpc_info.c`、`rpc_control.c`、

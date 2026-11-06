@@ -128,12 +128,25 @@ int ui_context_menu_open(UIContextMenuBuilder build,
                          int anchor_y, int anchor_x);
 
 /**
- * @brief 关闭菜单（幂等）。
+ * @brief 关闭菜单（幂等），各层按当前档位走对角线消失动画（OFF 档等价瞬时）。
  *
  * @param repaint 1 = 关闭后立即重绘当前界面擦掉菜单像素；
- *                0 = 交给调用方（视图切换/resize/动作分发）重绘。
+ *                0 = 交给调用方（动作分发）重绘。
+ *
+ * 视图切换/resize/布局重建/自愈必须用 ui_context_menu_close_now()：
+ * 界面变更不播放消失动画。
  */
 void ui_context_menu_close(int repaint);
+
+/**
+ * @brief 瞬时关闭菜单（幂等）：不创建 ghost、不播放消失动画。
+ *
+ * 用于换视图、resize、布局重建、布局编辑器接管、配置重载等
+ * "界面已经变了"的路径。
+ *
+ * @param repaint 1 = 立即重绘当前界面
+ */
+void ui_context_menu_close_now(int repaint);
 
 /** @brief 菜单是否处于可交互状态（视图匹配且布局编辑器未激活）。 */
 int ui_context_menu_active(void);

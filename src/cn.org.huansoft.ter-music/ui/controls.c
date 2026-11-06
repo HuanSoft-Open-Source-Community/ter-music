@@ -14,6 +14,7 @@
 #include "ui/layout.h"
 #include "ui/keymap.h"
 #include "i18n/i18n.h"
+#include "ui/menu_anim.h"
 #include "ui/menu_internal.h"
 #include "audio/audio.h"
 #include "audio/play_queue.h"
@@ -386,6 +387,8 @@ static void destroy_popup_window(PopupState *popup)
 {
     if (popup->popup_win) {
         WINDOW *w = (WINDOW *)popup->popup_win;
+        /* 进入动画的 borrowed 记录必须先摘掉；ghost 是独立副本，不受影响。 */
+        ui_menu_anim_cancel_window(w);
         /* 仅释放窗口，不刷新—下层窗口将在后续全量重绘中恢复 */
         delwin(w);
         popup->popup_win = NULL;
@@ -394,10 +397,15 @@ static void destroy_popup_window(PopupState *popup)
 
 static void create_popup_window(PopupState *popup)
 {
+    /* 新弹层打开前收掉上一轮消失动画，避免两层叠影。 */
+    ui_menu_anim_finish_exits(1);
     destroy_popup_window(popup); /* clean up any lingering window */
     WINDOW *w = newwin(popup->height, popup->width, popup->start_row, popup->start_col);
     if (!w) return;
     popup->popup_win = (void *)w;
+    /* 下拉式弹层：纵向滑入；tier=OFF/无位移时窗口留在最终位置。 */
+    (void)ui_menu_anim_begin_enter(w, UI_MENU_ANIM_VERTICAL,
+                                   popup->start_row, popup->start_col);
     log_debug("controls", "popup shown type=%d rect=%d,%d,%d,%d",
               (int)popup->type, popup->start_row, popup->start_col,
               popup->height, popup->width);
@@ -680,6 +688,12 @@ static void render_controls_popup(void)
 static void popup_dismiss(void)
 {
     if (!g_popup.active) return;
+
+    WINDOW *popup_win = (WINDOW *)g_popup.popup_win;
+    if (popup_win) {
+        /* 先复制 ghost 再销毁原窗口；ghost 自己向上滑出并消失。 */
+        (void)ui_menu_anim_begin_exit(popup_win, UI_MENU_ANIM_VERTICAL, 0);
+    }
     destroy_popup_window(&g_popup);
     g_popup.active = 0;
 
@@ -701,9 +715,17 @@ static void popup_dismiss(void)
     render_menu_hint_bar();
 }
 
+/* 焦点从控制区切到列表时的弹层关闭：与 Esc 同一条消失动画路径。
+ * （布局重建/视图切换仍走 controls_reset_popup() 的瞬时路径。） */
+void controls_popup_dismiss(void)
+{
+    popup_dismiss();
+}
+
 /* 布局重建时丢弃残留弹窗：只销毁窗口，不触发旧窗口重绘。 */
 void controls_reset_popup(void)
 {
+    ui_menu_anim_cancel_window((WINDOW *)g_popup.popup_win);
     destroy_popup_window(&g_popup);
     g_popup.active = 0;
 }
