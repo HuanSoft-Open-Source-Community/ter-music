@@ -112,7 +112,7 @@ Load order: built-in → user → `TER_MUSIC_LAYOUTS`.
 | `id` | yes | `[A-Za-z0-9_-]`, max 31 chars; unique within a catalog |
 | `name` | no | display name, max 63 chars; falls back to `id` |
 | `name_key` | no | i18n key; used when a translation exists, otherwise `name` |
-| `tree` | v2 yes | one split/leaf tree with 1–5 unique pane leaves |
+| `tree` | v2 yes | one split/leaf tree with 1–6 unique pane leaves |
 | `panes` | v2 mirror | derived per-mille rectangles; kept so older builds can read v2 files |
 
 `tree` is authoritative. Hand-editing `panes` without changing `tree` has no
@@ -321,7 +321,7 @@ split and three lines of key hints.
 | `{` / `}` | shrink/grow the selected pane **vertically** by 1% (nearest column split) |
 | `PgUp` / `PgDn` | adjust the horizontal ratio by 5% |
 | `=` | restore the nearest parent split to 50/50 |
-| `|` | split side by side; then choose the new pane type |
+| &#124; | split side by side; then choose the new pane type |
 | `-` | split stacked; then choose the new pane type |
 | `x` | remove the selected pane (at least one remains; the sibling takes over) |
 | `t` | change the selected pane's type (any kind the layout does not already use) |

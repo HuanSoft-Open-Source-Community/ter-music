@@ -497,8 +497,8 @@ ter-music 快速上手
   核心在会话总线上以 org.mpris.MediaPlayer2.ter_music 发布对象
   /org/mpris/MediaPlayer2，同时提供 MPRIS 与 ter-music 自有接口：
     cn.org.huansoft.ter_music.Info / Control / Lyrics / Queue / Config
-  握手看 Info.GetInfo 里的 core.api_version（当前 5；客户端最低要求 4，
-  v4 核心只是缺少逐字字段）。
+  握手看 Info.GetInfo 里的 core.api_version（当前 7；客户端最低要求 7，
+  接口前缀在版本 7 迁到 cn.org.huansoft.*）。
 
   MPRIS 侧：Rate 是可读写的真实倍速（MinimumRate 0.5 / MaximumRate 3.0），
   LoopStatus 与 Shuffle 会做完整的播放模式切换；OpenUri 明确回 NotSupported
