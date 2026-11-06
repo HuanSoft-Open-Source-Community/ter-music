@@ -60,7 +60,17 @@ static int pw_thread_running = 0;
 /*  环形缓冲区（SPSC，线程安全）                                       */
 /* ================================================================== */
 
+/* 环的硬容量。稳态积压不再由它决定——见 pw_write_samples 的节流：
+ * 写入端把环内未播数据压到 PW_BACKLOG_* 毫秒级，消人声/EQ 这类
+ * “写入时处理”的效果变更才能很快被听到（以前 1MB 全满 ≈ 3 秒，
+ * 切一档要等整环排空）。保留大数组只为极端卡顿时的兜底上限。 */
 #define PW_RING_SIZE (1024 * 1024)          /* 1 MB */
+/* 节流目标积压 = 4 × 配置的音频延时，钳到 [400, 1200] ms。
+ * 下限 400ms 用来吸收段界预解码/下一曲预加载开流这类毫秒级的同步
+ * 停顿（解码已分片，单片 ≤10ms；开流探测约 50–200ms）。 */
+#define PW_BACKLOG_LAT_FACTOR   4
+#define PW_BACKLOG_MIN_MS       400
+#define PW_BACKLOG_MAX_MS       1200
 static uint8_t pw_ring_data[PW_RING_SIZE];
 static volatile int pw_ring_write_pos = 0;
 static volatile int pw_ring_read_pos = 0;
@@ -137,9 +147,9 @@ static void pw_ring_reset(void) {
 }
 
 /* 尚未被 PipeWire process 回调取走的帧数。
- * progress_tracker 统计的是“写入”而不是“播完”，而 PipeWire 允许一次把
- * 1MB 环填满（44.1kHz/双声道约 2.9s）；不校正的话 UI 与断点恢复都会比
- * 实际听到的位置提前约一个环。 */
+ * progress_tracker 统计的是“写入”而不是“播完”，PipeWire 环里总压着
+ * 节流上限那么多（默认约 0.4s）未播数据；不校正的话 UI 与断点恢复
+ * 都会比实际听到的位置提前。 */
 int pw_ring_buffered_frames(void) {
     pthread_mutex_lock(&pw_state_mutex);
     int channels = pw_channels;
@@ -741,6 +751,34 @@ int pw_write_samples(const int32_t *samples, int frame_count) {
         }
         total_written += written;
     }
+
+    /* 积压节流：process 回调按实时取走数据，写入端本身远快于实时，
+     * 若不设限，环会长期保持接近全满——写入时施加的处理（消人声、
+     * EQ）要到约 3 秒后才听得见。这里等积压回落到节流上限以下再返回，
+     * 语义与 Pulse 按 stream_writable_size 等待、ALSA 阻塞 writei 对齐。
+     * 退出条件与上面的写入循环一致：线程停止回 0，流失效回 -1。 */
+    {
+        int cap_ms = get_configured_latency_ms() * PW_BACKLOG_LAT_FACTOR;
+        if (cap_ms < PW_BACKLOG_MIN_MS) cap_ms = PW_BACKLOG_MIN_MS;
+        if (cap_ms > PW_BACKLOG_MAX_MS) cap_ms = PW_BACKLOG_MAX_MS;
+
+        int channels = pw_channels > 0 ? pw_channels : 2;
+        int rate = pw_sample_rate > 0 ? pw_sample_rate : 44100;
+        long frame_bytes = (long)channels * (long)sizeof(int32_t);
+        long cap_bytes = (long)cap_ms * rate * frame_bytes / 1000;
+        if (cap_bytes > PW_RING_SIZE - 1)
+            cap_bytes = PW_RING_SIZE - 1;   /* 极端配置下退化为不节流 */
+
+        while (pw_ring_bytes_available() > cap_bytes) {
+            if (!g_play_thread_running) return 0;
+            pthread_mutex_lock(&pw_state_mutex);
+            stream_ok = pw_stream_ready;
+            pthread_mutex_unlock(&pw_state_mutex);
+            if (!stream_ok) return -1;
+            usleep(1000);
+        }
+    }
+
     return 0;
 }
 

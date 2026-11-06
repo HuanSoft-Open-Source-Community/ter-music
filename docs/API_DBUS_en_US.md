@@ -301,7 +301,7 @@ Transport methods return a boolean (`true` when the request was accepted).
 | `SetVolume` / `GetVolume` | `(i percent) -> b` / `() -> i` | Volume (0-100) |
 | `SetSpeed` / `GetSpeed` | `(d rate) -> b` / `() -> d` | Playback speed (0.5-3.0) |
 | `SetPlayMode` / `GetPlayMode` / `GetPlayModeName` | `(i mode) -> b` / `() -> i` / `() -> s` | Play mode (0-16, stable name, localized name) |
-| `SetKaraoke` / `GetKaraoke` | `(i mode) -> b` / `() -> i` | Karaoke centre-vocal removal level (0 off, 1 soft, 2 full); since `api_version` 6. Out-of-range `mode` replies `false`, it is not an error. `GetKaraoke` reports the level the DSP is actually running, which is also mirrored into `preferences.karaoke_mode` |
+| `SetKaraoke` / `GetKaraoke` | `(i mode) -> b` / `() -> i` | Karaoke centre-vocal removal level (0 off, 1 soft, 2 full); since `api_version` 6. Out-of-range `mode` replies `false`, it is not an error. `SetKaraoke` returns after publishing the request to the playback thread, and `GetKaraoke` reports that **requested** level immediately — the DSP consumes it at the head of the next write batch and rides its 30 ms ramp to it (fully audible within the bounded PipeWire output backlog, about 0.4–1.2 s worst case at the default quantum). The value is also mirrored into `preferences.karaoke_mode` |
 | `ReloadConfig` | `() -> b` | Re-read `config.xml` (same as `SIGHUP`); `Config.Reload` is the newer equivalent |
 | `Quit` | `() -> b` | Gracefully stop this instance (persists the playback session) |
 | `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":7,"ping_interval_ms":2000,"frontends":n}` |

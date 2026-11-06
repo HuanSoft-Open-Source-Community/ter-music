@@ -191,8 +191,9 @@ static void append_probe_reason(char *buf, size_t buf_size, int backend,
 }
 
 /* 后端仍持有、尚未真正播出的帧数：position（进度/断点恢复）必须扣除它。
- * 目前只有 PipeWire 的 1MB 环形缓冲会累计到秒级；Pulse/ALSA 的写入路径
- * 本身受设备可写空间限制，缓冲深度很小，返回 0 即可。 */
+ * 目前只有 PipeWire 的用户态环会积累到数百毫秒级（写入端按配置延时
+ * 节流，见 pipewire.c 的 PW_BACKLOG_*）；Pulse/ALSA 的写入路径本身受
+ * 设备可写空间限制，缓冲深度很小，返回 0 即可。 */
 int audio_backend_buffered_frames(void)
 {
     if (pipewire_loaded && g_active_backend == AUDIO_BACKEND_PIPEWIRE) {

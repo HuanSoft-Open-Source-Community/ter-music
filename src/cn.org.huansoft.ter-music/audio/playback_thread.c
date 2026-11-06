@@ -127,8 +127,24 @@ static void append_decoded_frame_to_segment(Segment *seg, AVFrame *frame,
 }
 
 /* ============================================================
- * Decode one full segment (15s) into a pool slot
+ * Decode one segment into a pool slot
+ *
+ * max_new_frames <= 0：一次填满整段（起播/seek 等本来就要暂停的路径）。
+ * max_new_frames > 0：本次最多再解码这么多帧然后返回，槽保持未就绪，
+ * 由主循环下一轮从 seg->frame_count 处继续（解码器/读包位置天然可续跑）。
+ * 分片的意义：PipeWire 写入端按配置延时节流后，环里只压几百毫秒数据；
+ * 若 15 秒一段仍在单次调用里整段解完（百毫秒级阻塞），段界处会被饿出
+ * 可闻的静音。分片把阻塞摊薄到每轮几毫秒。
+ * read_errors：跨调用保存的读错误熔断计数（分片续跑不得重置熔断）。
+ * 返回：-1 出错；1 解到了数据；0 一段都没解到。调用方以
+ * “frame_count 达标或 decoder_finished”判定填满，只有填满才 mark_ready。
  * ============================================================ */
+
+/* 每轮主循环允许的分片解码帧数（≈93ms 音频，mp3 解码 CPU 开销约 1–2ms） */
+#define DECODE_SLICE_FRAMES 4096
+
+/* 读错误熔断计数：单播放线程内使用，track 起播时清零 */
+static int g_decode_read_errors = 0;
 
 static int decode_segment_fill(AVFormatContext *fmt_ctx,
                                AVCodecContext *codec_ctx,
@@ -139,6 +155,7 @@ static int decode_segment_fill(AVFormatContext *fmt_ctx,
                                SegmentPool *pool,
                                int target_slot,
                                int target_frames,
+                               int max_new_frames,
                                int audio_stream_index,
                                int output_sample_rate,
                                int output_channels,
@@ -156,9 +173,10 @@ static int decode_segment_fill(AVFormatContext *fmt_ctx,
     if (target_frames > seg->capacity_frames)
         target_frames = seg->capacity_frames;
 
-    int read_error_count = 0;  /* circuit breaker: resets per segment fill */
+    const int slice_start = seg->frame_count;
 
-    while (seg->frame_count < target_frames && !*decoder_finished) {
+    while (seg->frame_count < target_frames && !*decoder_finished &&
+           (max_new_frames <= 0 || seg->frame_count - slice_start < max_new_frames)) {
         /* 1. Try atempo filtered frame first */
         if (atempo_is_active()) {
             int filter_ret = atempo_receive_frame(filtered_frame);
@@ -227,14 +245,14 @@ static int decode_segment_fill(AVFormatContext *fmt_ctx,
                      * draining here would discard all remaining audio. */
                     log_warn("audio", "av_read_frame error %d in decode_segment_fill, attempting to skip and continue", ret);
                     av_packet_unref(packet);
-                    if (++read_error_count > 100) {
+                    if (++g_decode_read_errors > 100) {
                         log_error("audio", "av_read_frame: too many consecutive errors (%d), aborting segment fill",
-                                  read_error_count);
+                                  g_decode_read_errors);
                         return -1;
                     }
                     continue;
                 }
-                read_error_count = 0;  /* successful read resets the breaker */
+                g_decode_read_errors = 0;  /* successful read resets the breaker */
 
                 if (packet->stream_index != audio_stream_index) { av_packet_unref(packet); continue; }
                 ret = avcodec_send_packet(codec_ctx, packet);
@@ -329,7 +347,7 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
             /* Immediately decode the target segment into slot 0 */
             int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
             int fill_ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
-                                pool, pool->current_slot, target_frames,
+                                pool, pool->current_slot, target_frames, 0 /*整段*/,
                                 audio_stream_index, output_sample_rate, output_channels,
                                 use_resampler, decoder_draining, decoder_finished);
             if (fill_ret < 0) {
@@ -503,8 +521,15 @@ static void attempt_next_track_preload(int current_track_index,
     next_filtered = av_frame_alloc();
     if (!next_pkt || !next_frame || !next_filtered) goto preload_cleanup;
 
-    /* Decode up to PRELOAD_SEGMENT_COUNT segments */
-    int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
+    /* Decode up to PRELOAD_SEGMENT_COUNT segments.
+     * 预加载是同步跑的：开文件、探测流、解码，全在写线程里，PipeWire
+     * 节流后的积压只有几百毫秒，一次解满 15 秒（重编码可达数百毫秒）
+     * 会在段尾附近饿出可闻空隙。这里只预解开头 PRELOAD_COVER_SEC 秒，
+     * 够接上无缝切换的班即可，剩余部分由新线程的常规分片解码补齐。 */
+#define PRELOAD_COVER_SEC 5
+    int target_frames = output_sample_rate * PRELOAD_COVER_SEC;
+    if (target_frames > SEGMENT_DURATION_SEC * output_sample_rate)
+        target_frames = SEGMENT_DURATION_SEC * output_sample_rate;
     for (int seg_idx = 0; seg_idx < PRELOAD_SEGMENT_COUNT; seg_idx++) {
         /* Abort check — user skipped track or seeked */
         {
@@ -694,6 +719,7 @@ void *play_audio_thread(void *arg)
     int decoder_draining = 0;
     int decoder_finished = 0;
     int playback_error = 0;
+    g_decode_read_errors = 0;   /* 每首曲子独立的读错误熔断计数 */
 
     /* ── Segment pool ── */
     SegmentPool seg_pool;
@@ -976,7 +1002,7 @@ void *play_audio_thread(void *arg)
 
             int ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx,
                                           packet, frame, filtered_frame,
-                                          &seg_pool, s, target_frames,
+                                          &seg_pool, s, target_frames, 0 /*起播前整段*/,
                                           audio_stream_index, output_sample_rate,
                                           output_channels, use_resampler,
                                           &decoder_draining, &decoder_finished);
@@ -1041,7 +1067,7 @@ void *play_audio_thread(void *arg)
             /* Re-decode first segment from seeked position */
             int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
             int fill_ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
-                                &seg_pool, seg_pool.current_slot, target_frames,
+                                &seg_pool, seg_pool.current_slot, target_frames, 0 /*起播前整段*/,
                                 audio_stream_index, output_sample_rate, output_channels,
                                 use_resampler, &decoder_draining, &decoder_finished);
             if (fill_ret < 0) {
@@ -1089,27 +1115,50 @@ void *play_audio_thread(void *arg)
             int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
             int free_slot;
             while ((free_slot = segment_pool_free_slot(&seg_pool)) >= 0 && !decoder_finished) {
-                int next_seg_id = seg_pool.current_segment_id;
-                /* Find the global segment id for this free slot */
-                /* It's the slot farthest from current, so its global id =
-                 * current_segment_id + (offset from current) */
+                Segment *fs = &seg_pool.slots[free_slot];
+                /* 该槽负责的全局段号 = current_segment_id + 距 current 的偏移；
+                 * 窗口推进时 current 与 offset 同变，段号不变。半截槽先“认领”
+                 * 段号再续填，避免下一轮被算成别的段。 */
                 int offset = (free_slot - seg_pool.current_slot + SEGMENT_POOL_SIZE) % SEGMENT_POOL_SIZE;
-                int global_seg = seg_pool.current_segment_id + offset;
+                int want_seg = seg_pool.current_segment_id + offset;
+                if (fs->segment_id < 0)
+                    fs->segment_id = want_seg;           /* 认领 */
+                int global_seg = fs->segment_id;
+                if (global_seg != want_seg) {
+                    if (global_seg < seg_pool.current_segment_id) {
+                        /* 填的是已被跳过的旧段：作废重来（病态场景，正常不发生） */
+                        fs->frame_count = 0;
+                        fs->consumed_frames = 0;
+                        fs->segment_id = global_seg = want_seg;
+                    } else {
+                        break;
+                    }
+                }
                 if (global_seg >= seg_pool.total_segments) break;
+
+                /* 当前槽必须整段就绪才能开播（本来就没数据可写，填满为止）；
+                 * 远处槽分片填，每轮主循环一片，段界不再出现整段解码的阻塞。 */
+                int is_current = (free_slot == seg_pool.current_slot);
+                int slice = is_current ? 0 : DECODE_SLICE_FRAMES;
 
                 int ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx,
                                               packet, frame, filtered_frame,
-                                              &seg_pool, free_slot, target_frames,
+                                              &seg_pool, free_slot, target_frames, slice,
                                               audio_stream_index, output_sample_rate,
                                               output_channels, use_resampler,
                                               &decoder_draining, &decoder_finished);
                 if (ret < 0) { playback_error = 1; break; }
 
-                segment_pool_mark_ready(&seg_pool, free_slot,
-                                        seg_pool.slots[free_slot].frame_count,
-                                        global_seg,
-                                        (decoder_finished || global_seg >= seg_pool.total_segments - 1));
-                if (ret == 0 && seg_pool.slots[free_slot].frame_count == 0) break;
+                int complete = (fs->frame_count >= target_frames) || decoder_finished;
+                if (complete) {
+                    segment_pool_mark_ready(&seg_pool, free_slot,
+                                            fs->frame_count,
+                                            global_seg,
+                                            (decoder_finished || global_seg >= seg_pool.total_segments - 1));
+                }
+                if (ret == 0 && fs->frame_count == 0) break;
+                /* 远槽这一片没填满：本轮到此为止，下一轮从断点继续 */
+                if (!is_current && !complete) break;
             }
         }
 
@@ -1155,21 +1204,9 @@ void *play_audio_thread(void *arg)
 
             int free_slot = segment_pool_advance(&seg_pool);
             if (free_slot >= 0 && !decoder_finished) {
-                int next_global = seg_pool.current_segment_id + 2; /* the new farthest slot */
-                if (next_global < seg_pool.total_segments) {
-                    int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
-                    int ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx,
-                                                  packet, frame, filtered_frame,
-                                                  &seg_pool, free_slot, target_frames,
-                                                  audio_stream_index, output_sample_rate,
-                                                  output_channels, use_resampler,
-                                                  &decoder_draining, &decoder_finished);
-                    if (ret < 0) { playback_error = 1; break; }
-                    segment_pool_mark_ready(&seg_pool, free_slot,
-                                            seg_pool.slots[free_slot].frame_count,
-                                            next_global,
-                                            (decoder_finished || next_global >= seg_pool.total_segments - 1));
-                }
+                /* 刚腾空的槽不再整段阻塞解码：窗口推进后它距 current 的偏移
+                 * 恰为 2，下一轮 Phase 3 会认领 current_segment_id+2 并分片填满，
+                 * 而池里 current+1 已有整段，足够把这一片的时间撑住。 */
             } else if (free_slot < 0 && !segment_pool_current(&seg_pool) && decoder_finished) {
                 /* Advance failed but current slot is still invalid and decoder
                  * is done.  If another slot has unconsumed data, jump to it
@@ -1226,10 +1263,11 @@ void *play_audio_thread(void *arg)
         int batch = (remaining < WRITE_BATCH_FRAMES) ? remaining : WRITE_BATCH_FRAMES;
         int32_t *write_ptr = cur->data + cur->consumed_frames * seg_pool.channels;
 
-        /* 卡拉OK（消人声）：先消人声，再交给均衡器做整体音色塑形 */
-        if (karaoke_is_active()) {
-            karaoke_process(write_ptr, batch, seg_pool.channels, output_sample_rate);
-        }
+        /* 卡拉OK（消人声）：先消人声，再交给均衡器做整体音色塑形。
+         * 无条件调用：档位请求的消化与起坡/收坡都在 karaoke_process
+         * 块首完成，外部先查 is_active 再调用会让"降回不启用"的淡出
+         * 坡被掐断，退回成硬切。不启用时函数内部即刻直通返回。 */
+        karaoke_process(write_ptr, batch, seg_pool.channels, output_sample_rate);
 
         /* Equalizer */
         if (eq_is_enabled()) {

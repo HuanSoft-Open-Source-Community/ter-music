@@ -206,7 +206,8 @@ ter-music Quick Start Guide
   [Mode]     Play mode (the popup lists the modes currently available)
   [Speed]    Playback speed (popup: 0.75x / 1.00x / 1.25x / 1.50x / 2.00x / 3.00x)
   [Vol]      Volume popup (0-100, 5% steps)
-  [Karaoke]  Vocal-removal popup (Off / Faint vocals / No vocals; stereo only)
+  [Karaoke]  Vocal-removal popup (Off / Faint vocals / No vocals; stereo only;
+             level changes ramp smoothly, stereo-spread accompaniment is gated out)
   [Progress] Current playback progress
 
 6. Play Modes (17 in total)
@@ -503,7 +504,8 @@ ter-music Quick Start Guide
     mode   [name|0-16]            Read or set the play mode
     karaoke [off|soft|full|0-2|cycle]
                                   Read or set the vocal-removal level (cycle
-                                  steps one level; stereo only — not the
+                                  steps one level; echoed immediately, applied
+                                  along a 30 ms ramp; stereo only — not the
                                   "karaoke" layout preset, not per-character
                                   lyric highlighting)
 

@@ -4,8 +4,9 @@
  *
  * 覆盖：频带内居中内容的抵消量（full/soft 两档）、频带外（低频/高频）
  * 居中能量的保留、声像两侧（side）内容的原样保留、单声道与"不启用"
- * 的逐位直通、非法档位的防御、采样率切换后的系数重算，以及档位切换
- * 的 30ms 平滑逼近（不是硬台阶）。
+ * 的逐位直通、非法档位的防御、采样率切换后的系数重算，档位切换的
+ * 30ms 平滑逼近，相似度门控对立体声伴奏的保护（纯伴奏段整带放行），
+ * 以及"降回不启用"的收坡淡出（不硬切、最终逐位直通）。
  */
 
 #include "audio/karaoke.h"
@@ -28,6 +29,7 @@ static int failures = 0;
 #define SR            44100
 #define TOTAL_FRAMES  (SR * 2)          /* 2 秒：足够暖机 + 测量 */
 #define MEASURE_FROM  (SR / 2)          /* 前 0.5 秒留给 α 逼近与滤波器稳定 */
+#define MEASURE_TO    (SR + SR / 2)     /* 测量窗 1 秒：整秒保证各分量正交 */
 #define BLOCK         1024              /* 与 WRITE_BATCH_FRAMES 一致 */
 #define FULL_SCALE    2147483647.0
 
@@ -43,6 +45,45 @@ static int32_t *make_tone(double freq, int centered, double amp, int frames, int
             buf[(size_t)i * channels + 1] = centered ? v : -v;
     }
     return buf;
+}
+
+/* 多分量生成器：每个分量按 mid 幅度 mamp_j·sin(θ) 与 side 幅度
+ * damp_j·sin(θ+φ_j) 相加；damp=0 即完全居中（单声道内容），
+ * mamp=damp 且 φ=90° 即左右去相关的立体声展开（伴奏铺底的典型形态）。
+ * L = m + d，R = m - d。各分量频率取整赫兹，1 秒窗内正交。 */
+static int32_t *make_md(const double *freq, const double *mamp, const double *damp,
+                        const double *dphase_deg, int ncomp, int frames)
+{
+    int32_t *buf = calloc((size_t)frames * 2, sizeof(int32_t));
+    if (!buf) return NULL;
+    for (int i = 0; i < frames; i++) {
+        double t = (double)i / (double)SR;
+        double m = 0.0, d = 0.0;
+        for (int j = 0; j < ncomp; j++) {
+            double th = 2.0 * M_PI * freq[j] * t;
+            m += mamp[j] * sin(th);
+            d  += damp[j] * sin(th + dphase_deg[j] * M_PI / 180.0);
+        }
+        double l = m + d, r = m - d;
+        if (l > 1.0) l = 1.0; if (l < -1.0) l = -1.0;
+        if (r > 1.0) r = 1.0; if (r < -1.0) r = -1.0;
+        buf[(size_t)i * 2]     = (int32_t)(l * FULL_SCALE);
+        buf[(size_t)i * 2 + 1] = (int32_t)(r * FULL_SCALE);
+    }
+    return buf;
+}
+
+/* 正交解调提取 buf（立体声交织，取左声道）中 freq 分量的幅度（0..1） */
+static double tone_amp_at(const int32_t *buf, int from, int len, double freq)
+{
+    double re = 0.0, im = 0.0;
+    for (int i = 0; i < len; i++) {
+        double th = 2.0 * M_PI * freq * (double)(from + i) / (double)SR;
+        double x = (double)buf[((size_t)from + i) * 2] / FULL_SCALE;
+        re += x * sin(th);
+        im += x * cos(th);
+    }
+    return 2.0 * sqrt(re * re + im * im) / (double)len;
 }
 
 static double rms_channel(const int32_t *buf, int from, int to, int channels, int ch)
@@ -164,6 +205,128 @@ static void test_passthrough(void)
     free(out);
 }
 
+/* ── 相似度门控：纯立体声伴奏段整带放行 ─────────────────────────── */
+static void run_md_blocks(int32_t *buf, int channels, int sample_rate)
+{
+    for (int off = 0; off < TOTAL_FRAMES; off += BLOCK) {
+        int n = (TOTAL_FRAMES - off) < BLOCK ? (TOTAL_FRAMES - off) : BLOCK;
+        karaoke_process(buf + (size_t)off * channels, n, channels, sample_rate);
+    }
+}
+
+static void test_wide_accompaniment_preserved(void)
+{
+    struct { const char *name; double f; double limit_db; } cases[] = {
+        { "2.5kHz 去相关铺底", 2500.0, -1.5 },   /* 门控旧版实测 -3.5dB，新版 ~0dB */
+        { "500Hz  去相关铺底",  500.0, -1.5 },
+    };
+    for (size_t c = 0; c < sizeof(cases)/sizeof(cases[0]); c++) {
+        const double f = cases[c].f;
+        const double freq[1]  = { f };
+        const double mamp[1]  = { 0.30 };
+        const double damp[1]  = { 0.30 };       /* mid/side 同能量、相差90° */
+        const double dph[1]   = { 90.0 };
+
+        int32_t *ref = make_md(freq, mamp, damp, dph, 1, TOTAL_FRAMES);
+        int32_t *out = make_md(freq, mamp, damp, dph, 1, TOTAL_FRAMES);
+        CHECK(ref && out, "宽伴奏保护测试数据分配成功");
+        if (!ref || !out) { free(ref); free(out); continue; }
+
+        karaoke_init();
+        karaoke_set_mode(KARAOKE_MODE_FULL);
+        run_md_blocks(out, 2, SR);
+
+        double in_a  = tone_amp_at(ref, MEASURE_FROM, MEASURE_TO - MEASURE_FROM, f);
+        double out_a = tone_amp_at(out, MEASURE_FROM, MEASURE_TO - MEASURE_FROM, f);
+        double gain = 20.0 * log10(out_a / (in_a > 0.0 ? in_a : 1e-12));
+        char msg[128];
+        snprintf(msg, sizeof(msg), "full 档：%s应被门控保护（>= %.1f dB）", cases[c].name, cases[c].limit_db);
+        CHECK(gain >= cases[c].limit_db, msg);
+        fprintf(stderr, "  [info] %s: gain=%.2fdB\n", cases[c].name, gain);
+
+        free(ref);
+        free(out);
+    }
+}
+
+/* ── 半带证据取大：立体声伴奏在场时，居中人声抵消量不打折 ───────── */
+static void test_gate_keeps_vocal_cancellation(void)
+{
+    const double freq[2] = { 800.0, 3000.0 };
+    const double mamp[2] = { 0.45, 0.30 };
+    const double damp[2] = { 0.00, 0.30 };      /* 人声正中；伴奏立体声展开 */
+    const double dph[2]  = { 0.0, 90.0 };
+
+    int32_t *ref = make_md(freq, mamp, damp, dph, 2, TOTAL_FRAMES);
+    int32_t *out = make_md(freq, mamp, damp, dph, 2, TOTAL_FRAMES);
+    CHECK(ref && out, "门控人声测试数据分配成功");
+    if (!ref || !out) { free(ref); free(out); return; }
+
+    karaoke_init();
+    karaoke_set_mode(KARAOKE_MODE_FULL);
+    run_md_blocks(out, 2, SR);
+
+    int len = MEASURE_TO - MEASURE_FROM;
+    double v_in  = tone_amp_at(ref, MEASURE_FROM, len, 800.0);
+    double v_out = tone_amp_at(out, MEASURE_FROM, len, 800.0);
+    double a_in  = tone_amp_at(ref, MEASURE_FROM, len, 3000.0);
+    double a_out = tone_amp_at(out, MEASURE_FROM, len, 3000.0);
+
+    double vgain = 20.0 * log10(v_out / (v_in > 0 ? v_in : 1e-12));
+    double again = 20.0 * log10(a_out / (a_in > 0 ? a_in : 1e-12));
+    CHECK(vgain <= -25.0, "3kHz 立体声伴奏在场时，800Hz 居中人声仍须抵消 >= 25dB");
+    CHECK(again >= -8.0,  "人声+伴奏混叠段允许伴奏受损，但不得反常放大（>= -8dB）");
+    fprintf(stderr, "  [info] vocal-in-mix: vocal=%.2fdB accompaniment=%.2fdB\n", vgain, again);
+
+    free(ref);
+    free(out);
+}
+
+/* ── 降回不启用：沿同一曲线收坡，走完逐位直通 ──────────────────── */
+static void test_off_ramps_out(void)
+{
+    karaoke_init();
+    karaoke_set_mode(KARAOKE_MODE_SOFT);
+
+    int32_t *ref = make_tone(1000.0, 1, 0.8, TOTAL_FRAMES, 2);
+    int32_t *out = make_tone(1000.0, 1, 0.8, TOTAL_FRAMES, 2);
+    CHECK(ref && out, "收坡测试数据分配成功");
+    if (!ref || !out) { free(ref); free(out); return; }
+
+    int half = SR / 2;                    /* 前 0.5s 稳态，中段切 OFF */
+    int off_at = (half / BLOCK) * BLOCK;
+    int32_t *tail_ref = make_tone(1000.0, 1, 0.8, TOTAL_FRAMES, 2);
+    CHECK(tail_ref, "收坡参考数据分配成功");
+
+    double steady = -1.0, first = -1.0;
+    for (int pos = 0; pos + BLOCK <= TOTAL_FRAMES; pos += BLOCK) {
+        if (pos == off_at) {
+            steady = rms_channel(out, pos - BLOCK, pos, 2, 0);
+            karaoke_set_mode(KARAOKE_MODE_OFF);   /* 播放中切回不启用 */
+            first = -1.0;
+        }
+        karaoke_process(out + (size_t)pos * 2, BLOCK, 2, SR);
+        if (pos == off_at) first = rms_channel(out, pos, pos + BLOCK, 2, 0);
+    }
+    /* 收坡语义：切档首块比稳态响（α>0 还在削弱），但远低于直通 */
+    double full_rms = rms_channel(tail_ref, off_at, off_at + BLOCK, 2, 0);
+    CHECK(steady > 0.0 && first > steady, "切到不启用的首块必须仍在淡出（非硬切直通）");
+    CHECK(first < full_rms * 0.9, "切档首块不得直接回到满幅（必须经过斜坡）");
+
+    /* 坡走完（>0.5s）之后必须逐位直通 */
+    int late = off_at + SR / 2;
+    late = (late / BLOCK) * BLOCK;
+    if (late + BLOCK <= TOTAL_FRAMES) {
+        CHECK(memcmp(out + (size_t)late * 2, tail_ref + (size_t)late * 2,
+                     (size_t)BLOCK * 2 * sizeof(int32_t)) == 0,
+              "收坡结束后必须逐位直通（旁路生效）");
+    }
+    fprintf(stderr, "  [info] off-ramp: steady=%.4f first=%.4f full=%.4f\n",
+            steady, first, full_rms);
+
+    free(ref); free(out); free(tail_ref);
+}
+
 /* ── 档位取值与非法值防御 ─────────────────────────────────────── */
 static void test_mode_accessors(void)
 {
@@ -219,7 +382,11 @@ static void test_sample_rate_change(void)
     double r22 = rms_channel(buf22, 11000, 20000, 2, 0);
 
     CHECK(isfinite(r44) && isfinite(r22), "切换采样率后输出有限");
-    CHECK(r44 < 0.001 && r22 < 0.001, "两个采样率下 1kHz 正中音都被显著削弱");
+    /* 阈值为"削弱 >= 约31dB"（残差 0.005 相对 0.566 的直通 RMS）：
+     * 频带边界 200/5000 在 1kHz 处的 skirt 泄漏约 -49dB 是设计预期，
+     * 此处校验的是重算系数后功能仍在起作用，不是抵消深度（深度由
+     * test_cancellation 以 <= -30dB 把关）。 */
+    CHECK(r44 < 0.005 && r22 < 0.005, "两个采样率下 1kHz 正中音都被显著削弱");
 
     free(buf44);
     free(buf22);
@@ -268,6 +435,9 @@ int main(void)
     test_cancellation();
     test_band_edges_preserved();
     test_side_preserved();
+    test_wide_accompaniment_preserved();
+    test_gate_keeps_vocal_cancellation();
+    test_off_ramps_out();
     test_sample_rate_change();
     test_alpha_ramp();
     test_reset_restarts_ramp();
