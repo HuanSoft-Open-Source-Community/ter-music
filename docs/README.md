@@ -52,11 +52,7 @@ The player has two planes: a **core** that owns the audio device, transport and 
 
 ### Arch Linux
 
-```bash
-yay -S cn.org.huansoft.ter-music
-# or
-paru -S cn.org.huansoft.ter-music
-```
+The AUR recipe is prepared as `cn.org.huansoft.ter-music` but is **not published yet**. Build from source below, or use the locally built packages described in [BUILD_GUIDE.md](BUILD_GUIDE.md).
 
 ### Build from source
 
@@ -106,7 +102,7 @@ make -j"$(nproc)"
 sudo make install   # optional
 ```
 
-The binary is `build/ter-music` (or `./ter-music` from the build directory). DEB, RPM, AppImage, portable and Linyaps packaging: see [BUILD_GUIDE.md](BUILD_GUIDE.md).
+The binary is `build/ter-music` (or `./ter-music` from the build directory). Locally built packages: one DEB (Debian 10–13 / Ubuntu 20.04–26.04), four RPMs (EL7–10), one AppImage (glibc 2.28), and one Linyaps UAB + layer; DEB/RPM source and debug packages are optional. See [BUILD_GUIDE.md](BUILD_GUIDE.md).
 
 ## Quick start
 

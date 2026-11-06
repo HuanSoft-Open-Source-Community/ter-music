@@ -52,11 +52,7 @@ Ter-Music 在终端中播放本地与远程音乐。FFmpeg 解码，ncursesw 绘
 
 ### Arch Linux
 
-```bash
-yay -S cn.org.huansoft.ter-music
-# 或
-paru -S cn.org.huansoft.ter-music
-```
+AUR 配方已准备为 `cn.org.huansoft.ter-music`，但**尚未投递**。请从下方源码构建，或使用 [BUILD_GUIDE.md](../BUILD_GUIDE.md) 描述的本地打包产物。
 
 ### 从源码构建
 
@@ -106,7 +102,7 @@ make -j"$(nproc)"
 sudo make install   # 可选
 ```
 
-可执行文件为 `build/ter-music`（在构建目录内为 `./ter-music`）。DEB、RPM、AppImage、可移植包与 Linyaps 打包见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
+可执行文件为 `build/ter-music`（在构建目录内为 `./ter-music`）。本地产物：1 个 DEB（Debian 10–13 / Ubuntu 20.04–26.04）、4 个 RPM（EL7–10）、1 个 AppImage（glibc 2.28）、1 个 Linyaps UAB + layer；DEB/RPM 的源码包与调试包为可选项。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
 ## 快速开始
 
