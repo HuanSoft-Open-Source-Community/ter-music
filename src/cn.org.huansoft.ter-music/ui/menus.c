@@ -33,6 +33,7 @@
 #include "ui/lyrics.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/menu_anim.h"
 #include "ui/rainbow.h"
 #include "ui/layout_editor.h"
 #include "ui/keymap.h"
@@ -833,9 +834,11 @@ void render_menu_hint_bar(void)
 void switch_to_view(ViewMode view)
 {
     log_info("menu_views", "View switched: %d -> %d", g_current_view, view);
-    /* 菜单锚定的是旧视图的行号，视图一变就失效：先关闭（不重绘，
-     * 下面会按新视图完整渲染）。 */
-    ui_context_menu_close(0);
+    /* 界面变更不播放消失动画：先清掉所有菜单动画态（含退场 ghost），
+     * 再瞬时关闭旧菜单/控制区弹层。 */
+    ui_menu_anim_cancel_all(0);
+    ui_context_menu_close_now(0);
+    controls_reset_popup();
     g_current_view = view;
     g_menu_selected_idx = 0;
     g_content_selected_idx = 0;
@@ -904,7 +907,9 @@ void switch_to_view(ViewMode view)
 
 void exit_current_view(void)
 {
-    ui_context_menu_close(0);
+    ui_menu_anim_cancel_all(0);
+    ui_context_menu_close_now(0);
+    controls_reset_popup();
     g_current_view = VIEW_MAIN;
     g_menu_selected_idx = 0;
     g_content_selected_idx = 0;

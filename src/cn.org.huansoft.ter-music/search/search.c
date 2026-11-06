@@ -1,6 +1,7 @@
 #include "search/search.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
+#include "ui/menu_anim.h"
 #include "i18n/i18n.h"
 #include "playlist/playlist.h"
 #include "logger/logger.h"
@@ -172,6 +173,9 @@ void search_prompt(void) {
         }
         return;
     }
+
+    /* 搜索框是模态输入：先收掉菜单退场 ghost。 */
+    ui_menu_anim_cancel_all(1);
 
     curs_set(1);
 

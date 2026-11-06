@@ -655,6 +655,12 @@ ter-music --bus org.mpris.MediaPlayer2.ter_music.instance12345   # 指所接入�
 
 单方张时，中键或 Ctrl／Alt+左击如再右击，惟敛其单；击于单外亦敛。**勿加 Shift**：多端闈以 Shift+左击择文，竟不转闻。兼键之**右**击（Ctrl／Alt／Shift＋右击）与兼键之**中**击皆**刻意不取**——端闈既以此键隶其家之单，程序复取之，则两单并张，而层态与所见相失。裸右击仍循其旧：端闈不吞之且不张其家之单，则启单；若端闈亦张其单（deepin-terminal 即然），请用中键。若中键不可用、端闈又不转闻兼位，则鼠侧已无干净之入口：请易一端闈，或请补一键盘之变触。
 
+**幕之动与退阶**。下拉之择幕（控御栏之弹单与节度之择目幕，兼颜色、均衡预设、信息显目）自上下移而入，退则反向滑出；右键之单每层皆斜向滑入，退亦斜向而没；中键／Ctrl／Alt+左击所启之同一单，其动亦同（见上「变触」）。局度编辑之动作／换类／颜色／助览模态之幕亦有动：居中而启（`Enter`、`?`、`t`、`c`）者纵向，右键于指针对启动作之幕者斜向；编辑关闭或改名之入接管时则即时敛之。动画惟在前端，不书配置。
+
+凡界面更易——F1至F8、页面之迁、改尺寸、重建局度、重载配置／语音、启闭局度编辑、模态文字之入——方开之幕皆即时敛去，不播消失之动。幕动之际，事件之环每一毫秒一询，凡落一格即合成一帧，不设人为之限；他格之动画（频谱、黑胶、歌辞、音程）暂停，以免夺其一拍。幕于理即时可用：键盘立应，鼠之命中以落定之矩形为准，不追移动之像素。消失之动方行而键至、鼠至者，先促其收尾，然后分发，输入终不为动画所塞。
+
+若终端不能尽其事，则动有退阶：全动 → 一缩之动（一行／一列、时更短）→ 无动。无彩或退为ASCII者用缩动；非TTY、`TERM=dumb`、终端过小或实测合成过慢者无动。科乐美流光则于整屏合成中并绘动幕与退幕（一帧一 doupdate），幕动之际停其黑胶／歌辞重染；启闭流光之时复探动之阶。
+
 #### 功能键（全域可用）
 **功能键（F1-F9）**
 | 键符 | 所司之事 |
@@ -1187,7 +1193,7 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
 | 包之身份 | `scripts/test/check-package-identity.sh` | 打包之身份必处处相合：应用之 ID 在 `debian/control`、`PKGBUILD`、`.SRCINFO`、`scripts/build/*` 与 systemd 之单元当同值；版号在 `APP_VERSION`（唯一之本源）、CMake `project VERSION`、`pkgver`、`debian/changelog` 首条当同值，而合于滚动之制 `<yy>.<q>.x.y`；`TER_MUSIC_API_VERSION` 当与 `dbus-rpc-check.sh` 所断者一也；旧名 `org.yxzl` 不得存于 `#include`、接口之字符串与打包之链；而**故为不改**之身份（ executable `ter-music`、MPRIS 总线之名、配置之目）亦不得顺手而改之 |
 | 配置之属 | `scripts/test/check-config-ownership.sh` | `config.xml` 为核所独有。前端**不得**用 `save_config()`／`config_save_to_xml()`：惟改己之配置镜像，以差异付之门面 `player_config_persist()`（远方之制即 `Config.Set`） |
 
-与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异、布局之 schema／几何／状态、不假 ncurses 之鼠标事件判定表，兼逐格栅格之验，以证诸预设无缝铺满），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、`karaoke-e2e.sh`（自符令 `karaoke` 与 `Control.GetKaraoke` 以至节度之文之落盘、核心重启之回灌，并验越界之钳与故文缺键之默）、`mouse-tui-e2e.sh`（以真的 SGR 点击／滚轮之节纳于 pty，既断 D-Bus 上所成之果，亦断每事归属之窗格——弹层既张之时，于弹层之外按之，惟收起弹层，不得穿透而及其后之列表）、`lyrics-pane-e2e.sh`（以 pty 真流经 `vt_grid.py` 还原字符之格，验歌辞格于启动即现、无歌辞之曲暂退、复至有歌辞之曲则自还而无需按任何键）、`context-menu-e2e.sh`（以真右键之节验菜单锚点与钳制、三层子单、由单以行队列与页面之事、信息页惟流光一条，及外部改队列后 stale 之拒）；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
+与之相配之回归套件：`scripts/test/run-unit-tests.sh`（径表、播弄队列之契约、歌辞解析、JSON读取之器、配置之差异、布局之 schema／几何／状态、幕动之几何／缓动／退阶、不假 ncurses 之鼠标事件判定表，兼逐格栅格之验，以证诸预设无缝铺满），及端到端之脚本 `dbus-rpc-check.sh`、`config-migration-check.sh`、`lifecycle-e2e.sh`、`offline-reconnect-e2e.sh`、`multi-frontend-e2e.sh`、`paging-deepdir-e2e.sh`、`remote-frontend-e2e.sh`、`karaoke-e2e.sh`（自符令 `karaoke` 与 `Control.GetKaraoke` 以至节度之文之落盘、核心重启之回灌，并验越界之钳与故文缺键之默）、`mouse-tui-e2e.sh`（以真的 SGR 点击／滚轮之节纳于 pty，既断 D-Bus 上所成之果，亦断每事归属之窗格——弹层既张之时，于弹层之外按之，惟收起弹层，不得穿透而及其后之列表）、`lyrics-pane-e2e.sh`（以 pty 真流经 `vt_grid.py` 还原字符之格，验歌辞格于启动即现、无歌辞之曲暂退、复至有歌辞之曲则自还而无需按任何键）、`context-menu-e2e.sh`（以真右键之节验菜单锚点与钳制、三层子单、由单以行队列与页面之事、信息页惟流光一条，及外部改队列后 stale 之拒）；又有性能之探 `perf-check.sh`（令下至状见之迟速、空闲时CPU之耗，皆立其限；CI 惟录其数，不以为断）。
 
 ### 三 模块地图
 
@@ -1218,7 +1224,9 @@ tar -czf mylanguage.tar.gz some/dir/lang.xml some/dir/help.txt
   庋藏之目，其实定于`playlist/playlist.c`）、对谈之框、鼠迹（`mouse.c`：ncurses之边垂，
   量诸格之方域；`mouse_routing.c`：不假ncurses而定其属，由 `scripts/test/test_mouse_routing.c`
   验之；`context_menu.c`／`context_menu_main.c`：右键之单与主列表之单；`context_menu_layout.c`：
-  不假ncurses之摆位/滚动，由 `scripts/test/test_context_menu_layout.c` 验之）、滚动条与共用之器
+  不假ncurses之摆位/滚动，由 `scripts/test/test_context_menu_layout.c` 验之；`menu_anim.c`：
+  幕之入退状态、ghost之影与合成；`menu_anim_math.c`：不假ncurses之位移、缓动、退阶之算，
+  由 `scripts/test/test_menu_anim_math.c` 验之）、滚动条与共用之器
 - **media/**：**核心**之D-Bus会话——`session.c`（总线之名、自省、分发）、
   `rpc_common.c`（回复之助、分页）、`rpc_info.c`、`rpc_control.c`、
   `rpc_queue.c`、`rpc_lyrics.c`、`rpc_config.c`，及MPRIS媒体播弄之接口

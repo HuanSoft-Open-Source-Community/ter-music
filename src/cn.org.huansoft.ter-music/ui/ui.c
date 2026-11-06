@@ -41,6 +41,7 @@
 #include "ui/context_menu.h"
 #include "ui/layout.h"
 #include "ui/layout_editor.h"
+#include "ui/menu_anim.h"
 #include "ui/rainbow.h"
 #include "ui/remote_view.h"
 #include <stdio.h>
@@ -111,6 +112,9 @@ static int g_default_colors_ok = 0;
  * 快进/音量步进量已上移到 ui.h（UI_SEEK_STEP_SECONDS / UI_VOLUME_STEP_PERCENT）：
  * 控制区窗格的滚轮要用同一份，不能在两个文件里各写一个魔数。 */
 #define UI_INPUT_TIMEOUT_MS 40
+/* 菜单动画激活时的输入轮询间隔：1ms 轮询只是调度上限，实际帧数受终端
+ * 输出与格子位置变化约束；getch 返回后立刻恢复 40ms，避免嵌套输入框继承。 */
+#define UI_MENU_ANIM_INPUT_TIMEOUT_MS 1
 #define ESC_TIMEOUT_MS 3000
 
 /* ============================================================
@@ -326,6 +330,8 @@ void init_ncurses(void)
         bkgdset(' ' | COLOR_PAIR(0));  /* transparent bg via border pair */
         ui_guard_stdio();  /* initscr 之后改道 fd2：拦截第三方库/遗留 stderr 输出污染提示条 */
         clear();
+        /* 颜色/尺寸就绪后探测菜单动画档位（full/reduced/off）。 */
+        ui_menu_anim_init();
 }
 
 /* 彩蛋只改前景；背景统一透明，终端不支持默认色时回退黑。 */
@@ -564,8 +570,10 @@ static void ui_on_config_reloaded(void)
 {
     log_info("ui", "Applying UI-side config reload (theme + keymap + panel refresh)");
     /* 配置/语言/键位可能已变，旧菜单的标签与动作不再可信：先关闭，
-     * 随后的重绘会把界面恢复干净。 */
-    ui_context_menu_close(0);
+     * 随后的重绘会把界面恢复干净。这属于界面变更，不播放消失动画。 */
+    ui_menu_anim_cancel_all(0);
+    ui_context_menu_close_now(0);
+    controls_reset_popup();
     keymap_reload();
     apply_color_theme();
     request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
@@ -675,7 +683,8 @@ int handle_main_action(ActionId action)
             return 1;
         case ACTION_FOCUS_LIST:
             if (g_popup.active) {
-                controls_reset_popup();
+                /* 焦点切换是用户操作，不是界面重建：弹层走纵向消失动画。 */
+                controls_popup_dismiss();
             }
             g_control_focus = 0;
             render_controls();
@@ -907,6 +916,8 @@ int handle_main_action(ActionId action)
             break;
         case ACTION_PLAYLIST_ADD:
             if (playlist_count() > 0 && g_playlist_manager.count > 0) {
+                /* 下面的内联选择框是模态接管：先收掉菜单退场 ghost。 */
+                ui_menu_anim_cancel_all(1);
                 Track t;
                 int track_idx = g_selected_index;
                 if (g_search_state.active) {
@@ -1134,6 +1145,8 @@ int handle_main_action(ActionId action)
         case ACTION_HISTORY_SHOW:
             if (g_lyric_cursor_mode || g_play_history.count == 0) break;
             {
+            /* 内联历史框是模态接管：先收掉菜单退场 ghost。 */
+            ui_menu_anim_cancel_all(1);
             /* Simple inline history: up to 10 rows, scrolls over all entries */
             int my, mx;
             getmaxyx(stdscr, my, mx);
@@ -1200,6 +1213,15 @@ int handle_main_action(ActionId action)
     return 1;
 }
 
+/* 一帧呈现：菜单动画激活时由动画模块统一合成（流光模式在内部走
+ * ui_rainbow_paint 且包含 ghost），否则保持原来的流光合成路径。 */
+static void present_overlay_frame(void)
+{
+    if (!ui_menu_anim_frame()) {
+        ui_rainbow_paint();
+    }
+}
+
 void run_event_loop(void)
 {
     extern volatile sig_atomic_t g_should_exit;
@@ -1236,20 +1258,28 @@ void run_event_loop(void)
         /* 前端远程：取回后台线程的列目录结果与已下载曲目（交给核心） */
         remote_view_tick();
         sync_player_revisions();
-        process_pending_ui_refresh();
+
+        /* 菜单动画期间冻结其它窗格的增量动画/进度刷新：动画帧自己会
+         * 重新合成整屏，这些刷新若插进来会与移动/退场 ghost 抢同一拍。 */
+        const int menu_animating = ui_menu_anim_active();
+        if (!menu_animating) {
+            process_pending_ui_refresh();
+        }
         controls_status_tick();
 
         /* 频谱独立窗格按自己的 40ms 节拍刷新；无歌词黑胶动画 100ms。
          * 二者都不再触发整块歌词/列表重绘。 */
-        spectrum_tick();
-        vinyl_tick();
-        lyrics_animation_tick();
+        if (!ui_menu_anim_active()) {
+            spectrum_tick();
+            vinyl_tick();
+            lyrics_animation_tick();
+        }
 
         /* 断线浮层：不清空快照（保留最后一帧），提示自动重连与一键重启 */
         render_offline_overlay(connected);
 
         /* 动画窗格在上一拍重绘过；右键菜单必须重新合成到最上层，
-         * 否则会被频谱/黑胶/歌词动画擦掉。 */
+         * 否则会被频谱/黑胶/歌词动画擦掉。动画进行时该函数内部会延后。 */
         ui_context_menu_refresh();
 
         /* 响应终端关闭、SIGTERM/SIGINT 等退出信号 */
@@ -1258,21 +1288,33 @@ void run_event_loop(void)
             break;
         }
 
+        /* 动画期间 1ms 轮询（不设人为帧率上限）；空闲仍为 40ms。 */
+        timeout(ui_menu_anim_active() ? UI_MENU_ANIM_INPUT_TIMEOUT_MS
+                                      : UI_INPUT_TIMEOUT_MS);
         ch = getch();
+        /* 立刻恢复空闲超时：随后可能打开的模态输入框会继承 getch 的
+         * 全局 timeout，绝不能让它按 1ms 空转。 */
+        timeout(UI_INPUT_TIMEOUT_MS);
 
-        if (player_play_state() == PLAY_STATE_PLAYING ||
-            player_play_state() == PLAY_STATE_PAUSED) {
+        /* 消失动画进行中收到输入：先立即收尾（删 ghost + 补一帧底层），
+         * 再按正常路径分发，输入永不被动画阻塞。 */
+        if (ch != ERR && ui_menu_anim_exit_active()) {
+            ui_menu_anim_finish_exits(1);
+        }
+
+        if ((player_play_state() == PLAY_STATE_PLAYING ||
+             player_play_state() == PLAY_STATE_PAUSED) &&
+            !ui_menu_anim_active()) {
             update_progress_bar();
         }
 
-        process_pending_ui_refresh();
+        if (!ui_menu_anim_active()) {
+            process_pending_ui_refresh();
+        }
 
-        /* 进度条/脏标记重绘之后再把菜单盖回去，然后才做流光合成。 */
+        /* 进度条/脏标记重绘之后再把菜单盖回去，然后才做流光/动画合成。 */
         ui_context_menu_refresh();
-
-        /* 彩蛋前景合成：放在所有本轮内容刷新之后，相位由时间决定；
-         * 未激活时立即返回，不产生额外终端输出。 */
-        ui_rainbow_paint();
+        present_overlay_frame();
 
         if (ch == ERR) {
             /* 终端断开检测：stdin 不再是 tty 时触发安全退出 */
@@ -1293,11 +1335,12 @@ void run_event_loop(void)
          * 再交给下面的既有 resize 分支重建布局。 */
         if (ui_context_menu_active()) {
             if (ch == KEY_RESIZE) {
-                ui_context_menu_close(0);
+                /* resize 是界面变更：瞬时关闭，不播消失动画。 */
+                ui_context_menu_close_now(0);
             } else if (ch != KEY_MOUSE) {
                 ui_context_menu_handle_key(ch);
                 ui_context_menu_refresh();
-                ui_rainbow_paint();
+                present_overlay_frame();
                 continue;
             }
         }
@@ -1386,6 +1429,8 @@ void run_event_loop(void)
         }
 
         if (ch == KEY_RESIZE) {
+            /* 尺寸变化是界面变更：先清空动画态，再由 create_layout 完整重绘。 */
+            ui_menu_anim_cancel_all(0);
             clear();
             create_layout();
             if (layout_editor_active()) {
@@ -1457,8 +1502,12 @@ void cleanup(void)
 {
     log_info("ui", "cleanup() called");
 
-    /* 菜单窗口必须在 endwin() 之前销毁，否则 delwin 会落在已结束的屏幕上。 */
-    ui_context_menu_close(0);
+    /* 菜单/ghost 窗口必须在 endwin() 之前销毁，否则 delwin 会落在
+     * 已结束的屏幕上。退出不走消失动画，也不在退出路径合成。 */
+    layout_editor_close_menu();
+    ui_menu_anim_shutdown();
+    ui_context_menu_close_now(0);
+    controls_reset_popup();
 
     search_async_cancel();
     pthread_mutex_lock(&g_search_mutex);

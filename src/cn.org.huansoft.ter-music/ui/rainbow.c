@@ -32,9 +32,11 @@
 #include "player/player.h"
 #include "ui/cover_art_cells.h"
 #include "ui/context_menu.h"
+#include "ui/layout_editor.h"
 #include "ui/lyrics.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/menu_anim.h"
 #include "ui/rainbow_gradient.h"
 #include "ui/ui.h"
 #include "ui/vinyl.h"
@@ -261,20 +263,33 @@ int ui_refresh_window(WINDOW *win)
         rainbow_paint_window(win, rainbow_offset_now());
     }
 
-    if (ui_context_menu_active() &&
-        !ui_context_menu_owns_window((const void *)win)) {
-        int top = 0, left = 0, rows = 0, cols = 0;
-        getbegyx(win, top, left);
-        getmaxyx(win, rows, cols);
-        if (ui_context_menu_intersects_rect(top, left, rows, cols)) {
-            if (wnoutrefresh(win) == ERR) {
-                return ERR;
-            }
+    int top = 0, left = 0, rows = 0, cols = 0;
+    getbegyx(win, top, left);
+    getmaxyx(win, rows, cols);
+
+    /* 活动中的右键菜单与退场 ghost 都是最高层：窗格刷新若与它们相交，
+     * 先把窗格入虚屏，再把菜单各层/ghost 压回，最后只 doupdate 一次。 */
+    int context_overlay = ui_context_menu_active() &&
+                          !ui_context_menu_owns_window((const void *)win) &&
+                          ui_context_menu_intersects_rect(top, left, rows, cols);
+    int ghost_overlay = ui_menu_anim_exit_active() &&
+                        ui_menu_anim_ghost_intersects_rect(top, left, rows, cols);
+
+    if (context_overlay || ghost_overlay) {
+        if (wnoutrefresh(win) == ERR) {
+            return ERR;
+        }
+        if (context_overlay) {
             int levels = ui_context_menu_reassert();
             log_debug("context_menu",
                       "overlay reassert after refresh levels=%d", levels);
-            return doupdate();
         }
+        if (ghost_overlay) {
+            int ghosts = ui_menu_anim_reassert_ghosts();
+            log_debug("menu_anim",
+                      "ghost reassert after refresh levels=%d", ghosts);
+        }
+        return doupdate();
     }
 
     return wrefresh(win);
@@ -288,8 +303,11 @@ void ui_rainbow_paint(void)
 
     int offset = rainbow_offset_now();
 
-    /* 黑胶碟面用三档流光色重染；相位变化时才重绘，避免每轮重复渲染。 */
-    if (g_current_view == VIEW_MAIN && offset != g_last_vinyl_offset) {
+    /* 黑胶碟面用三档流光色重染；相位变化时才重绘，避免每轮重复渲染。
+     * 菜单动画期间不在这里另起整块黑胶/歌词重绘：动画帧只走
+     * ui_menu_anim_frame() 的一次合成，避免同一拍内两次 doupdate。 */
+    if (!ui_menu_anim_active() &&
+        g_current_view == VIEW_MAIN && offset != g_last_vinyl_offset) {
         int shades[3];
         rainbow_pick_shades(g_fg, g_steps, offset, shades);
         if (vinyl_rainbow_apply(shades) == 0) {
@@ -334,6 +352,12 @@ void ui_rainbow_paint(void)
             rainbow_paint_window(sel, offset);
             (void)wnoutrefresh(sel);
         }
+        /* 布局编辑器的模态菜单同样是独立窗口，动画帧里也要逐帧重染。 */
+        WINDOW *editor_menu = (WINDOW *)layout_editor_menu_window();
+        if (editor_menu) {
+            rainbow_paint_window(editor_menu, offset);
+            (void)wnoutrefresh(editor_menu);
+        }
     }
 
     /* 右键菜单是最高层（根→子菜单顺序合成），必须盖在窗格与弹层之上。 */
@@ -346,11 +370,27 @@ void ui_rainbow_paint(void)
         }
     }
 
+    /* 消失动画的 ghost 是真正的最顶层：同样逐帧重染并压回，保证菜单
+     * 退场时不会被流光合成或窗格刷新擦掉。 */
+    int ghosts = ui_menu_anim_ghost_count();
+    for (int i = 0; i < ghosts; i++) {
+        WINDOW *ghost = ui_menu_anim_ghost_window(i);
+        if (ghost) {
+            rainbow_paint_window(ghost, offset);
+            (void)wnoutrefresh(ghost);
+        }
+    }
+
     (void)doupdate();
 }
 
 void toggle_rainbow_mode(void)
 {
+    /* 流光开关会整屏重绘：先收掉菜单退场 ghost，并按新场景重新探测动画档位
+     * （流光整屏合成的耗时不应永久拖累普通模式）。 */
+    ui_menu_anim_cancel_all(0);
+    ui_menu_anim_reset_tier();
+
     if (g_active) {
         g_active = 0;
         vinyl_rainbow_restore();

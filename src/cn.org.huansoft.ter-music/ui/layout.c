@@ -22,6 +22,7 @@
 #include "ui/menu_internal.h"
 #include "ui/context_menu.h"
 #include "ui/menus.h"
+#include "ui/menu_anim.h"
 #include "ui/ui.h"
 
 #include <ncursesw/ncurses.h>
@@ -1013,8 +1014,9 @@ int ui_layout_lyrics_pane_applied(void)
 void create_layout(void)
 {
     /* 布局重建会换掉窗格矩形与行号，旧菜单的锚点/行上下文立即失效。
-     * 先关闭（不重绘，本函数末尾会完整重绘）。 */
-    ui_context_menu_close(0);
+     * 这是界面变更：清掉动画态并瞬时关闭（不重绘，本函数末尾会完整重绘）。 */
+    ui_menu_anim_cancel_all(0);
+    ui_context_menu_close_now(0);
 
     if (!g_initialized) {
         ui_layout_init();
