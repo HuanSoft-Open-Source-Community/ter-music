@@ -1753,16 +1753,21 @@ static void open_sel_menu(int option_index)
  * @brief 选择弹层的锚点：触发它的选项在屏幕上的左上角。
  *
  * 行号取渲染期记录的真实列表几何（g_settings_list_top + 可见位置 - 滚动
- * 偏移），列取内容区文字起始列；绝不在这里另抄一份 start_y/off 公式。
- * 均衡器页的预设弹窗不对应列表行，锚定当前选中频带所在列与频带顶行。
+ * 偏移）；列取该选项"标签 + 冒号分隔符"之后的取值起始列——选项名与冒号
+ * 必须留在弹层左边可见，绝不在这里另抄一份 start_y/off 公式。
+ * 均衡器页的预设弹窗不对应列表行，锚定当前选中频带所在列与频带顶行
+ * （那里没有冒号行，维持频带列语义）。
+ * out_colon 回报本次是否为"冒号后"锚定：create_sel_window() 据此决定
+ * min_left 是取值列（永不左翻盖住选项名）还是内容区左缘（EQ 既有语义）。
  */
-static void settings_sel_anchor(int src, int *out_y, int *out_x)
+static void settings_sel_anchor(int src, int *out_y, int *out_x, int *out_colon)
 {
     MenuContentArea area;
     menu_content_area(&area);
 
     int anchor_y = 2;
     int anchor_x = area.content_x;
+    int colon_anchor = 0;
 
     if (src == SETTINGS_IDX_EQ_PRESET && g_menu_selected_idx == 6) {
         if (g_eq_bars_top >= 2) {
@@ -1788,6 +1793,19 @@ static void settings_sel_anchor(int src, int *out_y, int *out_x)
                 anchor_y = g_settings_list_top;
             }
         }
+        /* 冒号后锚点：所有会打开选择弹层的选项行都渲染成
+         * "标签 + settings.separator + 值"（format_settings_option_line），
+         * 取值列 = 内容区左缘 + 标签显示宽 + 分隔符显示宽。分隔符按当前
+         * 语言取显示宽（zh/en ": " 为 2 列，先秦 "：" 全角同为 2 列），
+         * 一律走 utf8_str_width，不在此处复制格式串。 */
+        if (src >= 0 && src < SETTINGS_OPTION_COUNT) {
+            const int label_w = utf8_str_width(i18n_get(settings_options[src]));
+            const int sep_w = utf8_str_width(i18n_get("settings.separator"));
+            if (label_w > 0 && sep_w > 0) {
+                anchor_x = area.content_x + label_w + sep_w;
+                colon_anchor = 1;
+            }
+        }
     }
 
     if (anchor_y < 2) anchor_y = 2;
@@ -1797,6 +1815,7 @@ static void settings_sel_anchor(int src, int *out_y, int *out_x)
 
     if (out_y) *out_y = anchor_y;
     if (out_x) *out_x = anchor_x;
+    if (out_colon) *out_colon = colon_anchor;
 }
 
 static void create_sel_window(void)
@@ -1953,11 +1972,28 @@ static void create_sel_window(void)
 
     int anchor_y = 2;
     int anchor_x = area.content_x;
-    settings_sel_anchor(src, &anchor_y, &anchor_x);
+    int anchor_colon = 0;
+    settings_sel_anchor(src, &anchor_y, &anchor_x, &anchor_colon);
+
+    /* 冒号后锚定：弹层只许往右长，宽度先钳到取值列以右的可用空间；
+     * 若连最小可用弹层（8 列，与上面的拒绝阈值一致）都放不下，
+     * 退回旧的行首锚定，保证弹层在极窄终端上仍然可用。 */
+    int min_left = area.content_x;
+    if (anchor_colon) {
+        const int avail_right = (area.max_x - 3) - anchor_x + 1;
+        if (avail_right >= 8) {
+            if (box_w > avail_right) box_w = avail_right;
+            min_left = anchor_x;
+        } else {
+            log_debug("settings", "sel menu colon fallback: avail right=%d",
+                      avail_right);
+            anchor_x = area.content_x;
+        }
+    }
 
     UIRect rect;
     if (!ui_popup_place_rect(anchor_y, anchor_x, box_w, box_h,
-                             2, max_bottom, area.content_x,
+                             2, max_bottom, min_left,
                              area.max_x - 3, &rect)) {
         log_debug("settings", "sel menu refused: place failed");
         g_sel_active = 0;
