@@ -607,8 +607,9 @@ ter-music Quick Start Guide
   The core publishes /org/mpris/MediaPlayer2 on the session bus as
   org.mpris.MediaPlayer2.ter_music, with MPRIS plus the ter-music interfaces
   cn.org.huansoft.ter_music.Info / Control / Lyrics / Queue / Config.
-  The handshake reads core.api_version from Info.GetInfo (currently 5; clients
-  require at least 4, and a v4 core simply lacks the per-character fields).
+  The handshake reads core.api_version from Info.GetInfo (currently 7; clients
+  require at least 7 - the interface namespace moved to cn.org.huansoft.* at
+  version 7).
 
   MPRIS: Rate is a real read/write playback rate (MinimumRate 0.5, MaximumRate
   3.0); LoopStatus and Shuffle perform full play-mode switching; OpenUri answers

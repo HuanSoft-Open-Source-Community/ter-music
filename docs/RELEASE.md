@@ -31,6 +31,7 @@
 最后才用脚本内的 `DEFAULT_VERSION` 兜底。这个顺序是刻意的：tag 曾落后于代码（仓库里
 最新 tag 是 `v2.1.0`，而 `APP_VERSION` 已是 `v2.3.0`），旧顺序会把包版本打成旧 tag 的
 值。正则同时放宽到四段，否则 `26.4.1.0` 会被截成 `26.4.1`。
+
 3. 确认 CI 全绿：`gh run list --workflow ci.yml`。
 4. 行为变更登记（架构反转：后端只做播放、前端持有内容的那一版）：
    - **职责边界**：核心（`daemon`）只做播放服务——音频设备、播放状态与进度、
@@ -43,7 +44,7 @@
      `GetPlaylist` 一并撤下；`Queue` 改为**路径队列**语义
      （`Set/Append/InsertAfter/RemoveAt/MoveUp/MoveDown/Clear/Shuffle/PlayAt/Get`，
      仅本地路径、单次 ≤500 条、分页读 ≤1000 条），新增 `QueueChanged` 广播；
-     播放面接口为 `Lyrics`/`Info`/`Control`/`Queue`/`Config`（46 个方法）；
+     播放面接口为 `Lyrics`/`Info`/`Control`/`Queue`/`Config`（当时 46 个方法）；
    - **前端默认走远程门面**：`ter-music` / `ter-music tui` 默认
      `--frontend=remote`（无核心则自动拉起并把内容队列推给核心），
      新增 `--attach-only`（无核心直接退出码 3）与 `--bus NAME`；
@@ -167,9 +168,9 @@
 > 取源码，不依赖 tag）；tag 只在确认可发布后创建，且必须打在构建所用的
 > 同一个 commit 上（打 tag 前 `git rev-parse HEAD` 与构建时比对）。
 >
-> **陷阱：打 tag 之前构建必须显式传 `-v X.Y.Z.W`。**
-> 构建脚本的 `detect_version()` 优先级是「最新 git tag > types.h > 默认值」，
-> 而此刻最新 tag 还是上一个版本——不显式传 `-v` 会打出旧版本号的包。
+> **注意：** 构建脚本的 `detect_version()` 以 `types.h` 的 `APP_VERSION` 为第一优先，
+> git tag 只是次级兜底；因此打 tag 之前构建不会把版本打成旧 tag。只有源码树缺少
+> `types.h`（或需要临时覆盖）时才显式传 `-v X.Y.Z.W`。
 
 ---
 
@@ -195,8 +196,8 @@
 1. **打 tag**：`v26.4.1.0` 必须在构建/AUR 推送之前存在——`PKGBUILD` 的 `#tag=v$pkgver`
    是前向引用，tag 不存在时 AUR 用户直接构建失败。
 2. **AUR**：新建或改名 `cn.org.huansoft.ter-music` 仓库，推送 `PKGBUILD` + `.SRCINFO`；
-   旧 `ter-music-cn` 由维护者决定下架或保留说明。README 里的 `yay/paru/zpm` 命令已按
-   新名写好，AUR 侧未落地前它们不可用（文中已注明）。
+   旧 `ter-music-cn` 由维护者决定下架或保留说明。README 里的 `yay/paru` 命令已按
+   新名写好，AUR 侧未落地前它们不可用。
 3. **apt / dnf 发布仓库**：把包从旧名迁到新名（索引组件、GPG 策略由发布方决定）。
    deb 侧已用 `Provides`/`Breaks`/`Replaces` 保证同一台机器上可直接替换，无需先卸载。
 4. **通知第三方 D-Bus 客户端**：接口前缀改为 `cn.org.huansoft.ter_music.*`。这是
@@ -364,7 +365,7 @@ cp PKGBUILD .SRCINFO aur-ter-music/
 cd aur-ter-music
 
 # 4. 本地完整预演：真实拉取 tag 源并构建，验证可复现
-makepkg -sro
+makepkg -s
 
 # 5. 提交推送
 git add PKGBUILD .SRCINFO
@@ -426,4 +427,4 @@ bash scripts/build/build-rpm.sh --container -v X.Y.Z.W -a x86_64  # Rocky Linux 
 8. [ ] 确认 HEAD 与构建所用 commit 一致（`git rev-parse HEAD`）
 9. [ ] **以上全部通过后**才打 tag：`git tag vX.Y.Z.W && git push origin vX.Y.Z.W`
 10. [ ] `gh release create` 上传产物，核对资产列表与上一个 Release 一致
-11. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -sro` 预演，再 push）
+11. [ ] tag 推送后更新 AUR（先 `git ls-remote` 确认 tag、`makepkg -s` 预演，再 push）

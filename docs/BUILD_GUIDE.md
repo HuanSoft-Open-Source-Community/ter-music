@@ -69,14 +69,14 @@ linyaps 与 appimage/portable 一样是原生构建（前者由 `ll-builder`/`ll
 **容器构建模式**（推荐用于非 RHEL 系统）：
 ```bash
 # 在 Rocky Linux 容器中构建（默认 EL9）
-./build-rpm.sh --container
+./scripts/build/build-rpm.sh --container
 
 # 在指定 EL 版本的容器中构建
-./build-rpm.sh --container --el-version 8
-./build-rpm.sh --container --el-version 10
+./scripts/build/build-rpm.sh --container --el-version 8
+./scripts/build/build-rpm.sh --container --el-version 10
 
 # 构建静态链接 RPM，单包兼容 EL8/9/10（自动启用容器模式）
-./build-rpm.sh --static
+./scripts/build/build-rpm.sh --static
 ```
 
 > **💡 强烈建议**：优先构建 **EL8** 版本（即 `--el-version 8`）。EL8 基于 glibc 2.28 构建，该版本是 EL8/9/10 三者间的最低公共版本，因此生成的 RPM 可在所有三个 EL 主版本上直接运行，无需为每个版本分别构建。若构建 EL9 或 EL10 版本，则会因 glibc 要求更高而无法在更低版本的系统中安装。
@@ -84,13 +84,13 @@ linyaps 与 appimage/portable 一样是原生构建（前者由 `ll-builder`/`ll
 **本地构建（仅在 RHEL/Fedora 系统上）：**
 ```bash
 # 使用默认版本号和架构构建
-./build-rpm.sh
+./scripts/build/build-rpm.sh
 
 # 保留临时文件用于调试
-./build-rpm.sh --keep-temp
+./scripts/build/build-rpm.sh --keep-temp
 
 # 显示帮助信息
-./build-rpm.sh --help
+./scripts/build/build-rpm.sh --help
 ```
 **输出：**
 - RPM 包将输出到 `build/rpm/<arch>/` 目录
@@ -100,54 +100,24 @@ linyaps 与 appimage/portable 一样是原生构建（前者由 `ll-builder`/`ll
 sudo dnf install build/rpm/x86_64/cn.org.huansoft.ter-music-*.x86_64.rpm
 ```
 
-### 7. tools/start-server.py — 测试服务器工具
-启动本地 SMB/FTP/SFTP/WebDAV/HTTP 服务器，用于测试远程音乐播放功能。
-
-> **Python 环境要求**：该脚本为 Python 脚本，建议在 Conda 环境中运行，避免依赖冲突。
-
-**Conda 环境配置（首次使用）：**
-```bash
-# 安装 Miniconda3（如尚未安装）
-# 请访问 https://docs.anaconda.com/miniconda/ 下载安装
-
-# 创建名为 ter-music 的虚拟环境并安装 Python
-conda create -n ter-music python=3
-
-# 激活虚拟环境
-conda activate ter-music
-
-# 安装依赖
-pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r tools/requirements.txt
-```
-
-**使用方法（已配置好环境后）：**
-```bash
-# 确保已激活 conda 环境
-conda activate ter-music
-
-# 启动交互式菜单
-python3 tools/start-server.py
-```
-按提示选择协议、配置端口和共享目录即可启动。支持匿名访问（FTP/SMB/HTTP）、密码认证（SFTP/WebDAV）和公钥认证（SFTP）。
-
 ### 2. build-appimage.sh - 构建 AppImage 包
 直接从源码构建 AppImage 格式（也可从 RPM 转换，需要 FUSE 支持）。
 **使用方法：**
 ```bash
 # 自动检测版本和架构，直接从源码构建
-./build-appimage.sh
+./scripts/build/build-appimage.sh
 
 # 指定版本号构建
-./build-appimage.sh -v 1.4.1
+./scripts/build/build-appimage.sh -v 26.4.1.0
 
 # 从指定 RPM 包文件转换
-./build-appimage.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-26.4.1.0-1.x86_64.rpm
+./scripts/build/build-appimage.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-26.4.1.0-1.x86_64.rpm
 
 # 保留临时文件用于调试
-./build-appimage.sh --keep-temp
+./scripts/build/build-appimage.sh --keep-temp
 
 # 显示帮助信息
-./build-appimage.sh --help
+./scripts/build/build-appimage.sh --help
 ```
 **输出：**
 - AppImage 包将输出到: `build/appimage/<arch>/` 目录
@@ -172,19 +142,19 @@ chmod +x build/appimage/x86_64/ter-music-26.4.1.0-x86_64.AppImage
 **使用方法：**
 ```bash
 # 自动检测版本和架构，直接从源码构建
-./build-portable.sh
+./scripts/build/build-portable.sh
 
 # 指定版本号构建
-./build-portable.sh -v 1.4.1
+./scripts/build/build-portable.sh -v 26.4.1.0
 
 # 从指定 RPM 包文件转换
-./build-portable.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-26.4.1.0-1.x86_64.rpm
+./scripts/build/build-portable.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-26.4.1.0-1.x86_64.rpm
 
 # 保留临时文件用于调试
-./build-portable.sh --keep-temp
+./scripts/build/build-portable.sh --keep-temp
 
 # 显示帮助信息
-./build-portable.sh --help
+./scripts/build/build-portable.sh --help
 ```
 **输出：**
 - 可移植包将输出到: `build/portable/<arch>/` 目录
@@ -239,6 +209,7 @@ cd ter-music-portable
 | `-k, --keep-temp` | 保留临时构建文件（默认 `.tmp/linyaps-temp`，可用 `TER_MUSIC_LINYAPS_TEMP` 覆盖） |
 | `-o, --offline` | 强制离线：不拉取源码与依赖，完全使用本地缓存（要求 base/runtime 已在缓存中） |
 | `-r, --refresh` | 强制从软件源刷新 base/runtime（默认仅在缓存为空时拉取） |
+| `--layer-only` | 只导出 layer，不导出 UAB（本地没有 builder.utils ≥ 0.0.4.0 时用） |
 
 > `--in-container` 已废弃：参数仍被识别，但只会打印提示并被忽略。
 
@@ -361,26 +332,26 @@ UAB 是 ELF 包：`linglong.meta` 段放元数据，`.note.uab.sig` 段的 note 
 **用法：**
 ```bash
 # 使用自动检测的版本号和架构构建 DEB
-./build-deb.sh
+./scripts/build/build-deb.sh
 
 # 指定版本号构建
-./build-deb.sh -v 1.4.1
+./scripts/build/build-deb.sh -v 26.4.1.0
 
 # 在 Docker 容器中构建（推荐，确保环境一致性）
-./build-deb.sh --container
-./build-deb.sh --container --debian-version 10   # 指定 Debian 版本
+./scripts/build/build-deb.sh --container
+./scripts/build/build-deb.sh --container --debian-version 10   # 指定 Debian 版本
 
 # 静态链接 FFmpeg，单包兼容 Debian 10/11/12/13+
-./build-deb.sh --static
+./scripts/build/build-deb.sh --static
 
 # 同时生成源码包和 debuginfo 包
-./build-deb.sh --with-source --with-debuginfo
+./scripts/build/build-deb.sh --with-source --with-debuginfo
 
 # 保留临时文件用于调试
-./build-deb.sh --keep-temp
+./scripts/build/build-deb.sh --keep-temp
 
 # 显示帮助信息
-./build-deb.sh --help
+./scripts/build/build-deb.sh --help
 ```
 **选项说明：**
 - `--container`：在 Docker 容器中构建，避免宿主系统库差异
@@ -430,6 +401,37 @@ sudo pacman -U cn.org.huansoft.ter-music-*.pkg.tar.zst
 - 自动处理依赖关系
 - 可通过 `pacman` 工具管理安装和卸载
 - 适合 Arch Linux 用户
+
+## 测试服务器工具
+
+启动本地 SMB/FTP/SFTP/WebDAV/HTTP 服务器，用于测试远程音乐播放功能。
+
+> **Python 环境要求**：该脚本为 Python 脚本，建议在 Conda 环境中运行，避免依赖冲突。
+
+**Conda 环境配置（首次使用）：**
+```bash
+# 安装 Miniconda3（如尚未安装）
+# 请访问 https://docs.anaconda.com/miniconda/ 下载安装
+
+# 创建名为 ter-music 的虚拟环境并安装 Python
+conda create -n ter-music python=3
+
+# 激活虚拟环境
+conda activate ter-music
+
+# 安装依赖
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r tools/requirements.txt
+```
+
+**使用方法（已配置好环境后）：**
+```bash
+# 确保已激活 conda 环境
+conda activate ter-music
+
+# 启动交互式菜单
+python3 tools/start-server.py
+```
+按提示选择协议、配置端口和共享目录即可启动。支持匿名访问（FTP/SMB/HTTP）、密码认证（SFTP/WebDAV）和公钥认证（SFTP）。
 
 ## 构建依赖
 
@@ -508,15 +510,23 @@ sudo pacman -U cn.org.huansoft.ter-music-*.pkg.tar.zst
 - `make`
 - `git`
 - `ffmpeg`
-- `pulseaudio`
 - `ncurses`
 - `libxml2`
+- `libpng`
+- `libjpeg-turbo`
+- `curl`
 - `sqlite`
 - `zlib`
 
+可选：`pulseaudio`、`alsa-lib`、`libpipewire`、`dbus`（`optdepends`）。
+
 在 Debian/Ubuntu 上安装构建依赖：
 ```bash
-sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev libjpeg-dev libswscale-dev libxml2-dev libsqlite3-dev zlib1g-dev
+sudo apt install dpkg-dev fakeroot devscripts cmake make gcc pkg-config \
+  libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
+  libswresample-dev libswscale-dev libpng-dev libjpeg-dev \
+  libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+  libsqlite3-dev libdbus-1-dev zlib1g-dev
 ```
 
 ## 推荐的构建流程
@@ -538,24 +548,24 @@ sudo apt install dpkg-dev fakeroot cmake make gcc libavfilter-dev libpng-dev lib
 
 - 直接指定版本号构建可移植包（推荐，兼容性最好）：
   ```bash
-  ./build-portable.sh -v 1.4.1
+  ./scripts/build/build-portable.sh -v 26.4.1.0
   ```
 
 - 直接指定版本号构建 AppImage（推荐）：
   ```bash
-  ./build-appimage.sh -v 1.4.1
+  ./scripts/build/build-appimage.sh -v 26.4.1.0
   ```
 
 - 自动检测版本直接构建：
   ```bash
-  ./build-portable.sh
-  ./build-appimage.sh
+  ./scripts/build/build-portable.sh
+  ./scripts/build/build-appimage.sh
   ```
 
 - 如果需要构建 RPM 包，可以先构建 RPM 再转换：
   ```bash
-  ./build-rpm.sh -v 1.4.1
-  ./build-portable.sh -r build/rpm/ter-music-*.rpm
+  ./scripts/build/build-rpm.sh -v 26.4.1.0
+  ./scripts/build/build-portable.sh -r build/rpm/x86_64/cn.org.huansoft.ter-music-*.rpm
   ```
 
 ## 分发建议
@@ -583,8 +593,8 @@ sudo dnf install ffmpeg-free-devel pulseaudio-libs-devel ncurses-devel libcurl-d
 ```
 
 **跨发行版构建的 RPM（在 Debian 上构建）**：如果在非 RHEL 系统上构建了 RPM，安装到 RHEL 时可能出现 FFmpeg soname 或 glibc 版本不匹配问题。解决方案：
-- 使用 `./build-rpm.sh --container` 在 Rocky Linux 容器中构建
-- 使用 `./build-rpm.sh --static` 构建静态链接 RPM，自动兼容 EL8/9/10
+- 使用 `./scripts/build/build-rpm.sh --container` 在 Rocky Linux 容器中构建
+- 使用 `./scripts/build/build-rpm.sh --static` 构建静态链接 RPM，自动兼容 EL8/9/10
 
 ### AppImage 无法运行
 如果遇到 FUSE 相关错误，请尝试：
