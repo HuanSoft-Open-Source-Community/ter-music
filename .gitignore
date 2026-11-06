@@ -33,10 +33,14 @@ debian/debhelper-build-stamp
 debian/files
 debian/*.substvars
 debian/ter-music/
+debian/cn.org.huansoft.ter-music/
+debian/.debhelper/
 
 # Packaging artifacts (never commit generated packages)
 *.AppImage
 *.AppImage.zsync
+*.uab
+*.layer
 *.snap
 *.flatpak
 *.rpm

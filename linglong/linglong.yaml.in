@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# Linyaps 模板：build-linyaps.sh 会把它复制到 .tmp 工作目录，替换
+# @VERSION@ / @ARCH@ 后再交给 ll-builder。模板本身不直接参与构建。
+version: "1"
+
+package:
+  id: cn.org.huansoft.ter-music
+  name: ter-music
+  version: @VERSION@
+  kind: app
+  description: |
+    ter-music 是一个基于 ncurses 的轻量级终端音乐播放器
+  architecture: @ARCH@
+
+command:
+  - /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music
+
+base: org.deepin.base/25.2.2
+
+sources:
+  - kind: file
+    name: ter-music
+    url: ./ter-music
+
+build: |
+  cd ter-music
+  mkdir -p build
+  cd build
+  cmake .. -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+    -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' \
+    -DTER_MUSIC_VERSION=@VERSION@ \
+    -DINSTALL_LINYAPS_INTEGRATION=ON
+  make -j$(nproc)
+  make install
+  mkdir -p ${PREFIX}/lib
+  for dep in libblas.so.3 liblapack.so.3 libmpg123.so.0; do
+    dep_path=$(find /usr/lib /lib \( -type f -o -type l \) -name "${dep}" 2>/dev/null | head -n 1)
+    if [ -z "${dep_path}" ]; then
+      echo "required runtime library not found: ${dep}" >&2
+      exit 1
+    fi
+    install -Dm755 "$(readlink -f "${dep_path}")" "${PREFIX}/lib/${dep}"
+  done
+
+buildext:
+  apt:
+    build_depends:
+      - build-essential
+      - cmake
+      - pkg-config
+      - libncurses-dev
+      - libavformat-dev
+      - libavcodec-dev
+      - libswresample-dev
+      - libavutil-dev
+      - libavfilter-dev
+      - libswscale-dev
+      - libpng-dev
+      - libjpeg-dev
+      - libxml2-dev
+      - libcurl4-openssl-dev
+      - libsqlite3-dev
+      - libdbus-1-dev
+      - zlib1g-dev
+    depends:
+      - libavformat60
+      - libavcodec60
+      - libswresample4
+      - libavutil58
+      - libavfilter9
+      - libpulse0
+      - libblas3
+      - liblapack3
+      - libgfortran5
+      - libpng16-16
+      - libjpeg62-turbo
+      - libxml2
+      - libcurl4
+      - libswscale7
+      - libmpg123-0
+      - libvorbis0a
+      - libvorbisenc2
+      - libvorbisfile3
+      - libopus0
+      - libtheora0
+      - libx264-160
+      - libx265-199
+      - libvpx7
+      - libzstd1
+      - liblzma5

@@ -1,71 +1,90 @@
-# Dockerfile.rpm - RHEL-compatible RPM build environment
-# Builds inside a Rocky Linux container so auto-generated soname
-# dependencies match the target platform (EL8, EL9, or EL10).
+# RHEL/EL RPM build image, parameterized by EL_VERSION (7/8/9/10).
 #
-# Usage:
-#   docker build --build-arg EL_VERSION=9 \
-#     -f scripts/docker/Dockerfile.rpm \
-#     -t ter-music-rpm .
-#
-#   docker run --rm -v $(pwd):/workspace ter-music-rpm \
-#     ./scripts/build/build-rpm.sh
+# 默认使用 USTC 的 Rocky 镜像；EL7 与 Debian 10 一样属于归档仓库，
+# 使用阿里 centos-vault + 阿里 EPEL/SCLo。只从源码构建静态 FFmpeg。
 
-ARG EL_VERSION=9
-FROM rockylinux:${EL_VERSION}
+ARG BASE_IMAGE=rockylinux:8
+FROM ${BASE_IMAGE}
 
-ARG EL_VERSION
+ARG FFMPEG_VERSION=8.1.2
+ARG EL_VERSION=8
 ARG DEBIAN_FRONTEND=noninteractive
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
-# Enable EPEL and RPM Fusion repositories (via USTC mirrors)
-RUN sed -e 's|^mirrorlist=|#mirrorlist=|g' \
-        -e 's|^#baseurl=http://dl.rockylinux.org/\$contentdir|baseurl=https://mirrors.ustc.edu.cn/rocky|g' \
-        -i /etc/yum.repos.d/*.repo && \
-    if [ "$EL_VERSION" = "10" ]; then \
-        dnf install -y dnf-plugins-core && \
-        dnf config-manager --set-enabled crb && \
-        dnf install -y https://mirrors.ustc.edu.cn/epel/epel-release-latest-10.noarch.rpm && \
-        dnf install -y https://mirrors.ustc.edu.cn/rpmfusion/free/el/rpmfusion-free-release-10.noarch.rpm; \
-    elif [ "$EL_VERSION" = "9" ]; then \
-        dnf install -y dnf-plugins-core && \
-        dnf config-manager --set-enabled crb && \
-        dnf install -y https://mirrors.ustc.edu.cn/epel/epel-release-latest-9.noarch.rpm && \
-        dnf install -y https://mirrors.ustc.edu.cn/rpmfusion/free/el/rpmfusion-free-release-9.noarch.rpm; \
-    elif [ "$EL_VERSION" = "8" ]; then \
-        dnf install -y dnf-plugins-core && \
-        dnf config-manager --set-enabled powertools && \
-        dnf install -y https://mirrors.ustc.edu.cn/epel/epel-release-latest-8.noarch.rpm && \
-        dnf install -y https://mirrors.ustc.edu.cn/rpmfusion/free/el/rpmfusion-free-release-8.noarch.rpm; \
+# 仓库配置 + 构建工具/开发库
+RUN if [ "$EL_VERSION" = "7" ]; then \
+        sed -i \
+            -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=https://mirrors.aliyun.com/centos-vault/7.9.2009|g' \
+            /etc/yum.repos.d/CentOS-*.repo; \
+        printf '%s\n' \
+            '[epel]' \
+            'name=EPEL 7' \
+            'baseurl=https://mirrors.aliyun.com/epel/7/$basearch/' \
+            'enabled=1' \
+            'gpgcheck=0' \
+            > /etc/yum.repos.d/epel.repo; \
+        printf '%s\n' \
+            '[centos-sclo-rh]' \
+            'name=CentOS-7 - SCLo rh' \
+            'baseurl=https://mirrors.aliyun.com/centos-vault/7.9.2009/sclo/$basearch/rh/' \
+            'enabled=1' \
+            'gpgcheck=0' \
+            > /etc/yum.repos.d/centos-sclo.repo; \
+        yum install -y \
+            gcc gcc-c++ make cmake3 pkgconfig rpm-build rsync ca-certificates tar gzip \
+            ncurses-devel libcurl-devel libpng-devel libjpeg-turbo-devel \
+            libxml2-devel dbus-devel sqlite-devel zlib-devel elfutils \
+            devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-make && \
+        { yum install -y debugedit || echo "debugedit unavailable on EL7; debuginfo may be limited"; } && \
+        ln -sf /usr/bin/cmake3 /usr/local/bin/cmake && \
+        yum clean all; \
     else \
-        echo "Unsupported EL_VERSION: $EL_VERSION" >&2; \
-        exit 1; \
-    fi && \
-    sed -e 's|^metalink=|#metalink=|g' \
-        -e 's|^#baseurl=https://download.example/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
-        -i /etc/yum.repos.d/epel*.repo && \
-    dnf clean all
+        sed -i \
+            -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^metalink=|#metalink=|g' \
+            -e 's|^#baseurl=http://dl.rockylinux.org/\$contentdir|baseurl=https://mirrors.ustc.edu.cn/rocky|g' \
+            /etc/yum.repos.d/*.repo; \
+        dnf install -y dnf-plugins-core && \
+        if [ "$EL_VERSION" = "8" ]; then \
+            dnf config-manager --set-enabled powertools || true; \
+        else \
+            dnf config-manager --set-enabled crb || true; \
+        fi && \
+        dnf install -y \
+            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip \
+            ncurses-devel libcurl-devel libpng-devel libjpeg-turbo-devel \
+            libxml2-devel dbus-devel sqlite-devel zlib-devel elfutils && \
+        { dnf install -y debugedit || echo "debugedit unavailable; debuginfo may be limited"; } && \
+        dnf clean all; \
+    fi
 
-# Install build toolchain
-RUN dnf groupinstall -y "Development Tools" && \
-    dnf install -y \
-        cmake \
-        pkgconfig \
-        rpm-build \
-        wget \
-        git && \
-    dnf clean all
+# FFmpeg 源码由 docker-build.sh 从宿主 .cache/sources 复制进构建上下文，
+# 只下载一次；这里不再 curl 远端。
+COPY ffmpeg-${FFMPEG_VERSION}.tar.gz /tmp/ffmpeg.tar.gz
 
-# Install project-specific build dependencies (from RPM Fusion + EPEL)
-RUN dnf install -y \
-        ffmpeg-devel \
-        ncurses-devel \
-        pulseaudio-libs-devel \
-        libxml2-devel \
-        libcurl-devel \
-        libpng-devel \
-        libjpeg-turbo-devel \
-        dbus-devel \
-        sqlite-devel \
-        zlib-devel && \
-    dnf clean all
+# FFmpeg 静态库；EL7 用 devtoolset-11 以获得足够新的 C 工具链。
+RUN if [ "$EL_VERSION" = "7" ]; then . /opt/rh/devtoolset-11/enable; fi; \
+    tar -xzf /tmp/ffmpeg.tar.gz -C /tmp && \
+    cd /tmp/ffmpeg-${FFMPEG_VERSION} && \
+    { ./configure \
+        --enable-static --disable-shared \
+        --enable-pic \
+        --disable-programs --disable-doc \
+        --disable-everything \
+        --enable-decoder="mp3*,aac*,flac,vorbis*,opus,wavpack*,wmav*,ape,alac,pcm*,libopus" \
+        --enable-demuxer="mp3,aac,flac,ogg,opus,wav,wv,wma*,ape,alac,mov,m4a,rm,aiff" \
+        --enable-parser="mpegaudio,aac,flac,vorbis,opus" \
+        --enable-protocol="file" \
+        --enable-filter="aresample" \
+        --disable-network --disable-iconv \
+        --disable-libxcb --disable-xlib --disable-zlib --disable-bzlib \
+        --disable-vaapi --disable-vdpau --disable-cuda \
+        --disable-x86asm \
+        --disable-ffplay --disable-ffprobe --disable-ffmpeg \
+      || { echo "=== ffbuild/config.log (tail) ==="; tail -n 120 ffbuild/config.log; exit 1; }; } && \
+    make -j"$(nproc)" && \
+    make install && \
+    rm -rf /tmp/ffmpeg-${FFMPEG_VERSION} /tmp/ffmpeg.tar.gz
 
 WORKDIR /workspace

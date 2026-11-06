@@ -17,14 +17,17 @@ optdepends=('pulseaudio: PulseAudio audio output'
             'alsa-lib: ALSA audio output'
             'libpipewire: PipeWire audio output'
             'dbus: MPRIS media session integration')
-makedepends=('cmake' 'make' 'gcc' 'git' 'pkg-config')
-source=("ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#tag=v$pkgver")
+makedepends=('cmake' 'make' 'gcc' 'git' 'pkgconf')
+
+# 不依赖 git tag：固定 commit，发布时人工更新 _commit。
+_commit=675bbb4172fc5f7b26d4488953256ee401c2f9f6
+source=("ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#commit=$_commit")
 sha256sums=('SKIP')
 
 prepare() {
   cd "$srcdir/ter-music"
-  # Arch ncurses 包提供 <ncurses.h>，无 ncursesw 子目录
-  find . \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|<ncursesw/ncurses.h>|<ncurses.h>|g' {} +
+  # Arch ncurses 包把头文件直接装在 /usr/include，无 ncursesw 子目录
+  find . \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|ncursesw/||g' {} +
 }
 
 build() {
@@ -33,31 +36,18 @@ build() {
   cd build
   cmake .. \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=Release \
+    -DTER_MUSIC_VERSION="$pkgver"
   make
+}
+
+check() {
+  cd "$srcdir/ter-music"
+  ./build/ter-music --help >/dev/null
+  ./build/ter-music version | grep -q "$pkgver"
 }
 
 package() {
   cd "$srcdir/ter-music"
-  # binary
-  install -Dm755 build/ter-music "$pkgdir/usr/bin/ter-music"
-  # help
-  install -Dm644 data/help/help-quickstart-zh_CN.txt "$pkgdir/usr/share/ter-music/help/help-quickstart-zh_CN.txt"
-  install -Dm644 data/help/help-quickstart-en_US.txt "$pkgdir/usr/share/ter-music/help/help-quickstart-en_US.txt"
-  install -Dm644 data/help/help-quickstart-zh-PQ.txt "$pkgdir/usr/share/ter-music/help/help-quickstart-zh-PQ.txt"
-  # layouts
-  install -Dm644 data/layouts/layouts.json "$pkgdir/usr/share/ter-music/layouts/layouts.json"
-  # i18n
-  install -Dm644 data/lang/zh_CN.xml "$pkgdir/usr/share/ter-music/lang/zh_CN.xml"
-  install -Dm644 data/lang/en_US.xml "$pkgdir/usr/share/ter-music/lang/en_US.xml"
-  install -Dm644 data/lang/zh-PQ.xml "$pkgdir/usr/share/ter-music/lang/zh-PQ.xml"
-  # desktop entry
-  install -Dm644 data/applications/ter-music.desktop "$pkgdir/usr/share/applications/ter-music.desktop"
-  # icons (XDG hicolor theme)
-  for s in 32x32 48x48 128x128 scalable; do
-    ext=png
-    [ "$s" = "scalable" ] && ext=svg
-    install -Dm644 "resources/icons/hicolor/$s/apps/ter-music.$ext" \
-      "$pkgdir/usr/share/icons/hicolor/$s/apps/ter-music.$ext"
-  done
+  DESTDIR="$pkgdir" cmake --install build
 }
