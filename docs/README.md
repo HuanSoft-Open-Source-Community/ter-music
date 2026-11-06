@@ -34,7 +34,7 @@ Ter-Music is a lightweight, terminal-based command-line music player designed fo
 - 🎼 **CUE Split-track Support**: CUE sheet parsing for FLAC/APE/WV, with auto-detect encoding (GBK/BIG5/Shift-JIS)
 - 📝 **LRC Lyrics Synchronization**: Automatically loads and synchronizes lyrics, highlights the current line and, when the LRC carries timing, lights up each character karaoke-style (per-character tags, line start/end tags, or interpolation between consecutive line timestamps); **embedded lyrics** (FFmpeg/APE) take priority over external .lrc files. Switch between embedded/external sources in lyric seek mode (Ctrl+L → Tab)
 - 🎛️ **10-band Graphic Equalizer**: ISO frequencies (31Hz-16kHz) with biquad IIR DSP, ±12dB range, visual bar UI in settings, with **EQ presets** and **soft-clip** support
-- 🎤 **Karaoke Mode (vocal removal)**: Three levels — off, soft (a faint centre vocal is kept) and full. Band-limited centre cancellation: the mid channel is split by a 4th-order Butterworth crossover (24 dB/oct, 180 Hz / 6 kHz) and only the band between the two corners is subtracted, so the bass and the airy top end of the accompaniment stay intact instead of being phase-cancelled. Stereo only — mono tracks are passed through bit-exactly. Available in the main controls pane (pop-up), Settings → Playback, the CLI (`ter-music karaoke`) and D-Bus (`Control.SetKaraoke`). Not to be confused with the *karaoke-style* per-character lyric highlighting above, or with the `karaoke` layout preset (a lyrics-first arrangement)
+- 🎤 **Karaoke Mode (vocal removal)**: Three levels — off, soft (a faint centre vocal is kept) and full. Band-limited centre cancellation with a similarity gate: a 4th-order Butterworth crossover (24 dB/oct, 200 Hz / 5 kHz) carves the band out of the mid channel, so bass and the airy top end of the accompaniment are never touched, and a 1 kHz half-band split feeds 15 ms envelope detectors that compare mid against side: where the band lives in the stereo field (decorrelated pads, strings, cymbals) the cancellation fades to zero, so pure accompaniment passages now stay at 0 dB instead of being dragged down; the gate takes the stronger evidence of the two half-bands, so a centred vocal keeps its full removal depth even when accompaniment plays at the same time. Level changes ramp the cancellation coefficient over a 30 ms exponential curve (no hard step) and switch to bit-exact passthrough only once a fade to zero has completed; a level change issued via CLI/D-Bus becomes audible within the output backlog — under about 0.4 s on PipeWire at the default latency (the old build could lag ~3 s there). Stereo only — mono tracks are passed through bit-exactly. Available in the main controls pane (pop-up), Settings → Playback, the CLI (`ter-music karaoke`) and D-Bus (`Control.SetKaraoke`). Not to be confused with the *karaoke-style* per-character lyric highlighting above, or with the `karaoke` layout preset (a lyrics-first arrangement)
 - 🎶 **17 Playback Modes**: From basic (Sequential, Single Repeat, List Repeat, Shuffle) to advanced (Folder/Album/Artist-based variants)
 - ⚡ **Playback Speed Control**: Supports 0.75x, 1.0x, 1.25x, 1.5x, 2.0x, 3.0x speed adjustment for efficient listening
 - 📚 **Music Library**: SQLite-backed music library with FTS5 full-text search, **recursive directory scan**, browse by artist/album/genre, incremental tracking
@@ -77,7 +77,7 @@ Ter-Music follows the **simple, efficient, native** design philosophy:
 | 🔧 **CMake Build**: Modern build system, good cross-platform compatibility | <br /> |
 | 🔊 **Audio Backend**: Supports PipeWire, PulseAudio and ALSA output. Auto mode probes each candidate at startup (PipeWire > Pulse > ALSA — service connectable, or for ALSA: the default device really opens and configures); a backend whose probe fails is neither auto-selected nor listed in Settings. If the chosen backend cannot open the stream at play time, the core re-probes the remaining candidates and falls back, announcing the switch in the status line | <br /> |
 | 🎛️ **10-band Equalizer**: ISO graphic equalizer with visual bar chart UI in settings | <br /> |
-| 🎤 **Karaoke Mode**: Three-level vocal removal (off / soft / full) by band-limited centre cancellation; stereo only, accompaniment kept; controls pop-up, Settings → Playback, `ter-music karaoke`, `Control.SetKaraoke` | <br /> |
+| 🎤 **Karaoke Mode**: Three-level vocal removal (off / soft / full) by band-limited, similarity-gated centre cancellation; stereo only, stereo-field accompaniment kept; smooth ramps on level change; controls pop-up, Settings → Playback, `ter-music karaoke`, `Control.SetKaraoke` | <br /> |
 | ⏩ **Playback Speed Control**: 6 levels of speed adjustment (0.75x-3.0x), switchable during playback | <br /> |
 | 📊 **Info Pane**: Displays state/mode, current-track metadata, sample rate, bit depth, bitrate and codec | <br /> |
 | 🌐 **Remote Playback**: SMB/SFTP/FTP/WebDAV/HTTP sources, browsed and downloaded by the front end into a local cache | <br /> |
@@ -418,7 +418,7 @@ path in its own process and delivers the resulting queue to the core.
 | `volume [0-100\|+N\|-N]` | Query or set volume |
 | `speed [0.5-3.0]` | Query or set playback speed |
 | `mode [NAME\|0-16]` | Query or set the play mode (stable names such as `list_repeat`, `folder_shuffle_repeat`) |
-| `karaoke [off\|soft\|full\|0-2\|cycle]` | Query or set the karaoke vocal-removal level (`cycle` steps 0→1→2→0); stereo only, the accompaniment is kept |
+| `karaoke [off\|soft\|full\|0-2\|cycle]` | Query or set the karaoke vocal-removal level (`cycle` steps 0→1→2→0); stereo only; the level is echoed back immediately and applied along a 30 ms ramp, stereo-spread accompaniment being gated out |
 | `show [OPTIONS]` | Print the current info block (basic info / text cover / progress / two lyric lines) |
 | `queue list [--offset N] [--count N]` / `queue clear` / `queue shuffle` / `queue remove <pos>` / `queue append <path>[,<path>...]` / `queue insert <pos> <path>` | Inspect or edit the live queue held by the core |
 | `config get [KEY]` / `config set <KEY> <VALUE>` / `config reload` / `config reset --yes` | Read or change the core configuration (keys are `config.xml` names; `reset` requires `--yes`) |
@@ -496,7 +496,7 @@ ter-music seek +10
 ter-music volume +5
 ter-music mode shuffle_repeat
 ter-music karaoke soft    # keep a faint centre vocal (level 1)
-ter-music karaoke full    # remove it as far as possible (level 2), accompaniment unchanged
+ter-music karaoke full    # remove it as far as possible (level 2), stereo-spread accompaniment untouched
 
 # Background daemon management
 ter-music daemon start --open ~/Music
@@ -1023,24 +1023,39 @@ never changes.
 | Level | Config value | What it does |
 | ----- | ------------ | ------------ |
 | Off | `0` | No processing at all — the buffer is passed through unchanged |
-| Soft | `1` | Subtracts about 60 % of the centre band, so a faint vocal remains |
-| Full | `2` | Subtracts the centre band completely (the vocal is as gone as this method allows) |
+| Soft | `1` | Subtracts about 60 % of the *gated* centre band, so a faint vocal remains |
+| Full | `2` | Subtracts the gated centre band completely (the vocal is as gone as this method allows) |
 
-**How it works** (band-limited centre cancellation):
+**How it works** (band-limited, similarity-gated centre cancellation):
 
 1. The mid channel `m = (L + R) / 2` is split by two 4th-order Butterworth sections
-   (24 dB/octave): a low-pass at 180 Hz and a high-pass at 6 kHz.
-2. Only the band between those corners — where a lead vocal mainly lives — is taken
-   away from the mid: `m' = m - α · (m - lo - hi)`, with α = 0 / 0.6 / 1.0 for the three levels.
-3. The side channel `d = (L - R) / 2` is untouched and the stereo pair is rebuilt as
+   (24 dB/octave): a low-pass at 200 Hz and a high-pass at 5 kHz. Only the band
+   between those corners — where a lead vocal mainly lives — can be taken away, so
+   bass and the airy top end are never touched: `band = m - lo - hi`.
+2. A similarity gate protects the accompaniment. The same filter chain also runs on
+   the side channel `d = (L - R) / 2`, and each of `band` and `band_d` is split into
+   two half-bands at 1 kHz. 15 ms envelope followers compare them: when a half-band
+   is strong in the side channel and weak in the mid (`r = e_d / e_m ≥ 0.8`) the
+   content is stereo-spread — pads, strings, wide synths — and the gate closes to 0;
+   when it is centred (`r ≤ 0.45`) the gate is fully open; in between it tapers
+   linearly. The two half-band gates are combined by taking the stronger one, and the
+   cancellation subtracts `m' = m - α · g · band` (α = 0 / 0.6 / 1.0 per level).
+3. The side channel itself is untouched and the stereo pair is rebuilt as
    `L' = m' + d`, `R' = m' - d`.
 
-Keeping the bass and the top end intact is the point of the band limit: subtracting
-the whole mid channel would thin out the low end and cymbals too. When the level
-changes while playing, α ramps over 30 ms instead of jumping, so no click is
-audible; the two crossover delay lines are re-primed from the current signal at the
-same moment, and the output is soft-limited only when a sample would exceed the
-digital full scale.
+Keeping the bass and the top end intact is the point of the band limit, and the gate
+is the point of the half-band split: subtracting an *ungated* band drags decorrelated
+accompaniment down by up to ~3.5 dB even when nothing centred is playing; gated,
+those passages now stay at 0 dB. When the level changes while playing, α ramps over
+30 ms instead of jumping, so no click is audible; entering a level starts from α = 0
+with the detectors and crossover states cleared, and returning to Off rides the same
+curve down to zero before the DSP fast-passthrough re-engages (bit-exact once α
+reaches 0). The request is published by `SetKaraoke` on the caller's thread and
+consumed by the playback thread at the head of the next write batch, and the PipeWire
+output is now paced so its backlog stays within a clamped window (about 0.4–1.2 s
+depending on the negotiated quantum, ≈0.4 s by default) — previously the 1 MB ring
+could sit ~3 s ahead, which is what made level changes feel delayed. The output is
+soft-limited only when a sample would exceed the digital full scale.
 
 **Limitations, stated plainly:**
 
@@ -1048,7 +1063,12 @@ digital full scale.
   passed through bit-exactly (`output_channels == 1` never touches the DSP path).
 - Anything panned centre is removed *with* the vocal — a centred bass drum, a snare,
   or a mono-panned guitar. This is inherent to the method, not a bug to fix.
-- Doubled or wide-panned vocals survive, because they are not in the mid channel.
+- When a centred vocal and stereo accompaniment share the same half-band, the gate is
+  open for the vocal and the accompaniment there is cancelled along with it (typically
+  a few dB); purely accompaniment-only passages are the ones the gate rescues.
+- The flip side: vocals that are themselves doubled or stereo-spread look like
+  accompaniment to the detector and survive more than before. Doubled or wide-panned
+  vocals were never in the mid channel to begin with.
 - The DSP runs on the decoded samples before the equalizer, so EQ, spectrum and
   visualiser all reflect the karaoke output.
 
@@ -1061,6 +1081,8 @@ digital full scale.
 - CLI: `ter-music karaoke` to query, `ter-music karaoke soft` (or `full`/`off`/`1`/`cycle`) to set.
 - D-Bus: `Control.SetKaraoke` / `Control.GetKaraoke`, or `Config.Set` with
   `preferences.karaoke_mode` (`api_version` 6; the namespace moved at 7).
+  `GetKaraoke` and the CLI echo report the requested level immediately — the DSP
+  catches up along the ramp described above.
 - The level is persisted in `config.xml` as `<karaoke_mode>` and is restored on the
   next start. Values outside 0–2 clamp back to Off.
 
