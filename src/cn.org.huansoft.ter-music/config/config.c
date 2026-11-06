@@ -17,8 +17,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <libxml/parser.h>
-#include <libxml/tree.h>
+#include "util/xml_compat.h"
 
 #include "types.h"
 #include "config/config.h"
@@ -434,9 +433,9 @@ int config_validate_xml(const char *path)
         return -1;
     }
 
-    if (xmlStrcmp(root->name, (const xmlChar *)XML_ROOT) != 0) {
+    if (xmlStrcmp(tm_xml_node_name(root), (const xmlChar *)XML_ROOT) != 0) {
         log_error("config_xml", "Unexpected root element '%s', expected '%s'",
-                  (const char *)root->name, XML_ROOT);
+                  (const char *)tm_xml_node_name(root), XML_ROOT);
         xmlFreeDoc(doc);
         return -1;
     }
@@ -724,9 +723,9 @@ static int legacy_connections_export(const char *config_path)
     xmlNodePtr conns = xmlNewChild(out_root, NULL, (const xmlChar *)REMOTE_SECTION_CONNS, NULL);
 
     int moved = 0;
-    for (xmlNodePtr child = legacy->children; child; child = child->next) {
-        if (child->type != XML_ELEMENT_NODE ||
-            xmlStrcmp(child->name, (const xmlChar *)XML_REMOTE_CONN) != 0) {
+    for (xmlNodePtr child = tm_xml_first_element_child(legacy);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child), (const xmlChar *)XML_REMOTE_CONN) != 0) {
             continue;
         }
         if (moved >= LEGACY_REMOTE_MAX) {
@@ -774,7 +773,7 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
     }
 
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    if (!root || xmlStrcmp(root->name, (const xmlChar *)XML_ROOT) != 0) {
+    if (!root || xmlStrcmp(tm_xml_node_name(root), (const xmlChar *)XML_ROOT) != 0) {
         log_error("config_xml", "Invalid root element in '%s'", path);
         xmlFreeDoc(doc);
         return -1;
@@ -897,9 +896,10 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
             cfg->eq_preamp  = xml_get_int(eq, XML_EQ_PREAMP, 0);
             memset(cfg->eq_band_gains, 0, sizeof(cfg->eq_band_gains));
 
-            for (xmlNodePtr child = eq->children; child; child = child->next) {
-                if (child->type == XML_ELEMENT_NODE &&
-                    xmlStrcmp(child->name, (const xmlChar *)XML_EQ_BAND) == 0) {
+            for (xmlNodePtr child = tm_xml_first_element_child(eq);
+                 child; child = tm_xml_next_element_sibling(child)) {
+                if (xmlStrcmp(tm_xml_node_name(child),
+                              (const xmlChar *)XML_EQ_BAND) == 0) {
                     xmlChar *freq_attr = xmlGetProp(child,
                                         (const xmlChar *)XML_ATTR_BAND_FREQUENCY);
                     xmlChar *content = xmlNodeGetContent(child);
@@ -926,9 +926,10 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         xmlNodePtr bindings = xml_find_child(root, XML_SECTION_KEYBINDINGS);
         if (bindings) {
             int accepted = 0;
-            for (xmlNodePtr child = bindings->children; child; child = child->next) {
-                if (child->type != XML_ELEMENT_NODE ||
-                    xmlStrcmp(child->name, (const xmlChar *)XML_BINDING) != 0) {
+            for (xmlNodePtr child = tm_xml_first_element_child(bindings);
+                 child; child = tm_xml_next_element_sibling(child)) {
+                if (xmlStrcmp(tm_xml_node_name(child),
+                              (const xmlChar *)XML_BINDING) != 0) {
                     continue;
                 }
                 if (accepted >= MAX_KEYBINDING_OVERRIDES) {
@@ -1027,7 +1028,7 @@ int config_load_raw_keybindings(const char *path, KeyBindingOverride *out, int m
     }
 
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    if (!root || xmlStrcmp(root->name, (const xmlChar *)XML_ROOT) != 0) {
+    if (!root || xmlStrcmp(tm_xml_node_name(root), (const xmlChar *)XML_ROOT) != 0) {
         if (err && err_size > 0) {
             snprintf(err, err_size, "invalid root element in '%s'", path);
         }
@@ -1042,9 +1043,10 @@ int config_load_raw_keybindings(const char *path, KeyBindingOverride *out, int m
     }
 
     int count = 0;
-    for (xmlNodePtr child = bindings->children; child; child = child->next) {
-        if (child->type != XML_ELEMENT_NODE ||
-            xmlStrcmp(child->name, (const xmlChar *)XML_BINDING) != 0) {
+    for (xmlNodePtr child = tm_xml_first_element_child(bindings);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child),
+                      (const xmlChar *)XML_BINDING) != 0) {
             continue;
         }
         if (count >= max) {
@@ -1076,46 +1078,40 @@ int config_load_raw_keybindings(const char *path, KeyBindingOverride *out, int m
 
 static xmlNodePtr xml_find_child(const xmlNode *parent, const char *name)
 {
-    xmlNodePtr child = parent->children;
-    while (child) {
-        if (child->type == XML_ELEMENT_NODE &&
-            xmlStrcmp(child->name, (const xmlChar *)name) == 0)
+    for (xmlNodePtr child = tm_xml_first_element_child(parent);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child), (const xmlChar *)name) == 0)
             return child;
-        child = child->next;
     }
     return NULL;
 }
 
 static int xml_get_int(const xmlNode *parent, const char *name, int def)
 {
-    xmlNodePtr child = parent->children;
-    while (child) {
-        if (child->type == XML_ELEMENT_NODE &&
-            xmlStrcmp(child->name, (const xmlChar *)name) == 0) {
+    for (xmlNodePtr child = tm_xml_first_element_child(parent);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child), (const xmlChar *)name) == 0) {
             xmlChar *content = xmlNodeGetContent(child);
             if (!content) return def;
             int val = atoi((const char *)content);
             xmlFree(content);
             return val;
         }
-        child = child->next;
     }
     return def;
 }
 
 static float xml_get_float(const xmlNode *parent, const char *name, float def)
 {
-    xmlNodePtr child = parent->children;
-    while (child) {
-        if (child->type == XML_ELEMENT_NODE &&
-            xmlStrcmp(child->name, (const xmlChar *)name) == 0) {
+    for (xmlNodePtr child = tm_xml_first_element_child(parent);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child), (const xmlChar *)name) == 0) {
             xmlChar *content = xmlNodeGetContent(child);
             if (!content) return def;
             float val = (float)atof((const char *)content);
             xmlFree(content);
             return val;
         }
-        child = child->next;
     }
     return def;
 }
@@ -1125,10 +1121,9 @@ static void xml_get_string(const xmlNode *parent, const char *name,
 {
     if (!out || out_size == 0) return;
 
-    xmlNodePtr child = parent->children;
-    while (child) {
-        if (child->type == XML_ELEMENT_NODE &&
-            xmlStrcmp(child->name, (const xmlChar *)name) == 0) {
+    for (xmlNodePtr child = tm_xml_first_element_child(parent);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child), (const xmlChar *)name) == 0) {
             xmlChar *content = xmlNodeGetContent(child);
             if (content) {
                 strncpy(out, (const char *)content, out_size - 1);
@@ -1137,7 +1132,6 @@ static void xml_get_string(const xmlNode *parent, const char *name,
             }
             return;
         }
-        child = child->next;
     }
 
     /* Not found: ensure null-terminated empty */

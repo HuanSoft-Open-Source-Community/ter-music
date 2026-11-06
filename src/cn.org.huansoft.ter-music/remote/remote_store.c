@@ -16,8 +16,7 @@
 #include "config/schema.h"
 #include "logger/logger.h"
 
-#include <libxml/parser.h>
-#include <libxml/tree.h>
+#include "util/xml_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,9 +47,9 @@ static xmlNodePtr store_find_child(xmlNodePtr parent, const char *name)
     if (!parent || !name) {
         return NULL;
     }
-    for (xmlNodePtr child = parent->children; child; child = child->next) {
-        if (child->type == XML_ELEMENT_NODE &&
-            xmlStrcmp(child->name, (const xmlChar *)name) == 0) {
+    for (xmlNodePtr child = tm_xml_first_element_child(parent);
+         child; child = tm_xml_next_element_sibling(child)) {
+        if (xmlStrcmp(tm_xml_node_name(child), (const xmlChar *)name) == 0) {
             return child;
         }
     }
@@ -143,9 +142,11 @@ int remote_store_load(void)
     xmlNodePtr conns = root ? store_find_child(root, REMOTE_SECTION_CONNS) : NULL;
     if (conns) {
         int index = 0;
-        for (xmlNodePtr node = conns->children; node && index < MAX_REMOTE_CONNECTIONS; node = node->next) {
-            if (node->type != XML_ELEMENT_NODE ||
-                xmlStrcmp(node->name, (const xmlChar *)XML_REMOTE_CONN) != 0) {
+        for (xmlNodePtr node = tm_xml_first_element_child(conns);
+             node && index < MAX_REMOTE_CONNECTIONS;
+             node = tm_xml_next_element_sibling(node)) {
+            if (xmlStrcmp(tm_xml_node_name(node),
+                          (const xmlChar *)XML_REMOTE_CONN) != 0) {
                 continue;
             }
             RemoteConnectionConfig *conn = &g_store.conns[index];

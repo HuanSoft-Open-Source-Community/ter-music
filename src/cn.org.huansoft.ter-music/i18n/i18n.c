@@ -14,8 +14,7 @@
 #include "config/config.h"
 #include "logger/logger.h"
 
-#include <libxml/parser.h>
-#include <libxml/tree.h>
+#include "util/xml_compat.h"
 
 #include <zlib.h>
 
@@ -164,7 +163,7 @@ static int i18n_parse_xml(I18nEntry **table, const char *path, char *lang_name_o
     }
 
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    if (!root || strcmp((const char *)root->name, "lang") != 0) {
+    if (!root || strcmp((const char *)tm_xml_node_name(root), "lang") != 0) {
         log_error("i18n", "Missing <lang> root in %s", path);
         xmlFreeDoc(doc);
         return -1;
@@ -179,9 +178,9 @@ static int i18n_parse_xml(I18nEntry **table, const char *path, char *lang_name_o
     }
 
     /* Iterate <string key="..." >value</string> */
-    for (xmlNodePtr node = root->children; node; node = node->next) {
-        if (node->type != XML_ELEMENT_NODE) continue;
-        if (strcmp((const char *)node->name, "string") != 0) continue;
+    for (xmlNodePtr node = tm_xml_first_element_child(root);
+         node; node = tm_xml_next_element_sibling(node)) {
+        if (strcmp((const char *)tm_xml_node_name(node), "string") != 0) continue;
 
         xmlChar *key = xmlGetProp(node, (const xmlChar *)"key");
         if (!key) continue;
@@ -409,7 +408,7 @@ static int tar_extract_lang_id(const unsigned char *data, size_t size,
     xmlDocPtr doc = xmlReadMemory((const char *)data, (int)size, NULL, NULL, 0);
     if (!doc) return -1;
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    if (!root || strcmp((const char *)root->name, "lang") != 0) {
+    if (!root || strcmp((const char *)tm_xml_node_name(root), "lang") != 0) {
         xmlFreeDoc(doc);
         return -1;
     }
@@ -633,7 +632,7 @@ int i18n_add_language(const char *source_path)
         return -1;
     }
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    if (!root || strcmp((const char *)root->name, "lang") != 0) {
+    if (!root || strcmp((const char *)tm_xml_node_name(root), "lang") != 0) {
         log_error("i18n", "Missing <lang> root in tar.gz lang.xml");
         xmlFreeDoc(doc);
         rmdir_safe(tmp_dir);
@@ -790,15 +789,15 @@ double i18n_coverage(const char *lang_id)
     if (!doc) return -1.0;
 
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    if (!root || strcmp((const char *)root->name, "lang") != 0) {
+    if (!root || strcmp((const char *)tm_xml_node_name(root), "lang") != 0) {
         xmlFreeDoc(doc);
         return -1.0;
     }
 
     int matched = 0;
-    for (xmlNodePtr node = root->children; node; node = node->next) {
-        if (node->type != XML_ELEMENT_NODE) continue;
-        if (strcmp((const char *)node->name, "string") != 0) continue;
+    for (xmlNodePtr node = tm_xml_first_element_child(root);
+         node; node = tm_xml_next_element_sibling(node)) {
+        if (strcmp((const char *)tm_xml_node_name(node), "string") != 0) continue;
 
         xmlChar *key = xmlGetProp(node, (const xmlChar *)"key");
         if (!key) continue;

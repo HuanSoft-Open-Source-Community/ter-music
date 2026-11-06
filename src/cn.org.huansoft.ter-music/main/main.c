@@ -22,6 +22,7 @@
 #include "cli/lang.h"
 #include "core/core.h"
 #include "player/player.h"
+#include "util/xml_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,6 +168,15 @@ static void push_content_to_core(void)
 }
 
 int main(int argc, char *argv[]) {
+    /* libxml2 通过 dlopen 加载：先探 .so.2，再探 .so.16。
+     * 配置、语言包、远程列表都依赖它，缺失时尽早给出明确错误。 */
+    if (tm_xml_load() != 0) {
+        fprintf(stderr,
+                "%s: libxml2 runtime not found "
+                "(tried libxml2.so.2, libxml2.so.16)\n", APP_NAME);
+        return 1;
+    }
+
     /* --lang 可写在任意位置（含命令之前），必须先于 CLI 命令判断剥离。 */
     cli_lang_extract_option(&argc, argv);
 

@@ -7,6 +7,13 @@ set(TER_MUSIC_APP_ID "cn.org.huansoft.ter-music")
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# 包版本覆盖：打包脚本用 -DTER_MUSIC_VERSION=<版本> 注入，让二进制内的
+# APP_VERSION 与包版本一致；普通开发构建回退到 project() 的 VERSION。
+set(TER_MUSIC_VERSION "" CACHE STRING "Package version override for APP_VERSION")
+if(NOT TER_MUSIC_VERSION)
+    set(TER_MUSIC_VERSION "${PROJECT_VERSION}")
+endif()
+
 # 静态链接选项（仅将 FFmpeg 库静态链接，其他库动态链接）
 # FFmpeg 的 soname 在不同 EL 版本间不同，是跨版本兼容的主要障碍。
 # 其他库（ncurses、libcurl、libpng、libjpeg、pulse）的 soname
@@ -204,6 +211,7 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/app/open.c
     src/cn.org.huansoft.ter-music/util/json.c
     src/cn.org.huansoft.ter-music/util/keyname.c
+    src/cn.org.huansoft.ter-music/util/xml_compat.c
     src/cn.org.huansoft.ter-music/keymap/actions.c
     src/cn.org.huansoft.ter-music/ui/keymap.c
     src/cn.org.huansoft.ter-music/remote/remote.c
@@ -250,6 +258,8 @@ else()
 endif()
 
 # 链接库
+# libxml2 由 util/xml_compat.c 在运行期 dlopen（libxml2.so.2 / libxml2.so.16），
+# 这里刻意不链接 ${LIBXML2_LIBRARIES}，避免 DT_NEEDED 写死某个 soname。
 target_link_libraries(${PROJECT_NAME}
     ${AVCODEC_LIBRARIES}
     ${AVFORMAT_LIBRARIES}
@@ -260,7 +270,6 @@ target_link_libraries(${PROJECT_NAME}
     ${PNG_LIBRARIES}
     ${JPEG_LIBRARIES}
     ${NCURSESW_LIBRARY}
-    ${LIBXML2_LIBRARIES}
     ${SQLITE3_LIBRARIES}
     ${ZLIB_LIBRARIES}
     m
@@ -299,6 +308,7 @@ endif()
 set(TER_MUSIC_DATA_DIR "${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}")
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     _GNU_SOURCE
+    APP_VERSION="v${TER_MUSIC_VERSION}"
     TER_MUSIC_DATA_DIR="${TER_MUSIC_DATA_DIR}"
     TER_MUSIC_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
