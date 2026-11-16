@@ -13,6 +13,7 @@
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/menu_anim.h"
 #include "ui/keymap.h"
 #include "ui/scrollbar.h"
 #include "search/search.h"
@@ -188,6 +189,8 @@ static void help_search_redraw(const MenuContentArea *area, int row,
 
 static void help_search_prompt(void)
 {
+    /* 模态输入接管屏幕：先收掉右键菜单退场 ghost，避免它压在提示行上。 */
+    ui_menu_anim_cancel_all(1);
     curs_set(1);
 
     MenuContentArea area;

@@ -11,6 +11,7 @@
 #include "ui/ui.h"
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
+#include "ui/menu_anim.h"
 #include "ui/keymap.h"
 #include "ui/scrollbar.h"
 #include "config/config.h"
@@ -79,6 +80,8 @@ static int lang_prompt_path(char *buf, size_t size)
     int y = area.max_y - 4;
     const char *prompt = i18n_get("lang_mgr.add_prompt");
 
+    /* 模态输入接管屏幕：先收掉右键菜单退场 ghost，避免它压在提示行上。 */
+    ui_menu_anim_cancel_all(1);
     curs_set(1);
     lang_prompt_redraw(&area, y, prompt, "");
 

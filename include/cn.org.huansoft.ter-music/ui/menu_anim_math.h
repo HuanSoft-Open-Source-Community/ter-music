@@ -3,7 +3,8 @@
  * @brief 菜单入场/消失动画的纯数学层（不依赖 ncurses）
  *
  * 只负责"从哪个屏幕格滑到哪个屏幕格、每毫秒滑到哪、终端能力不够时
- * 退到哪一档"，窗口移动/合成/ghost 生命周期归 ui/menu_anim.c。
+ * 退到哪一档、ghost 按层怎么排"，窗口移动/合成/ghost 生命周期归
+ * ui/menu_anim.c。
  * 因为没有 ncurses 依赖，这份推导由 scripts/test/test_menu_anim_math.c
  * 做穷举断言。
  *
@@ -83,6 +84,19 @@ void ui_menu_anim_position(const UIMenuAnimPlan *plan, unsigned elapsed_ms,
  */
 UIMenuAnimTier ui_menu_anim_tier_after_frame(UIMenuAnimTier tier,
                                              unsigned avg_frame_cost_ms);
+
+/**
+ * @brief 计算 ghost 的 z 序：按 layer 升序稳定排序。
+ *
+ * 同层保持传入顺序；layer < 0 视为 0。调用方负责提供至少 count 项的
+ * order 数组。参数非法（layers/order 为 NULL 或 count <= 0）返回 0。
+ *
+ * @param layers 每项的层号
+ * @param count  项数
+ * @param order  输出下标数组
+ * @return 实际写入 order 的项数
+ */
+int ui_menu_anim_order_layers(const int *layers, int count, int *order);
 
 #ifdef __cplusplus
 }

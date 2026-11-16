@@ -198,3 +198,29 @@ UIMenuAnimTier ui_menu_anim_tier_after_frame(UIMenuAnimTier tier,
     }
     return tier;
 }
+
+/* 稳定插入排序：同层 ghost 保持登记顺序。ghost 数最多 8 个，O(n^2)
+ * 足够；这里不做堆分配，避免把纯逻辑层拖进内存管理。 */
+int ui_menu_anim_order_layers(const int *layers, int count, int *order)
+{
+    if (!layers || !order || count <= 0) {
+        return 0;
+    }
+
+    for (int i = 0; i < count; i++) {
+        int layer = (layers[i] < 0) ? 0 : layers[i];
+        int pos = i;
+        while (pos > 0) {
+            int prev_layer = (layers[order[pos - 1]] < 0)
+                                 ? 0
+                                 : layers[order[pos - 1]];
+            if (prev_layer <= layer) {
+                break;
+            }
+            order[pos] = order[pos - 1];
+            pos--;
+        }
+        order[pos] = i;
+    }
+    return count;
+}
