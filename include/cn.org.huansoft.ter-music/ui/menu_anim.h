@@ -7,9 +7,14 @@
  *   - 进入动画只借用菜单自己的窗口（mvwin），不复制；
  *   - 消失动画用 dupwin() 复制一份 ghost 后由本模块持有，调用方可以立即
  *     销毁原窗口；ghost 到期/取消时由本模块 delwin；
- *   - 每帧按 z 序重新压入所有可见层，保证移动中的菜单不会留下旧像素；
+ *   - 每帧按 z 序重新压入所有可见层（ghost 按 layer 升序稳定排序，
+ *     根菜单在底、子菜单在上），保证移动中的菜单不会留下旧像素；
+ *     位移帧只重绘 old_rect ∪ new_rect，打开/内容变化才整场合成；
  *     流光模式直接复用 ui_rainbow_paint()，同一帧只做一次 doupdate；
- *   - 能力不足或实测单帧合成过慢时只降不升：FULL → REDUCED → OFF。
+ *   - 能力不足或实测单帧合成过慢时只降不升：FULL → REDUCED → OFF；
+ *     降档立即 snap 当前动画并重合成，不会让本次弹出继续卡完；
+ *     流光激活时默认 REDUCED；TER_MUSIC_MENU_ANIM=full|reduced|off
+ *     可显式覆盖（显式档位不再被帧耗时自动降级）。
  *
  * 所有状态只在 UI 单线程内读写。
  *
@@ -72,9 +77,18 @@ void ui_menu_anim_cancel_all(int repaint);
 /**
  * @brief 立即收尾所有消失动画（输入到达或新 overlay 打开时）。
  *
- * @param repaint 1 = 删除 ghost 后补一帧底层合成
+ * @param repaint 1 = 删除 ghost 后立即补一帧整场合成；
+ *                0 = 只标记待呈现，由下一轮 ui_menu_anim_frame() 补画
  */
 void ui_menu_anim_finish_exits(int repaint);
+
+/**
+ * @brief 请求下一轮事件循环合成一次场景（幂等，不清动画状态）。
+ *
+ * 用于“菜单已打开/内容或选中变化/首帧”这类没有位置变化的场景：
+ * ui_menu_anim_frame() 会做一次 full compose，然后清除请求。
+ */
+void ui_menu_anim_request_frame(void);
 
 /** @brief 是否有进行中的进入/消失动画（SETTLED 不算）。 */
 int ui_menu_anim_active(void);
@@ -83,10 +97,13 @@ int ui_menu_anim_active(void);
 int ui_menu_anim_exit_active(void);
 
 /**
- * @brief 推进一帧并合成（仅在位置变化/ghost 删除时真正 doupdate）。
+ * @brief 推进一帧并合成（仅在位置变化/ghost 删除/有请求帧时 doupdate）。
+ *
+ * 动画帧优先只重绘 old_rect ∪ new_rect；打开/内容变化/首帧用整场合成。
+ * 每轮至多一次 doupdate，避免同拍多次刷新造成可见闪烁。
  *
  * @return 1 = 本轮由本模块处理（调用方不要再跑普通流光合成）；
- *         0 = 没有活动动画（调用方照常 ui_rainbow_paint()）。
+ *         0 = 没有活动动画且无待呈现请求（调用方照常 ui_rainbow_paint()）。
  */
 int ui_menu_anim_frame(void);
 

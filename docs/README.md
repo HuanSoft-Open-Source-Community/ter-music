@@ -139,7 +139,7 @@ The TUI needs a real terminal; do not pipe its output. Press `O` to open a folde
 
 The full list is in `F8` and `ter-music keys list`. Rebind actions in Settings → Hotkeys. `F3` is folder history; `h` is the playback-history popup.
 
-Mouse: left click selects and activates, the wheel scrolls, and right click opens a context menu. Middle click opens the same menu on terminals that intercept right click. The layout follows terminal resizes.
+Mouse: left click selects and activates, the wheel scrolls, and right click opens a context menu. Middle click opens the same menu on terminals that intercept right click. Menu slide animations compose one frame per movement and degrade or switch off on slow terminals and in Aurora Flow; input is handled without waiting for an animation to finish. Force the tier with `TER_MUSIC_MENU_ANIM=full|reduced|off` (default auto). The layout follows terminal resizes.
 
 ## CLI
 

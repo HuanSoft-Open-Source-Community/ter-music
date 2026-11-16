@@ -21,6 +21,11 @@
 #       提示 stale 且队列数不变；
 #   R15 菜单展开 2 s（动画继续）不自行关闭；
 #   R16 播放中动画窗格刷新时，菜单不被擦除（合成刷新 + 菜单快照）；
+#   R18 快速子菜单往返（pop→down→down→push 在同一读包）：旧 ghost 被
+#       收掉，最终只剩根菜单 + 新子菜单，不残留旧子菜单标题；
+#   R19 右键关闭菜单后 300ms 内无菜单标题残影；
+#   R20 单帧呈现预算：打开后 400ms 内 present ≤ 12，落定后 600ms 无新 present；
+#   R21 Esc 响应：单独 Esc 在 300ms 内关闭菜单（set_escdelay=100ms）；
 #   R16b 修饰左键备选触发（pty 语义）：Ctrl/Alt+左键打开/收起菜单、只开一次、
 #        跨格按下/松开也只开一次、不播放；
 #   R16c 中键备选触发：中键打开/收起菜单、不播放；带修饰的中键被忽略；
@@ -51,7 +56,7 @@ CTL_FILE=""
 TUI_LOG=""
 LOG_FILE=""
 
-usage() { sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 ORIG_ARGS=("$@")
 while [ $# -gt 0 ]; do
@@ -126,6 +131,9 @@ cat > "$CONFIG_DIR/config.xml" <<'EOF'
     <auto_play_on_start>0</auto_play_on_start>
     <resume_last_playback>0</resume_last_playback>
     <ui_language>zh_CN</ui_language>
+    <!-- 测试素材是正弦波，且 R16 会真的开始播放：必须静音，
+         不能打扰开发机上的音乐/游戏/会议。 -->
+    <volume_percent>0</volume_percent>
   </preferences>
 </ter-music-config>
 EOF
@@ -676,6 +684,88 @@ if [ "$(play_name)" = "$playing" ]; then
 else
     bad "菜单期间曲目被切走：$playing → $(play_name)"
 fi
+
+# ── R18 快速子菜单往返 ─────────────────────────────────────────
+info "R18 快速子菜单往返：旧 ghost 不压新菜单"
+right_at 6 3
+mark="$(menu_mark)"
+# 队列管理 → 右进子菜单 → 左退 → 下两格到加入歌单 → 右进新子菜单，
+# 全部一次写入 pty；driver 的 key 指令每条间隔 0.6s，测不出这个竞态。
+printf 'burst:<down><right><left><down><down><right>\n' >> "$CTL_FILE"
+sleep 1.0
+new="$(tail -n +"$((mark + 1))" "$LOG_FILE" 2>/dev/null || true)"
+if printf '%s\n' "$new" | grep -q 'finish-exits deleted=[1-9]'; then
+    ok "push 前已收掉旧子菜单 ghost"
+else
+    bad "push 前没有收掉旧子菜单 ghost"
+fi
+cp "$TUI_LOG" "$WORK_DIR/r18-snap.bin"
+if python3 "$SCRIPT_DIR/vt_grid.py" --cols 100 --rows 30 \
+        --has '╭.*加.*入.*歌.*单' "$WORK_DIR/r18-snap.bin" >/dev/null 2>&1; then
+    ok "最终画面包含新子菜单"
+else
+    bad "最终画面缺少新子菜单"
+fi
+if python3 "$SCRIPT_DIR/vt_grid.py" --cols 100 --rows 30 \
+        --has '╭.*队.*列.*管.*理' "$WORK_DIR/r18-snap.bin" >/dev/null 2>&1; then
+    bad "旧子菜单标题仍残留在最终画面"
+else
+    ok "旧子菜单标题已消失"
+fi
+if python3 "$SCRIPT_DIR/vt_grid.py" --cols 100 --rows 30 \
+        --has '╭.*列.*表.*操.*作' "$WORK_DIR/r18-snap.bin" >/dev/null 2>&1; then
+    ok "根菜单仍完整"
+else
+    bad "根菜单被旧 ghost 擦掉"
+fi
+send "<esc>" 0.9
+
+# ── R19 关闭后无菜单残影 ───────────────────────────────────────
+info "R19 关闭后 300ms 内无菜单标题残影"
+right_at 6 3
+send "<right:6:3>" 0.4
+sleep 0.3
+cp "$TUI_LOG" "$WORK_DIR/r19-snap.bin"
+if python3 "$SCRIPT_DIR/vt_grid.py" --cols 100 --rows 30 \
+        --has '列.*表.*操.*作' "$WORK_DIR/r19-snap.bin" >/dev/null 2>&1; then
+    bad "关闭后仍有菜单标题残影"
+else
+    ok "关闭后菜单标题已消失"
+fi
+sleep 0.3
+
+# ── R20 单帧呈现预算 ───────────────────────────────────────────
+info "R20 打开动画单帧呈现：present 次数与落定后静默"
+present_before="$(log_count '\[menu_anim\] present')"
+right_at 6 3 0.05
+sleep 0.4
+present_after="$(log_count '\[menu_anim\] present')"
+present_count=$((present_after - present_before))
+if [ "$present_count" -ge 1 ] && [ "$present_count" -le 12 ]; then
+    ok "打开 400ms 内 present=$present_count（≤12）"
+else
+    bad "打开 400ms 内 present=$present_count（期望 1..12）"
+fi
+sleep 0.6
+present_idle="$(log_count '\[menu_anim\] present')"
+if [ "$present_idle" -eq "$present_after" ]; then
+    ok "菜单落定后 600ms 内没有额外 present"
+else
+    bad "菜单落定后仍在重复 present：$present_after → $present_idle"
+fi
+
+# ── R21 Esc 响应 ───────────────────────────────────────────────
+info "R21 单独 Esc 在 300ms 内关闭菜单"
+closes_before="$(log_count '\[context_menu\] close')"
+printf 'key:<esc>\n' >> "$CTL_FILE"
+sleep 0.3
+closes_after="$(log_count '\[context_menu\] close')"
+if [ "$closes_after" -gt "$closes_before" ]; then
+    ok "Esc 在 300ms 内产生 close"
+else
+    bad "Esc 300ms 内没有产生 close"
+fi
+sleep 0.4
 
 # ── R16b 修饰左键备选触发（pty 语义） ───────────────────────────
 # 本段只验证 ncurses 层的归一化：Ctrl/Alt+左键被转成右键菜单。

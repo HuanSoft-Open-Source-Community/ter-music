@@ -348,7 +348,10 @@ is too short for every entry.
 A **right click** anywhere in the editor opens the same action menu anchored at
 the pointer instead of a second menu system. It is clamped to the screen exactly
 like the other context menus (flips up/left at the edges, never covers the bottom
-hint row), so every destructive editor operation stays reachable by mouse.
+hint row), so every destructive editor operation stays reachable by mouse. While
+a menu slide animation is running, mouse hit-testing follows the menu's current
+visible rectangle (not its final position), and the animation degrades or stops
+on slow terminals so input does not wait for an animation to finish.
 
 ### Colour panel
 

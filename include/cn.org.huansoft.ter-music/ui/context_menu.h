@@ -11,8 +11,10 @@
  *     已有的 handle_*_action()/execute_global_action()，不合成按键；
  *   - **竞态安全**：执行前先销毁菜单窗口再分发；视图/resize/配置重载/
  *     布局重建同步关闭；行相关操作可携带快照做失配校验；
- *   - **不闪**：与菜单相交的窗格刷新先入虚拟屏，再把菜单各层 backing
- *     压回，最后只 doupdate 一次；终端不会看到菜单被动画擦掉的中间帧。
+ *   - **不闪**：菜单内容只画进各层窗口 backing，不在这里 wrefresh；
+ *     事件循环每轮通过 ui_menu_anim_frame()/ui_rainbow_paint() 只合成一次。
+ *     与菜单相交的窗格刷新先入虚拟屏，再把菜单各层 backing 压回，最后
+ *     只 doupdate 一次；终端不会看到菜单被动画擦掉的中间帧。
  *
  * 本头文件不 include ncurses：窗口访问器返回 void *（与 PopupState 同风格）。
  *
@@ -151,7 +153,12 @@ void ui_context_menu_close_now(int repaint);
 /** @brief 菜单是否处于可交互状态（视图匹配且布局编辑器未激活）。 */
 int ui_context_menu_active(void);
 
-/** @brief 最顶层菜单的屏幕矩形；未激活返回 0。 */
+/**
+ * @brief 最顶层菜单的**当前可见**屏幕矩形；未激活返回 0。
+ *
+ * 入场动画期间窗口会 mvwin 移动，这里量现场窗口而不是落定后的
+ * levels[].rect：鼠标命中必须与用户看到的矩形一致。
+ */
 int ui_context_menu_rect(UIRect *out);
 
 /** @brief 菜单键盘输入：所有键都被消费（未识别键 = 关闭并吞掉）。 */
@@ -162,10 +169,12 @@ int ui_context_menu_handle_mouse(const UIMouseEvent *ev,
                                  const UIMouseDecision *d);
 
 /**
- * @brief 每轮事件循环把菜单重新合成到最上层。
+ * @brief 每轮事件循环消费菜单脏标记并请求一次场景合成。
  *
- * 底层动画/异步重绘会擦掉菜单像素；本函数在激活时逐个 ui_refresh_window()。
- * 发现视图不匹配会自愈关闭。
+ * 只把变化的层画进窗口 backing（不 wrefresh/doupdate），然后调用
+ * ui_menu_anim_request_frame()；真正压屏由事件循环的
+ * ui_menu_anim_frame()/ui_rainbow_paint() 统一完成。发现视图不匹配
+ * 会自愈关闭。
  */
 void ui_context_menu_refresh(void);
 

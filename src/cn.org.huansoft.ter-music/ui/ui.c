@@ -292,6 +292,9 @@ void init_ncurses(void)
     }
     noecho();
     keypad(stdscr, TRUE);
+    /* 单独 Esc 的识别延迟：ncurses 默认约 1s，右键菜单按 Esc 会明显迟滞。
+     * 100ms 足够区分 Esc 与转义序列，也远小于本程序 ESC+数字链的 3s 窗口。 */
+    set_escdelay(100);
     /* 鼠标上报：主键点击（单击/双击/三击/release，均归一成一次点击）+
      * 中键点击 + 右键按下 + 滚轮。
      * 滚轮在 xterm 协议里只有 BUTTON4/BUTTON5_PRESSED（无 release 语义），
@@ -1218,8 +1221,8 @@ int handle_main_action(ActionId action)
     return 1;
 }
 
-/* 一帧呈现：菜单动画激活时由动画模块统一合成（流光模式在内部走
- * ui_rainbow_paint 且包含 ghost），否则保持原来的流光合成路径。 */
+/* 一帧呈现：有动画/菜单待呈现请求时由动画模块统一合成（流光模式在
+ * 内部走 ui_rainbow_paint 且包含 ghost），否则保持原来的流光合成路径。 */
 static void present_overlay_frame(void)
 {
     if (!ui_menu_anim_frame()) {
@@ -1264,27 +1267,22 @@ void run_event_loop(void)
         remote_view_tick();
         sync_player_revisions();
 
-        /* 菜单动画期间冻结其它窗格的增量动画/进度刷新：动画帧自己会
-         * 重新合成整屏，这些刷新若插进来会与移动/退场 ghost 抢同一拍。 */
-        const int menu_animating = ui_menu_anim_active();
-        if (!menu_animating) {
-            process_pending_ui_refresh();
-        }
+        /* 菜单动画不再冻结其它窗格：相交窗格刷新由 ui_refresh_window()
+         * 先入虚拟屏再把菜单/ghost 压回，最后只 doupdate 一次；不相交
+         * 窗格正常刷新。这样右键菜单展开时频谱/黑胶/歌词不会卡住。 */
+        process_pending_ui_refresh();
         controls_status_tick();
 
         /* 频谱独立窗格按自己的 40ms 节拍刷新；无歌词黑胶动画 100ms。
          * 二者都不再触发整块歌词/列表重绘。 */
-        if (!ui_menu_anim_active()) {
-            spectrum_tick();
-            vinyl_tick();
-            lyrics_animation_tick();
-        }
+        spectrum_tick();
+        vinyl_tick();
+        lyrics_animation_tick();
 
         /* 断线浮层：不清空快照（保留最后一帧），提示自动重连与一键重启 */
         render_offline_overlay(connected);
 
-        /* 动画窗格在上一拍重绘过；右键菜单必须重新合成到最上层，
-         * 否则会被频谱/黑胶/歌词动画擦掉。动画进行时该函数内部会延后。 */
+        /* 菜单内容只画 backing；压屏统一由 present_overlay_frame() 做一次。 */
         ui_context_menu_refresh();
 
         /* 响应终端关闭、SIGTERM/SIGINT 等退出信号 */
@@ -1307,17 +1305,14 @@ void run_event_loop(void)
             ui_menu_anim_finish_exits(1);
         }
 
-        if ((player_play_state() == PLAY_STATE_PLAYING ||
-             player_play_state() == PLAY_STATE_PAUSED) &&
-            !ui_menu_anim_active()) {
+        if (player_play_state() == PLAY_STATE_PLAYING ||
+            player_play_state() == PLAY_STATE_PAUSED) {
             update_progress_bar();
         }
 
-        if (!ui_menu_anim_active()) {
-            process_pending_ui_refresh();
-        }
-
-        /* 进度条/脏标记重绘之后再把菜单盖回去，然后才做流光/动画合成。 */
+        /* 进度条/脏标记重绘之后消费菜单脏标记；动画帧/请求帧由
+         * present_overlay_frame() 只合成一次。 */
+        process_pending_ui_refresh();
         ui_context_menu_refresh();
         present_overlay_frame();
 
@@ -1429,6 +1424,11 @@ void run_event_loop(void)
                  * 布局编辑器、以及展开中的弹层，都由 handle_global_mouse_event
                  * 统一判归属（规则见 ui/mouse.h），这里不再各自命中。 */
                 handle_global_mouse_event(&event);
+                /* 右键打开/关闭/子菜单切换的第一帧必须立刻合成：
+                 * 否则动画起点会停到下一轮 getch 之后，既慢又容易被
+                 * 看成界面跳了一下。 */
+                ui_context_menu_refresh();
+                present_overlay_frame();
             }
             continue;
         }

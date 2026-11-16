@@ -528,11 +528,17 @@ static void dispatch_playlist(const UIMouseEvent *ev, const UIMouseDecision *d)
             }
         }
 
+        /* 先开菜单，再补画底层选中态：菜单窗口已在最终/入场位置，
+         * 渲染列表与控件时 ui_refresh_window() 会把菜单 backing 压回，
+         * 因此用户不会先看到一帧“只有高亮变化、菜单还没出现”的画面。 */
+        const int opened = ui_context_menu_open(main_list_context_menu_build,
+                                                main_list_context_dispatch,
+                                                &ctx, ev->y, ev->x);
         render_playlist_content();
         render_controls();
-        (void)ui_context_menu_open(main_list_context_menu_build,
-                                   main_list_context_dispatch,
-                                   &ctx, ev->y, ev->x);
+        if (opened) {
+            ui_context_menu_refresh();
+        }
         return;
     }
 

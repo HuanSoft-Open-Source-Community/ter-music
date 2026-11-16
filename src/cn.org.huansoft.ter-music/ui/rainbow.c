@@ -396,13 +396,13 @@ void ui_rainbow_paint(void)
 
 void toggle_rainbow_mode(void)
 {
-    /* 流光开关会整屏重绘：先收掉菜单退场 ghost，并按新场景重新探测动画档位
-     * （流光整屏合成的耗时不应永久拖累普通模式）。 */
+    /* 流光开关会整屏重绘：先收掉菜单退场 ghost。档位探测必须放在
+     * g_active 变更之后——detect_tier() 会按“流光是否激活”决定 REDUCED。 */
     ui_menu_anim_cancel_all(0);
-    ui_menu_anim_reset_tier();
 
     if (g_active) {
         g_active = 0;
+        ui_menu_anim_reset_tier();
         vinyl_rainbow_restore();
         g_last_vinyl_offset = -1;
         show_status_message(i18n_get("status.rainbow_off"));
@@ -430,6 +430,7 @@ void toggle_rainbow_mode(void)
     }
 
     g_active = 1;
+    ui_menu_anim_reset_tier();
     g_last_vinyl_offset = -1;
     show_status_message(i18n_get("status.rainbow_on"));
     update_controls_status(i18n_get("status.rainbow_on"));

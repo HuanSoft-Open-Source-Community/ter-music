@@ -4,7 +4,8 @@
  *
  * 纯几何推导在 ui/context_menu_layout.c；本文件只做条目模型、窗口、
  * 选中/滚动、执行与关闭后的界面恢复。菜单不阻塞事件循环：每轮由
- * ui_context_menu_refresh() 重新合成到最上层（含流光合成）。
+ * ui_context_menu_refresh() 消费脏标记并只画 backing，压屏统一由
+ * ui_menu_anim_frame()/ui_rainbow_paint() 合成一次。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -31,6 +32,9 @@
 
 typedef struct {
     int active;
+    /* 条目/选中/滚动/层栈变化只置位；由 ui_context_menu_refresh() 统一
+     * 画 backing，避免同一条变化在多个入口各 wrefresh 一次。 */
+    int dirty;
     ViewMode view;
     UIContextMenuContext ctx;
     UIContextMenuDispatch dispatch;
@@ -402,13 +406,12 @@ static void draw_level(int index)
     wattrset(win, A_NORMAL);
 }
 
-static void render_refresh(void)
+/* 只画 backing，不刷新屏幕：压屏由事件循环每轮一次的
+ * ui_menu_anim_frame()/ui_rainbow_paint() 统一完成。 */
+static void render_backing(void)
 {
     for (int i = 0; i < g_ctx_menu.level_count; i++) {
         draw_level(i);
-        if (g_ctx_menu.wins[i]) {
-            (void)ui_refresh_window(g_ctx_menu.wins[i]);
-        }
     }
 }
 
@@ -510,6 +513,10 @@ static int push_submenu(void)
         return 0;
     }
 
+    /* 上一层的退场 ghost 若还在飞（快速左→右切换），必须先收掉；
+     * 否则它会按 ghost 最高层的 z 序压住刚打开的新子菜单。 */
+    ui_menu_anim_finish_exits(0);
+
     UIContextMenuLevel next;
     if (!build_level(&next, item->submenu, &g_ctx_menu.ctx)) {
         return 0;
@@ -536,7 +543,8 @@ static int push_submenu(void)
     g_ctx_menu.level_count++;
     log_debug("context_menu", "push depth=%d", g_ctx_menu.level_count);
     log_level(index);
-    render_refresh();
+    g_ctx_menu.dirty = 1;
+    ui_context_menu_refresh();
     return 1;
 }
 
@@ -547,6 +555,9 @@ static void pop_submenu(void)
         return;
     }
     const int index = g_ctx_menu.level_count - 1;
+    /* 上一次 pop 的 ghost 若还没走完，先收掉，避免同一层叠多张退场快照。 */
+    ui_menu_anim_finish_exits(0);
+
     if (g_ctx_menu.wins[index]) {
         /* 子菜单退场：复制一份 ghost 滑回父层，再销毁原窗口。 */
         (void)ui_menu_anim_begin_exit(g_ctx_menu.wins[index],
@@ -558,7 +569,8 @@ static void pop_submenu(void)
     memset(&g_ctx_menu.levels[index], 0, sizeof(g_ctx_menu.levels[index]));
     g_ctx_menu.level_count--;
     log_debug("context_menu", "pop depth=%d", g_ctx_menu.level_count);
-    render_refresh();
+    g_ctx_menu.dirty = 1;
+    ui_context_menu_refresh();
 }
 
 /* ============================================================
@@ -624,6 +636,10 @@ void ui_context_menu_close(int repaint)
         return;
     }
 
+    /* 先收掉上一次 pop 留下的退场 ghost，再为当前各层复制退场快照。
+     * 否则快速操作时旧 ghost 会和新退场层叠在同一个 z 序里。 */
+    ui_menu_anim_finish_exits(0);
+
     /* 右边菜单逐层退场：先为每层复制 ghost（按层号登记保证 z 序），
      * 再统一销毁原窗口。tier 为 OFF 时 begin_exit 返回 0，等价于旧版
      * 瞬时关闭。 */
@@ -638,6 +654,7 @@ void ui_context_menu_close(int repaint)
     destroy_windows();
     g_ctx_menu.active = 0;
     g_ctx_menu.level_count = 0;
+    g_ctx_menu.dirty = 0;
     log_debug("context_menu", "close repaint=%d animated=%d",
               repaint ? 1 : 0, animated);
 
@@ -651,9 +668,13 @@ void ui_context_menu_close_now(int repaint)
     if (!g_ctx_menu.active) {
         return;
     }
+    /* 界面变更路径不播消失动画：连同仍在飞的 ghost 一起清掉，
+     * 避免旧菜单快照压到新视图/模态窗口上。 */
+    ui_menu_anim_cancel_all(0);
     destroy_windows();
     g_ctx_menu.active = 0;
     g_ctx_menu.level_count = 0;
+    g_ctx_menu.dirty = 0;
     log_debug("context_menu", "close-now repaint=%d", repaint ? 1 : 0);
     if (repaint) {
         repaint_underlying();
@@ -672,8 +693,9 @@ int ui_context_menu_open(UIContextMenuBuilder build,
     if (!build || !ctx) {
         return 0;
     }
-    /* 新 overlay 打开前把上一轮退场 ghost 收干净，避免两层菜单叠影。 */
-    ui_menu_anim_finish_exits(1);
+    /* 新 overlay 打开前把上一轮退场 ghost 收干净，避免两层菜单叠影。
+     * 这里不立即 compose：新菜单的首帧会连同底层一起合成。 */
+    ui_menu_anim_finish_exits(0);
     if (g_ctx_menu.active) {
         ui_context_menu_close_now(0);
     }
@@ -696,6 +718,7 @@ int ui_context_menu_open(UIContextMenuBuilder build,
 
     g_ctx_menu.level_count = 1;
     g_ctx_menu.active = 1;
+    g_ctx_menu.dirty = 1;
     log_debug("context_menu",
               "open view=%d target=%d area=%d valid=%d anchor=%d,%d rect=%d,%d,%d,%d",
               (int)ctx->view, (int)ctx->target, (int)ctx->area, ctx->valid,
@@ -703,7 +726,7 @@ int ui_context_menu_open(UIContextMenuBuilder build,
               g_ctx_menu.levels[0].rect.top, g_ctx_menu.levels[0].rect.left,
               g_ctx_menu.levels[0].rect.rows, g_ctx_menu.levels[0].rect.cols);
     log_level(0);
-    render_refresh();
+    ui_context_menu_refresh();
     return 1;
 }
 
@@ -724,11 +747,15 @@ void ui_context_menu_refresh(void)
         ui_context_menu_close_now(1);
         return;
     }
-    if (ui_menu_anim_active()) {
-        /* 动画帧由 ui_menu_anim_frame() 统一合成，别在这里另刷一帧。 */
+    if (!g_ctx_menu.dirty) {
         return;
     }
-    render_refresh();
+
+    /* 只画 backing；压屏统一由事件循环的 ui_menu_anim_frame() 完成，
+     * 避免和动画帧各 doupdate 一次。 */
+    render_backing();
+    g_ctx_menu.dirty = 0;
+    ui_menu_anim_request_frame();
 }
 
 /* ============================================================
@@ -740,6 +767,13 @@ static void ensure_top_visible(void)
     UIContextMenuLevel *level = &g_ctx_menu.levels[g_ctx_menu.level_count - 1];
     level->scroll = ui_ctx_menu_scroll_for(level->selected, level->count,
                                            level->visible, level->scroll);
+}
+
+/* 选中/滚动变化只标脏并请求一次场景帧；不在这里 wrefresh。 */
+static void menu_mark_dirty(void)
+{
+    g_ctx_menu.dirty = 1;
+    ui_context_menu_refresh();
 }
 
 int ui_context_menu_handle_key(int ch)
@@ -762,15 +796,13 @@ int ui_context_menu_handle_key(int ch)
     if (action == ACTION_POPUP_UP || ch == KEY_UP) {
         move_selection(level, -1);
         log_debug("context_menu", "key up -> selected=%d", level->selected);
-        draw_level(g_ctx_menu.level_count - 1);
-        (void)ui_refresh_window(g_ctx_menu.wins[g_ctx_menu.level_count - 1]);
+        menu_mark_dirty();
         return 1;
     }
     if (action == ACTION_POPUP_DOWN || ch == KEY_DOWN) {
         move_selection(level, 1);
         log_debug("context_menu", "key down -> selected=%d", level->selected);
-        draw_level(g_ctx_menu.level_count - 1);
-        (void)ui_refresh_window(g_ctx_menu.wins[g_ctx_menu.level_count - 1]);
+        menu_mark_dirty();
         return 1;
     }
     if (ch == KEY_RIGHT) {
@@ -805,8 +837,7 @@ int ui_context_menu_handle_mouse(const UIMouseEvent *ev,
         UIContextMenuLevel *level = &g_ctx_menu.levels[g_ctx_menu.level_count - 1];
         move_selection(level, ev->wheel);
         ensure_top_visible();
-        draw_level(g_ctx_menu.level_count - 1);
-        (void)ui_refresh_window(g_ctx_menu.wins[g_ctx_menu.level_count - 1]);
+        menu_mark_dirty();
         return 1;
     }
     if (!ev->click) {
@@ -842,7 +873,18 @@ int ui_context_menu_rect(UIRect *out)
     if (!ui_context_menu_active() || !out || g_ctx_menu.level_count <= 0) {
         return 0;
     }
-    *out = g_ctx_menu.levels[g_ctx_menu.level_count - 1].rect;
+
+    const int index = g_ctx_menu.level_count - 1;
+    WINDOW *win = g_ctx_menu.wins[index];
+    if (!win) {
+        *out = g_ctx_menu.levels[index].rect;
+        return 1;
+    }
+
+    /* 动画期间窗口会被 mvwin 移动：命中判定必须量现场窗口，
+     * 否则用户点着看得见的菜单却会被判成“菜单外”。 */
+    getbegyx(win, out->top, out->left);
+    getmaxyx(win, out->rows, out->cols);
     return 1;
 }
 

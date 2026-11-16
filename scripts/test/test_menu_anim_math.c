@@ -209,6 +209,44 @@ static void test_position(void)
     CHECK(top == 5 && left == 5, "position: 消失起点在原地");
 }
 
+/* ── ghost 层序 ───────────────────────────────────────────────── */
+
+static void test_ghost_order(void)
+{
+    int order[8];
+
+    CHECK(ui_menu_anim_order_layers(NULL, 3, order) == 0,
+          "order: layers == NULL");
+    CHECK(ui_menu_anim_order_layers((const int[]){0}, 1, NULL) == 0,
+          "order: order == NULL");
+    CHECK(ui_menu_anim_order_layers((const int[]){0}, 0, order) == 0,
+          "order: count == 0");
+
+    const int mixed[] = {0, 2, 1, 1};
+    CHECK(ui_menu_anim_order_layers(mixed, 4, order) == 4,
+          "order: 返回项数");
+    CHECK(order[0] == 0 && order[1] == 2 && order[2] == 3 && order[3] == 1,
+          "order: 按层升序且同层稳定");
+
+    const int reverse[] = {2, 1, 0};
+    CHECK(ui_menu_anim_order_layers(reverse, 3, order) == 3,
+          "order: 逆序返回项数");
+    CHECK(order[0] == 2 && order[1] == 1 && order[2] == 0,
+          "order: 逆序按层升序");
+
+    const int same[] = {1, 1, 1};
+    CHECK(ui_menu_anim_order_layers(same, 3, order) == 3,
+          "order: 同层返回项数");
+    CHECK(order[0] == 0 && order[1] == 1 && order[2] == 2,
+          "order: 同层保持登记顺序");
+
+    const int negative[] = {-1, 0, -5};
+    CHECK(ui_menu_anim_order_layers(negative, 3, order) == 3,
+          "order: 负层返回项数");
+    CHECK(order[0] == 0 && order[1] == 1 && order[2] == 2,
+          "order: 负层按 0 处理且稳定");
+}
+
 /* ── 降级 ─────────────────────────────────────────────────────── */
 
 static void test_degrade(void)
@@ -240,6 +278,7 @@ int main(void)
     test_durations();
     test_ease();
     test_position();
+    test_ghost_order();
     test_degrade();
 
     printf("test_menu_anim_math: %d checks, %d failures\n",
