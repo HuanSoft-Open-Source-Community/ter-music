@@ -18,6 +18,9 @@ stderr / 取退出码」这四件事做对：shell 里 fork pty 之后主端描�
   key:<按键描述>   向 pty 写入按键（见 decode_keyspec 的转义与 <F9> 命名键，
                    以及鼠标键 <click:列:行> <double:列:行> <right:列:行>
                    <wheel-up:列:行> <wheel-down:列:行>，xterm SGR 编码，坐标从 1 开始）
+  burst:<按键描述> 把整段按键一次写入 pty，再只等 0.4s；用于制造真实的
+                   快速连续输入（例如右键菜单左→下→右紧接切换）。
+                   key 指令每条之间固定等 0.6s，测不出这种竞态。
   wait:<秒>        驱动侧等待（同时继续收屏）
   kill             SIGKILL 掉 TUI 并结束会话
   其余（含空行、# 开头）忽略
@@ -274,6 +277,17 @@ def cmd_drive(argv):
             except OSError:
                 return False
             spin(0.6, capture)
+            return True
+        if verb == "burst":
+            if poll_exit() is not None:
+                return False
+            try:
+                os.write(fd, decode_keyspec(arg, named_keys_map))
+            except OSError:
+                return False
+            # 一次写入让 ncurses 在同一读包里拿到整串键，事件循环才能
+            # 在动画窗口内连续处理“左→下→右”，复现 ghost 竞态。
+            spin(0.4, capture)
             return True
         if verb == "wait":
             try:
