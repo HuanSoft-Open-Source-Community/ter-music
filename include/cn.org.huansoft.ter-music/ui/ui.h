@@ -69,6 +69,18 @@ WINDOW *controls_popup_window(void);
  * "wnoutrefresh + 菜单 backing 压回 + 单次 doupdate" 的合成刷新，
  * 保证终端不会输出菜单矩形内的窗格像素；其余情况等价 wrefresh。 */
 int ui_refresh_window(WINDOW *win);
+/*
+ * R4 接线说明：主循环的节拍刷新（visualizer/lyrics/progress/controls 等）被
+ * ui_refresh_begin_soft()/ui_refresh_end_soft() 包住；区间内 ui_refresh_window()
+ * 自动改走 soft 路径（只 wnoutrefresh 入虚拟屏），doupdate 由帧末的
+ * ui_frame_flush() 统一完成 —— 流光期每帧只写一次终端。区间外的嵌套输入
+ * 循环/模态框仍然即时 wrefresh。
+ */
+/* 把当前可见模型按 z 序合成进 ncurses 虚拟屏（stdscr→窗格→弹层→菜单→ghost）。
+ * 流光激活时同时把当前相位的前景色合成进各窗格；不刷终端（由 ui_frame_flush 刷）。 */
+void ui_frame_compose(void);
+/* 把虚拟屏差量刷到终端；无待刷内容时为无副作用的 OK。 */
+int ui_frame_flush(void);
 /* 彩蛋色对的背景：终端支持默认色时返回 -1（透明），否则返回黑(0)。 */
 int ui_transparent_background(void);
 void render_spectrum_pane(void);

@@ -154,6 +154,9 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/ui/ui.c
     src/cn.org.huansoft.ter-music/ui/rainbow.c
     src/cn.org.huansoft.ter-music/ui/rainbow_gradient.c
+    src/cn.org.huansoft.ter-music/ui/tty_guard.c
+    src/cn.org.huansoft.ter-music/ui/tty_guard_policy.c
+    src/cn.org.huansoft.ter-music/ui/rainbow_band_policy.c
     src/cn.org.huansoft.ter-music/ui/menu_anim.c
     src/cn.org.huansoft.ter-music/ui/menu_anim_math.c
     src/cn.org.huansoft.ter-music/util/utf8.c

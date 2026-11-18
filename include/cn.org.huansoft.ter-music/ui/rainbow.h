@@ -38,4 +38,21 @@ int ui_rainbow_active(void);
  */
 void ui_rainbow_paint(void);
 
+/**
+ * @brief resize 重建帧只出基础色：抑制接下来约 50ms 内的流光上色。
+ *
+ * 由 X1（ui.c 的 resize 重建）调用，避免“重建整屏 burst + 流光整屏 burst”
+ * 叠在同一帧（T5 §4.4 第 4 步）。窗口过后下一帧自动恢复流光。
+ */
+void ui_rainbow_suppress_next_frame(void);
+
+/**
+ * @brief 标记“接下来这次窗格刷新属于主循环节拍刷新”（R4）。
+ *
+ * 流光激活时这类刷新只入虚拟屏，帧末由 ui_frame_flush() 统一 doupdate，
+ * 多个窗格一帧只写一次终端。嵌套输入循环里的即时刷新不受影响。
+ */
+void ui_refresh_begin_soft(void);
+void ui_refresh_end_soft(void);
+
 #endif
