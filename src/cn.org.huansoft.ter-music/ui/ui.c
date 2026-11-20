@@ -43,6 +43,7 @@
 #include "ui/layout_editor.h"
 #include "ui/menu_anim.h"
 #include "ui/rainbow.h"
+#include "ui/tty_guard.h"
 #include "ui/remote_view.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -340,6 +341,9 @@ void init_ncurses(void)
         clear();
         /* 颜色/尺寸就绪后探测菜单动画档位（full/reduced/off）。 */
         ui_menu_anim_init();
+        /* 终端输出守卫：只在玲珑容器内启用（ll-box 冷启动转发缺陷的
+         * 降触发/检测/恢复），直跑路径零输出零行为变化。 */
+        ui_tty_guard_init();
 }
 
 /* 彩蛋只改前景；背景统一透明，终端不支持默认色时回退黑。 */
@@ -1222,12 +1226,68 @@ int handle_main_action(ActionId action)
 }
 
 /* 一帧呈现：有动画/菜单待呈现请求时由动画模块统一合成（流光模式在
- * 内部走 ui_rainbow_paint 且包含 ghost），否则保持原来的流光合成路径。 */
+ * 内部走 ui_rainbow_paint 且包含 ghost），否则保持原来的流光合成路径。
+ * 帧末统一 flush：R4 的节拍刷新只把差量压入虚拟屏，这里一次写出去。 */
 static void present_overlay_frame(void)
 {
     if (!ui_menu_anim_frame()) {
         ui_rainbow_paint();
     }
+    (void)ui_frame_flush();
+}
+
+/* X1：resize 重建（T5 §4.4）。
+ *
+ * 顺序固定为：F2 裸模式重置 → clear/create_layout（尺寸模型已由 ncurses 的
+ * SIGWINCH 处理更新）→ 该帧抑制流光合成（只出基础色）→ 补一轮 F1 整屏强制重绘。
+ * 拖窗口会连发 SIGWINCH/KEY_RESIZE，30–50ms 内的多次合并成一次重建；否则
+ * 每次重建都是一次整屏 burst，最容易和 ll-box 重放叠在同一帧。
+ * F2/F1 只在容器内生效（ui_tty_guard_* 内部按 cli_in_sandbox 门控）。 */
+#define UI_RESIZE_DEBOUNCE_MS 40
+
+static int g_resize_pending = 0;
+static uint64_t g_resize_last_ms = 0;
+
+static void schedule_resize_rebuild(void)
+{
+    g_resize_pending = 1;
+    g_resize_last_ms = get_ui_time_ms();
+}
+
+/* 返回 1 表示本轮做了重建。 */
+static int apply_resize_rebuild_if_due(void)
+{
+    if (!g_resize_pending) {
+        return 0;
+    }
+    uint64_t now = get_ui_time_ms();
+    if (now - g_resize_last_ms < UI_RESIZE_DEBOUNCE_MS) {
+        return 0;
+    }
+    g_resize_pending = 0;
+
+    /* 1) 先在旧终端状态上重置解析器模式：resize 期间 SIGWINCH 与重放最易
+     *    毒化 DECSTBM/DECOM，且 resizeterm 会按旧尺寸重设滚动区。 */
+    ui_tty_guard_reset_terminal_modes();
+    /* 2) 重建布局与全部窗格。 */
+    ui_menu_anim_cancel_all(0);
+    clear();
+    create_layout();
+    if (layout_editor_active()) {
+        layout_editor_render();
+    } else if (g_current_view != VIEW_MAIN) {
+        rerender_active_view();
+    } else {
+        request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
+                           UI_DIRTY_LYRICS | UI_DIRTY_INFO);
+    }
+    /* 3) 重建帧只出基础色：避免“重建整屏 burst + 流光整屏 burst” 2× 叠加。 */
+    ui_rainbow_suppress_next_frame();
+    /* 4) 重建后补一轮整屏强制重绘（clearok/ClrUpdate），确保新尺寸下整屏正确。 */
+    ui_tty_guard_request_repair();
+    log_debug("ui", "resize rebuild done (debounced, %dx%d)",
+              LINES, COLS);
+    return 1;
 }
 
 void run_event_loop(void)
@@ -1258,6 +1318,12 @@ void run_event_loop(void)
     core_set_config_listener(ui_on_config_reloaded);
 
     while (1) {
+        /* TTY 守卫：结算上一帧的 wchar 写入量（D1），并推进必要的修复带（F1）。
+         * 放在最前面，保证本轮任何 continue 都不会让修复停摆。 */
+        ui_tty_guard_frame_begin();
+        (void)apply_resize_rebuild_if_due();
+        ui_tty_guard_tick();
+
         /* 核心工作（回收线程/挂起动作/歌词推进/D-Bus tick/配置重载） */
         core_tick();
         /* 门面刷新：本地后端重算快照并与上次比较，修订号变化即请求重绘；
@@ -1269,15 +1335,20 @@ void run_event_loop(void)
 
         /* 菜单动画不再冻结其它窗格：相交窗格刷新由 ui_refresh_window()
          * 先入虚拟屏再把菜单/ghost 压回，最后只 doupdate 一次；不相交
-         * 窗格正常刷新。这样右键菜单展开时频谱/黑胶/歌词不会卡住。 */
+         * 窗格正常刷新，右键菜单展开时频谱/黑胶/歌词不会卡住。
+         * 同时保留 R4 的 soft 通道：这些节拍刷新只压入虚拟屏，帧末统一刷出。 */
+        ui_refresh_begin_soft();
         process_pending_ui_refresh();
+        ui_refresh_end_soft();
         controls_status_tick();
 
         /* 频谱独立窗格按自己的 40ms 节拍刷新；无歌词黑胶动画 100ms。
          * 二者都不再触发整块歌词/列表重绘。 */
+        ui_refresh_begin_soft();
         spectrum_tick();
         vinyl_tick();
         lyrics_animation_tick();
+        ui_refresh_end_soft();
 
         /* 断线浮层：不清空快照（保留最后一帧），提示自动重连与一键重启 */
         render_offline_overlay(connected);
@@ -1291,9 +1362,13 @@ void run_event_loop(void)
             break;
         }
 
-        /* 动画期间 1ms 轮询（不设人为帧率上限）；空闲仍为 40ms。 */
-        timeout(ui_menu_anim_active() ? UI_MENU_ANIM_INPUT_TIMEOUT_MS
-                                      : UI_INPUT_TIMEOUT_MS);
+        /* 动画期间 1ms 轮询（不设人为帧率上限）；空闲仍为 40ms。
+         * F1 修复进行中时用 10ms 轮询，让整屏强制重绘尽快完成。 */
+        timeout(ui_menu_anim_active()
+                    ? UI_MENU_ANIM_INPUT_TIMEOUT_MS
+                    : (ui_tty_guard_repair_active()
+                           ? UI_TTY_REPAIR_INPUT_TIMEOUT_MS
+                           : UI_INPUT_TIMEOUT_MS));
         ch = getch();
         /* 立刻恢复空闲超时：随后可能打开的模态输入框会继承 getch 的
          * 全局 timeout，绝不能让它按 1ms 空转。 */
@@ -1307,12 +1382,16 @@ void run_event_loop(void)
 
         if (player_play_state() == PLAY_STATE_PLAYING ||
             player_play_state() == PLAY_STATE_PAUSED) {
+            ui_refresh_begin_soft();
             update_progress_bar();
+            ui_refresh_end_soft();
         }
 
         /* 进度条/脏标记重绘之后消费菜单脏标记；动画帧/请求帧由
-         * present_overlay_frame() 只合成一次。 */
+         * present_overlay_frame() 统一合成（soft 通道合并成帧末一次 flush）。 */
+        ui_refresh_begin_soft();
         process_pending_ui_refresh();
+        ui_refresh_end_soft();
         ui_context_menu_refresh();
         present_overlay_frame();
 
@@ -1434,18 +1513,9 @@ void run_event_loop(void)
         }
 
         if (ch == KEY_RESIZE) {
-            /* 尺寸变化是界面变更：先清空动画态，再由 create_layout 完整重绘。 */
-            ui_menu_anim_cancel_all(0);
-            clear();
-            create_layout();
-            if (layout_editor_active()) {
-                layout_editor_render();
-            } else if (g_current_view != VIEW_MAIN) {
-                rerender_active_view();
-            } else {
-                request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
-                                   UI_DIRTY_LYRICS | UI_DIRTY_INFO);
-            }
+            /* 尺寸变化是界面变更：交给 X1 的 debounce 通道统一重建
+             * （F2 → 重建 → 抑制流光一帧 → 补 F1）。 */
+            schedule_resize_rebuild();
             continue;
         }
 
@@ -1547,6 +1617,10 @@ void cleanup(void)
     library_shutdown();
 
     destroy_main_windows();
+
+    /* 退出前把 TTY 守卫统计落进调试日志（验收证据：帧数/写入量/burst/
+     * 修复轮数/最大修复带/F2/F3 次数）。非容器内是空操作。 */
+    ui_tty_guard_log_stats();
 
     endwin();
     ui_restore_stdio();  /* 恢复真实 stderr，随后的退出错误才能显示在终端 */
