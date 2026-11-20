@@ -29,7 +29,7 @@ The player has two planes: a **core** that owns the audio device, transport and 
 - MP3, WAV, FLAC, OGG, M4A, AAC, WMA, APE, OPUS and WavPack, plus CUE sheets for FLAC/APE/WV (GBK, BIG5 and Shift-JIS auto-detected).
 - 17 play modes (sequential, repeat, shuffle; folder, album and artist scopes), six speeds (0.75x-3x) and gapless preload at 1.0x.
 - 10-band ISO equalizer (31 Hz-16 kHz, ±12 dB) with presets and soft clipping.
-- Karaoke vocal removal: off, soft or full band-limited centre cancellation; stereo only.
+- Karaoke vocal removal: off, soft or full per-bin centre cancellation inside 200 Hz–5 kHz; stereo only, with about 9 ms of algorithmic latency while enabled.
 - Embedded or external LRC lyrics, with per-character highlighting when timings allow.
 
 **Content**
@@ -195,7 +195,9 @@ Background playback uses D-Bus activation, the shipped systemd user service, or 
 
 Shortcuts `1`-`5` select Sequential, Single Repeat, List Repeat, Shuffle Repeat and Folder Sequential. Advanced modes need library metadata and are enabled in Settings → Play Mode.
 
-Speed: 0.75x, 1.0x, 1.25x, 1.5x, 2x and 3x, pitch preserved (FFmpeg atempo). Equalizer: 10 bands from 31 Hz to 16 kHz, presets in Settings → Equalizer. Karaoke: off, soft or full, stereo only; change it from the controls popup, Settings → Playback, `ter-music karaoke` or `Control.SetKaraoke`.
+Speed: 0.75x, 1.0x, 1.25x, 1.5x, 2x and 3x, pitch preserved (FFmpeg atempo). Equalizer: 10 bands from 31 Hz to 16 kHz, presets in Settings → Equalizer.
+
+Karaoke: off, soft or full, stereo only. It cancels centred coherent content per frequency bin inside 200 Hz–5 kHz — soft leaves it about 8 dB down, full removes it — while pan-spread accompaniment and hard-panned transients are kept, so a hard-panned hi-hat or snare does not release the cancellation of the centred vocal. Mono tracks pass through untouched. While enabled, the processed stream is delayed by the window length minus one sample — 383 samples at 44.1 kHz (about 8.7 ms), at most 10 ms at every supported rate; turning the level off fades the cancellation out over about 0.35 s before bit-exact pass-through resumes. Change it from the controls popup, Settings → Playback, `ter-music karaoke` or `Control.SetKaraoke`.
 
 ## Lyrics and covers
 

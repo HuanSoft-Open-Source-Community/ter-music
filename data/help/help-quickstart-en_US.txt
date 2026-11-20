@@ -218,7 +218,8 @@ ter-music Quick Start Guide
   [Speed]    Playback speed (popup: 0.75x / 1.00x / 1.25x / 1.50x / 2.00x / 3.00x)
   [Vol]      Volume popup (0-100, 5% steps)
   [Karaoke]  Vocal-removal popup (Off / Faint vocals / No vocals; stereo only;
-             level changes ramp smoothly, stereo-spread accompaniment is gated out)
+             per-bin centre removal in 200 Hz-5 kHz keeps pan-spread and
+             hard-panned transient content; level changes ramp smoothly)
   [Progress] Current playback progress
 
 6. Play Modes (17 in total)
@@ -516,7 +517,9 @@ ter-music Quick Start Guide
     karaoke [off|soft|full|0-2|cycle]
                                   Read or set the vocal-removal level (cycle
                                   steps one level; echoed immediately, applied
-                                  along a 30 ms ramp; stereo only — not the
+                                  along a 30 ms time constant; stereo only; per-bin
+                                  centre removal in 200 Hz-5 kHz, soft leaves
+                                  it about -8 dB, full removes it — not the
                                   "karaoke" layout preset, not per-character
                                   lyric highlighting)
 
@@ -568,12 +571,23 @@ ter-music Quick Start Guide
 ------------------
   Press F8 for this help page (/ searches, ↑/↓ scroll three lines).
   Karaoke (vocal removal) has three levels: Off, Faint vocals and No vocals. It
-  only attenuates what is centred in a stereo signal; the accompaniment, the bass
-  and the top end stay put, and mono tracks play untouched. Three ways to change
-  it: the [Karaoke] button popup in the control bar, Settings -> Playback, or
-  `ter-music karaoke`. Note that "karaoke" names two unrelated things here as
-  well - per-character lyric highlighting, and the `karaoke` layout preset. The
-  level persists as karaoke_mode (0/1/2) in config.xml and returns on restart.
+  only attenuates what is centred in a stereo signal, frequency bin by frequency
+  bin inside 200 Hz-5 kHz; the accompaniment, the bass and the top end stay put
+  (at 100 Hz and 10 kHz the measured loss is at most 0.25 dB), as do pan-spread
+  or hard-panned transients, so a hard-panned hi-hat or snare does not release
+  the cancellation of the centred vocal. The Faint vocals level leaves the
+  centred content about 8 dB down; No vocals removes it. Mono tracks play
+  untouched. While enabled it adds the window length minus one sample of
+  algorithmic latency (383 samples at 44.1/48 kHz, about 8.7 ms at 44.1 kHz, at
+  most 10 ms at every supported rate); turning it on (or seeking while it is on)
+  repeats the first few milliseconds once while the analysis window fills, while
+  switching between Faint and No vocals does not. Turning it off fades the
+  cancellation out over about 0.35 s before the stream is bit-exact passthrough
+  again. Three ways to change the level: the [Karaoke] button popup in the
+  control bar, Settings -> Playback, or `ter-music karaoke`. Note that "karaoke"
+  names two unrelated things here as well - per-character lyric highlighting,
+  and the `karaoke` layout preset. The level persists as karaoke_mode (0/1/2)
+  in config.xml and returns on restart.
   Press h for the play-history popup; F3 is the folder-history view — they are
   not the same thing.
   Every settings entry opens its option menu with ENTER (no +/- keys needed).
