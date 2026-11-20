@@ -88,12 +88,61 @@ int ui_tty_guard_repair_active(void);
 void ui_tty_guard_request_repair(void);
 
 /**
- * @brief F2：裸模式重置（约 30 B），把终端解析器拉回 ncurses 的默认 belief。
+ * @brief F2：裸模式重置（核心序列约 27 B + smkx），把终端解析器拉回 ncurses
+ *        的默认 belief，并恢复 keypad 依赖的键盘光标模式。
+ *
+ * 序列 = 裸 ESC / SGR0 / 默认色 / DECSTBM 复位 / DECOM 关 / DECAWM 开 /
+ * G0=ASCII / insert 关，**末尾不发 DECCKM 关**。
+ * 有 smkx 的终端需保持 DECCKM 应用模式，由
+ * `ui_tty_guard_keypad_restore_seq()` 补发；无 smkx 的终端保持普通模式、
+ * 不补发任何字节。（`ESC[?1l` 会让方向键退化为 `ESC[A`，被 getch 当作裸 ESC
+ * —— t25 回归：设置页按方向键退回主界面；反过来在 `kcuu1=ESC[A` 的终端上
+ * 硬发 `ESC[?1h` 同样会制造新的方向键回归 —— t30/t31。）
  *
  * 调用受冷却限制（UI_TTY_MODE_RESET_COOLDOWN_MS，内部提前返回）。
  * 必须保证 ncurses 的输出已排空（调用点在帧边界，doupdate 已 flush）。
  */
 void ui_tty_guard_reset_terminal_modes(void);
+
+/**
+ * @brief F2 的“核心”模式重置序列（不含键盘光标/keypad 恢复）。
+ *
+ * 顺序不可换（裸 ESC 取消悬挂 CSI → SGR 归零 → 默认色 → DECSTBM 复位 →
+ * DECOM 关 → DECAWM 开 → G0=ASCII → insert 关）。**不含 `ESC[?1l`(rmkx)！**
+ * 有 terminfo smkx 时由 ui_tty_guard_keypad_restore_seq() 补发（DECCKM 应用
+ * 模式）；无 smkx 的终端（linux/vt220/ansi 等）什么都不发，保持普通模式
+ * （ncurses 的 kcuu1 本就是 ESC[A）。
+ *
+ * 纯头文件实现：便于单测在不链接 ncurses 的情况下断言序列字节。
+ */
+static inline const char *ui_tty_guard_mode_reset_core(void)
+{
+    return "\033" "\033[0m\033[39;49m\033[r\033[?6l\033[?7h\033(B\033[4l";
+}
+
+/**
+ * @brief F2 末尾要补发的 keypad 恢复序列（仅当终端有 terminfo smkx 时）。
+ *
+ * ncurses 的 `keypad(win, TRUE)` 用 terminfo 的 `keypad_xmit`（xterm/screen 系 =
+ * `ESC[?1h ESC=`：DECCKM 应用模式 + 键盘传输模式）打开键盘传输；F2 发过 `ESC[r`
+ * 等裸序列之后，必须把这项**终端自己开启过的状态**补回去，否则方向键退化成
+ * `ESC[A`，被 getch 当成裸 ESC（t25：设置页按方向键直接退回主界面）。
+ *
+ * 但 `keypad_xmit` 为 NULL/空的终端（linux / vt220 / ansi / sun 等，`kcuu1=ESC[A`）
+ * 从来没有开启键盘传输/DECCKM，**没有状态需要恢复**：此时返回空串 = 什么都不发。
+ * 绝不能在这里硬编码 xterm 的 `ESC[?1h ESC=` —— 在那类终端上把 DECCKM 打开会让
+ * 终端发 `ESC OA` 而 ncurses 只认 `ESC[A`，等于制造一个新的方向键回归（t31）。
+ *
+ * @param keypad_xmit terminfo 的 keypad_xmit（可为 NULL 或空串）
+ * @return 非 NULL；无 smkx 时是空串（调用方据此跳过发送）
+ */
+static inline const char *ui_tty_guard_keypad_restore_seq(const char *keypad_xmit)
+{
+    if (keypad_xmit && keypad_xmit[0] != '\0') {
+        return keypad_xmit;
+    }
+    return "";
+}
 
 /** @brief 把统计写进调试日志（退出前和周期性摘要使用）。 */
 void ui_tty_guard_log_stats(void);

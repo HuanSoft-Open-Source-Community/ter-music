@@ -27,6 +27,7 @@
 #include "remote/remote_store.h"
 #include "ui/dialog.h"
 #include "ui/keymap.h"
+#include "ui/layout.h"
 #include "ui/menu_internal.h"
 #include "ui/menus.h"
 #include "ui/ui.h"
@@ -701,7 +702,9 @@ void remote_view_render(void)
     int y = 2;
 
     remote_map_clear();
-    attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    /* 设置右栏的“远程设备”内容与其它设置正文同色：当前生效的播放列表色（t28） */
+    int content_attr = ui_pane_body_attr(LAYOUT_PANE_PLAYLIST);
+    attron(content_attr);
 
     menu_content_clear_rows(&area, 2, max_y - 3);
 
@@ -741,7 +744,7 @@ void remote_view_render(void)
         int conn_idx = g_remote_selected_conn;
         if (conn_idx < 0 || conn_idx >= remote_store_count()) {
             menu_content_puts(&area, y++, i18n_get("general.no_connection"));
-            attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+            attroff(content_attr);
             return;
         }
         const RemoteConnectionConfig *rc = remote_store_get(conn_idx);
@@ -798,7 +801,7 @@ void remote_view_render(void)
     } else if (g_remote_mode == 3) {
         if (g_remote_selected_conn < 0) {
             menu_content_puts(&area, y++, i18n_get("general.no_connection"));
-            attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+            attroff(content_attr);
             return;
         }
         const RemoteConnectionConfig *conn = remote_store_get(g_remote_selected_conn);
@@ -868,7 +871,7 @@ void remote_view_render(void)
         }
     }
 
-    attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    attroff(content_attr);
     refresh();
 }
 

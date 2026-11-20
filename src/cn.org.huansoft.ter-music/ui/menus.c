@@ -80,6 +80,10 @@ void apply_color_theme(void)
     /* 主题色同样按终端色数量化：256 原样、8/16 取最近基色、黑白不启用。 */
 #define CLR(v) ((v) < 0 ? ((v) == -1 ? -1 : 0) : layout_color_quantize((v), COLORS))
 
+    /* 注意：设置页右栏正文**不用**这个 pair，而是用
+     * ui_pane_body_attr(LAYOUT_PANE_PLAYLIST) —— 即“当前生效的播放列表色”
+     * （布局显式覆盖优先，否则就是本行的主题色）。这样颜色主题页的
+     * “播放列表”行无论写布局还是写主题，右栏都会一步跟着变（t28）。 */
     init_pair(COLOR_PAIR_PLAYLIST,  CLR(g_app_config.theme.playlist_fg),  CLR(g_app_config.theme.playlist_bg));
     init_pair(COLOR_PAIR_CONTROLS,  CLR(g_app_config.theme.controls_fg),  CLR(g_app_config.theme.controls_bg));
     init_pair(COLOR_PAIR_LYRICS,    CLR(g_app_config.theme.lyrics_fg),    CLR(g_app_config.theme.lyrics_bg));

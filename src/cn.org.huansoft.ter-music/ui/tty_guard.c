@@ -21,6 +21,7 @@
 
 #include <fcntl.h>
 #include <ncursesw/ncurses.h>
+#include <term.h>   /* keypad_xmit（smkx）：F2 之后恢复 ncurses keypad 依赖的键盘光标模式 */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +29,8 @@
 #include <time.h>
 #include <unistd.h>
 
-/* F2 裸模式重置序列：顺序不可换。
+/* F2 裸模式重置：顺序不可换（核心序列见 ui/tty_guard.h 的
+ * ui_tty_guard_mode_reset_core()）：
  *   裸 ESC          取消任何悬挂的 ESC/CSI（VTE 收到裸 ESC 回 ground）
  *   ESC[0m          SGR 归零
  *   ESC[39;49m      默认前景/背景（清掉 38;5;N / 48;5;N 残留）
@@ -37,10 +39,11 @@
  *   ESC[?7h         DECAWM 开（恢复自动换行）
  *   ESC(B           G0=ASCII（解掉 ACS/制表符映射残留）
  *   ESC[4l          关闭插入模式
- *   ESC[?1l         DECCKM 关（与 ncurses smkx 一致的键盘光标模式）
- * 终点态 == ncurses 启动时的默认 belief，发完不需要 ncurses 重发任何模式。 */
-#define UI_TTY_MODE_RESET_SEQ \
-    "\033" "\033[0m\033[39;49m\033[r\033[?6l\033[?7h\033(B\033[4l\033[?1l"
+ * 末尾**不发 DECCKM 关**：ncurses 的 keypad(TRUE) 只在终端支持 smkx 时开启
+ * DECCKM 应用模式 + 键盘传输模式。旧版在这里无条件发 ESC[?1l(rmkx) 会让方向键
+ * 退化成 ESC[A，被 getch 当成裸 ESC（t25 回归：设置页按方向键直接退回主界面）。
+ * 现在发完核心序列后：有 terminfo smkx（keypad_xmit）则补发；无 smkx
+ * （linux/vt220/ansi 等）则什么都不发，保持普通模式。 */
 
 /* 修复带发出后，把“强制校准物理光标”的有效期向后延：一次高风险 burst 之后
  * 的若干帧里，每一帧开头都用绝对 CUP 把终端拉回 ncurses 的 belief，
@@ -359,7 +362,15 @@ void ui_tty_guard_reset_terminal_modes(void)
      * （终端会把它当控制序列起始，但部分回放器/终端实现会按可打印字符处理，
      * 产生一次多余换行→底行滚屏）。行首位置不在任何 pending-wrap 状态。 */
     tty_guard_sync_cursor_to(cursor_y, 0);
-    (void)putp(UI_TTY_MODE_RESET_SEQ);
+    (void)putp(ui_tty_guard_mode_reset_core());
+    /* 恢复终端自己开启过的键盘传输/光标模式（terminfo smkx）。
+     * 无 keypad_xmit 的终端（linux/vt220 等）本来就没开过，这里什么都不发；
+     * 硬编码 xterm 的 ESC[?1h 会在那类终端制造新的方向键回归（t31）。 */
+    int keypad_absent = !(keypad_xmit && keypad_xmit[0] != '\0');
+    const char *keypad_restore = ui_tty_guard_keypad_restore_seq(keypad_xmit);
+    if (keypad_restore[0] != '\0') {
+        (void)putp(keypad_restore);
+    }
     /* 裸序列之后立刻用绝对 CUP 把物理光标/属性 belief 校准回 ncurses；
      * 否则 ESC[r 把光标送回 home，而 curses 仍按旧位置做相对定位。 */
     tty_guard_sync_cursor_to(cursor_y, cursor_x);
@@ -369,8 +380,10 @@ void ui_tty_guard_reset_terminal_modes(void)
     g_resets_since_hard++;
     g_stalled_since_reset = 0;
     log_info("tty_guard",
-             "F2 mode reset #%llu: ESC/SGR/bg/DECSTBM/DECOM/DECAWM/G0/insert/DECCKM",
-             g_stats.mode_resets);
+             "F2 mode reset #%llu: ESC/SGR/bg/DECSTBM/DECOM/DECAWM/G0/insert "
+             "+ keypad restore: %s",
+             g_stats.mode_resets,
+             keypad_absent ? "skipped (no terminfo smkx)" : "terminfo keypad_xmit");
 }
 
 static void tty_guard_hard_reset(void)

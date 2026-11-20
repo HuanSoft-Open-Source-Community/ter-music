@@ -2763,7 +2763,13 @@ void render_settings_content(void)
     SettingsSectionSpec spec = get_active_settings_section_spec();
     char hint_buf[512];
 
-    attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    /* 右栏正文颜色 = **当前生效的播放列表色**（t28）：布局显式覆盖优先，
+     * 否则回退到主题的 playlist 色 —— 正是颜色主题页“播放列表”行显示/编辑的
+     * 那个值。因此不论该行写布局（layouts.json）还是写主题（config.xml），
+     * 右栏都会在重绘后一步跟着变。终端无颜色 / COLOR_PAIRS 不足时
+     * ui_pane_body_attr() 返回 0（默认属性），与旧行为在无色终端上一致。 */
+    int content_attr = ui_pane_body_attr(LAYOUT_PANE_PLAYLIST);
+    attron(content_attr);
 
     menu_content_clear_rows(&area, 2, area.max_y - 3);
 
@@ -2820,7 +2826,7 @@ void render_settings_content(void)
         remote_view_render();
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
         render_eq_visual();
-        attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+        attron(content_attr);   /* render_eq_visual 内部会 off，回来重新开 */
     } else if (g_menu_selected_idx == 7) {  /* 信息显示（窗格 + CLI/D-Bus） */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.info.hint"));
@@ -2840,7 +2846,7 @@ void render_settings_content(void)
         menu_content_puts(&area, start_y, hint_buf);
     }
 
-    attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    attroff(content_attr);
 
     /* Refresh stdscr first, then overlay selection menu sub-window */
     repaint_status_message();
@@ -2890,8 +2896,9 @@ static void render_eq_visual(void)
     menu_content_area(&area);
     int start_y = 2;
 
-    /* Status header */
-    attron(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    /* Status header —— 与设置右栏同色：当前生效的播放列表色（t28） */
+    int content_attr = ui_pane_body_attr(LAYOUT_PANE_PLAYLIST);
+    attron(content_attr);
     const char *status = g_app_config.eq_enabled
         ? i18n_get("eq.title_enabled")
         : i18n_get("eq.title_disabled");
@@ -3073,7 +3080,7 @@ static void render_eq_visual(void)
     g_eq_bars_bottom = start_y;   /* 命中区最后一行＝增益值那一行 */
     start_y++;
 
-    attroff(COLOR_PAIR(COLOR_PAIR_PLAYLIST));
+    attroff(content_attr);
     wnoutrefresh(stdscr);
     doupdate();
 #undef EQ_COL_W
