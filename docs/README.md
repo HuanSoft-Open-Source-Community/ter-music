@@ -184,6 +184,10 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 Background playback uses D-Bus activation, the shipped systemd user service, or `--foreground` inside `ll-cli run`; enable the service from the host with `systemctl --user enable --now cn.org.huansoft.ter-music`. When the container is already running, read output with `ll-cli enter` or `journalctl --user -u cn.org.huansoft.ter-music`.
 
+**ll-box cold-start replay.** ll-box ≤ 2.3.5 can replay bytes it has already written when its cold-start forwarder hits a full terminal queue, splicing duplicated output into the TUI. ter-music cannot stop that write; inside the container it measures each frame's terminal writes (`wchar` in `/proc/self/io`) and forces one full-screen repaint only on burst or back-pressure evidence or after a terminal resize. A bare-mode reset likewise needs that evidence (or a terminal resize), and the `endwin`+`refresh` fallback stays opt-in (`TER_MUSIC_TTY_HARD_RESET=1`, off by default). None of this runs outside the container, and the guard adds no configuration key, setting-page entry or user-visible switch. Known limitation: a repaint is no longer scheduled by a timer when there is no evidence, so damage that appears in a session with only small frames and a slow reader is not repainted proactively; it may remain until the next repaint-class event (a terminal resize, a view change or new burst/back-pressure evidence).
+
+The root fix is upstream: PR #295 is merged into linyaps-box `release/2.3` (merge commit `31ddf04`, 2026-11-20) and makes the forwarder consume the bytes it already wrote when `TryAgain` is returned with `k > 0`; it covers ll-box ≤ 2.3.5. No release contains it yet (the latest release is still 2.3.5) and `master` does not carry it, so check that the tag you install contains it and do not assume the next release will. There is no plan to publish a UAB with the next ter-music Release; UAB artefacts are planned to be published after the upstream fix is released. `TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`, an undocumented tuning variable, was removed with the timer fallback; it only configured that fallback, so setting it now has no effect.
+
 ## Playback
 
 | Group | Modes |
@@ -309,6 +313,7 @@ Four gates run in CI:
 - **No sound:** check that PipeWire, PulseAudio or ALSA is running; the backend is probed in that order. An explicitly chosen backend falls back to the next working one at play time. Switch it in Settings → Audio.
 - **Stutter or crackle:** raise Output Latency in Settings (20-250 ms, in 10 ms steps).
 - **Garbled CJK:** use a UTF-8 locale and a UTF-8 terminal; `locale` should show `LC_CTYPE=UTF-8`.
+- **Duplicated or garbled TUI lines inside Linyaps:** the ll-box ≤ 2.3.5 cold-start replay described under "Linyaps" above. The guard repaints the screen when it sees burst or back-pressure evidence; with no evidence it no longer repaints on a timer, so the damage may stay until a terminal resize, a view change or new evidence.
 - **Missing headers at build time:** install the `-devel`/`-dev` variants of the dependencies above.
 - **CUE tracks missing:** the `.cue` file must share the audio file basename; change CUE Encoding in Settings if the text is garbled.
 - **Library is empty:** open the library browser (`M`) and scan or rescan; the database is `library.db` in the config directory.

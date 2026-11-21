@@ -17,7 +17,7 @@
  * 环境变量（均可选，默认即生产值）：
  *   TER_MUSIC_TTY_GUARD=0          关闭整个守卫（默认开启，仅容器内生效）
  *   TER_MUSIC_TTY_BURST_BYTES=N    高风险 burst 阈值（默认 4096）
- *   TER_MUSIC_TTY_REPAIR_MS=N      整屏强制重绘周期（默认 800）
+ *   TER_MUSIC_TTY_REPAIR_MS=N      整屏强制重绘最小间隔（默认 800；仅证据触发后生效）
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
