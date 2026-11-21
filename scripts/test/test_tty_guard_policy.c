@@ -69,7 +69,7 @@ static void test_no_evidence_never_repaints(void)
  * 未到最小间隔时仍受速率限制（速率限制不得因此放宽）。 */
 static void test_evidence_triggers_repaint(void)
 {
-    const unsigned long long period = UI_TTY_REPAIR_PERIOD_MS;
+    const unsigned long long period = UI_TTY_REPAIR_MIN_INTERVAL_MS;
     const unsigned long long now = 10ULL * 60ULL * 1000ULL;
 
     CHECK(ui_tty_guard_should_start_pass(0, now, 0, 0) == 0,
@@ -82,7 +82,7 @@ static void test_evidence_triggers_repaint(void)
 
 static void test_should_start_pass(void)
 {
-    const unsigned long long period = UI_TTY_REPAIR_PERIOD_MS;
+    const unsigned long long period = UI_TTY_REPAIR_MIN_INTERVAL_MS;
     CHECK(ui_tty_guard_should_start_pass(0, 100000, 0, 0) == 0,
           "no risk -> no pass");
     CHECK(ui_tty_guard_should_start_pass(1, 0, 0, 1) == 0,

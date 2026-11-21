@@ -29,7 +29,7 @@ int ui_tty_guard_should_start_pass(int risk_pending, unsigned long long now_ms,
     if (now_ms < last_done_ms) {
         return 0;
     }
-    return (now_ms - last_done_ms) >= (unsigned long long)UI_TTY_REPAIR_PERIOD_MS;
+    return (now_ms - last_done_ms) >= (unsigned long long)UI_TTY_REPAIR_MIN_INTERVAL_MS;
 }
 
 UiTtyEscalation ui_tty_guard_escalate(unsigned long long stalled_frames,
