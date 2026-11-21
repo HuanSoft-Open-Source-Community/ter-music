@@ -54,11 +54,9 @@ static int g_enabled;
 static int g_io_fd = -1;
 
 static unsigned long long g_burst_warn = UI_TTY_BURST_WARN_BYTES;
-static unsigned long long g_repair_period_ms = UI_TTY_REPAIR_PERIOD_MS;
+static unsigned long long g_repair_min_interval_ms = UI_TTY_REPAIR_PERIOD_MS;
 static unsigned long long g_mode_reset_cooldown_ms = UI_TTY_MODE_RESET_COOLDOWN_MS;
 static unsigned long long g_hard_reset_cooldown_ms = UI_TTY_HARD_RESET_COOLDOWN_MS;
-/* F1 周期兜底：0 = 只在“真实高风险帧”触发；>0 = 距上次修复超过该毫秒数也补一轮。 */
-static unsigned long long g_repair_backstop_ms = UI_TTY_REPAIR_BACKSTOP_MS;
 
 static int g_frame_open;
 static unsigned long long g_frame_start_wchar;
@@ -173,13 +171,11 @@ void ui_tty_guard_init(void)
     if (g_burst_warn < 256) {
         g_burst_warn = 256;
     }
-    g_repair_period_ms = (unsigned long long)tty_guard_env_ull(
+    g_repair_min_interval_ms = (unsigned long long)tty_guard_env_ull(
         "TER_MUSIC_TTY_REPAIR_MS", UI_TTY_REPAIR_PERIOD_MS);
-    if (g_repair_period_ms < 200) {
-        g_repair_period_ms = 200;
+    if (g_repair_min_interval_ms < 200) {
+        g_repair_min_interval_ms = 200;
     }
-    g_repair_backstop_ms = (unsigned long long)tty_guard_env_ull(
-        "TER_MUSIC_TTY_REPAIR_BACKSTOP_MS", UI_TTY_REPAIR_BACKSTOP_MS);
     const char *env_modes = getenv("TER_MUSIC_TTY_MODES");
     if (env_modes && env_modes[0] != '\0') {
         g_modes_enabled = (strcmp(env_modes, "0") != 0);
@@ -205,17 +201,17 @@ void ui_tty_guard_init(void)
 
     g_enabled = 1;
     unsigned long long now = tty_guard_now_ms();
-    g_last_pass_done_ms = now - g_repair_period_ms; /* 首次风险即可开修复 */
+    g_last_pass_done_ms = now - g_repair_min_interval_ms; /* 首次风险即可开修复 */
     g_last_mode_reset_ms = now - g_mode_reset_cooldown_ms;
     g_last_hard_reset_ms = now;
     g_stats_log_at_ms = now + UI_TTY_STATS_LOG_MS;
     g_resets_since_hard = 0; /* F3 的前提是“已经用过 >=3 次 F2”，从 0 起算 */
 
     log_info("tty_guard",
-             "enabled: wchar=%llu burst_warn=%llu repair_period=%llums "
+             "enabled: wchar=%llu burst_warn=%llu repair_min_interval=%llums "
              "band_budget=%uB",
              (unsigned long long)wchar_now, (unsigned long long)g_burst_warn,
-             (unsigned long long)g_repair_period_ms,
+             (unsigned long long)g_repair_min_interval_ms,
              (unsigned)UI_TTY_BAND_BUDGET_BYTES);
 }
 
@@ -229,10 +225,10 @@ void ui_tty_guard_request_repair(void)
     if (!g_enabled) {
         return;
     }
-    /* 允许下一拍就开新一轮：把“上轮完成时刻”回退一个周期。 */
+    /* 允许下一拍就开新一轮：把“上轮完成时刻”回退一个最小间隔。 */
     unsigned long long now = tty_guard_now_ms();
-    if (now >= g_repair_period_ms) {
-        g_last_pass_done_ms = now - g_repair_period_ms;
+    if (now >= g_repair_min_interval_ms) {
+        g_last_pass_done_ms = now - g_repair_min_interval_ms;
     }
     g_force_repair = 1;
     g_risk_pending = 1;
@@ -272,7 +268,7 @@ void ui_tty_guard_log_stats(void)
  * clearok 的 ClrUpdate 路径，整屏一次完成。
  *
  * 自激控制：
- *   - 只在“出现高风险 burst 证据”时启动（D1），周期 UI_TTY_REPAIR_PERIOD_MS；
+ *   - 只在“出现高风险 burst 证据”时启动（D1），最小间隔 UI_TTY_REPAIR_PERIOD_MS；
  *   - 修复不单独 doupdate，而是并进下一次相位帧（take_repair_due），
  *     一次 flush 同时完成“相位重绘 + 整屏强制重绘”，不产生第二个大 burst；
  *   - 菜单动画帧由动画模块整帧合成，不插队。
@@ -390,7 +386,7 @@ static void tty_guard_hard_reset(void)
     g_last_hard_reset_ms = now;
     g_resets_since_hard = 0;
     g_stalled_since_reset = 0;
-    /* refresh() 自己整屏重绘；把下一轮重绘排到一个周期之后，避免同一拍叠加。 */
+    /* refresh() 自己整屏重绘；把下一轮重绘排到一个最小间隔之后，避免同一拍叠加。 */
     g_repair_active = 0;
     g_repair_due = 0;
     g_risk_pending = 0;
@@ -445,7 +441,7 @@ static void tty_guard_close_frame(unsigned long long now)
         g_stats.stalled_frames++;
         g_stalled_since_reset++;
         /* 背压停滞是“可能已发生部分写/重放”的最强证据：立刻安排一次定向修复，
-         * 而不是等周期到点（最多 UI_TTY_REPAIR_PERIOD_MS = 800ms）。 */
+         * 而不是等最小间隔到点（最多 UI_TTY_REPAIR_PERIOD_MS = 800ms）。 */
         g_stall_repair = 1;
         g_risk_pending = 1;
         g_resync_until_ms = now + UI_TTY_RESYNC_HOLD_MS;
@@ -524,16 +520,15 @@ void ui_tty_guard_tick(void)
         log_debug("tty_guard", "L1 full repaint queued (post-stall, urgent)");
         return;
     }
-    int backstop_due = (g_repair_backstop_ms > 0) && now >= g_last_pass_done_ms &&
-                       (now - g_last_pass_done_ms) >= g_repair_backstop_ms;
-    int request = g_risk_pending || g_force_repair || backstop_due;
+    /* 只认证据：帧记账发现的高风险 burst（risk）或显式请求（resize 重建）。
+     * 没有任何计时器兜底——稳定会话不会因“时间到了”而整屏重绘。 */
+    int request = g_risk_pending || g_force_repair;
     if (ui_tty_guard_should_start_pass(request, now, g_last_pass_done_ms,
                                        g_repair_active)) {
         /* 只排期：真正的 clearok+flush 并进下一帧（由 ui_rainbow_paint 在
          * 帧合成里消费），避免同一拍出现两个大 burst。 */
         g_repair_due = 1;
-        log_debug("tty_guard",
-                  "L1 full repaint queued (risk=%d force=%d backstop=%d)",
-                  g_risk_pending, g_force_repair, backstop_due);
+        log_debug("tty_guard", "L1 full repaint queued (risk=%d force=%d)",
+                  g_risk_pending, g_force_repair);
     }
 }
