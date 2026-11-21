@@ -57,7 +57,7 @@ static int g_enabled;
 static int g_io_fd = -1;
 
 static unsigned long long g_burst_warn = UI_TTY_BURST_WARN_BYTES;
-static unsigned long long g_repair_min_interval_ms = UI_TTY_REPAIR_PERIOD_MS;
+static unsigned long long g_repair_min_interval_ms = UI_TTY_REPAIR_MIN_INTERVAL_MS;
 static unsigned long long g_mode_reset_cooldown_ms = UI_TTY_MODE_RESET_COOLDOWN_MS;
 static unsigned long long g_hard_reset_cooldown_ms = UI_TTY_HARD_RESET_COOLDOWN_MS;
 
@@ -175,7 +175,7 @@ void ui_tty_guard_init(void)
         g_burst_warn = 256;
     }
     g_repair_min_interval_ms = (unsigned long long)tty_guard_env_ull(
-        "TER_MUSIC_TTY_REPAIR_MS", UI_TTY_REPAIR_PERIOD_MS);
+        "TER_MUSIC_TTY_REPAIR_MS", UI_TTY_REPAIR_MIN_INTERVAL_MS);
     if (g_repair_min_interval_ms < 200) {
         g_repair_min_interval_ms = 200;
     }
@@ -271,7 +271,7 @@ void ui_tty_guard_log_stats(void)
  * clearok 的 ClrUpdate 路径，整屏一次完成。
  *
  * 自激控制：
- *   - 只在“出现高风险 burst 证据”时启动（D1），最小间隔 UI_TTY_REPAIR_PERIOD_MS；
+ *   - 只在“出现高风险 burst 证据”时启动（D1），最小间隔 UI_TTY_REPAIR_MIN_INTERVAL_MS；
  *   - 修复不单独 doupdate，而是并进下一次相位帧（take_repair_due），
  *     一次 flush 同时完成“相位重绘 + 整屏强制重绘”，不产生第二个大 burst；
  *   - 菜单动画帧由动画模块整帧合成，不插队。
@@ -454,7 +454,7 @@ static void tty_guard_close_frame(unsigned long long now)
         g_stats.stalled_frames++;
         g_stalled_since_reset++;
         /* 背压停滞是“可能已发生部分写/重放”的最强证据：立刻安排一次定向修复，
-         * 而不是等最小间隔到点（最多 UI_TTY_REPAIR_PERIOD_MS = 800ms）。 */
+         * 而不是等最小间隔到点（最多 UI_TTY_REPAIR_MIN_INTERVAL_MS = 800ms）。 */
         g_stall_repair = 1;
         g_risk_pending = 1;
         g_resync_until_ms = now + UI_TTY_RESYNC_HOLD_MS;

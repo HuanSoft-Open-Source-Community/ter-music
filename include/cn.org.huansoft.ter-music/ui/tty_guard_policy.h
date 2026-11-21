@@ -42,7 +42,7 @@
  * 已知残余缺口：若损坏发生在**没有**本进程 burst/背压证据的会话（小帧、慢读者），
  * 本模块不会主动重绘，只有下一次重绘类事件（resize/切页/证据出现）才可能抹掉；
  * 根治手段是上游 ll-box 的 PR #295 修复。 */
-#define UI_TTY_REPAIR_PERIOD_MS 800u
+#define UI_TTY_REPAIR_MIN_INTERVAL_MS 800u
 
 /* 修复期主循环输入超时：修复进行中把轮询缩短到 10 ms，让整屏重绘尽快完成。 */
 #define UI_TTY_REPAIR_INPUT_TIMEOUT_MS 10
