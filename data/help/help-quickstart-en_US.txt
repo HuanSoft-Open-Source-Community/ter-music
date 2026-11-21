@@ -644,3 +644,30 @@ ter-music Quick Start Guide
 
   Full specification: see docs/API_DBUS_en_US.md and docs/API_LYRICS_en_US.md
   in the source tree.
+
+22. Linyaps, ll-box and the TUI guard
+-------------------------------------
+  ll-box <= 2.3.5 can replay bytes it has already written when its cold-start
+  forwarder hits a full terminal queue, splicing duplicated output into the TUI.
+  ter-music cannot stop that write; inside the container it measures each
+  frame's terminal writes (wchar in /proc/self/io) and forces one full-screen
+  repaint only on burst or back-pressure evidence or after a terminal resize. A
+  bare-mode reset likewise needs that evidence (or a terminal resize), and the
+  endwin+refresh fallback stays opt-in (TER_MUSIC_TTY_HARD_RESET=1, off by
+  default). None of this runs outside the container, and the guard adds no
+  configuration key, setting-page entry or user-visible switch.
+  Known limitation: no repaint is scheduled by a timer when there is no
+  evidence, so damage in a session with only small frames and a slow reader is
+  not repainted proactively and may stay until a terminal resize, a view change
+  or new evidence.
+  The root fix is upstream: PR #295 is merged into linyaps-box release/2.3
+  (merge commit 31ddf04, 2026-11-20) and makes the forwarder consume the bytes
+  it already wrote when TryAgain is returned with k > 0; it covers ll-box
+  <= 2.3.5. No release contains it yet (the latest is still 2.3.5) and master
+  does not carry it, so check that the tag you install contains it and do not
+  assume the next release will.
+  There is no plan to publish a UAB with the next ter-music Release; UAB
+  artefacts are planned to be published after the upstream fix is released.
+  TER_MUSIC_TTY_REPAIR_BACKSTOP_MS, an undocumented tuning variable, was
+  removed with the timer fallback; it only configured that fallback, so setting
+  it now has no effect.

@@ -41,6 +41,42 @@ static void test_classify_burst(void)
     CHECK(ui_tty_guard_classify_burst(1ULL << 40) == 2, "huge severe");
 }
 
+/* 删除 F1 周期兜底后的语义锁（原兜底无证据也每 1.5s 整屏重绘一次）：
+ * 稳定会话即使跑满 10 分钟、按主循环 40ms 步进，也不得因“时间到了”启动
+ * 任何整屏重绘。这是**policy 层的防回归语义锁**：它在被删代码仍存在时同样
+ * 通过（旧实现的兜底在有状态 tick 里，纯函数碰不到），因此**不能**用它证明
+ * 删除生效；删除生效的反向验证见 t3 的有状态探针（旧 due=395/600s → 新 0）
+ * 与 grep/strings 证据。 */
+static void test_no_evidence_never_repaints(void)
+{
+    const unsigned long long step = 40; /* UI_INPUT_TIMEOUT_MS 空闲节拍 */
+    const unsigned long long span = 10ULL * 60ULL * 1000ULL;
+    unsigned long long last_done = 0;
+    int passes = 0;
+
+    for (unsigned long long now = 0; now <= span; now += step) {
+        if (ui_tty_guard_should_start_pass(0, now, last_done, 0)) {
+            passes++;
+        }
+    }
+    CHECK(passes == 0, "no evidence -> 0 passes in 10 min");
+}
+
+/* 证据驱动方向：出现高风险 burst 证据后，最小间隔到达的第一拍就排期；
+ * 未到最小间隔时仍受速率限制（速率限制不得因此放宽）。 */
+static void test_evidence_triggers_repaint(void)
+{
+    const unsigned long long period = UI_TTY_REPAIR_PERIOD_MS;
+    const unsigned long long now = 10ULL * 60ULL * 1000ULL;
+
+    CHECK(ui_tty_guard_should_start_pass(0, now, 0, 0) == 0,
+          "10 min with no evidence -> still no pass");
+    CHECK(ui_tty_guard_should_start_pass(1, now, now - period, 0) == 1,
+          "evidence + min interval elapsed -> pass");
+    CHECK(ui_tty_guard_should_start_pass(1, now, now - 1, 0) == 0,
+          "evidence but min interval not elapsed -> wait");
+}
+
 static void test_should_start_pass(void)
 {
     const unsigned long long period = UI_TTY_REPAIR_PERIOD_MS;
@@ -92,6 +128,8 @@ int main(void)
 {
     test_classify_burst();
     test_should_start_pass();
+    test_no_evidence_never_repaints();
+    test_evidence_triggers_repaint();
     test_escalate();
 
     if (g_failures == 0) {

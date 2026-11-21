@@ -184,6 +184,10 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 后台播弄于容器内改用D-Bus激活或随包之systemd用户役使；亦可在`ll-cli run`中加`--foreground`；于宿主以`systemctl --user enable --now cn.org.huansoft.ter-music`启其常驻之役。容器既行时，以`ll-cli enter`或`journalctl --user -u cn.org.huansoft.ter-music`读其出。
 
+**ll-box冷启之重放。** ll-box ≤ 2.3.5之冷启转发，遇端闱队列既满，则重放其已写之字节，以重出之文混入端闱之流。应用不能止其写；容器之内，故逐帧计其入端闱之字节（`/proc/self/io`之`wchar`），惟见骤写或背压之据、或端闱易其修广，乃一整屏重绘。裸模式之重置亦准此据（或易其修广），`endwin`+`refresh`之兜底仍须显启（`TER_MUSIC_TTY_HARD_RESET=1`，默闭）。容器之外不行此事，守卫亦未增节度之键、设置之目、用户可见之开关。已知之阙：无据之时，不复以时计排重绘；帧微而读者迟缓之会，若见损伤，不即重绘，或俟端闱易其修广、易其视，或复见骤写/背压之据，而后覆之。
+
+根治在上游：PR #295已合入linyaps-box之`release/2.3`（合并之提交`31ddf04`，2026-11-20），其转发于`TryAgain`且`k > 0`时改为消费已写之字节；所及为ll-box ≤ 2.3.5。今尚无含此修之发行（最新发行仍2.3.5），`master`亦未载之，故装之时宜核所用tag果含此修，勿遽谓次版必含。ter-music次一Release不拟发布UAB；UAB之产物拟俟上游之修既出而后发布。`TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`者，未载于典册之调参也，惟司已删之计兜底；已随其去，今设之无验。
+
 ## 六、播弄
 
 | 组 | 制 |
@@ -309,6 +313,7 @@ CI行四门：
 - **无声：** 察PipeWire、PulseAudio或ALSA之行；后端依此序探之。显择之后端播而不成，则退就次可用者。可于设置→音声易之。
 - **滞或爆音：** 于设置增高输出之迟（20-250 ms，每次加十毫秒）。
 - **华文乱码：** 用UTF-8之locale与UTF-8之端闱；`locale`宜见`LC_CTYPE=UTF-8`。
+- **Linyaps中文界出重复错乱之行：** 即上文Linyaps一节所述ll-box ≤ 2.3.5冷启之重放。守卫见骤写或背压之据则整屏重绘；无据之时不复以时计重绘，其损或俟端闱易修广、易视，或复见据而后覆。
 - **营构时无头文：** 装上所依之`-devel`/`-dev`包。
 - **CUE分轨不显：** `.cue`须与音声同名；文乱则于设置改CUE之编码。
 - **曲库空：** 按`M`开曲库而扫之或复扫；库为配置目录下之`library.db`。
