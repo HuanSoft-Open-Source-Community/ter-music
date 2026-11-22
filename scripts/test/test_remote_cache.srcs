@@ -1,0 +1,5 @@
+src/cn.org.huansoft.ter-music/remote/remote_cache.c
+src/cn.org.huansoft.ter-music/remote/remote_store.c
+src/cn.org.huansoft.ter-music/config/crypto.c
+src/cn.org.huansoft.ter-music/util/xml_compat.c
+scripts/test/stub_logger.c

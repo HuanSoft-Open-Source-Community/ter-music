@@ -224,7 +224,42 @@ Docker 类构建只要求宿主机有可用的 Docker：
 
 Linyaps 不使用 Docker，要求宿主玲珑工具链。
 
-## 9. 故障排除
+构建依赖里有两点与远程音乐源直接相关：
+
+- **libcurl 是硬依赖**：`CMakeLists.txt` 用 `pkg_check_modules(LIBCURL libcurl)` 检测，缺失时以 `FATAL_ERROR` 终止，不能靠关闭远程功能绕过；Debian/RPM 的 `Build-Depends`/`BuildRequires` 已声明 `libcurl4-openssl-dev`/`libcurl-devel`，Arch 的 `depends` 已含 `curl`。
+- **SMB 依赖运行期的外部程序 `smbclient`**（Samba 客户端），libcurl 的 SMB 实现未被使用。打包元数据只作可选/推荐声明：DEB `Recommends: smbclient`、Arch `optdepends`、RPM（非 RHEL7）`Recommends`；Linyaps 清单没有“可选依赖”字段，因此由应用在缺少 `smbclient` 时给出“安装 Samba 客户端”的可操作提示。缺 `smbclient` 不影响构建，只影响 SMB 连接。
+
+## 9. 测试
+
+### 9.1 单元测试
+
+```bash
+./scripts/test/run-unit-tests.sh                 # 全部
+./scripts/test/run-unit-tests.sh test_remote_url test_remote_listing test_remote_cache
+TM_UNIT_STRICT=1 ./scripts/test/run-unit-tests.sh
+```
+
+- 远程功能有三组单测：`test_remote_url`（URL 解析/构造/编解码/脱敏）、`test_remote_listing`（FTP MLSD/LIST、WebDAV 命名空间、HTML autoindex、SMB 列格式、路径归一）、`test_remote_cache`（`.part`→rename、缓存命中、LRC、取消/重试、淘汰保护集、线程竞态）。
+- 某些单测需要本机未安装的开发头/库（libavcodec、ncursesw、libxml2）；这类**环境**编译失败输出 `SKIP`，不算测试失败。默认退出码 `0` = 全过或只有环境 SKIP，`1` = 有真实失败；CI 完整环境请设 `TM_UNIT_STRICT=1`，此时 SKIP 也按失败处理。
+
+### 9.2 远程端到端测试
+
+```bash
+./scripts/test/remote-frontend-e2e.sh --bin build/ter-music
+./scripts/test/remote-frontend-e2e.sh --bin build/ter-music --keep   # 保留工作目录与日志
+```
+
+前置工具：`python3`（含 `pyftpdlib`，FTP 夹具需要；可 `pip install pyftpdlib`）、`gdbus`、`dbus-run-session`、`openssl`、`curl`。音频夹具由 python `wave` 生成，**不需要 ffmpeg**。
+
+脚本行为：
+
+- 在私有 `dbus-run-session` 内先以 `daemon foreground` 起核心，再用 pty 驱动 TUI；这样与 Linyaps 容器一致（容器内 TUI 不能自行 fork 脱离的核心），也不会误连宿主上正在播放的实例。
+- 本地回环夹具覆盖 HTTP、WebDAV、FTP、TLS/自签名 CA、401 认证、慢速下载、空目录与超过 200 首的截断目录；SMB 用遵循 Samba `process_command_string()` 语义的假 `smbclient`（断言命令注入不执行、密码不进 argv），SFTP 用黑洞监听器验证 known_hosts 缺失时 fail-closed。
+- 断言核心队列里的路径全部是缓存中的本地路径、缓存无 `.part`、无残留进程；失败时保留日志并给出可复现命令。
+- 退出码：`0` 全部断言通过，`1` 有断言失败，`2` 环境不满足（缺工具/构建产物），不会把环境问题伪装成产品失败。
+- 真实 Samba/SFTP 服务端不在默认夹具内：SMB 只验证命令构造与安全语义（脚本注释保留了接入真实 `smbd` 的说明，当前默认运行的仍是假客户端）；SFTP 只验证 fail-closed 保护；FTPS 验证 TLS 握手，数据通道未覆盖。
+
+## 10. 故障排除
 
 - **`libxml2 runtime not found`**：运行期既没有 `libxml2.so.2` 也没有 `libxml2.so.16`。安装对应发行版的 `libxml2`/`libxml2-16`。
 - **`libxml2 (...) missing symbol ...`**：运行库版本与项目使用的 API 不匹配；把完整报错保留下来，便于定位 ABI 差异。

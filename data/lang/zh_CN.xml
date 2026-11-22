@@ -437,8 +437,6 @@
   <string key="remote.refresh_failed">刷新失败：</string>
   <string key="remote.connection_ok">连接成功，共</string>
   <string key="remote.entries">个条目</string>
-  <string key="remote.loaded">已加载</string>
-  <string key="remote.tracks">首歌曲</string>
   <string key="remote.name_required">名称为必填项</string>
   <string key="remote.host_required">主机地址为必填项</string>
   <string key="remote.connections_full">远程连接已满</string>
@@ -456,7 +454,6 @@
   <string key="remote.delete">删除连接</string>
   <string key="remote.edit_hint">编辑连接 (↑/↓ 选择  ENTER 编辑  +/- 协议  S 保存  ESC 取消)</string>
   <string key="remote.add_hint">添加连接 (↑/↓ 选择  ENTER 编辑  +/- 协议  S 保存  ESC 取消)</string>
-  <string key="remote.edit_keys">↑/↓:选择  ENTER:编辑  +/-:协议  S:保存  ESC:取消</string>
   <string key="remote.browse_short">浏览</string>
   <string key="remote.load_hint">↓ 加载此目录到播放列表</string>
   <string key="remote.browse_hint">↑/↓ 选择  ENTER 加载  RIGHT 进入目录  ESC 返回</string>
@@ -469,6 +466,65 @@
   <string key="remote.field.password">密码</string>
   <string key="remote.field.private_key">私钥</string>
   <string key="remote.field.base_path">基础路径</string>
+  <string key="remote.status.listing">正在列目录…</string>
+  <string key="remote.status.listing_done">列目录完成</string>
+  <string key="remote.status.downloading">下载中 %d/%d，失败 %d</string>
+  <string key="remote.status.done">下载完成 %d/%d，失败 %d</string>
+  <string key="remote.status.failed">会话失败</string>
+  <string key="remote.status.cancelled">已取消</string>
+  <string key="remote.retry_listing">重试列目录</string>
+  <string key="remote.retry_listing_started">正在重新列目录…</string>
+  <string key="remote.retry_failed">重试失败曲目（%d）</string>
+  <string key="remote.retry_started">正在重试失败的曲目…</string>
+  <string key="remote.cancel">取消当前任务</string>
+  <string key="remote.cancel_hint">任务进行中：ESC 取消当前任务</string>
+  <string key="remote.cancelled">已取消当前任务</string>
+  <string key="remote.err.auth">认证失败：请检查用户名和密码</string>
+  <string key="remote.err.connect">无法连接服务器：请检查主机、端口和网络</string>
+  <string key="remote.err.not_found">远程路径不存在：请检查路径/共享名</string>
+  <string key="remote.err.timeout">连接或下载超时：请稍后重试</string>
+  <string key="remote.err.tls">TLS 证书校验失败：请更换证书，或为自签名服务器开启“信任自签名证书”</string>
+  <string key="remote.err.protocol">服务器或协议不受支持</string>
+  <string key="remote.err.smbclient">缺少 smbclient：请安装 Samba 客户端后重试</string>
+  <string key="remote.err.smb_path">SMB 文件名/路径包含命令模式不安全的字符（; ! 引号或控制字符）：请在服务器端重命名该文件后重试</string>
+  <string key="remote.err.known_hosts">SFTP 主机密钥校验未配置：请在连接里填写可读的 known_hosts，或创建 ~/.ssh/known_hosts（可用 ssh-keyscan 主机名 &gt;&gt; ~/.ssh/known_hosts）后重试</string>
+  <string key="remote.err.too_large">远程文件或目录过大，已中止</string>
+  <string key="remote.err.no_audio">该目录没有音频文件</string>
+  <string key="remote.err.cache_limit">缓存空间不足：请清理缓存或提高缓存上限</string>
+  <string key="remote.err.parse">无法解析服务器返回的目录内容</string>
+  <string key="remote.err.cancelled">传输已取消</string>
+  <string key="remote.err.unknown">远程操作失败</string>
+  <string key="remote.err.busy">已有远程任务在进行，请稍候</string>
+  <string key="remote.load_failed">读取远程配置失败（remote.xml 可能损坏）</string>
+  <string key="remote.save_failed">保存远程配置失败：请检查磁盘空间和权限</string>
+  <string key="remote.delete_confirm">确认删除连接“%s”？ENTER 删除，ESC 取消</string>
+  <string key="remote.confirm_keys">ENTER 确认，ESC 取消</string>
+  <string key="remote.invalid_port">端口必须在 1-65535 之间（留空使用默认端口）</string>
+  <string key="remote.invalid_base_path">共享名/路径不能为空</string>
+  <string key="remote.value_on">开</string>
+  <string key="remote.value_off">关</string>
+  <string key="remote.field.tls">TLS</string>
+  <string key="remote.field.insecure_tls">信任自签名证书</string>
+  <string key="remote.field.known_hosts">known_hosts 路径</string>
+  <string key="remote.field.key_passphrase">私钥口令</string>
+  <string key="remote.field.smb_share">SMB 共享名/子路径</string>
+  <string key="remote.smb_path_hint">提示：SMB 填“共享名/子路径”（如 music/albums），不要带 smb:// 前缀</string>
+  <string key="remote.tls_hint">提示：TLS 对 HTTP/WebDAV/FTPS 生效；自签名证书可开启“信任自签名证书”</string>
+  <string key="remote.form_hint">↑/↓ 选择  ENTER 编辑  +/- 切换  S 保存  ESC 取消</string>
+  <string key="remote.actions_hint">↑/↓ 选择  ENTER 执行  ESC 返回</string>
+  <string key="remote.cache_title">缓存</string>
+  <string key="remote.cache_usage">已用 %lld MB / 上限：%s</string>
+  <string key="remote.cache_unlimited">不限制</string>
+  <string key="remote.cache_prefetch_unavailable">预取：不可用（引擎未实现，已从配置中移除）</string>
+  <string key="remote.cache_clean">清理缓存（保留播放中/队列/收藏/历史）</string>
+  <string key="remote.cache_clean_confirm">确认清理未被保护的缓存文件？ENTER 确认，ESC 取消</string>
+  <string key="remote.cache_cleaned">已清理 %d 个缓存文件</string>
+  <string key="remote.cache_limit_field">缓存上限（MB，0=不限制）</string>
+  <string key="remote.cache_limit_prompt">缓存上限（MB）</string>
+  <string key="remote.cache_limit_set">缓存上限已设为 %d MB</string>
+  <string key="remote.cache_limit_invalid">缓存上限必须是 ≥0 的整数</string>
+  <string key="remote.session_summary">本次会话：完成 %d/%d，失败 %d</string>
+  <string key="remote.truncated">目录音频超过单会话上限：仅加载 %d/%d 首</string>
 
   <!-- ===== Equalizer ===== -->
   <!-- 预设名称 -->
@@ -670,7 +726,6 @@
   <!-- ===== Help fallback ===== -->
   <string key="help.fallback_notice">{name}语言包内帮助页面缺失，此处显示为缺省英文帮助页面！</string>
   <string key="remote.download_failed">下载失败：</string>
-  <string key="remote.partial">部分曲目下载失败</string>
   <string key="core.offline.title">播放服务已断开</string>
   <string key="core.offline.hint">核心进程不在运行；界面会在后台自动重连（指数退避）</string>
   <string key="core.offline.retry">下一次重连尝试：%d 秒后</string>

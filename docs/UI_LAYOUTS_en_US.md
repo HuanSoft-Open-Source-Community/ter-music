@@ -519,6 +519,84 @@ The section needs 22 list rows plus the header and three pinned hint lines, so o
 terminals shorter than 32 rows the list scrolls with the selection and draws a
 scrollbar in the reserved column; the three hint lines stay at the bottom.
 
+## Remote Devices page
+
+`F2` → **Remote Devices** (`SETTINGS_PAGE_REMOTE`, the sixth Settings sidebar
+item) is the front-end remote-source page. It is not a layout pane: it uses the
+settings content area and keeps its own four-mode state. Selecting the page from
+the sidebar always resets it to the connection list, so a browser session does
+not leak into the next visit.
+
+### Connection list
+
+Rows, in this order:
+
+- one row per saved connection, `name [PROTOCOL(+TLS)] host` (at most 20);
+- `↓ Add New Connection`;
+- the cache block: cache title, `Used N MB / limit: M MB` (or `unlimited`), a
+  prefetch-unavailable note, `Clean cache (…)`, `Cache limit (MB, 0=unlimited)`.
+
+Keys: `↑`/`↓` select, ENTER opens the connection menu, starts the add form,
+asks before cleaning the cache, or opens the cache-limit prompt; `←`/ESC leaves
+the page. Deleting a connection and cleaning the cache need a second ENTER
+(ESC cancels); the confirmation text is drawn under the list.
+
+### Connection action menu
+
+Rows: Browse Folder, Load to Playlist, Refresh Connection, Edit Connection,
+Delete Connection, plus dynamic rows when relevant: Cancel current job (a
+remote job runs), Retry listing (the last listing failed), Retry failed tracks
+(n) (the last session had failures for this connection).
+
+Keys: `↑`/`↓` select, ENTER runs the row, `←`/ESC returns to the connection
+list. The delete confirmation replaces the rows: ENTER deletes, ESC keeps the
+connection.
+
+### Add / edit form
+
+Fields appear by protocol, in this order: Name, Protocol, Host, Port, Username,
+Password; for HTTP/WebDAV/FTP a TLS field and — when TLS is on — a "trust
+self-signed certificate" field; for SFTP private key, key passphrase and
+known_hosts path; then Base path (labelled "SMB share/subpath" for SMB).
+
+Keys: `↑`/`↓` select a field, ENTER edits a text field (on Protocol it
+advances the enum), `+`/`-` cycle the protocol or toggle TLS / the self-signed
+switch, `S` saves, ESC cancels. An invalid port (outside 1–65535) or an empty base path is rejected
+with a status message and is not saved.
+
+### Folder browser
+
+The first row is always `↓ Load into Playlist` (loads the current folder);
+folder entries are prefixed `[dir]`. Keys: `↑`/`↓` select, ENTER enters a
+selected directory or loads the folder, `→` also enters the selected directory,
+ESC goes up one level (at the server root it returns to the action menu). The
+selection follows the scroll window, so it is never scrolled out of sight.
+
+### Status line
+
+A status line under the list reports the job: `Listing remote directory…`,
+`Downloading done/total, failed n`, the localized failure reason followed by
+`Retry listing`, `Download complete done/total, failed n`, `Cancelled`, or the
+truncation notice `only done of total tracks loaded`. A finished or failed
+session keeps its summary for a while. The same progress is mirrored in the
+main view's status bar, so leaving the settings page does not hide it. Errors
+are localized into authentication, connection, not-found, timeout, TLS,
+protocol, missing smbclient, unsafe SMB path, SFTP known_hosts, too large, no
+audio, cache limit, parse and cancelled categories; unmatched errors keep the
+English detail as a suffix.
+
+### Mouse
+
+A left click selects and runs a row (same as ENTER); the wheel moves the
+selection; a right click selects the row without running it and opens the
+context menu (Activate Remote Item / Increase Remote Value / Decrease Remote
+Value / Save Remote Config, the last one enabled only inside the form).
+Rendering records which selection value each drawn row maps to, so clicks in
+the scrolled folder browser hit the visible row.
+
+Remote playback and cache behaviour are documented in the README's
+[Remote music sources](README.md#remote-music-sources).
+
 ## Troubleshooting
 
 - **My old layout has a different shape after upgrading**: it contained a gap,

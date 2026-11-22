@@ -15,8 +15,14 @@
 
 #include "keymap/actions.h"   /* ActionId */
 
-/* 启动时调用：读入前端自有的远程配置并初始化下载器 */
+/* 启动时调用：读入前端自有的远程配置并初始化下载器。
+ * 注意：启动淘汰不在 init 里做——那时 player 门面还没接上核心，
+ * 保护集不完整（审计 F-19）。main 在 player_init() 之后调用
+ * remote_view_startup_evict()。 */
 void remote_view_init(void);
+
+/* player_init() 之后调用：按缓存上限淘汰旧缓存，保护当前曲目与整条核心队列。 */
+void remote_view_startup_evict(void);
 /* 退出时调用：停掉后台下载线程并释放队列 */
 void remote_view_shutdown(void);
 

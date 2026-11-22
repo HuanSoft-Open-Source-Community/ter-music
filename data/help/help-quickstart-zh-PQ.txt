@@ -89,7 +89,7 @@
     播弄之度      語、時延、樂集之面、無縫預載、音聲後端、汰聲之等
     播弄之制      默播弄之制與迅疾
     捷鍵          改諸事之鍵；r 復今項，R 盡復，s 存
-    遠器          錄 SMB/SFTP/FTP/WebDAV/HTTP 之遠源
+    遠器          錄 SMB/SFTP/FTP/WebDAV/HTTP 之遠源（詳十二）
     均音          十段增益、預增與預設
     信息顯明      預設、諸域、面、音程與歌辭行數
 
@@ -113,9 +113,63 @@
   F3 往跡：目錄之往來；Enter 易播弄列，A 續隊列，D 刪，C 清。
   F8 助覽：此篇也；/ 求索，n/N 次合，↑/↓ 滾。
 
-十二、玲瓏之器
+十二、遠源
+----------
+  遠源者，前端之務也。前端列其目錄，逐曲下於本地之藏，乃以藏中之路授核心；
+  核心未嘗自開遠方之URL（本地路徑之約見 docs/API_DBUS_en_US.md）。
+
+  於節度→遠器（第六目）立一聯：名、協議（SMB/SFTP/FTP/WebDAV/HTTP，
+  以+/-易之）、主機、端口（空則用該協議之默）、用戶名、密碼、
+  基途，及依協議而顯之域：
+    HTTP/WebDAV/FTP有TLS（https/webdavs/ftps），啟之則有「信自簽之證」；
+    SFTP有私鑰、私鑰口令、known_hosts之徑。
+  基途不可闕（「/」為伺服之根）；SMB填共享名與可擇之子徑，如music/albums，
+  勿用smb:// URL。目錄之徑/URL不必自補尾斜，前端列目錄時自補之。
+  TLS為每聯之啟，不以端口為斷：非443之HTTPS，須啟TLS而填其實端口。
+  ENTER改域，+/-易協議或TLS，S存，ESC罷。
+  端口不在1-65535或基途空者不可存；刪聯先請確認（ENTER刪，ESC留）。
+
+  SFTP驗主機之鑰且fail-closed：須有可讀之known_hosts（聯中所填，否則
+  ~/.ssh/known_hosts）且已載其伺服。無默然初信之事；先以
+  ssh-keyscan HOST >> ~/.ssh/known_hosts 載之。
+
+  聯之動作單：覽目錄、載此目錄於播弄列、更聯、修聯、刪聯。目錄之覽，↑/↓擇：
+  ENTER入所擇之夾（在首行或擇一曲時則載今夾），→亦入所擇之夾，ESC返上層。
+  開一夾，則下其夾之音聲之卷（惟此夾之卷，不及子夾）於藏，一次至多二百曲；
+  多者示已載若干、共若干。下載行於後臺：其頁示「下載中 done/total，敗 n」，
+  主界之狀態行亦然；ESC罷今務。動作單有「罷今務」「復列目錄」「復試敗曲（n）」。
+
+  其限：一遠卷至多1 GiB，一次列目錄至多32 MiB（二十萬條）；連接逾十秒、
+  列目錄逾百二十秒、每曲下載逾六百秒則罷。一卷逾限則棄之而他曲續。
+  SMB文件名含';'、'!'、雙引號、反斜或制字者不收（smbclient之命令模式），
+  宜於伺服端改名。下載隨需而為，無預取。
+
+  藏於$XDG_CACHE_HOME/ter-music/remote/
+  （默~/.cache/ter-music/remote/）。遠器之頁示其用量，
+  可立上限（默2048 MB，0則不限）而清其未護者；
+  正在播、在隊列、在珍存、在往跡者不刪。音卷旁之.lrc亦隨之而藏。
+
+  憑證：聯表為前端之remote.xml（權0600）；密碼以定鹽XOR之流蒙之，非真加密。
+  日誌、核心之last_opened_path、曲庫之目錄往跡皆存脫敏之URL，故自往跡復取
+  之URL無密碼；有密之伺服宜用聯表。臨時開遠URL，勿以user:password@入之——
+  其文見於shell之史與進程之表。
+
+  TUI亦可徑開遠方之URL：
+    ter-music -o webdav://host/music/
+  所受之scheme：http(s)、ftp(s)、sftp、smb、webdav(s)（dav/davs為別名），
+  大小寫無別。
+  CLI之play與daemon start --open不受遠方之URL：核心惟播本地之路。
+
+  自動之試所及：HTTP/WebDAV/FTP、FTPS之TLS握手、非443之HTTPS、自簽CA之信、
+  401/404、慢速下載之罷，及以假smbclient所驗之SMB。真Samba、真SSH與FTPS之
+  數據道未及。
+
+十三、玲瓏之器
 --------------
-  玲瓏（Linyaps）之容器中，ll-box ≤ 2.3.5 之冷啟轉發，遇端闈之隊列既滿，
+  玲瓏（Linyaps）之容器中，前端不能析離脫之核心，乃請宿主以D-Bus激活之；
+  激活不可用者，先於宿主行 ll-cli run cn.org.huansoft.ter-music --
+  ter-music daemon foreground。
+  容器之中，ll-box ≤ 2.3.5 之冷啟轉發，遇端闈之隊列既滿，
   則重放其已寫之字節，以重出之文攙入端闈之流。應用不能止其寫；容器之內，
   惟逐幀計其入端闈之字節（/proc/self/io 之 wchar），見驟寫或背壓之據，
   或端闈易其修廣，乃一整屏重繪。裸模式之重置亦準此據（或易其修廣），
@@ -130,7 +184,7 @@
   UAB，俟上游之修既出而後發布。TER_MUSIC_TTY_REPAIR_BACKSTOP_MS 者，
   未載於典冊之調參也，惟司已刪之時計兜底；已隨其去，今設之無驗。
 
-十三、離開
+十四、離開
 ----------
   q 或 F9 退。若以 daemon start 起背景之役，端闈雖閉而樂不絕；
   欲止之，行 ter-music daemon stop。

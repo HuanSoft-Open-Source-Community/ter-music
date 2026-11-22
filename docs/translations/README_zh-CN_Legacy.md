@@ -21,7 +21,7 @@
 
 Ter-Music者，端闱之乐部也。以斐氏FFmpeg解声，纽氏ncursesw绘界，运行时择PipeWire、PulseAudio或ALSA而用之。内置SQLite曲库；编译时通D-Bus者，兼有MPRIS与D-Bus控制之接口。
 
-其体分二层：**核心**主音声之器、传输之令与前端所授之路径队列；**前端**（TUI或CLI）主文件、曲库、曲帙、往迹与远程之下载。无核心时，启TUI则自起其一。
+其体分二层：**核心**主音声之器、传输之令与前端所授之路径队列；**前端**（TUI或CLI）主文件、曲库、曲帙、往迹与远程之下载。无核心时，前端自起其一：容器之外，则自后台析一核心；若在玲珑之器，器不能析离脱之役，乃请D-Bus激活（详见「符令」一节之玲珑说）。
 
 ## 二、功用
 
@@ -35,7 +35,7 @@ Ter-Music者，端闱之乐部也。以斐氏FFmpeg解声，纽氏ncursesw绘界
 **内容**
 - SQLite曲库，FTS5搜检、拼音匹配、递归扫描；按艺术家、专辑、流派览之。
 - 播弄队列、自建曲帙、珍存、播弄往迹、目录往迹。
-- SMB、SFTP、FTP、WebDAV、HTTP之远源；前端逐曲下载于本地之藏。
+- SMB、SFTP、FTP、WebDAV、HTTP之远源；前端逐曲下载于本地之藏，乃以藏中之路授核心。SMB须Samba之用户端，SFTP须known_hosts之文（见[远源](#七远源)）。
 
 **文界**
 - 六格（曲帙、信息、控御、频谱、歌辞、黑胶），七种JSON局度预设，强制平铺。
@@ -56,19 +56,21 @@ AUR之方已备为`cn.org.huansoft.ter-music`，然**尚未投递**。可由下�
 
 ### 由源码营构
 
-必需：CMake 3.10+、C99之译器、pkg-config、ncursesw、FFmpeg诸库（avcodec、avformat、avutil、avfilter、swresample、swscale）、libpng、libjpeg、libxml2、SQLite3、zlib。
+必需：CMake 3.10+、C99之译器、pkg-config、ncursesw、FFmpeg诸库（avcodec、avformat、avutil、avfilter、swresample、swscale）、libpng、libjpeg、libxml2、SQLite3、zlib与libcurl。libcurl非可择：缺之则CMake以明误止其营构。
 
-可选：PipeWire、PulseAudio、ALSA之出；D-Bus（MPRIS/API）；libcurl（远源）。
+可选：PipeWire、PulseAudio、ALSA之出；D-Bus（MPRIS/API）。SMB之远源别须运行期之外器`smbclient`（Samba之用户端）；缺之仍可营构，SMB之联则明言未装。
 
 **Fedora / RHEL**
 
 ```bash
 sudo dnf install cmake gcc make pkg-config ncurses-devel \
   ffmpeg-free-devel libpng-devel libjpeg-turbo-devel libxml2-devel \
-  sqlite-devel zlib-devel
-# 可选
+  sqlite-devel zlib-devel libcurl-devel
+# 可择
 sudo dnf install pipewire-devel pulseaudio-libs-devel alsa-lib-devel \
-  dbus-devel libcurl-devel
+  dbus-devel
+# SMB之远源须运行期之Samba用户端
+sudo dnf install samba-client
 ```
 
 **Debian / Ubuntu**
@@ -77,19 +79,23 @@ sudo dnf install pipewire-devel pulseaudio-libs-devel alsa-lib-devel \
 sudo apt install build-essential cmake pkg-config libncursesw5-dev \
   libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev \
   libswresample-dev libswscale-dev libpng-dev libjpeg-dev libxml2-dev \
-  libsqlite3-dev zlib1g-dev
-# 可选
+  libsqlite3-dev zlib1g-dev libcurl4-openssl-dev
+# 可择
 sudo apt install libpipewire-0.3-dev libpulse-dev libasound2-dev \
-  libdbus-1-dev libcurl4-openssl-dev
+  libdbus-1-dev
+# SMB之远源须运行期之Samba用户端
+sudo apt install smbclient
 ```
 
 **Arch Linux**
 
 ```bash
 sudo pacman -S --needed base-devel cmake pkgconf ncurses ffmpeg \
-  libpng libjpeg-turbo libxml2 sqlite zlib
-# 可选
-sudo pacman -S --needed libpipewire libpulse alsa-lib dbus curl
+  libpng libjpeg-turbo libxml2 sqlite zlib curl
+# 可择
+sudo pacman -S --needed libpipewire libpulse alsa-lib dbus
+# SMB之远源须运行期之Samba用户端
+sudo pacman -S --needed smbclient
 ```
 
 **营构**
@@ -107,12 +113,14 @@ sudo make install   # 可择
 ## 四、速上手
 
 ```bash
-ter-music                  # 启TUI；无核心时自起其一
-ter-music -o ~/Music       # 开目录或文件
-ter-music ftp://user:pass@host/music
+ter-music                        # 启TUI；无核心时自起其一（玲珑之内为D-Bus激活）
+ter-music -o ~/Music             # 开目录或文件
+ter-music -o ftp://host/music/   # 于TUI中开远程目录
 ```
 
 文界须真端闱，勿以管道引其出。按`O`开目录，`↑`/`↓`择曲，`Enter`或`Space`播之，`q`退。
+
+如此所开之远程URL，惟用URL中所携之凭据。须密码之伺服，宜于`F2` → 远程设备存其联而后开目录，勿以`user:password@`入URL：URL留于shell之史与进程之表。`ter-music play`与`ter-music daemon start --open`拒远程URL，盖核心惟播本地之路。
 
 | 键 | 事 |
 | --- | --- |
@@ -184,6 +192,12 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 后台播弄于容器内改用D-Bus激活或随包之systemd用户役使；亦可在`ll-cli run`中加`--foreground`；于宿主以`systemctl --user enable --now cn.org.huansoft.ter-music`启其常驻之役。容器既行时，以`ll-cli enter`或`journalctl --user -u cn.org.huansoft.ter-music`读其出。
 
+TUI于容器内不能析离脱之核心，故请宿主激活其役。若激活不可用，宜先于宿主以前台之式起核心，而后开TUI：
+
+```bash
+ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
+```
+
 **ll-box冷启之重放。** ll-box ≤ 2.3.5之冷启转发，遇端闱队列既满，则重放其已写之字节，以重出之文混入端闱之流。应用不能止其写；容器之内，故逐帧计其入端闱之字节（`/proc/self/io`之`wchar`），惟见骤写或背压之据、或端闱易其修广，乃一整屏重绘。裸模式之重置亦准此据（或易其修广），`endwin`+`refresh`之兜底仍须显启（`TER_MUSIC_TTY_HARD_RESET=1`，默闭）。容器之外不行此事，守卫亦未增节度之键、设置之目、用户可见之开关。已知之阙：无据之时，不复以时计排重绘；帧微而读者迟缓之会，若见损伤，不即重绘，或俟端闱易其修广、易其视，或复见骤写/背压之据，而后覆之。
 
 根治在上游：PR #295已合入linyaps-box之`release/2.3`（合并之提交`31ddf04`，2026-11-20），其转发于`TryAgain`且`k > 0`时改为消费已写之字节；所及为ll-box ≤ 2.3.5。今尚无含此修之发行（最新发行仍2.3.5），`master`亦未载之，故装之时宜核所用tag果含此修，勿遽谓次版必含。ter-music次一Release不拟发布UAB；UAB之产物拟俟上游之修既出而后发布。`TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`者，未载于典册之调参也，惟司已删之计兜底；已随其去，今设之无验。
@@ -203,7 +217,43 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 汰聲：勿汰、微汰、盡汰三档，惟兩聲並列者行之。其法於 200 Hz–5 kHz 间逐频而较 side 与 mid 之幅比，削居中相干者——微汰餘约八分贝，盡汰尽去带内居中者——声场展开之伴奏与偏于一侧之瞬态存焉，故偏侧之镲、鼓不復使居中之人声随原声漏出。单声之曲直通。启之则迟窗长减一之数（44.1 kHz 下三百八十三样本，约八点七毫秒；诸采样率皆不过十毫秒）；止之则约三百五十毫秒渐隐，而后逐位直通。可于控御之弹层、设置→播弄、`ter-music karaoke`或`Control.SetKaraoke`改之。
 
-## 七、歌辞与封面
+## 七、远源
+
+远源者，前端之务也。前端列其目录，逐曲下载于本地之藏，乃以藏中之路授核心；核心未尝自开远方之URL（本地路径之约见 [API_DBUS_en_US.md](../API_DBUS_en_US.md)）。
+
+于`F2` → **远程设备**（设置之第六目）立一联：名、协议（SMB、SFTP、FTP、WebDAV、HTTP）、主机、端口（空则用默）、用户名、密码与基途。基途不可阙：`/`为伺服之根；SMB则填共享名与其子径，如`music/albums`，勿用`smb://host/music/albums`。HTTP、WebDAV、FTP有TLS之启（https/webdavs/ftps），启之则见「信自签之证」；SFTP另有私钥、口令与known_hosts之径。目录之径/URL不必自补尾斜，前端列目录时自补之。TLS为每联显式之启，不以端口为断：非443之HTTPS，须启TLS而填其实端口。端口不在1–65535、基途空者，不可存；删联则先请确认。
+
+协议之要：
+
+- **SMB**以外行之`smbclient`为之，非libcurl；主机、端口、用户名、密码皆授之，密码经临时0600认证之文而非argv。宜装Samba之用户端（包名`smbclient`；Debian、Arch、RPM之封装列为荐），否则SMB之联明报缺失。文件名含`;`、`!`、双引号、反斜或制字者不收——`smbclient -c`将析之为令；宜于伺服端改名。
+- **SFTP**验主机之钥，且fail-closed：须有可读之known_hosts（联中所填之径，否则`~/.ssh/known_hosts`），且已载伺服之钥。无默然初信（TOFU）之事；先以`ssh-keyscan HOST >> ~/.ssh/known_hosts`载之。私钥与口令为可择。
+- **FTP**先以MLSD列之，不成则退用LIST。TLS者，隐式FTPS（`ftps://`，默端口990）。
+- **WebDAV**以`PROPFIND`、`Depth: 1`行之，带命名之`<D:href>`（Apache/Nextcloud之形）与无命名者皆受。
+- **HTTP**读HTML之目录索引（Apache/nginx/python之形），以链接所指为准而非所显之文，并解HTML之实体。
+- HTTP与WebDAV之认证，Basic、Digest、NTLM皆由libcurl议之；启TLS时验证书，惟「信自签之证」则否；自HTTPS之重定向，永不降为HTTP。
+
+开一夹，则后台列其目录，逐曲下载其音声之卷（惟此夹之卷，不及子夹）于藏；一次至多二百曲，多者示已载若干、共若干，子夹可别开。远器之页与主界之状态行皆示其进（`下载中 done/total，失败 n`）；`ESC`罢今务，联之动作单有「罢今务」「复列目录」「复试败曲（n）」。每曲下载既毕则授核心：队列易为所下之曲，自首曲始播。
+
+其限：一远卷至多1 GiB，一次列目录至多32 MiB（二十万条）；连接逾十秒、列目录逾百二十秒、每曲下载逾六百秒则罢。一卷逾限则弃之而他曲续；目录过大或藏已满，则以误止。下载随需而为，无预取。
+
+藏于`$XDG_CACHE_HOME/ter-music/remote/`（默`~/.cache/ter-music/remote/`），依联与远径而镜之。其页示其用量，可立上限（默2048 MB，`0`则不限）而清其未护者；正在播、在队列、在珍存、在往迹者不删。音卷旁之`.lrc`亦随之而藏。
+
+**凭据。**联表在前端之`remote.xml`（权0600）。密码以定盐XOR之流蒙之，非真加密也：可防肉眼，不能防能读其文者。日志、核心之`last_opened_path`、曲库之目录往迹，皆存脱敏之URL；故自往迹复取之URL已无密码，有密之伺服宜用联表。临时开远源，勿以`user:password@`入URL：URL见于shell之史与进程之表。
+
+**已验之域。**自动之试及HTTP、WebDAV、FTP、FTPS之TLS握手、非443之HTTPS、自签CA之信、401/404、慢速下载之罢。SMB以仿Samba令析之假`smbclient`试之；SFTP惟验known_hosts之fail-closed。真Samba、真SSH与FTPS之数据道，未得其器而未试。
+
+TUI亦可径开远方之URL：
+
+```bash
+ter-music -o webdav://host/music/
+```
+
+所受之scheme：`http`、`https`、`ftp`、`ftps`、`sftp`、`smb`、`webdav`、
+`webdavs`（`dav`/`davs`为别名），且大小写无别。
+
+`ter-music play`与`ter-music daemon start --open`不受远方之URL：核心惟播本地之路，欲开远源，用TUI。
+
+## 八、歌辞与封面
 
 - 先取内嵌歌辞（FFmpeg/APE之签），无则取同名之`.lrc`。
 - LRC有逐字、行首尾或插值之时签者，按字昭焕。
@@ -211,7 +261,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 - 封面先取内嵌之图，次取同目录之`cover`/`folder`/`front`/`album`。
 - 色自二百五十六而降于八、终归黑白；`ter-music cover`与`Info.GetCoverArt`出点阵、ASCII或半块之封面。
 
-## 八、局度与色采
+## 九、局度与色采
 
 局度者，二叉分栏之树也。其叶为六格之一，故主区常强制平铺；端闱修广之变，按千分比复算。预设：`classic`、`vinyl`、`karaoke`、`visualizer`、`focus`、`stage`、`neon`。
 
@@ -223,21 +273,21 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 二十四套调色之谱加一自定槽位，主侧栏、高亮、边框；每格亦可别立前景/背景。全式见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)。
 
-## 九、节度与数据
+## 十、节度与数据
 
 `$XDG_CONFIG_HOME/ter-music`（默`~/.config/ter-music`）：
 
 ```text
 config.xml     核心节度
 library.db     SQLite曲库：曲目、珍存、往迹、曲帙、目录往迹
-remote.xml     远服（惟前端）
+remote.xml     远服与藏之上限（惟前端，权0600）
 layouts.json   用户局度之覆
 ui-layout      今局度之id
 lang/          用户语言包
 help/          用户速上之文
 ```
 
-远曲之藏于`$XDG_CACHE_HOME/ter-music/remote/`；封面之藏于`/tmp/ter-music-cover-*.jpg`，退时清之。
+远曲之藏于`$XDG_CACHE_HOME/ter-music/remote/`（默`~/.cache/ter-music/remote/`），依联与远径而镜之；同名之`.lrc`亦随曲而藏。藏之上限与清理在设置→远程设备。封面之藏于`/tmp/ter-music-cover-*.jpg`，退时清之。
 
 常用`config.xml`之键：
 
@@ -267,7 +317,7 @@ help/          用户速上之文
 
 语言包为XML之文（`<lang id="..." name="...">`，内含`<string key="...">`），置于`~/.config/ter-music/lang/`，或于`F7`语言之视以`A`装`.tar.gz`、以`D`删之。内置：`zh_CN`、`en_US`、`zh-PQ`。
 
-## 十、通合
+## 十一、通合
 
 编译时通D-Bus者，MPRIS以`org.mpris.MediaPlayer2.ter_music`布于`/org/mpris/MediaPlayer2`。同对象亦具：
 
@@ -281,7 +331,7 @@ help/          用户速上之文
 
 `Info.GetInfo`出`core.api_version`（今七）。详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md) 与 [API_LYRICS_en_US.md](../API_LYRICS_en_US.md)。
 
-## 十一、营缮
+## 十二、营缮
 
 | 层 | 职 |
 | --- | --- |
@@ -308,27 +358,31 @@ CI行四门：
 | `scripts/test/check-config-ownership.sh` | 核心为`config.xml`之独书者 |
 | `scripts/test/check-package-identity.sh` | 诸封装之应用ID与版相合 |
 
-## 十二、祛疑
+## 十三、祛疑
 
 - **无声：** 察PipeWire、PulseAudio或ALSA之行；后端依此序探之。显择之后端播而不成，则退就次可用者。可于设置→音声易之。
 - **滞或爆音：** 于设置增高输出之迟（20-250 ms，每次加十毫秒）。
 - **华文乱码：** 用UTF-8之locale与UTF-8之端闱；`locale`宜见`LC_CTYPE=UTF-8`。
 - **Linyaps中文界出重复错乱之行：** 即上文Linyaps一节所述ll-box ≤ 2.3.5冷启之重放。守卫见骤写或背压之据则整屏重绘；无据之时不复以时计重绘，其损或俟端闱易修广、易视，或复见据而后覆。
 - **营构时无头文：** 装上所依之`-devel`/`-dev`包。
+- **远目录不能列：** 察协议、主机、端口与基途（SMB须填`共享名/子径`）；SMB须装`smbclient`；SFTP须可读之known_hosts；https/webdavs/ftps须启TLS。其页示本地化之由，联之动作单有「复列目录」。
+- **远曲下载败：** 其页示`失败 n`与首误；去其因（网络、权限、磁盘）而后用「复试败曲（n）」，已藏之曲不复下载。单卷逾1 GiB或藏已满，则于此曲止；可于远程设备页增上限或清藏。
+- **远目录下载至半而止：** 一次至多下载二百曲；宜入子夹别开。
+- **自目录往迹复开远URL而认证败：** 入库之URL已脱敏（本不含密码）；须密码之伺服宜用远程设备页所存之联。
 - **CUE分轨不显：** `.cue`须与音声同名；文乱则于设置改CUE之编码。
 - **曲库空：** 按`M`开曲库而扫之或复扫；库为配置目录下之`library.db`。
 
-## 十三、律例
+## 十四、律例
 
 GPL-3.0-only，见 [LICENSE](../../LICENSE)。
 
 Ter-Music惟播弄之器，不供、不藏、不布音声之文；所播之文，君自备之，当合律令。
 
-## 十四、撰者
+## 十五、撰者
 
 浣软科技（HuanSoft）· <yxzl666xx@outlook.com>
 
-## 十五、鸣谢
+## 十六、鸣谢
 
 - **@guanzi008**：Debian之封装、MPRIS、UTF-8之入、鼠与文界之修。
 - **@Zeta**：Arch Linux之封装。

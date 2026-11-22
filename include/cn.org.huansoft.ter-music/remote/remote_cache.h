@@ -29,15 +29,17 @@ typedef enum {
     REMOTE_CACHE_LISTING,
     REMOTE_CACHE_DOWNLOADING,
     REMOTE_CACHE_DONE,
-    REMOTE_CACHE_FAILED
+    REMOTE_CACHE_FAILED,
+    REMOTE_CACHE_CANCELLED
 } RemoteCacheState;
 
 typedef struct {
     int state;                  /* RemoteCacheState */
     int done;                   /* 已交付给核心的曲目数 */
-    int total;                  /* 本次会话曲目数（列目录后确定） */
+    int total;                  /* 目录里的音频总数（超过单会话上限时 > done） */
     int failed;                 /* 下载失败的曲目数 */
     int cancelled;              /* 是否被取消 */
+    int truncated;              /* 1 = 目录音频数超过 REMOTE_CACHE_SESSION_MAX */
     char message[256];          /* 最近状态/错误（UI 直接显示） */
 } RemoteCacheStatus;
 
@@ -73,7 +75,13 @@ int remote_cache_take_error(char *out, size_t size);
 int remote_cache_session_autoplay(void);
 
 void remote_cache_cancel(void);
-const RemoteCacheStatus *remote_cache_status(void);
+
+/* 等待后台任务结束（0 = 已空闲；-1 = 超时）。测试与退出路径用。 */
+int remote_cache_wait_idle(int timeout_ms);
+
+/* 状态快照：在锁内拷贝，UI 线程不再直接读工作线程写入的内部指针
+ * （审计 F-26）。 */
+void remote_cache_get_status(RemoteCacheStatus *out);
 
 /* ── 缓存维护（UI 线程调用） ──────────────────────────────────────── */
 /* 缓存根目录（静态缓冲，始终可用） */

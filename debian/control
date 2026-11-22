@@ -24,6 +24,7 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libxml2 | libxml2-16
+Recommends: smbclient
 Provides: ter-music (= ${binary:Version})
 Breaks: ter-music (<< 26.4.1.0)
 Replaces: ter-music (<< 26.4.1.0)

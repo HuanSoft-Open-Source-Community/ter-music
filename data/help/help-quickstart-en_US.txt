@@ -29,7 +29,7 @@ ter-music Quick Start Guide
   Examples:
     ter-music -o ~/Music
     ter-music -o /path/to/song.mp3
-    ter-music ftp://user:pass@host/path/to/music
+    ter-music -o ftp://host/path/to/music/
 
 2. Layout Overview
 ------------------
@@ -359,14 +359,79 @@ ter-music Quick Start Guide
 
 13. Remote Playback
 -------------------
-  Supports SMB/SFTP/FTP/WebDAV/HTTP protocols.
-  Configure connections in Settings -> Remote Devices.
-  The front end lists a remote folder and downloads tracks into a local cache,
-  then hands those local paths to the core.
-  A remote URL can also be passed directly on the command line into the TUI:
-    ter-music ftp://user:password@host/path/
+  Remote sources are handled by the front end: it lists a remote folder,
+  downloads its tracks into a local cache, and hands those cached local paths
+  to the core. The core plays local files only.
+
+  Protocols: SMB, SFTP, FTP, WebDAV and HTTP; FTPS and HTTPS are the TLS forms
+  of FTP and HTTP. SMB uses the external `smbclient` program, so install the
+  Samba client; without it SMB connections report that smbclient is missing.
+
+  Configure a connection in Settings -> Remote Devices (F2, sixth Settings
+  item). Fields: name, protocol (SMB/SFTP/FTP/WebDAV/HTTP; +/- cycles), host,
+  port (empty = the protocol default), username, password, base path,
+  plus protocol-specific fields:
+    - HTTP/WebDAV/FTP: TLS (https/webdavs/ftps) and, when on,
+      "trust self-signed certificate";
+    - SFTP: private key, key passphrase, known_hosts path.
+  The base path is required ("/" = server root). For SMB enter the share and
+  an optional subfolder, e.g. "music/albums" - not an smb:// URL. A folder
+  path or URL does not need a trailing slash; the front end adds it when
+  listing. TLS is a per-connection switch, not a port rule: an HTTPS server on
+  port 8443 needs TLS on and the port set to 8443.
+  ENTER edits a field, +/- changes the protocol/TLS switch, S saves and ESC
+  cancels. A port outside 1-65535 or an empty base path cannot be saved.
+  Deleting a connection asks for confirmation (ENTER deletes, ESC keeps it).
+
+  SFTP verifies host keys and fails closed: a readable known_hosts file (the
+  connection field, otherwise ~/.ssh/known_hosts) must already contain the
+  server. There is no automatic trust on first use; add the key first with
+  ssh-keyscan HOST >> ~/.ssh/known_hosts.
+
+  Connection menu: Browse Folder, Load to Playlist, Refresh Connection, Edit
+  Connection, Delete Connection. In the folder browser, up/down selects:
+  ENTER enters a selected folder (on the first row, or on a file, it loads
+  the current folder), RIGHT also enters the selected folder, ESC goes up a
+  level.
+  Opening a folder downloads its audio files (files directly in that folder,
+  not subfolders) into the cache, up to 200 tracks per open; a larger folder
+  reports how many of how many tracks were loaded. Downloads run in the
+  background: the page shows "Downloading done/total, failed n" and the main
+  status bar shows the same; ESC cancels the running job. The menu offers
+  "Cancel current job", "Retry listing" and "Retry failed tracks (n)".
+
+  Limits: one remote file may be at most 1 GiB, one directory listing at most
+  32 MiB (200,000 entries); connect times out after 10 s, listing after 120 s
+  and each download after 600 s. An oversized file is skipped and the other
+  tracks continue. SMB file names containing ';', '!', double quotes,
+  backslashes or control characters are refused (smbclient command mode);
+  rename them on the server. Downloads are on demand; there is no prefetch.
+
+  Cache: $XDG_CACHE_HOME/ter-music/remote/ (default
+  ~/.cache/ter-music/remote/). Remote Devices shows its size and can set a
+  limit (default 2048 MB, 0 = unlimited) or clean unprotected files; tracks
+  that are playing, queued, favorited or in the history are kept. A .lrc
+  beside an audio file is cached with it.
+
+  Credentials: the connection list is the front-end file remote.xml
+  (mode 0600); passwords are obfuscated with a fixed-salt XOR stream, not
+  encrypted. Logs, the core's last_opened_path and the library folder history
+  store a redacted URL, so a URL read back from history has no password; use
+  the saved connection for password-protected servers. Do not put
+  user:password@ into an ad-hoc remote URL - it stays visible in the shell
+  history and process list.
+
+  A remote URL can also be opened directly by the TUI:
+    ter-music -o webdav://host/music/
+  Accepted schemes: http(s), ftp(s), sftp, smb, webdav(s) (dav/davs are
+  aliases); the scheme is case-insensitive.
   CLI `play` and `daemon start --open` reject remote URLs: the core only plays
   local paths.
+
+  Automated coverage: HTTP/WebDAV/FTP, the FTPS TLS handshake, HTTPS on
+  non-443 ports, self-signed CA trust, 401/404, slow-download cancellation,
+  and SMB through a fake smbclient. A real Samba server, a real SSH server and
+  the FTPS data channel are not covered.
 
 14. Playlist Management
 -----------------------

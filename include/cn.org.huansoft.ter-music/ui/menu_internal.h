@@ -25,6 +25,14 @@ extern const char *help_sidebar_items[];
 extern const char *language_sidebar_items[];
 
 extern const int SETTINGS_ITEM_COUNT;
+
+/* 设置侧栏页下标（settings_sidebar_items 的顺序；新增/调整设置项时只改这里，
+ * 不要在设置页/远程页里写裸数字，见审计 F-28）。 */
+#define SETTINGS_PAGE_THEME      0
+#define SETTINGS_PAGE_HOTKEYS    4
+#define SETTINGS_PAGE_REMOTE     5
+#define SETTINGS_PAGE_EQUALIZER  6
+#define SETTINGS_PAGE_INFO       7
 extern const int HISTORY_ITEM_COUNT;
 extern const int PLAYLIST_ITEM_COUNT;
 extern const int FAVORITES_ITEM_COUNT;

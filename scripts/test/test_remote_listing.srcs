@@ -1,0 +1,3 @@
+src/cn.org.huansoft.ter-music/remote/remote_parse.c
+src/cn.org.huansoft.ter-music/remote/remote_url.c
+scripts/test/stub_logger.c

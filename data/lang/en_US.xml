@@ -437,8 +437,6 @@
   <string key="remote.refresh_failed">Refresh failed: </string>
   <string key="remote.connection_ok">Connection OK, found</string>
   <string key="remote.entries">entries</string>
-  <string key="remote.loaded">Loaded</string>
-  <string key="remote.tracks">tracks</string>
   <string key="remote.name_required">Name is required</string>
   <string key="remote.host_required">Host is required</string>
   <string key="remote.connections_full">Remote connections full</string>
@@ -456,7 +454,6 @@
   <string key="remote.delete">Delete Connection</string>
   <string key="remote.edit_hint">Edit Connection (Up/Down select  ENTER edit  +/- protocol  S save  ESC cancel)</string>
   <string key="remote.add_hint">Add Connection (Up/Down select  ENTER edit  +/- protocol  S save  ESC cancel)</string>
-  <string key="remote.edit_keys">Up/Down:select  ENTER:edit  +/-:protocol  S:save  ESC:cancel</string>
   <string key="remote.browse_short">Browse</string>
   <string key="remote.load_hint">↓ Load into Playlist</string>
   <string key="remote.browse_hint">Up/Down select  ENTER load  RIGHT enter dir  ESC back</string>
@@ -469,6 +466,66 @@
   <string key="remote.field.password">Password</string>
   <string key="remote.field.private_key">Private Key</string>
   <string key="remote.field.base_path">Base Path</string>
+
+  <string key="remote.status.listing">Listing remote directory…</string>
+  <string key="remote.status.listing_done">Directory listing complete</string>
+  <string key="remote.status.downloading">Downloading %d/%d, failed %d</string>
+  <string key="remote.status.done">Download complete %d/%d, failed %d</string>
+  <string key="remote.status.failed">Session failed</string>
+  <string key="remote.status.cancelled">Cancelled</string>
+  <string key="remote.retry_listing">Retry listing</string>
+  <string key="remote.retry_listing_started">Retrying directory listing…</string>
+  <string key="remote.retry_failed">Retry failed tracks (%d)</string>
+  <string key="remote.retry_started">Retrying failed tracks…</string>
+  <string key="remote.cancel">Cancel current job</string>
+  <string key="remote.cancel_hint">Job running: ESC cancels the current job</string>
+  <string key="remote.cancelled">Current job cancelled</string>
+  <string key="remote.err.auth">Authentication failed: check the username and password</string>
+  <string key="remote.err.connect">Cannot reach the server: check host, port and network</string>
+  <string key="remote.err.not_found">Remote path not found: check the path/share name</string>
+  <string key="remote.err.timeout">Connection or download timed out: try again later</string>
+  <string key="remote.err.tls">TLS certificate verification failed: replace the certificate, or enable “trust self-signed” for this server</string>
+  <string key="remote.err.protocol">Server or protocol is not supported</string>
+  <string key="remote.err.smbclient">smbclient is missing: install the Samba client and retry</string>
+  <string key="remote.err.smb_path">SMB file name or path contains characters unsafe for command mode (';', '!', quotes or control characters): rename the file on the server and retry</string>
+  <string key="remote.err.known_hosts">SFTP host key verification is not configured: set a readable known_hosts path in the connection, or create ~/.ssh/known_hosts (e.g. ssh-keyscan HOST &gt;&gt; ~/.ssh/known_hosts) and retry</string>
+  <string key="remote.err.too_large">Remote file or directory is too large; aborted</string>
+  <string key="remote.err.no_audio">No audio files in this directory</string>
+  <string key="remote.err.cache_limit">Cache is full: clean the cache or raise the cache limit</string>
+  <string key="remote.err.parse">Cannot parse the directory listing returned by the server</string>
+  <string key="remote.err.cancelled">Transfer cancelled</string>
+  <string key="remote.err.unknown">Remote operation failed</string>
+  <string key="remote.err.busy">Another remote job is running; please wait</string>
+  <string key="remote.load_failed">Failed to read remote configuration (remote.xml may be corrupted)</string>
+  <string key="remote.save_failed">Failed to save remote configuration: check disk space and permissions</string>
+  <string key="remote.delete_confirm">Delete connection “%s”? ENTER deletes, ESC cancels</string>
+  <string key="remote.confirm_keys">ENTER confirms, ESC cancels</string>
+  <string key="remote.invalid_port">Port must be 1-65535 (leave empty for the default port)</string>
+  <string key="remote.invalid_base_path">Share name/path must not be empty</string>
+  <string key="remote.value_on">On</string>
+  <string key="remote.value_off">Off</string>
+  <string key="remote.field.tls">TLS</string>
+  <string key="remote.field.insecure_tls">Trust self-signed certificate</string>
+  <string key="remote.field.known_hosts">known_hosts path</string>
+  <string key="remote.field.key_passphrase">Key passphrase</string>
+  <string key="remote.field.smb_share">SMB share/subpath</string>
+  <string key="remote.smb_path_hint">Hint: SMB takes “share/subpath” (e.g. music/albums), without the smb:// prefix</string>
+  <string key="remote.tls_hint">Hint: TLS applies to HTTP/WebDAV/FTPS; enable “trust self-signed” for self-signed certificates</string>
+  <string key="remote.form_hint">Up/Down select  ENTER edit  +/- toggle  S save  ESC cancel</string>
+  <string key="remote.actions_hint">Up/Down select  ENTER run  ESC back</string>
+  <string key="remote.cache_title">Cache</string>
+  <string key="remote.cache_usage">Used %lld MB / limit: %s</string>
+  <string key="remote.cache_unlimited">unlimited</string>
+  <string key="remote.cache_prefetch_unavailable">Prefetch: unavailable (never implemented; removed from the configuration)</string>
+  <string key="remote.cache_clean">Clean cache (keep playing/queue/favorites/history)</string>
+  <string key="remote.cache_clean_confirm">Clean unprotected cache files? ENTER confirms, ESC cancels</string>
+  <string key="remote.cache_cleaned">Cleaned %d cached file(s)</string>
+  <string key="remote.cache_limit_field">Cache limit (MB, 0=unlimited)</string>
+  <string key="remote.cache_limit_prompt">Cache limit (MB)</string>
+  <string key="remote.cache_limit_set">Cache limit set to %d MB</string>
+  <string key="remote.cache_limit_invalid">Cache limit must be an integer &gt;= 0</string>
+  <string key="remote.session_summary">Session: completed %d/%d, failed %d</string>
+  <string key="remote.truncated">Directory exceeds the per-session limit: only %d of %d tracks loaded</string>
 
   <!-- ===== Equalizer ===== -->
   <!-- Preset names -->
@@ -670,7 +727,6 @@
   <!-- ===== Help fallback ===== -->
   <string key="help.fallback_notice">The help page for {name} is missing — displaying the default English help page instead.</string>
   <string key="remote.download_failed">Download failed: </string>
-  <string key="remote.partial">Some tracks failed to download</string>
   <string key="core.offline.title">Playback service disconnected</string>
   <string key="core.offline.hint">The core is not running; the UI keeps reconnecting with backoff</string>
   <string key="core.offline.retry">Next reconnect attempt in %d s</string>

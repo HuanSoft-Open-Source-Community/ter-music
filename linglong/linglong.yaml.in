@@ -65,6 +65,9 @@ buildext:
       - libdbus-1-dev
       - zlib1g-dev
     depends:
+      # SMB/CIFS 远程音乐源需要运行时的 smbclient（Samba 客户端）。
+      # Linyaps 清单没有“可选/推荐依赖”字段，因此不放进 depends（否则会
+      # 强制安装整个 Samba）；由应用在缺 smbclient 时给出安装提示，文档同步。
       - libavformat60
       - libavcodec60
       - libswresample4
