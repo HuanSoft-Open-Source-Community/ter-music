@@ -550,7 +550,7 @@ The same page starts with two terminal-appearance rows:
 | Row | Effect |
 | --- | --- |
 | `Default Appearance Mode` | `Auto (follow terminal)`, `Light` or `Dark`; stored as `preferences.appearance_mode` (0/1/2) in `config.xml` (contract v10). `←`/`→` cycles, `ENTER` opens the picker. This is the global default. |
-| `Re-detect Terminal Background` | Runs the full detection chain (terminal theme adapter; XDG portal up to 200 ms when the adapter is unknown; OSC 11 up to 250 ms; `COLORFGBG`; a `TERM` hint) and reports the light/dark/unknown conclusion **and its source** in one status message. The row itself keeps a live `background: light (terminal reply)` suffix; the source is one of terminal theme / terminal reply / system appearance / COLORFGBG / TERM hint / fallback. Use it when the terminal does not report focus. |
+| `Re-detect Terminal Background` | Runs the full detection chain (terminal theme adapter; XDG portal up to 250 ms when the adapter is unknown; OSC 11 up to 250 ms; `COLORFGBG`; a `TERM` hint) and reports the light/dark/unknown conclusion **and its source** in one status message. The row itself keeps a live `background: light (terminal reply)` suffix; the source is one of terminal theme / terminal reply / system appearance / COLORFGBG / TERM hint / fallback. Use it when the terminal does not report focus. The probe that runs once at startup is cheaper and does not wait as long (OSC 11 up to 200 ms, portal up to 120 ms). |
 
 After the colour rows, the same page has one more appearance row:
 

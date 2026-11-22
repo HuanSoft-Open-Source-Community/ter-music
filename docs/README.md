@@ -40,6 +40,7 @@ The player has two planes: a **core** that owns the audio device, transport and 
 **Interface**
 - Six panes (playlist, info, controls, spectrum, lyrics, vinyl), seven JSON layout presets and forced tiling.
 - 24 theme palettes plus a custom slot; per-pane foreground and background colors.
+- Terminal light/dark adaptation: detects the terminal background (OSC 11, deepin-terminal theme, XDG portal, COLORFGBG, TERM hint) and switches the factory colours and the seven layout presets; choose Auto, Light or Dark in Settings → Appearance.
 - Album art as colored half-blocks; a vinyl pane with a rotating cover label.
 - Keyboard and mouse operation; built-in languages `zh_CN`, `en_US` and `zh-PQ`.
 

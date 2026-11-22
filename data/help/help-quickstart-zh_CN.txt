@@ -56,17 +56,18 @@ ter-music 快速上手
   内置文件：/usr/share/ter-music/layouts/layouts.json（源码树 data/layouts/）
   用户覆盖：~/.config/ter-music/layouts.json（同 id 覆盖内置）
   选中状态：~/.config/ter-music/ui-layout（前端本地，不写入 config.xml）
-  终端亮/暗：F2 -> 界面外观 -> 外观模式（自动/亮色/暗色，存于
-  preferences.appearance_mode）。自动模式先向终端查询（OSC 11）；使用
-  deepin-terminal 时再读其自身主题（只读，最多每 2 秒检查一次文件变化；
-  身份优先 TERM_PROGRAM，未设置才看祖先链；其它终端不读取），然后读 XDG
-  桌面 portal 的 color-scheme（运行期跟随），再依次尝试 COLORFGBG、
-  TERM 提示，
-  最后保持原有暗色外观；设置页会显示探测来源。前端本地
-  ~/.config/ter-music/appearance-terminals.json 可按终端覆盖全局默认。
-  亮色背景下出厂主题色与 7 个内置预设切换到亮色安全配色；改过的颜色保留，
-  用户布局只对仍等于预设出厂暗色值的前景色做适配（TER_MUSIC_LAYOUTS 逐字生效）。
-  终端支持焦点上报时离开再回来会自动重探，否则用“重新探测终端背景”。
+  终端亮/暗：F2 -> 界面外观 -> 默认外观模式（自动/亮色/暗色，存于
+  preferences.appearance_mode，契约版本 10）。自动模式在首帧前先向终端查询
+  背景色（OSC 11）；无应答时，若为 deepin-terminal 再读其自身主题（只读，
+  最多每 2 秒检查一次文件变化；身份优先 TERM_PROGRAM，未设置才看祖先链；
+  其它终端不读取），然后读 XDG 桌面 portal 的 color-scheme（运行期跟随），
+  再依次尝试 COLORFGBG、TERM 提示，最后保持原有暗色外观；设置页会显示探测
+  来源。前端本地 ~/.config/ter-music/appearance-terminals.json 可按终端覆盖
+  全局默认（设置页“本终端外观”一行）；探测到的亮/暗变体属于各前端进程，绝不
+  写入 config.xml。亮色背景下出厂主题色与 7 个内置预设切换到亮色安全配色；
+  改过的颜色保留，用户布局只对仍等于预设出厂暗色值的前景色做适配
+  （TER_MUSIC_LAYOUTS 逐字生效）。
+  终端支持焦点上报时离开再回来会自动重探，否则用同页的“重新探测终端背景”。
 
 3. 焦点切换
 -----------
