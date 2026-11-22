@@ -73,6 +73,31 @@
   <string key="settings.color.saved_copy">Saved as copy %s</string>
   <string key="settings.color.save_failed">Could not save colours (see log)</string>
   <string key="settings.color.rainbow_pending">aurora flow active</string>
+  <string key="settings.color.auto_terminal">Auto (light/dark)</string>
+  <string key="settings.appearance.auto">Auto (follow terminal)</string>
+  <string key="settings.appearance.light">Light</string>
+  <string key="settings.appearance.dark">Dark</string>
+  <string key="settings.appearance.detected_light">Terminal background: light</string>
+  <string key="settings.appearance.detected_dark">Terminal background: dark</string>
+  <string key="settings.appearance.detected_unknown">Terminal background unknown — keeping the current look</string>
+  <string key="settings.appearance.detected_inline">background: %s (%s)</string>
+  <string key="settings.appearance.detected_fmt">Terminal background: %s (%s)</string>
+  <string key="settings.appearance.source_osc11">terminal reply</string>
+  <string key="settings.appearance.source_terminal_theme">terminal theme</string>
+  <string key="settings.appearance.source_xdg">system appearance</string>
+  <string key="settings.appearance.source_colorfgbg">COLORFGBG</string>
+  <string key="settings.appearance.source_term">TERM hint</string>
+  <string key="settings.appearance.source_fallback">fallback</string>
+  <string key="settings.appearance.source_explicit">appearance mode</string>
+  <string key="settings.appearance.terminal_inline_inherit">Inherit</string>
+  <string key="settings.appearance.terminal_inherit">Inherit (%s)</string>
+  <string key="settings.appearance.terminal_override">%s (override)</string>
+  <string key="settings.appearance.terminal_hint">This terminal (%s): the override applies only here; clear it with Inherit.</string>
+  <string key="settings.appearance.terminal_saved">This terminal's appearance override saved</string>
+  <string key="settings.appearance.terminal_cleared">This terminal now inherits the global appearance mode</string>
+  <string key="settings.appearance.terminal_save_failed">Could not save this terminal's appearance override</string>
+  <string key="settings.appearance.unsupported">The running core does not support appearance mode</string>
+  <string key="settings.appearance.hint">Auto follows the terminal's light/dark background; built-in presets and factory theme colours change with it. On deepin-terminal its own theme is read (before the system appearance) and followed automatically. A per-terminal override wins over the global default; XDG system appearance is only used when neither OSC 11 nor the terminal theme answers.</string>
   <string key="settings.layout.hint">Layouts are force-tiled: ←/→ switch, ENTER choose; old or hand-edited geometry is auto-fitted instead of rejected</string>
   <string key="settings.layout.edit_hint">Layout editing: ENTER opens the split editor; arrows select, [ ] adjust ratio, | / - split, S save</string>
   <string key="settings.layout.saved">Layout switched</string>
@@ -147,6 +172,9 @@
   <string key="settings.opt.sort_mode">Sort Mode</string>
   <string key="settings.opt.cue_encoding">CUE Encoding</string>
   <string key="settings.opt.karaoke_mode">Karaoke (vocal removal)</string>
+  <string key="settings.opt.appearance_mode">Default Appearance Mode</string>
+  <string key="settings.opt.terminal_mode">This Terminal's Appearance</string>
+  <string key="settings.opt.detect_background">Re-detect Terminal Background</string>
 
   <!-- ===== Info display (info pane + CLI / D-Bus) ===== -->
   <string key="settings.opt.info_preset">Info Display Preset</string>
@@ -675,6 +703,13 @@
   <string key="color.sky_blue">Sky Blue</string>
   <string key="color.coral">Coral</string>
   <string key="color.lime">Lime</string>
+  <string key="color.charcoal">Charcoal</string>
+  <string key="color.deep_teal">Deep Teal</string>
+  <string key="color.dark_amber">Dark Amber</string>
+  <string key="color.dark_green">Dark Green</string>
+  <string key="color.dark_magenta">Dark Magenta</string>
+  <string key="color.deep_blue">Deep Blue</string>
+  <string key="color.dark_pink">Dark Pink</string>
 
   <string key="help.line">Lines</string>
 

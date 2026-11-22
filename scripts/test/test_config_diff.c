@@ -104,6 +104,15 @@ int main(void)
     CHECK(strstr(buf, "\"preferences\"") != NULL, "karaoke_mode 落在 preferences 分区");
     CHECK(strstr(buf, "\"karaoke_mode\":2") != NULL, "karaoke_mode 键与值正确");
 
+    /* 4c. appearance_mode（配置契约 v10 新增，取值域 0..2）：
+     *     与 karaoke_mode 同理——登记在 config_fields.h 即自动进补丁，
+     *     证明 Settings 经 player_config_persist() 下发的差异包含它。 */
+    AppConfig am = before;
+    am.appearance_mode = 2;
+    diff_of(&before, &am, buf, sizeof(buf));
+    CHECK(strstr(buf, "\"preferences\"") != NULL, "appearance_mode 落在 preferences 分区");
+    CHECK(strstr(buf, "\"appearance_mode\":2") != NULL, "appearance_mode 键与值正确");
+
     /* 5. 多分区多键 */
     AppConfig m = before;
     m.volume_percent = 55;

@@ -73,6 +73,31 @@
   <string key="settings.color.saved_copy">已存为副本 %s</string>
   <string key="settings.color.save_failed">配色保存失败（详见日志）</string>
   <string key="settings.color.rainbow_pending">流光模式生效中</string>
+  <string key="settings.color.auto_terminal">自动（亮/暗）</string>
+  <string key="settings.appearance.auto">自动（跟随终端）</string>
+  <string key="settings.appearance.light">亮色</string>
+  <string key="settings.appearance.dark">暗色</string>
+  <string key="settings.appearance.detected_light">终端背景：亮色</string>
+  <string key="settings.appearance.detected_dark">终端背景：暗色</string>
+  <string key="settings.appearance.detected_unknown">无法探测终端背景，保持当前外观</string>
+  <string key="settings.appearance.detected_inline">背景：%s（%s）</string>
+  <string key="settings.appearance.detected_fmt">终端背景：%s（%s）</string>
+  <string key="settings.appearance.source_osc11">终端应答</string>
+  <string key="settings.appearance.source_terminal_theme">终端主题</string>
+  <string key="settings.appearance.source_xdg">系统外观</string>
+  <string key="settings.appearance.source_colorfgbg">COLORFGBG</string>
+  <string key="settings.appearance.source_term">TERM 提示</string>
+  <string key="settings.appearance.source_fallback">回退（未知）</string>
+  <string key="settings.appearance.source_explicit">外观模式</string>
+  <string key="settings.appearance.terminal_inline_inherit">继承</string>
+  <string key="settings.appearance.terminal_inherit">继承（%s）</string>
+  <string key="settings.appearance.terminal_override">%s（覆盖）</string>
+  <string key="settings.appearance.terminal_hint">本终端（%s）：覆盖仅在此终端生效；选“继承”可清除。</string>
+  <string key="settings.appearance.terminal_saved">已保存本终端外观覆盖</string>
+  <string key="settings.appearance.terminal_cleared">本终端已改为继承全局外观模式</string>
+  <string key="settings.appearance.terminal_save_failed">无法保存本终端外观覆盖</string>
+  <string key="settings.appearance.unsupported">运行中的核心不支持外观模式</string>
+  <string key="settings.appearance.hint">自动跟随终端亮/暗背景；内置预设与出厂主题色随之切换。使用 deepin-terminal 时会读取其自身主题（优先于系统外观）并自动跟随。本终端覆盖优先于全局默认；仅当 OSC 11 与终端主题都不可用时才使用 XDG 系统外观。</string>
   <string key="settings.layout.hint">布局强制平铺：←/→ 切换，ENTER 选择；旧布局或手改几何会自动适配，不再拒绝</string>
   <string key="settings.layout.edit_hint">布局编辑：ENTER 打开分栏编辑器；方向键选择，[ ] 调比例，| / - 分栏，S 保存</string>
   <string key="settings.layout.saved">布局已切换</string>
@@ -147,6 +172,9 @@
   <string key="settings.opt.sort_mode">排序方式</string>
   <string key="settings.opt.cue_encoding">CUE编码</string>
   <string key="settings.opt.karaoke_mode">卡拉OK（消人声）</string>
+  <string key="settings.opt.appearance_mode">默认外观模式</string>
+  <string key="settings.opt.terminal_mode">本终端外观</string>
+  <string key="settings.opt.detect_background">重新探测终端背景</string>
 
   <!-- ===== Info display (info pane + CLI / D-Bus) ===== -->
   <string key="settings.opt.info_preset">信息显示预设</string>
@@ -674,6 +702,13 @@
   <string key="color.sky_blue">天蓝</string>
   <string key="color.coral">珊瑚</string>
   <string key="color.lime">石灰</string>
+  <string key="color.charcoal">炭灰</string>
+  <string key="color.deep_teal">深青</string>
+  <string key="color.dark_amber">暗琥珀</string>
+  <string key="color.dark_green">暗绿</string>
+  <string key="color.dark_magenta">暗洋红</string>
+  <string key="color.deep_blue">深蓝</string>
+  <string key="color.dark_pink">暗粉</string>
 
   <string key="help.line">行</string>
 

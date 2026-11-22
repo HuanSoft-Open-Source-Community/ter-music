@@ -56,6 +56,18 @@ ter-music 快速上手
   内置文件：/usr/share/ter-music/layouts/layouts.json（源码树 data/layouts/）
   用户覆盖：~/.config/ter-music/layouts.json（同 id 覆盖内置）
   选中状态：~/.config/ter-music/ui-layout（前端本地，不写入 config.xml）
+  终端亮/暗：F2 -> 界面外观 -> 默认外观模式（自动/亮色/暗色，存于
+  preferences.appearance_mode，契约版本 10）。自动模式在首帧前先向终端查询
+  背景色（OSC 11）；无应答时，若为 deepin-terminal 再读其自身主题（只读，
+  最多每 2 秒检查一次文件变化；身份优先 TERM_PROGRAM，未设置才看祖先链；
+  其它终端不读取），然后读 XDG 桌面 portal 的 color-scheme（运行期跟随），
+  再依次尝试 COLORFGBG、TERM 提示，最后保持原有暗色外观；设置页会显示探测
+  来源。前端本地 ~/.config/ter-music/appearance-terminals.json 可按终端覆盖
+  全局默认（设置页“本终端外观”一行）；探测到的亮/暗变体属于各前端进程，绝不
+  写入 config.xml。亮色背景下出厂主题色与 7 个内置预设切换到亮色安全配色；
+  改过的颜色保留，用户布局只对仍等于预设出厂暗色值的前景色做适配
+  （TER_MUSIC_LAYOUTS 逐字生效）。
+  终端支持焦点上报时离开再回来会自动重探，否则用同页的“重新探测终端背景”。
 
 3. 焦点切换
 -----------
@@ -410,7 +422,9 @@ ter-music 快速上手
           选中状态 ~/.config/ter-music/ui-layout（前端本地）。
           show_lyrics_panel 已弃用，仅在没有 ui-layout 时作为首次映射提示。
   配置：  ~/.config/ter-music/config.xml   由核心独占写盘（XML 根版本属性写配置
-          契约号，当前为 9；历史 "2.2" 文件仍可加载，升级首启迁移后改写为数字）。
+          契约号，当前为 10；历史 "2.2" 文件仍可加载，升级首启迁移后改写为数字）。
+          appearance_mode 位于 <preferences>（0 自动，1 亮色，2 暗色）；探测到的
+          亮/暗变体只属于各前端进程，绝不落盘。
           前端只修改自己的配置镜像，再把差异经 Config.Set 交给核心落盘。
   内容：  ~/.config/ter-music/library.db   前端 SQLite 曲库，含曲目元数据、
           扫描根、播放历史、收藏、歌单与歌单曲目、目录历史、临时播放列表。

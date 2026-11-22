@@ -240,6 +240,7 @@ TM_UNIT_STRICT=1 ./scripts/test/run-unit-tests.sh
 ```
 
 - 远程功能有三组单测：`test_remote_url`（URL 解析/构造/编解码/脱敏）、`test_remote_listing`（FTP MLSD/LIST、WebDAV 命名空间、HTML autoindex、SMB 列格式、路径归一）、`test_remote_cache`（`.part`→rename、缓存命中、LRC、取消/重试、淘汰保护集、线程竞态）。
+- 外观功能有两组单测：`test_appearance`（OSC 11 应答解析、COLORFGBG 回退、WCAG 亮度分类与模式→变体、出厂/亮色表与“显式自定义不改写”、7 个内置预设的亮/暗互异性与 8/16/256 色量化、`data/layouts/layouts.json` 暗色值防漂移）与 `test_appearance_terminal`（按终端覆盖文件的 round-trip、非法条目与损坏 JSON、只读版本、原子写）。
 - 某些单测需要本机未安装的开发头/库（libavcodec、ncursesw、libxml2）；这类**环境**编译失败输出 `SKIP`，不算测试失败。默认退出码 `0` = 全过或只有环境 SKIP，`1` = 有真实失败；CI 完整环境请设 `TM_UNIT_STRICT=1`，此时 SKIP 也按失败处理。
 
 ### 9.2 远程端到端测试
@@ -258,6 +259,23 @@ TM_UNIT_STRICT=1 ./scripts/test/run-unit-tests.sh
 - 断言核心队列里的路径全部是缓存中的本地路径、缓存无 `.part`、无残留进程；失败时保留日志并给出可复现命令。
 - 退出码：`0` 全部断言通过，`1` 有断言失败，`2` 环境不满足（缺工具/构建产物），不会把环境问题伪装成产品失败。
 - 真实 Samba/SFTP 服务端不在默认夹具内：SMB 只验证命令构造与安全语义（脚本注释保留了接入真实 `smbd` 的说明，当前默认运行的仍是假客户端）；SFTP 只验证 fail-closed 保护；FTPS 验证 TLS 握手，数据通道未覆盖。
+
+### 9.3 外观端到端测试
+
+```bash
+# 外观模式、OSC 11 应答与回退链、焦点重探、输入安全、deepin-terminal 适配器
+TERM=xterm-256color script -qefc \
+  "python3 scripts/test/appearance-pty-e2e.py --bin build/ter-music" /dev/null
+
+# XDG desktop portal 的 color-scheme 与 SettingChanged 跟随
+dbus-run-session -- script -qefc \
+  "python3 scripts/test/appearance-xdg-pty-e2e.py --bin build/ter-music" /dev/null
+```
+
+- 两个脚本都用 pty 驱动 TUI；`appearance-pty-e2e.py` 在 stdin 不是终端时会自行 `SKIP`，所以在无终端的 CI/脚本环境中要用 `script`（或真实终端）包一层。`--only 场景名` 只跑一个场景。
+- 每个场景使用独立的临时 `HOME`/`XDG_CONFIG_HOME`/`XDG_CACHE_HOME`，不触碰真实用户配置；非 XDG 场景以 `--frontend=local` 启动，不依赖 D-Bus。
+- `appearance-xdg-pty-e2e.py` 需在 `dbus-run-session` 内运行；脚本自己启动私有 dbus-daemon 与 `fake-xdg-portal.py` 提供 `org.freedesktop.portal.Settings`，不需要系统 portal。如果宿主当前的 D-Bus 会话里有真实 XDG portal 干扰回退场景，可在运行非 XDG 用例前 `env -u DBUS_SESSION_BUS_ADDRESS`。
+- 前置工具：`python3`（仅标准库）、`dbus-daemon`/`dbus-run-session`、util-linux 的 `script`。
 
 ## 10. 故障排除
 

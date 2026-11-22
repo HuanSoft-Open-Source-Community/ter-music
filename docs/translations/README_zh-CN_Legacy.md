@@ -40,6 +40,7 @@ Ter-Music者，端闱之乐部也。以斐氏FFmpeg解声，纽氏ncursesw绘界
 **文界**
 - 六格（曲帙、信息、控御、频谱、歌辞、黑胶），七种JSON局度预设，强制平铺。
 - 二十四套调色之谱，加一自定槽位；每格可别立前景、背景之色。
+- 端闈明暗之自適：自探端闈之底（OSC 11、deepin-terminal之題、XDG案牘、COLORFGBG、TERM之示），出廠之色與七預設隨之而易；於设置→界面外观擇自、明、暗。
 - 专辑封面以彩色半块绘之；黑胶格有旋转之封面圆标。
 - 键鼠并用；内置`zh_CN`、`en_US`、`zh-PQ`三语。
 
@@ -273,6 +274,14 @@ ter-music -o webdav://host/music/
 
 二十四套调色之谱加一自定槽位，主侧栏、高亮、边框；每格亦可别立前景/背景。全式见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)。
 
+### 端闈明暗之自適
+
+`F2`→界面外观→**通體色式**，可擇`自`（默）、`明`、`暗`；藏於`config.xml`之`preferences.appearance_mode`（契約十）。`自`者，先於首帧前問端闈之底色（OSC 11）；不答，則次端闈之本題（今惟 deepin-terminal 之適，讀而不寫，至多每二秒察其變）、次 XDG 系統之式、次`COLORFGBG`、次`TERM`之示（名含`light`/`dark`），終守舊暗之貌——故不答之端闈/案牘，其觀與舊版無異（OSC 11 探之限約二百毫秒，案牘讀之限約百二十毫秒，且惟`自`者行之）。端闈之答自鍵流而去，不入界面；惟本程序方發問、猶待答之窗內，得全答（BEL 或 ST 終）乃以為答；手書同文，仍得逕達（窗內預讀至多八十毫秒）。 `自`者之序：先 OSC 11（端闈實底，為準）→ 次端闈本題之適（今惟 deepin-terminal，讀其本題之配，先於案牘之好）→ 次 XDG 案牘之 `org.freedesktop.appearance color-scheme`（系統之好，以 `SettingChanged` 隨之）→ 次 `COLORFGBG` → 次 `TERM` 之示 → 終守舊暗；設置之頁顯其源。端闈本題之適，惟 deepin-terminal 用之；他端不讀其文，其行如故。識之也，先`TERM_PROGRAM`；未設，乃察祖之鏈。前端本地 `~/.config/ter-music/appearance-terminals.json` 可按端闈覆通體 `preferences.appearance_mode`（通體之鍵仍為默，亦 `config.xml` 中惟一存者）。內置預設徑自適；用戶 `layouts.json` 與預設同名者，惟其前景猶等預設出廠暗值乃易明色——君所改者存，`TER_MUSIC_LAYOUTS` 則如其文而用。
+
+底色既明，則出廠主題之色與七預設皆易為明底之安色；一預設之內，諸格之色於二百五十六、十六、八色之端闈仍各不相同。暗色之譜一仍其舊。所易者惟出廠之值：君已改之主題色則存。`~/.config/ter-music/layouts.json`之用戶局度不為改寫；若其 id 與內置預設同名，而某格之前景猶等預設出廠暗值，則此前景隨明色之變。故用戶預設副本中未改之出廠值仍自適（局度修器顯所存之值，設置顯其效之值）；君所改之值與`TER_MUSIC_LAYOUTS`則如其文而用。於局度修器存內置預設，則先物化今屏之色而後定。
+
+端闈能報其見者（`自`時啟`\e[?1004h`，且terminfo有焦點之鍵），去而復歸，即自復探，不須重啟；不能者，用同頁之**復探端闈之底**。節度頁之色名亦及明色之目（炭、深青、暗珀……）；出廠默認之色，書曰「自（明暗）」。所探之明暗屬各前端之進程，**絕不書於`config.xml`**；色式則共享之節度，今行之TUI經舊有`ConfigChanged`重載之路而效。
+
 ## 十、节度与数据
 
 `$XDG_CONFIG_HOME/ter-music`（默`~/.config/ter-music`）：
@@ -300,6 +309,7 @@ help/          用户速上之文
 | `default_play_mode` | 0-16 |
 | `ui_language` | `zh_CN`、`en_US`、`zh-PQ`或已装之语言包ID |
 | `karaoke_mode` | 0勿汰，1微汰，2盡汰 |
+| `appearance_mode` | 0自（從端闈），1明，2暗 |
 | `resume_last_playback` | 复上次之曲与位 |
 | `stop_core_on_exit` | 1退时止核心，0续播 |
 | `core_exit_when_no_frontend` | 末前端去后十秒核心自退 |
