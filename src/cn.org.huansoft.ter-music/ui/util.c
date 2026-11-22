@@ -71,12 +71,13 @@ time_t get_status_message_time(void)
 
 /* 子视图内容重绘后补画状态行。render_menu_frame() 只在整帧重绘时画它；
  * 键盘动作常走“show_status_message + 只重绘内容”的路径，状态行会不可见。
- * 调用方在 refresh/doupdate 之前调用本函数即可（不自行刷新）。 */
+ * 调用方在 refresh/doupdate 之前调用本函数即可（不自行刷新）。
+ *
+ * 主视图同样支持：远程下载在后台进行、加载后会自动回到主视图，若这里
+ * 直接 return，用户就看不到进度/失败（t5 V-03）。主视图的提示栏在
+ * max_y-1，本函数写在 max_y-2，与 render_menu_frame 的状态行同一位置。 */
 void repaint_status_message(void)
 {
-    if (g_current_view == VIEW_MAIN) {
-        return;
-    }
     if (layout_editor_active()) {
         return;
     }

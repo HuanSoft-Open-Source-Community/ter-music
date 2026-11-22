@@ -17,6 +17,7 @@
  */
 
 #include "library/library.h"
+#include "remote/remote_url.h"
 #include "logger/logger.h"
 #include "search/search.h"
 #include "playlist/playlist.h"
@@ -1559,12 +1560,19 @@ int library_favorites_has(const char *track_path) {
 
 int library_dir_history_add(const char *path) {
     if (!library_is_available() || !path || !path[0]) return -1;
+    /* 远程 URL 里的密码不进库：历史里只保存脱敏 URL（审计 F-05）。 */
+    char safe_path[MAX_PATH_LEN];
+    if (strstr(path, "://") != NULL) {
+        remote_redact_url(path, safe_path, sizeof(safe_path));
+    } else {
+        snprintf(safe_path, sizeof(safe_path), "%s", path);
+    }
     pthread_mutex_lock(&g_library_mutex);
     sqlite3_stmt *stmt = NULL;
     sqlite3_prepare_v2(g_db,
         "INSERT OR REPLACE INTO dir_history(path, open_time) VALUES(?, ?)",
         -1, &stmt, NULL);
-    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, safe_path, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(stmt, 2, (sqlite3_int64)time(NULL));
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -1596,7 +1604,16 @@ int library_dir_history_get_all(DirHistoryEntry *entries, int max_entries) {
     int count = 0;
     while (count < max_entries && sqlite3_step(stmt) == SQLITE_ROW) {
         const char *p = (const char *)sqlite3_column_text(stmt, 0);
-        if (p) strncpy(entries[count].path, p, sizeof(entries[count].path) - 1);
+        if (p) {
+            /* 旧库里可能已有带凭据的历史条目：读出时也脱敏（F-05）。 */
+            if (strstr(p, "://") != NULL) {
+                remote_redact_url(p, entries[count].path, sizeof(entries[count].path));
+            } else {
+                snprintf(entries[count].path, sizeof(entries[count].path), "%s", p);
+            }
+        } else {
+            entries[count].path[0] = '\0';
+        }
         entries[count].open_time = (time_t)sqlite3_column_int64(stmt, 1);
         count++;
     }

@@ -21,7 +21,7 @@
 
 Ter-Music plays local and remote music in a terminal. FFmpeg decodes, ncursesw draws the UI, and PipeWire, PulseAudio or ALSA is selected at runtime. A SQLite library is built in; MPRIS and the D-Bus control API are available when D-Bus support is compiled in.
 
-The player has two planes: a **core** that owns the audio device, transport and the path queue it is given, and a **front end** (TUI or CLI) that owns files, the library, playlists, history and remote downloads. Starting the TUI starts a core when none is running.
+The player has two planes: a **core** that owns the audio device, transport and the path queue it is given, and a **front end** (TUI or CLI) that owns files, the library, playlists, history and remote downloads. A front end starts a core when none is running: outside a container it forks one in the background, while inside the Linyaps container it requests D-Bus activation instead because the container cannot fork a detached process (see the Linyaps notes under CLI).
 
 ## Features
 
@@ -35,7 +35,7 @@ The player has two planes: a **core** that owns the audio device, transport and 
 **Content**
 - SQLite library with FTS5 search, pinyin matching and recursive scanning; browse by artist, album or genre.
 - Play queue, user playlists, favorites, playback history and folder history.
-- SMB, SFTP, FTP, WebDAV and HTTP sources; the front end downloads each track into a local cache.
+- SMB, SFTP, FTP, WebDAV and HTTP sources; the front end downloads each track into a local cache and hands those local paths to the core. SMB needs the Samba client, SFTP needs a known_hosts file (see [Remote music sources](#remote-music-sources)).
 
 **Interface**
 - Six panes (playlist, info, controls, spectrum, lyrics, vinyl), seven JSON layout presets and forced tiling.
@@ -56,19 +56,21 @@ The AUR recipe is prepared as `cn.org.huansoft.ter-music` but is **not published
 
 ### Build from source
 
-Required: CMake 3.10+, a C99 compiler, pkg-config, ncursesw, FFmpeg libraries (avcodec, avformat, avutil, avfilter, swresample, swscale), libpng, libjpeg, libxml2, SQLite3 and zlib.
+Required: CMake 3.10+, a C99 compiler, pkg-config, ncursesw, FFmpeg libraries (avcodec, avformat, avutil, avfilter, swresample, swscale), libpng, libjpeg, libxml2, SQLite3, zlib and libcurl. libcurl is not optional: the build stops with a clear error when it is missing.
 
-Optional: PipeWire, PulseAudio and ALSA output; D-Bus (MPRIS/API); libcurl (remote sources).
+Optional: PipeWire, PulseAudio and ALSA output; D-Bus (MPRIS/API). SMB sources additionally need the external `smbclient` program (Samba client) at run time; without it the build still works and SMB connections report that it is missing.
 
 **Fedora / RHEL**
 
 ```bash
 sudo dnf install cmake gcc make pkg-config ncurses-devel \
   ffmpeg-free-devel libpng-devel libjpeg-turbo-devel libxml2-devel \
-  sqlite-devel zlib-devel
+  sqlite-devel zlib-devel libcurl-devel
 # optional
 sudo dnf install pipewire-devel pulseaudio-libs-devel alsa-lib-devel \
-  dbus-devel libcurl-devel
+  dbus-devel
+# SMB sources need the Samba client at run time
+sudo dnf install samba-client
 ```
 
 **Debian / Ubuntu**
@@ -77,19 +79,23 @@ sudo dnf install pipewire-devel pulseaudio-libs-devel alsa-lib-devel \
 sudo apt install build-essential cmake pkg-config libncursesw5-dev \
   libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev \
   libswresample-dev libswscale-dev libpng-dev libjpeg-dev libxml2-dev \
-  libsqlite3-dev zlib1g-dev
+  libsqlite3-dev zlib1g-dev libcurl4-openssl-dev
 # optional
 sudo apt install libpipewire-0.3-dev libpulse-dev libasound2-dev \
-  libdbus-1-dev libcurl4-openssl-dev
+  libdbus-1-dev
+# SMB sources need the Samba client at run time
+sudo apt install smbclient
 ```
 
 **Arch Linux**
 
 ```bash
 sudo pacman -S --needed base-devel cmake pkgconf ncurses ffmpeg \
-  libpng libjpeg-turbo libxml2 sqlite zlib
+  libpng libjpeg-turbo libxml2 sqlite zlib curl
 # optional
-sudo pacman -S --needed libpipewire libpulse alsa-lib dbus curl
+sudo pacman -S --needed libpipewire libpulse alsa-lib dbus
+# SMB sources need the Samba client at run time
+sudo pacman -S --needed smbclient
 ```
 
 **Build**
@@ -107,12 +113,14 @@ The binary is `build/ter-music` (or `./ter-music` from the build directory). Loc
 ## Quick start
 
 ```bash
-ter-music                  # TUI; starts a core if none is running
-ter-music -o ~/Music       # open a folder or file
-ter-music ftp://user:pass@host/music
+ter-music                        # TUI; starts a core if none runs (Linyaps: D-Bus activation)
+ter-music -o ~/Music             # open a folder or file
+ter-music -o ftp://host/music/   # open a remote folder in the TUI
 ```
 
 The TUI needs a real terminal; do not pipe its output. Press `O` to open a folder, `↑`/`↓` to select, `Enter` or `Space` to play, and `q` to quit.
+
+A remote URL opened this way uses only the credentials embedded in the URL. For a server that needs a password, add a connection in `F2` → Remote Devices and open the folder there instead of writing `user:password@` into the URL: the URL stays visible in the shell history and process list. `ter-music play` and `ter-music daemon start --open` reject remote URLs because the core plays local paths only.
 
 | Key | Action |
 | --- | --- |
@@ -184,6 +192,12 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music play ~/Music
 
 Background playback uses D-Bus activation, the shipped systemd user service, or `--foreground` inside `ll-cli run`; enable the service from the host with `systemctl --user enable --now cn.org.huansoft.ter-music`. When the container is already running, read output with `ll-cli enter` or `journalctl --user -u cn.org.huansoft.ter-music`.
 
+The TUI cannot fork a detached core inside the container, so it asks the host to activate the service. When activation is not available, start the core on the host first and keep it in the foreground, then open the TUI:
+
+```bash
+ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
+```
+
 **ll-box cold-start replay.** ll-box ≤ 2.3.5 can replay bytes it has already written when its cold-start forwarder hits a full terminal queue, splicing duplicated output into the TUI. ter-music cannot stop that write; inside the container it measures each frame's terminal writes (`wchar` in `/proc/self/io`) and forces one full-screen repaint only on burst or back-pressure evidence or after a terminal resize. A bare-mode reset likewise needs that evidence (or a terminal resize), and the `endwin`+`refresh` fallback stays opt-in (`TER_MUSIC_TTY_HARD_RESET=1`, off by default). None of this runs outside the container, and the guard adds no configuration key, setting-page entry or user-visible switch. Known limitation: a repaint is no longer scheduled by a timer when there is no evidence, so damage that appears in a session with only small frames and a slow reader is not repainted proactively; it may remain until the next repaint-class event (a terminal resize, a view change or new burst/back-pressure evidence).
 
 The root fix is upstream: PR #295 is merged into linyaps-box `release/2.3` (merge commit `31ddf04`, 2026-11-20) and makes the forwarder consume the bytes it already wrote when `TryAgain` is returned with `k > 0`; it covers ll-box ≤ 2.3.5. No release contains it yet (the latest release is still 2.3.5) and `master` does not carry it, so check that the tag you install contains it and do not assume the next release will. There is no plan to publish a UAB with the next ter-music Release; UAB artefacts are planned to be published after the upstream fix is released. `TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`, an undocumented tuning variable, was removed with the timer fallback; it only configured that fallback, so setting it now has no effect.
@@ -202,6 +216,42 @@ Shortcuts `1`-`5` select Sequential, Single Repeat, List Repeat, Shuffle Repeat 
 Speed: 0.75x, 1.0x, 1.25x, 1.5x, 2x and 3x, pitch preserved (FFmpeg atempo). Equalizer: 10 bands from 31 Hz to 16 kHz, presets in Settings → Equalizer.
 
 Karaoke: off, soft or full, stereo only. It cancels centred coherent content per frequency bin inside 200 Hz–5 kHz — soft leaves it about 8 dB down, full removes it — while pan-spread accompaniment and hard-panned transients are kept, so a hard-panned hi-hat or snare does not release the cancellation of the centred vocal. Mono tracks pass through untouched. While enabled, the processed stream is delayed by the window length minus one sample — 383 samples at 44.1 kHz (about 8.7 ms), at most 10 ms at every supported rate; turning the level off fades the cancellation out over about 0.35 s before bit-exact pass-through resumes. Change it from the controls popup, Settings → Playback, `ter-music karaoke` or `Control.SetKaraoke`.
+
+## Remote music sources
+
+Remote sources are front-end work. The front end lists the remote folder, downloads its audio files into a local cache and hands those local paths to the core; the core never opens a remote URL (the queue contract is in [API_DBUS_en_US.md](API_DBUS_en_US.md)).
+
+Add a connection in `F2` → **Remote Devices** (the sixth Settings item): name, protocol (SMB, SFTP, FTP, WebDAV or HTTP), host, port (empty = the protocol default), username, password and base path. The base path is required: `/` is the server root, and SMB wants the share plus an optional subfolder — for example `music/albums`, not `smb://host/music/albums`. HTTP, WebDAV and FTP add a TLS switch (https/webdavs/ftps) and, once on, a "trust self-signed certificate" switch. SFTP adds a private-key path, a key passphrase and a known_hosts path. A directory path or URL does not need a trailing slash; the front end adds it when listing. TLS is an explicit per-connection switch, not a port rule: an HTTPS server on port 8443 needs TLS on and the port set to 8443. A port outside 1–65535 or an empty base path cannot be saved; deleting a connection asks for confirmation.
+
+Protocol notes:
+
+- **SMB** runs the external `smbclient` program (not libcurl) and passes it host, port, username and password; the password goes through a temporary mode-0600 auth file, never argv. Install the Samba client (package `smbclient`; the Debian, Arch and RPM metadata recommend it) or SMB connections fail with a "smbclient is missing" message. File names containing `;`, `!`, double quotes, backslashes or control characters are refused because `smbclient -c` would split them into commands; rename such files on the server.
+- **SFTP** verifies host keys and fails closed: a readable known_hosts file (the connection field, otherwise `~/.ssh/known_hosts`) must already contain the server. There is no silent trust-on-first-use; add the key first, for example `ssh-keyscan HOST >> ~/.ssh/known_hosts`. A private key and passphrase are optional.
+- **FTP** lists with MLSD and falls back to LIST. TLS means implicit FTPS (`ftps://`, default port 990).
+- **WebDAV** sends `PROPFIND` with `Depth: 1` and accepts both namespaced (`<D:href>`, Apache/Nextcloud-style) and plain responses.
+- **HTTP** reads HTML directory indexes (Apache/nginx/python style), follows the link target instead of the displayed text, and decodes HTML entities.
+- HTTP and WebDAV negotiate Basic, Digest or NTLM authentication. With TLS on, certificates are verified unless "trust self-signed certificate" is set, and an HTTPS transfer is never redirected down to HTTP.
+
+Opening a folder queues a background job that lists it and downloads its audio files (files directly in that folder, not subfolders) into the cache. Up to 200 tracks are downloaded per open; a larger folder reports how many of how many tracks were loaded, and subfolders can be opened separately. The remote page and the main status bar show progress (`Downloading done/total, failed n`), `ESC` cancels the running job, and the connection menu offers "Cancel current job", "Retry listing" and "Retry failed tracks (n)". Downloaded tracks are handed to the core as they finish: the queue is replaced and playback starts at the first track.
+
+Guard rails: one remote file may be at most 1 GiB and one directory listing at most 32 MiB (200,000 entries); connecting times out after 10 s, listing after 120 s and each download after 600 s. A single file beyond a cap is skipped and the rest of the folder continues; an oversized listing or a full cache stops the job with an error. Downloads happen on demand for the folder you open; there is no prefetch.
+
+The cache is `$XDG_CACHE_HOME/ter-music/remote/` (default `~/.cache/ter-music/remote/`), mirroring the connection and remote path. Remote Devices shows its size, sets a limit (default 2048 MB, `0` = unlimited) and cleans unprotected files; files that are playing, queued, favorited or in the history are kept. A `.lrc` next to a downloaded audio file is cached with it.
+
+**Credentials.** The connection list lives in the front-end file `remote.xml` (mode 0600). Passwords are obfuscated with a fixed-salt XOR stream, not encrypted: this stops casual reading, not someone who can read the file. Logs, the core's `last_opened_path` and the library's folder history store a redacted URL, so a URL read back from history does not carry the password — use the saved connection for password-protected servers. Do not put `user:password@` into the URL of an ad-hoc remote open: the URL stays visible in the shell history and process list.
+
+**Verified scope.** The automated suite exercises HTTP, WebDAV, FTP, the FTPS TLS handshake, HTTPS on non-443 ports, self-signed CA trust, 401/404 and slow-download cancellation. SMB is exercised through a fake `smbclient` that follows Samba's command-string parsing; SFTP covers the fail-closed known_hosts guard. A real Samba server, a real SSH server and the FTPS data channel were not available to the suite.
+
+A remote URL can also be opened directly by the TUI:
+
+```bash
+ter-music -o webdav://host/music/
+```
+
+Accepted schemes are `http`, `https`, `ftp`, `ftps`, `sftp`, `smb`, `webdav`
+and `webdavs` (`dav`/`davs` are aliases); the scheme is matched case-insensitively.
+
+`ter-music play` and `ter-music daemon start --open` reject remote URLs because the core plays local paths only; open remote folders from the TUI.
 
 ## Lyrics and covers
 
@@ -230,14 +280,14 @@ Select or edit layouts in `F2` → Appearance → UI Layout. Files:
 ```text
 config.xml     core configuration
 library.db     SQLite library: tracks, favorites, history, playlists, folder history
-remote.xml     remote servers (front end only)
+remote.xml     remote servers and cache limit (front end only, mode 0600)
 layouts.json   user layout overrides
 ui-layout      selected layout id
 lang/          user language packs
 help/          user quick-start text
 ```
 
-Downloaded remote tracks are cached under `$XDG_CACHE_HOME/ter-music/remote/`; extracted covers are temporary files under `/tmp/ter-music-cover-*.jpg`.
+Downloaded remote tracks are cached under `$XDG_CACHE_HOME/ter-music/remote/` (default `~/.cache/ter-music/remote/`), mirroring the connection and remote path; a sibling `.lrc` is cached with the track. The cache limit and the clean action are in Settings → Remote Devices. Extracted covers are temporary files under `/tmp/ter-music-cover-*.jpg`.
 
 Common `config.xml` keys:
 
@@ -315,6 +365,10 @@ Four gates run in CI:
 - **Garbled CJK:** use a UTF-8 locale and a UTF-8 terminal; `locale` should show `LC_CTYPE=UTF-8`.
 - **Duplicated or garbled TUI lines inside Linyaps:** the ll-box ≤ 2.3.5 cold-start replay described under "Linyaps" above. The guard repaints the screen when it sees burst or back-pressure evidence; with no evidence it no longer repaints on a timer, so the damage may stay until a terminal resize, a view change or new evidence.
 - **Missing headers at build time:** install the `-devel`/`-dev` variants of the dependencies above.
+- **A remote folder will not list:** check protocol, host, port and base path (SMB needs `share/subpath`); install `smbclient` for SMB; create a readable known_hosts file for SFTP; turn on TLS for an https/webdavs/ftps server. The page shows the localized reason and the connection menu offers "Retry listing".
+- **Remote tracks failed to download:** the page shows `failed n` and the first error; fix the cause (network, permissions, disk space) and use "Retry failed tracks (n)" — an already cached track is not downloaded again. A file over 1 GiB or a full cache stops at that track; raise the cache limit or clean the cache in Remote Devices.
+- **A remote folder stopped after many tracks:** one open downloads at most 200 tracks; browse and open subfolders separately.
+- **A remote URL pasted from the folder history fails to authenticate:** stored URLs are redacted (no password by design); open the saved connection in Remote Devices instead.
 - **CUE tracks missing:** the `.cue` file must share the audio file basename; change CUE Encoding in Settings if the text is garbled.
 - **Library is empty:** open the library browser (`M`) and scan or rescan; the database is `library.db` in the config directory.
 

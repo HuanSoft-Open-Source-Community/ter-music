@@ -8,7 +8,8 @@
  *
  * 文件格式沿用旧配置里 `<remote_connections>` 段的元素名，迁移因此是
  * 逐元素原样复制；密码沿用 `config/crypto.c` 的密文格式，迁移过来的
- * 密文可直接解密。
+ * 密文可直接解密。`use_tls` / `insecure_tls` / `known_hosts_path` /
+ * `key_passphrase` 由 UI 表单维护（t4），旧文件缺省即 0/空。
  *
  * @author 燕戏竹林 (yxzl666xx@outlook.com)
  */
@@ -41,10 +42,12 @@ int remote_store_upsert(int index, const RemoteConnectionConfig *conn);
 /* @return 0 成功；-1 = 越界 */
 int remote_store_remove(int index);
 
-/* ── 缓存设置（同一文件里的 <cache>） ─────────────────────────────── */
-int  remote_store_cache_limit_mb(void);        /* 默认 2048 */
+/* ── 缓存设置（同一文件里的 <cache limit_mb="..."/>） ───────────────
+ * 0 表示“不限制”。文件里未写该属性时返回默认 2048。
+ *
+ * 旧版本写出的属性/子元素两种形状都能读；写入统一用属性。历史遗留的
+ * prefetch 配置从未实现，已从文件格式与 API 中删除（审计 F-14）。 */
+int  remote_store_cache_limit_mb(void);
 void remote_store_set_cache_limit_mb(int mb);
-int  remote_store_prefetch(void);              /* 默认 2，0 = 不预取 */
-void remote_store_set_prefetch(int count);
 
 #endif /* REMOTE_STORE_H */

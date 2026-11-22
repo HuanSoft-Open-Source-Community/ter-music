@@ -218,6 +218,8 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/keymap/actions.c
     src/cn.org.huansoft.ter-music/ui/keymap.c
     src/cn.org.huansoft.ter-music/remote/remote.c
+    src/cn.org.huansoft.ter-music/remote/remote_url.c
+    src/cn.org.huansoft.ter-music/remote/remote_parse.c
     src/cn.org.huansoft.ter-music/remote/remote_store.c
     src/cn.org.huansoft.ter-music/remote/remote_cache.c
     src/cn.org.huansoft.ter-music/config/config.c
@@ -258,6 +260,18 @@ if(LIBCURL_FOUND)
     target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_LIBCURL=1)
 else()
     message(FATAL_ERROR "libcurl is required for remote playback (SMB/SFTP/FTP/WebDAV)")
+endif()
+
+# SMB 走外部 smbclient（libcurl 的 SMB 实现与不少 Samba 服务端不兼容）。
+# 它是运行期可选依赖：构建期只检测并给出明确提示，运行期缺失时前端会报
+# “需要 smbclient”的可操作错误（审计 F-06）。
+# 只看运行时 PATH（NO_CMAKE_PATH 避免把宿主机 sysroot 里的二进制误报成可用；
+# Linyaps 容器内 PATH 通常没有 smbclient）。缺失只是运行期能力问题，不阻断构建。
+find_program(SMBCLIENT_EXECUTABLE smbclient NO_CMAKE_PATH)
+if(SMBCLIENT_EXECUTABLE)
+    message(STATUS "Using smbclient: ${SMBCLIENT_EXECUTABLE}")
+else()
+    message(STATUS "smbclient not found in PATH: SMB sources need the samba client at runtime")
 endif()
 
 # 链接库

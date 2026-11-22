@@ -25,7 +25,7 @@ ter-music 快速上手
   示例:
     ter-music -o ~/Music
     ter-music -o /path/to/song.mp3
-    ter-music ftp://user:pass@host/path/to/music
+    ter-music -o ftp://host/path/to/music/
 
 2. 界面布局
 -----------
@@ -296,12 +296,63 @@ ter-music 快速上手
 
 13. 远程播放
 ------------
-  支持 SMB/SFTP/FTP/WebDAV/HTTP 协议。
-  在 设置 → 远程设备 中配置连接。
-  远程目录由前端列出并逐曲下载到本地缓存，再把本地路径交给核心播放。
-  也支持命令行直接传入远程 URL 进入 TUI：
-    ter-music ftp://user:password@host/path/
-  CLI 的 play / daemon start --open 不接受远程 URL：核心只播放本地路径。
+  远程源由前端负责：前端列出远程目录，把曲目下载到本地缓存，再把缓存里的
+  本地路径交给核心播放。核心只播放本地文件。
+
+  协议：SMB、SFTP、FTP、WebDAV、HTTP；FTPS 与 HTTPS 分别是 FTP 与 HTTP 的
+  TLS 形式。SMB 调用外部 smbclient 程序，需要安装 Samba 客户端；缺少时
+  SMB 连接会明确提示 smbclient 缺失。
+
+  在 设置 → 远程设备（F2 设置页第 6 项）中配置连接。字段包括：名称、协议
+  （SMB/SFTP/FTP/WebDAV/HTTP，用 +/- 循环）、主机、端口（留空用该协议
+  默认端口）、用户名、密码、基础路径，以及按协议显示的字段：
+    - HTTP/WebDAV/FTP：TLS（https/webdavs/ftps）开关，开启后还有
+      “信任自签名证书”；
+    - SFTP：私钥、私钥口令、known_hosts 路径。
+  基础路径必填（“/”表示服务器根目录）。SMB 填共享名加可选子目录，例如
+  “music/albums”，不要填 smb:// URL。目录路径/URL 不需要手工补尾斜杠，
+  前端列目录时会自动补上。TLS 是每条连接的开关，不按端口判断：非 443
+  端口的 HTTPS 服务器需要打开 TLS 并把端口填成实际端口。
+  ENTER 编辑字段，+/- 切换协议/TLS，S 保存，ESC 取消。端口不在 1-65535 或
+  基础路径为空时不能保存。删除连接需要确认（ENTER 删除，ESC 保留）。
+
+  SFTP 校验主机密钥且 fail-closed：必须存在可读的 known_hosts（连接中填的
+  路径，否则 ~/.ssh/known_hosts），且其中已有该服务器。不会自动首次信任；
+  请先用 ssh-keyscan HOST >> ~/.ssh/known_hosts 写入。
+
+  连接动作菜单：浏览目录、加载此目录到播放列表、刷新连接、编辑连接、删除连接。
+  目录浏览中 ↑/↓ 选择：ENTER 进入选中目录（在第一行或选中文件时载入
+  当前目录），→ 也进入选中目录，ESC 返回上一层。
+  打开目录会下载其中的音频文件（只含该目录下的文件，不含子目录）到缓存，
+  每次最多 200 首；目录更大时会提示已加载/总数。下载在后台进行：页面显示
+  “下载中 done/total，失败 n”，主界面状态栏同步显示；ESC 取消当前任务。
+  动作菜单提供“取消当前任务”“重试列目录”“重试失败曲目（n）”。
+
+  限制：单个远程文件最大 1 GiB，单次列目录最多 32 MiB（20 万条）；连接
+  超时 10 秒，列目录 120 秒，单曲下载 600 秒。单个文件超过上限会被跳过，
+  其余曲目继续。SMB 文件名含 ';'、'!'、双引号、反斜杠或控制字符时会被拒绝
+  （smbclient 命令模式），请在服务器端改名。下载按需进行，没有预取。
+
+  缓存：$XDG_CACHE_HOME/ter-music/remote/（默认
+  ~/.cache/ter-music/remote/）。远程设备页显示用量，可设置上限（默认
+  2048 MB，0 = 不限制）并清理未受保护的文件；正在播放、在队列中、已收藏
+  或在历史中的文件会保留。音频旁的 .lrc 会随音频一起缓存。
+
+  凭据：连接表是前端文件 remote.xml（权限 0600）；密码用固定盐 XOR 流
+  混淆，不是加密。日志、核心的 last_opened_path 和曲库目录历史只保存脱敏
+  URL，因此从历史里复取的 URL 不含密码；需要密码的服务器请使用已保存的
+  连接。临时打开远程 URL 时不要把 user:password@ 写进 URL——它会留在
+  shell 历史与进程列表里。
+
+  TUI 也可以直接打开远程 URL：
+    ter-music -o webdav://host/music/
+  接受的 scheme：http(s)、ftp(s)、sftp、smb、webdav(s)（dav/davs 为别名），
+  大小写不敏感。
+  CLI 的 play 与 daemon start --open 拒绝远程 URL：核心只播放本地路径。
+
+  自动化覆盖：HTTP/WebDAV/FTP、FTPS 的 TLS 握手、非 443 端口的 HTTPS、
+  自签名 CA 信任、401/404、慢速下载取消，以及用假 smbclient 验证的 SMB。
+  真实 Samba 服务器、真实 SSH 服务器与 FTPS 数据通道未覆盖。
 
 14. 歌单管理
 ------------

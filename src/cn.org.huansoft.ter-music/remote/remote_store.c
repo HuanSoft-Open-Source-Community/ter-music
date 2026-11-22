@@ -24,16 +24,16 @@
 
 #define REMOTE_STORE_CACHE_ELEMENT   "cache"
 #define REMOTE_STORE_CACHE_LIMIT     "limit_mb"
-#define REMOTE_STORE_CACHE_PREFETCH  "prefetch"
+#define REMOTE_STORE_KNOWN_HOSTS     "known_hosts_path"
+#define REMOTE_STORE_KEY_PASSPHRASE  "key_passphrase"
+#define REMOTE_STORE_INSECURE_TLS    "insecure_tls"
 
 #define REMOTE_STORE_DEFAULT_LIMIT_MB 2048
-#define REMOTE_STORE_DEFAULT_PREFETCH 2
 
 typedef struct {
     RemoteConnectionConfig conns[MAX_REMOTE_CONNECTIONS];
     int count;
     int cache_limit_mb;
-    int prefetch;
     char path[MAX_PATH_LEN];
     int loaded;
 } RemoteStore;
@@ -84,6 +84,25 @@ static int store_get_int(xmlNodePtr parent, const char *name, int fallback)
     return atoi(buffer);
 }
 
+/* 属性优先、子元素兜底：旧版 save 写属性、旧版 load 读子元素造成的错配
+ * 两种形状都能读回来（F-14）。 */
+static int store_get_int_attr_or_child(xmlNodePtr parent, const char *name, int fallback)
+{
+    if (!parent || !name) {
+        return fallback;
+    }
+    xmlChar *attr = xmlGetProp(parent, (const xmlChar *)name);
+    if (attr && attr[0]) {
+        int value = atoi((const char *)attr);
+        xmlFree(attr);
+        return value;
+    }
+    if (attr) {
+        xmlFree(attr);
+    }
+    return store_get_int(parent, name, fallback);
+}
+
 /* ── 路径与默认值 ─────────────────────────────────────────────────── */
 
 static void store_set_defaults(void)
@@ -91,7 +110,6 @@ static void store_set_defaults(void)
     memset(g_store.conns, 0, sizeof(g_store.conns));
     g_store.count = 0;
     g_store.cache_limit_mb = REMOTE_STORE_DEFAULT_LIMIT_MB;
-    g_store.prefetch = REMOTE_STORE_DEFAULT_PREFETCH;
 }
 
 static int store_resolve_path(void)
@@ -177,6 +195,30 @@ int remote_store_load(void)
             store_get_string(node, XML_REMOTE_PRIVKEY, conn->private_key_path,
                              sizeof(conn->private_key_path));
             store_get_string(node, XML_REMOTE_BASE_PATH, conn->base_path, sizeof(conn->base_path));
+            store_get_string(node, REMOTE_STORE_KNOWN_HOSTS, conn->known_hosts_path,
+                             sizeof(conn->known_hosts_path));
+            conn->insecure_tls = store_get_int(node, REMOTE_STORE_INSECURE_TLS, 0) != 0;
+            /* t4：TLS 开关持久化（缺省 0，兼容 t3 之前没有该元素的旧文件）。 */
+            conn->use_tls = store_get_int(node, "use_tls", 0) != 0;
+            xmlNodePtr pass = store_find_child(node, REMOTE_STORE_KEY_PASSPHRASE);
+            if (pass) {
+                xmlChar *content = xmlNodeGetContent(pass);
+                if (content) {
+                    xmlChar *enc = xmlGetProp(pass, (const xmlChar *)XML_ATTR_PASSWORD_ENCRYPTED);
+                    if (enc && xmlStrcmp(enc, (const xmlChar *)XML_VAL_ENCRYPTED) == 0) {
+                        crypto_decrypt((const char *)content, conn->key_passphrase,
+                                       sizeof(conn->key_passphrase));
+                    } else {
+                        snprintf(conn->key_passphrase, sizeof(conn->key_passphrase),
+                                 "%s", (const char *)content);
+                    }
+                    conn->has_key_passphrase = conn->key_passphrase[0] != '\0';
+                    if (enc) {
+                        xmlFree(enc);
+                    }
+                    xmlFree(content);
+                }
+            }
             index++;
         }
         g_store.count = index;
@@ -184,15 +226,10 @@ int remote_store_load(void)
 
     xmlNodePtr cache = root ? store_find_child(root, REMOTE_STORE_CACHE_ELEMENT) : NULL;
     if (cache) {
-        g_store.cache_limit_mb = store_get_int(cache, REMOTE_STORE_CACHE_LIMIT,
-                                               REMOTE_STORE_DEFAULT_LIMIT_MB);
-        g_store.prefetch = store_get_int(cache, REMOTE_STORE_CACHE_PREFETCH,
-                                         REMOTE_STORE_DEFAULT_PREFETCH);
+        g_store.cache_limit_mb = store_get_int_attr_or_child(cache, REMOTE_STORE_CACHE_LIMIT,
+                                                            REMOTE_STORE_DEFAULT_LIMIT_MB);
         if (g_store.cache_limit_mb < 0) {
-            g_store.cache_limit_mb = 0;   /* 0 = 不限制 */
-        }
-        if (g_store.prefetch < 0) {
-            g_store.prefetch = 0;
+            g_store.cache_limit_mb = 0;   /* 0 / 负数 = 不限制 */
         }
     }
 
@@ -251,13 +288,27 @@ int remote_store_save(void)
                     (const xmlChar *)conn->private_key_path);
         xmlNewChild(node, NULL, (const xmlChar *)XML_REMOTE_BASE_PATH,
                     (const xmlChar *)conn->base_path);
+        xmlNewChild(node, NULL, (const xmlChar *)REMOTE_STORE_KNOWN_HOSTS,
+                    (const xmlChar *)conn->known_hosts_path);
+        snprintf(buffer, sizeof(buffer), "%d", conn->insecure_tls ? 1 : 0);
+        xmlNewChild(node, NULL, (const xmlChar *)REMOTE_STORE_INSECURE_TLS,
+                    (const xmlChar *)buffer);
+        snprintf(buffer, sizeof(buffer), "%d", conn->use_tls ? 1 : 0);
+        xmlNewChild(node, NULL, (const xmlChar *)"use_tls", (const xmlChar *)buffer);
+        xmlNodePtr pass = xmlNewChild(node, NULL,
+                                      (const xmlChar *)REMOTE_STORE_KEY_PASSPHRASE, NULL);
+        if (conn->has_key_passphrase && conn->key_passphrase[0]) {
+            char encrypted[512];
+            crypto_encrypt(conn->key_passphrase, encrypted, sizeof(encrypted));
+            xmlNodeSetContent(pass, (const xmlChar *)encrypted);
+            xmlSetProp(pass, (const xmlChar *)XML_ATTR_PASSWORD_ENCRYPTED,
+                       (const xmlChar *)XML_VAL_ENCRYPTED);
+        }
     }
 
     xmlNodePtr cache = xmlNewChild(root, NULL, (const xmlChar *)REMOTE_STORE_CACHE_ELEMENT, NULL);
     snprintf(buffer, sizeof(buffer), "%d", g_store.cache_limit_mb);
     xmlSetProp(cache, (const xmlChar *)REMOTE_STORE_CACHE_LIMIT, (const xmlChar *)buffer);
-    snprintf(buffer, sizeof(buffer), "%d", g_store.prefetch);
-    xmlSetProp(cache, (const xmlChar *)REMOTE_STORE_CACHE_PREFETCH, (const xmlChar *)buffer);
 
     char tmp_path[MAX_PATH_LEN];
     int written = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", g_store.path);
@@ -335,20 +386,11 @@ int remote_store_remove(int index)
 
 int remote_store_cache_limit_mb(void)
 {
-    return g_store.cache_limit_mb > 0 ? g_store.cache_limit_mb : REMOTE_STORE_DEFAULT_LIMIT_MB;
+    /* 0 = 不限制（与审计 F-14 的语义一致，不再把 0 映射回默认值） */
+    return g_store.cache_limit_mb > 0 ? g_store.cache_limit_mb : 0;
 }
 
 void remote_store_set_cache_limit_mb(int mb)
 {
     g_store.cache_limit_mb = mb < 0 ? 0 : mb;
-}
-
-int remote_store_prefetch(void)
-{
-    return g_store.prefetch;
-}
-
-void remote_store_set_prefetch(int count)
-{
-    g_store.prefetch = count < 0 ? 0 : count;
 }

@@ -16,7 +16,8 @@ depends=('ffmpeg' 'ncurses' 'libxml2' 'libpng' 'libjpeg-turbo' 'curl' 'sqlite' '
 optdepends=('pulseaudio: PulseAudio audio output'
             'alsa-lib: ALSA audio output'
             'libpipewire: PipeWire audio output'
-            'dbus: MPRIS media session integration')
+            'dbus: MPRIS media session integration'
+            'smbclient: SMB/CIFS remote music sources')
 makedepends=('cmake' 'make' 'gcc' 'git' 'pkgconf')
 
 # 不依赖 git tag：固定 commit，发布时人工更新 _commit。

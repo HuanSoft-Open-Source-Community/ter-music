@@ -361,6 +361,8 @@ static void rerender_settings_view(void);
 static void render_eq_visual(void);
 static int handle_eq_action(ActionId action);
 /* 设置页动作入口：键盘解析结果与鼠标共用（定义在本文件末尾的输入分发处）。 */
+static void settings_sidebar_changed(void);
+
 static int handle_settings_action(ActionId action);
 
 /* Reset settings view state (called from menus.c on view switch) */
@@ -2822,7 +2824,7 @@ void render_settings_content(void)
         render_settings_option_group(start_y, area.max_y, spec, 0);
     } else if (g_menu_selected_idx == 4) {  /* 快捷键 */
         render_hotkey_editor(start_y, area.max_y);
-    } else if (g_menu_selected_idx == 5) {  /* 远程设备 */
+    } else if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {  /* 远程设备 */
         remote_view_render();
     } else if (g_menu_selected_idx == 6) {  /* 均衡器 */
         render_eq_visual();
@@ -3207,7 +3209,7 @@ int handle_settings_input(int ch)
         if (handle_hotkey_editor_action(action)) return 1;
     } else {
         /* Remote section handles its own input when content-focused */
-        if (g_menu_selected_idx == 5 && g_focus_area == FOCUS_CONTENT) {
+        if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE && g_focus_area == FOCUS_CONTENT) {
             if (remote_view_handle_input(ch)) return 1;
             /* 旧行为：远程内容区吞掉非全局键；仅全局动作交给上层分发 */
             if (keymap_resolve(CTX_GLOBAL, ch) != ACTION_NONE) return 0;
@@ -3239,6 +3241,7 @@ static int handle_settings_action(ActionId action)
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx--;
                 if (g_menu_selected_idx < 0) g_menu_selected_idx = SETTINGS_ITEM_COUNT - 1;
+                settings_sidebar_changed();
                 render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
                 render_settings_content();
             } else {
@@ -3251,6 +3254,7 @@ static int handle_settings_action(ActionId action)
             if (g_focus_area == FOCUS_SIDEBAR) {
                 g_menu_selected_idx++;
                 if (g_menu_selected_idx >= SETTINGS_ITEM_COUNT) g_menu_selected_idx = 0;
+                settings_sidebar_changed();
                 render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
                 render_settings_content();
             } else {
@@ -3277,6 +3281,7 @@ static int handle_settings_action(ActionId action)
                 if (g_menu_selected_idx == SETTINGS_ITEM_COUNT - 1) {
                     exit_current_view();
                 } else {
+                    settings_sidebar_changed();
                     g_focus_area = FOCUS_CONTENT;
                     sync_settings_selection_to_sidebar();
                     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
@@ -3298,6 +3303,7 @@ static int handle_settings_action(ActionId action)
                 if (g_menu_selected_idx == SETTINGS_ITEM_COUNT - 1) {
                     exit_current_view();
                 } else {
+                    settings_sidebar_changed();
                     g_focus_area = FOCUS_CONTENT;
                     sync_settings_selection_to_sidebar();
                     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
@@ -3315,6 +3321,7 @@ static int handle_settings_action(ActionId action)
                 if (g_menu_selected_idx == SETTINGS_ITEM_COUNT - 1) {
                     exit_current_view();
                 } else {
+                    settings_sidebar_changed();
                     g_focus_area = FOCUS_CONTENT;
                     sync_settings_selection_to_sidebar();
                     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
@@ -3408,10 +3415,20 @@ static void settings_focus_content_area(void)
     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
 }
 
+/* 侧栏切到远程设备页时回到连接列表模式：浏览目录后离开再回来不应停留在
+ * 旧目录/动作菜单里（也复用既有的 remote_enter_list_mode 入口）。 */
+static void settings_sidebar_changed(void)
+{
+    if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {
+        remote_enter_list_mode();
+    }
+}
+
 static void settings_select_sidebar_row(int row)
 {
     g_focus_area = FOCUS_SIDEBAR;
     g_menu_selected_idx = row;
+    settings_sidebar_changed();
     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
     render_settings_content();
 }
@@ -3473,7 +3490,7 @@ void settings_context_menu_build(UIContextMenuLevel *level,
                                valid && g_focus_area == FOCUS_CONTENT, 0);
         ui_ctx_menu_add_action(level, ACTION_SETTINGS_HOTKEY_RESET_ALL,
                                g_focus_area == FOCUS_CONTENT, 0);
-    } else if (content && g_menu_selected_idx == 5) {   /* remote devices */
+    } else if (content && g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {   /* remote devices */
         ui_ctx_menu_add_separator(level);
         ui_ctx_menu_add_action(level, ACTION_REMOTE_ACTIVATE, valid, 0);
         ui_ctx_menu_add_action(level, ACTION_REMOTE_ADJUST_UP, valid, 0);
@@ -3501,7 +3518,7 @@ int settings_context_dispatch(ActionId action, const UIContextMenuContext *ctx)
         handled = handle_eq_action(action);
     } else if (g_menu_selected_idx == 4) {
         handled = handle_hotkey_editor_action(action);
-    } else if (g_menu_selected_idx == 5) {
+    } else if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {
         handled = remote_view_handle_action(action);
     }
     if (!handled) {
@@ -3547,7 +3564,7 @@ static void settings_open_context_menu(const UIMouseEvent *ev,
                 ctx.valid = 1;
                 render_settings_content();
             }
-        } else if (g_menu_selected_idx == 5) {
+        } else if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {
             ctx.valid = remote_view_handle_click(ev->y, 0) ? 1 : 0;
         } else {
             int option = settings_option_at_screen_row(ev->y);
@@ -3610,7 +3627,7 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
             return handle_hotkey_editor_action(ev->wheel < 0 ? ACTION_SETTINGS_UP
                                                              : ACTION_SETTINGS_DOWN);
         }
-        if (g_menu_selected_idx == 5) {
+        if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {
             return remote_view_handle_action(ev->wheel < 0 ? ACTION_REMOTE_UP
                                                            : ACTION_REMOTE_DOWN);
         }
@@ -3640,7 +3657,7 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         return handle_hotkey_editor_action(ACTION_SETTINGS_ACTIVATE);
     }
 
-    if (g_menu_selected_idx == 5) {
+    if (g_menu_selected_idx == SETTINGS_PAGE_REMOTE) {
         /* 远程页的选中状态归 remote_view.c（四种模式行号推导各不相同，
          * 目录模式还有滚动偏移），这里只把屏幕行交给它；activate=1 表示
          * 单击即执行（右键菜单路径传 0，只选中）。 */

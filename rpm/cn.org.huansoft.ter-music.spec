@@ -48,6 +48,11 @@ BuildRequires:  cmake
 # libxml2 由运行期 dlopen 加载（.so.2 / .so.16），不会由 rpmbuild 从
 # ELF NEEDED 自动生成依赖，因此这里显式声明。
 Requires:       libxml2
+# SMB/CIFS 远程音乐源是可选能力：运行时调用 smbclient（F-06/R-05）。
+# RHEL7 的 rpm 不支持弱依赖，故仅在新版本声明 Recommends。
+%if 0%{?rhel} != 7
+Recommends:     smbclient
+%endif
 
 %description
 Ter-Music is a lightweight terminal-based music player for Linux systems.

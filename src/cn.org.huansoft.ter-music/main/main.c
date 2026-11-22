@@ -15,6 +15,7 @@
 #include "library/library.h"
 #include "remote/remote.h"
 #include "remote/remote_cache.h"
+#include "remote/remote_url.h"
 #include "ui/remote_view.h"
 #include "app/open.h"
 #include "cli/cli.h"
@@ -396,7 +397,11 @@ int main(int argc, char *argv[]) {
     }
 
     if (open_path && strlen(open_path) > 0) {
-        log_info("main", "Processing --open path: %s", open_path);
+        /* 日志/持久化一律用脱敏 URL：密码不进日志、不进 core config.xml 的
+         * last_opened_path、也不进 library.db 的 dir_history（审计 F-05）。 */
+        char safe_open_path[MAX_PATH_LEN];
+        remote_redact_url(open_path, safe_open_path, sizeof(safe_open_path));
+        log_info("main", "Processing --open path: %s", safe_open_path);
         if (!app_path_is_local_playable(open_path)) {
             /* 远程 URL：**前端**负责——列出目录、逐曲下载到本地缓存，再把
              * 缓存路径交给核心播放（核心不认识远程，见 check-core-purity.sh）。
@@ -404,13 +409,18 @@ int main(int argc, char *argv[]) {
              * 交付给核心。 */
             RemoteConnectionConfig rconn;
             if (remote_parse_url(open_path, &rconn) == 0) {
-                log_info("main", "Remote URL parsed: protocol=%d host=%s port=%d",
-                         rconn.protocol, rconn.host, rconn.port);
+                log_info("main", "Remote URL parsed: protocol=%d tls=%d host=%s port=%d",
+                         rconn.protocol, rconn.use_tls, rconn.host, rconn.port);
                 if (remote_cache_start_session(&rconn, rconn.base_path,
                                                g_app_config.auto_play_on_start) == 0) {
-                    log_info("main", "Front-end remote session started for '%s'", open_path);
+                    /* final_path 会被 add_dir_history_entry() 与
+                     * player_config_persist() 落盘，必须是脱敏但仍保留原
+                     * scheme 的 URL（webdav:// 不能退化成 http://，否则下次
+                     * 恢复会按 HTML autoindex 解析；密码也不能落盘）。 */
+                    log_info("main", "Front-end remote session started for '%s'",
+                             safe_open_path);
                     loaded = 1;
-                    snprintf(final_path, sizeof(final_path), "%s", open_path);
+                    snprintf(final_path, sizeof(final_path), "%s", safe_open_path);
                 } else {
                     const char *err = remote_strerror();
                     if (err && err[0]) {
@@ -427,7 +437,7 @@ int main(int argc, char *argv[]) {
                     used_fallback = 1;
                 }
             } else {
-                log_warn("main", "Failed to parse remote URL: %s", open_path);
+                log_warn("main", "Failed to parse remote URL: %s", safe_open_path);
                 mvprintw(2, 2, "%s",
                          i18n_get("main.warn.invalid_remote"));
                 mvprintw(3, 2, "%s", i18n_get("main.continue_default"));
@@ -589,6 +599,10 @@ int main(int argc, char *argv[]) {
         /* 本地模式的音量在音频设备初始化时应用；远端模式由核心持有 */
         set_volume_percent(g_app_config.volume_percent); /* ui-purity-allow: local 分支=核心宿主同进程直调引擎（远端永不进此分支）; config-ownership-allow: 仅 local 核心宿主 */
     }
+
+    /* 缓存启动淘汰必须在 player_init() 之后：保护集要包含核心当前曲目与
+     * 整条队列，否则可能删掉另一个前端正在播放的缓存文件（审计 F-19）。 */
+    remote_view_startup_evict();
 
     /* 目录历史归前端。放在 player_init()/远端配置镜像刷新之后，才能按
      * 核心的 clear_history_on_startup 决定；内容装载期间已经写入的当前

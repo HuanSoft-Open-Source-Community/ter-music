@@ -33,11 +33,20 @@ typedef struct {
     char password[256];
     char private_key_path[MAX_PATH_LEN];
     char base_path[512];
+
+    /* 以下字段为协议/安全能力扩展（老配置文件缺省即 0/空，行为保持旧版） */
+    int use_tls;                            // 显式 TLS（https/ftps/webdavs），不由端口推断
+    int insecure_tls;                       // 跳过证书校验（仅用户显式配置/测试 CA 时）
+    int has_key_passphrase;                 // key_passphrase 是否有效
+    char key_passphrase[256];               // SFTP 私钥口令（remote.xml 加密保存）
+    char known_hosts_path[MAX_PATH_LEN];    // SFTP known_hosts；空 = 默认 ~/.ssh/known_hosts
 } RemoteConnectionConfig;
 
 typedef struct {
     char name[256];
     int is_dir;
+    long long size;             // 远端字节数；-1 = 协议未提供（如 HTML autoindex）
+    long mtime;                 // 远端修改时间（epoch 秒）；0 = 未知
 } RemoteDirEntry;
 
 // Lifecycle
@@ -47,19 +56,9 @@ void remote_cleanup(void);
 // Path detection
 int remote_is_remote_path(const char *path);
 
-// URL construction
-void remote_build_url(const RemoteConnectionConfig *conn,
-                      const char *subpath,
-                      char *url, size_t url_size);
-
-// Percent-encode non-ASCII and URL-special characters in a path.
-// Preserves '/' for path structure.  Output buffer must be at least
-// available_input_len * 3 + 1 bytes for correct encoding of all inputs.
-void remote_encode_url_path(const char *in, char *out, size_t out_size);
-void remote_url_decode(const char *in, char *out, size_t out_size);
-
-// Directory listing – returns number of entries, or -1 on error.
-// Call remote_free_entries() when done.
+// Directory listing – returns 0 on success (count may be 0 = empty directory),
+// -1 on error. Call remote_free_entries() when done. 空响应必须按“空目录”
+// 成功处理，不得对 NULL 缓冲做字符串操作（见审计 F-01）。
 int remote_list_directory(const RemoteConnectionConfig *conn,
                           const char *subpath,
                           RemoteDirEntry **out_entries,
@@ -69,25 +68,35 @@ void remote_free_entries(RemoteDirEntry *entries, int count);
 // Protocol name for display
 const char *remote_protocol_name(int protocol);
 
-// URL parsing – parse "protocol://user:pass@host:port/path" into config
-// Returns 0 on success, -1 on parse failure.
+// URL parsing/construction —— 实现见 remote_url.c（无 libcurl 依赖）
 int remote_parse_url(const char *url, RemoteConnectionConfig *conn);
+int remote_build_url(const RemoteConnectionConfig *conn, const char *subpath,
+                     char *url, size_t url_size);
+int remote_build_dir_url(const RemoteConnectionConfig *conn, const char *subpath,
+                         char *url, size_t url_size);
+int remote_encode_url_path(const char *in, char *out, size_t out_size);
+int remote_url_decode(const char *in, char *out, size_t out_size);
+void remote_redact_url(const char *in, char *out, size_t out_size);
 
-// Error reporting – returns last error message (empty string if none)
+// Error reporting – returns last error message (empty string if none).
+// 每线程一份，工作线程写、UI 线程读不会互相踩（见审计 F-26）。
 const char *remote_strerror(void);
+void remote_set_error(const char *msg);
 
-// Download a remote URL into a malloc'd buffer (caller must free).
+// Download one remote file to a local file.
+// subpath 是服务器上的完整路径（含文件名）；凭据来自 conn，绝不出现在
+// URL 文本里（F-05）。失败时删除目标文件（调用方通常传 <final>.part，
+// 成功后自行 rename）。
 // Returns 0 on success, -1 on error.
-int remote_fetch_to_buffer(const char *url, unsigned char **data, size_t *size);
+int remote_fetch_file(const RemoteConnectionConfig *conn, const char *subpath,
+                      const char *dest_path);
 
-// Download a remote URL directly to a local file.
-// Returns 0 on success, -1 on error (partial file is cleaned up).
-int remote_fetch_to_file(const char *url, const char *dest_path);
+/* 中断钩子：curl 传输期间周期性回调；返回非 0 立即中止传输（F-09）。
+ * 由 remote_cache 的取消逻辑安装；传 NULL 卸载。 */
+void remote_set_abort_check(int (*check)(void *ctx), void *ctx);
 
-// Set a hook that is called periodically during remote download to keep the
-// UI responsive.  Pass NULL to unset.  The hook is called from inside curl's
-// blocking I/O, so it must be safe to call from any context (typically just
-// calls refresh() or similar).
-void remote_set_progress_hook(void (*hook)(void));
+/* 工作线程存活标记：remote_cleanup() 在仍有 worker 时不会做 curl 全局清理，
+ * 避免“退出后 worker 继续用 libcurl”的竞态（F-09）。 */
+void remote_set_worker_active(int active);
 
 #endif
