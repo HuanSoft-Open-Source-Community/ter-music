@@ -25,6 +25,8 @@
 #include "ui/vinyl.h"
 #include "i18n/i18n.h"
 #include "config/config.h"
+#include "config/appearance.h"
+#include "ui/appearance.h"
 #include "player/player.h"
 #include "core/core.h"
 #include "logger/logger.h"
@@ -77,21 +79,37 @@ void apply_color_theme(void)
 {
     if (!has_colors()) return;
 
-    /* 主题色同样按终端色数量化：256 原样、8/16 取最近基色、黑白不启用。 */
+    /* 主题色同样按终端色数量化：256 原样、8/16 取最近基色、黑白不启用。
+     * 亮色变体只在“字段值等于出厂默认值”时替换（显式自定义原样），
+     * 解析在 config/appearance.c，绝不回写配置。 */
 #define CLR(v) ((v) < 0 ? ((v) == -1 ? -1 : 0) : layout_color_quantize((v), COLORS))
+#define EFF(slot, raw) appearance_theme_effective((slot), (raw), appearance_variant())
 
     /* 注意：设置页右栏正文**不用**这个 pair，而是用
      * ui_pane_body_attr(LAYOUT_PANE_PLAYLIST) —— 即“当前生效的播放列表色”
      * （布局显式覆盖优先，否则就是本行的主题色）。这样颜色主题页的
      * “播放列表”行无论写布局还是写主题，右栏都会一步跟着变（t28）。 */
-    init_pair(COLOR_PAIR_PLAYLIST,  CLR(g_app_config.theme.playlist_fg),  CLR(g_app_config.theme.playlist_bg));
-    init_pair(COLOR_PAIR_CONTROLS,  CLR(g_app_config.theme.controls_fg),  CLR(g_app_config.theme.controls_bg));
-    init_pair(COLOR_PAIR_LYRICS,    CLR(g_app_config.theme.lyrics_fg),    CLR(g_app_config.theme.lyrics_bg));
-    init_pair(COLOR_PAIR_SIDEBAR,   CLR(g_app_config.theme.sidebar_fg),   CLR(g_app_config.theme.sidebar_bg));
-    init_pair(COLOR_PAIR_HIGHLIGHT, CLR(g_app_config.theme.highlight_fg), CLR(g_app_config.theme.highlight_bg));
-    init_pair(COLOR_PAIR_BORDER,    CLR(g_app_config.theme.border_fg),    CLR(g_app_config.theme.border_bg));
+    init_pair(COLOR_PAIR_PLAYLIST,
+              CLR(EFF(APPEARANCE_THEME_SLOT_PLAYLIST_FG, g_app_config.theme.playlist_fg)),
+              CLR(EFF(APPEARANCE_THEME_SLOT_PLAYLIST_BG, g_app_config.theme.playlist_bg)));
+    init_pair(COLOR_PAIR_CONTROLS,
+              CLR(EFF(APPEARANCE_THEME_SLOT_CONTROLS_FG, g_app_config.theme.controls_fg)),
+              CLR(EFF(APPEARANCE_THEME_SLOT_CONTROLS_BG, g_app_config.theme.controls_bg)));
+    init_pair(COLOR_PAIR_LYRICS,
+              CLR(EFF(APPEARANCE_THEME_SLOT_LYRICS_FG, g_app_config.theme.lyrics_fg)),
+              CLR(EFF(APPEARANCE_THEME_SLOT_LYRICS_BG, g_app_config.theme.lyrics_bg)));
+    init_pair(COLOR_PAIR_SIDEBAR,
+              CLR(EFF(APPEARANCE_THEME_SLOT_SIDEBAR_FG, g_app_config.theme.sidebar_fg)),
+              CLR(EFF(APPEARANCE_THEME_SLOT_SIDEBAR_BG, g_app_config.theme.sidebar_bg)));
+    init_pair(COLOR_PAIR_HIGHLIGHT,
+              CLR(EFF(APPEARANCE_THEME_SLOT_HIGHLIGHT_FG, g_app_config.theme.highlight_fg)),
+              CLR(EFF(APPEARANCE_THEME_SLOT_HIGHLIGHT_BG, g_app_config.theme.highlight_bg)));
+    init_pair(COLOR_PAIR_BORDER,
+              CLR(EFF(APPEARANCE_THEME_SLOT_BORDER_FG, g_app_config.theme.border_fg)),
+              CLR(EFF(APPEARANCE_THEME_SLOT_BORDER_BG, g_app_config.theme.border_bg)));
     ui_layout_apply_colors();
 
+#undef EFF
 #undef CLR
 }
 
@@ -654,6 +672,9 @@ void frontend_init_config(int readonly_mirror)
         /* TUI-local 即核心：读取配置、执行迁移并应用运行时字段。 */
         core_config_apply(); /* config-ownership-allow: 仅 local(TUI-即-核心) 分支；remote 走 load_config_readonly() */
     }
+    /* 配置加载后、首帧前：按 appearance_mode 做一次启动探测（仅 auto），
+     * 让 apply_color_theme() 直接使用正确的亮/暗变体，不会先闪一下暗色。 */
+    appearance_sync_from_config();
     apply_color_theme();
 }
 

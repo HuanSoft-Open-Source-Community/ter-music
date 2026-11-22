@@ -11,16 +11,16 @@
 #   2. 启动核心（daemon），让它完成迁移；
 #   3. 断言 config.xml 变成 v6 且无该段、remote.xml 存在且条目与密文逐字节一致；
 #   4. 断言前端能读入该文件（以 TUI 探针的日志为准）；
-#   5. 断言 v7 → v9：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 9
-#      （经 v7→v8→v9 迁移链）；属性 8 显式 0 的文件连续启停不回卷；
+#   5. 断言 v7 → v10：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 10
+#      （经 v7→v8→v9→v10 迁移链）；属性 8 显式 0 的文件连续启停不回卷；
 #      JSON v1 → XML 的迁移产出同样含 stop_core_on_exit=1（该键在 JSON
-#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 9 内的普通新键，
+#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 10 内的普通新键，
 #      旧文件缺元素即按 0 加载并随首存补写，不另升版本。
 #   6. 断言属性 8 夹具文件（含 theme playlist_bg=0）连续启停不触发
 #      file_version<4 的主题迁移块：版本属性数字化后，bg 0→-1 只对老文件
-#      （<4）一次性生效；首启同时完成 v8→v9 迁移；
+#      （<4）一次性生效；首启同时完成 v8→v9→v10 迁移；
 #   7. 断言历史字面量 version="2.2" 的完整文件仍可加载，且首启迁移一次
-#      （属性升 9、补 stop_core_on_exit=1、playlist_bg 0→-1、显式值保留）
+#      （属性升 10、补 stop_core_on_exit=1、playlist_bg 0→-1、显式值保留）
 #      之后再启停不重跑迁移块。
 #
 # 用法：scripts/test/config-migration-check.sh [--bin <ter-music>] [--keep]
@@ -164,10 +164,10 @@ sleep 1
 info "断言：config.xml 升级到当前版本且不再含远程段"
 cfg_version="$(python3 "$SCRIPT_DIR/rpc_client.py" call cn.org.huansoft.ter_music.Config.GetAll 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", "?"))' 2>/dev/null || echo "?")"
-if [ "$cfg_version" = "9" ]; then
-    ok "核心配置版本为 9（Config.GetAll version=$cfg_version）"
+if [ "$cfg_version" = "10" ]; then
+    ok "核心配置版本为 10（Config.GetAll version=$cfg_version）"
 else
-    bad "核心配置版本应为 9，实际 '$cfg_version'"
+    bad "核心配置版本应为 10，实际 '$cfg_version'"
 fi
 if grep -q "remote_connections" "$CONFIG"; then
     bad "config.xml 仍含 <remote_connections>"
@@ -248,7 +248,7 @@ else
     printf '  skip 缺少 tui-probe.py\n'
 fi
 
-# ── v7→v9 / v8 显式值 / JSON v1 的 stop_core_on_exit 断言 ──────────
+# ── v7→v10 / v8 显式值 / JSON v1 的 stop_core_on_exit 断言 ──────────
 core_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
 wait_core_down() {
     for _ in $(seq 1 40); do core_up || return 0; sleep 0.25; done
@@ -259,7 +259,7 @@ stop_live() {   # 核心现在内存镜像里的 stop_core_on_exit（经 Config.
         python3 -c 'import json,sys; print(json.load(sys.stdin)["preferences"].get("stop_core_on_exit","?"))' 2>/dev/null || echo "?"
 }
 
-info "v7 → v9：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 9"
+info "v7 → v10：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 10"
 "$TM_BIN" daemon stop >/dev/null 2>&1 || true
 wait_core_down || bad "daemon stop 后核心没有下线，夹具断言不可信"
 cat > "$CONFIG" <<'EOF'
@@ -275,10 +275,10 @@ EOF
 sleep 2
 DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
 if [ -n "$DAEMON_PID" ]; then ok "v7 夹具下核心已启动（pid $DAEMON_PID）"; else bad "核心启动失败"; fi
-if grep -q 'version="9"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
-    ok "属性 7 文件首启后被补写：版本升 9 且含 <stop_core_on_exit>1</stop_core_on_exit>"
+if grep -q 'version="10"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
+    ok "属性 7 文件首启后被补写：版本升 10 且含 <stop_core_on_exit>1</stop_core_on_exit>"
 else
-    bad "v7→v9 补写缺失（文件根属性 $(grep -o 'version="[^"]*"' "$CONFIG" | head -1)，stop 值 '$(sed -n 's|.*<stop_core_on_exit>\([0-9]*\)</stop_core_on_exit>.*|\1|p' "$CONFIG" | head -1)'）"
+    bad "v7→v10 补写缺失（文件根属性 $(grep -o 'version="[^"]*"' "$CONFIG" | head -1)，stop 值 '$(sed -n 's|.*<stop_core_on_exit>\([0-9]*\)</stop_core_on_exit>.*|\1|p' "$CONFIG" | head -1)'）"
 fi
 if grep -q "<volume_percent>77</volume_percent>" "$CONFIG"; then
     ok "迁移补写不误伤显式值（volume_percent=77 原样保留）"
@@ -317,7 +317,7 @@ else
     bad "多轮启停后 stop_core_on_exit=$(stop_live)（期望 0，存在被缺省 1 回卷的迁移块/加载路径）"
 fi
 if grep -q "<stop_core_on_exit>0</stop_core_on_exit>" "$CONFIG"; then
-    ok "落盘文件保持 <stop_core_on_exit>0</stop_core_on_exit>（v8→v9 迁移后不再触发 <8 迁移块）"
+    ok "落盘文件保持 <stop_core_on_exit>0</stop_core_on_exit>（v8→v9→v10 迁移后不再触发 <8 迁移块）"
 else
     bad "落盘文件的 stop_core_on_exit 被回卷：$(grep -o '<stop_core_on_exit>[0-9]*</stop_core_on_exit>' "$CONFIG" | head -1)"
 fi
@@ -334,7 +334,7 @@ fi
 
 # ── 版本属性数字化后的新契约：file_version<4 主题块只对老文件一次性生效 ──
 # 守的点：config_save_to_xml() 从落 "2.2" 字面量改为落数字契约版后，
-# 属性 8 的夹具经首启 v8→v9 迁移后 file_version=9，`< 4` 迁移块（bg==0 → -1）
+# 属性 8 的夹具经首启 v8→v9→v10 迁移后 file_version=10，`< 4` 迁移块（bg==0 → -1）
 # 不再命中；用户显式选择的 0（C_BLACK）底色必须能跨启停存活——数字化之前
 # "2.2" 恒被 atoi 成 2，每次启动重跑该块、把 0 反复抹成 -1，正是本次改动要
 # 根除的回归。
@@ -397,11 +397,11 @@ sleep 2
 DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
 if [ -n "$DAEMON_PID" ]; then ok "\"2.2\" 夹具下核心已启动（历史文件仍可加载，pid $DAEMON_PID）"; else bad "核心启动失败（\"2.2\" 文件没有被加载？）"; fi
 # atoi("2.2")==2：>= CONFIG_MIN_SUPPORTED_VER(2) 可加载；file_version=2 让
-# <4 / <7 / <8 / <9 四个块在首启各跑一次，随后保存落属性 9，之后再启停永不命中。
-if grep -q 'version="9"' "$CONFIG"; then
-    ok "\"2.2\" 文件首启后根属性升为 9（数字化契约生效）"
+# <4 / <7 / <8 / <9 / <10 五个块在首启各跑一次，随后保存落属性 10，之后再启停永不命中。
+if grep -q 'version="10"' "$CONFIG"; then
+    ok "\"2.2\" 文件首启后根属性升为 10（数字化契约生效）"
 else
-    bad "\"2.2\" 文件首启后属性未升 9（实际 $(grep -o '<ter-music-config version="[^"]*"' "$CONFIG" | head -1)）"
+    bad "\"2.2\" 文件首启后属性未升 10（实际 $(grep -o '<ter-music-config version="[^"]*"' "$CONFIG" | head -1)）"
 fi
 if grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
     ok "\"2.2\" 文件首启补写 <stop_core_on_exit>1</stop_core_on_exit>（<8 块一次性生效）"
@@ -423,9 +423,9 @@ wait_core_down || bad "daemon stop 后核心未下线，第二轮断言不可信
 "$TM_BIN" daemon start >/dev/null 2>&1
 sleep 1.5
 DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
-if grep -q 'version="9"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG" &&
+if grep -q 'version="10"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG" &&
    grep -q "<playlist_bg>-1</playlist_bg>" "$CONFIG" && grep -q "<volume_percent>55</volume_percent>" "$CONFIG"; then
-    ok "第二轮启停后四项迁移产出全部不变（属性 9 起跳，迁移块不再重跑）"
+    ok "第二轮启停后四项迁移产出全部不变（属性 10 起跳，迁移块不再重跑）"
 else
     bad "第二轮启停把迁移产出改写了（实际：$(grep -o '<ter-music-config version="[^"]*"' "$CONFIG" | head -1)，$(grep -o '<playlist_bg>[0-9-]*</playlist_bg>' "$CONFIG" | head -1)，$(grep -o '<stop_core_on_exit>[0-9]*</stop_core_on_exit>' "$CONFIG" | head -1)）"
 fi
@@ -448,10 +448,10 @@ if [ -f "$XDG_CONFIG_HOME/ter-music/config.json.bak" ]; then
 else
     bad "config.json 未被迁移（迁移入口没有走到）"
 fi
-if [ -f "$CONFIG" ] && grep -q 'version="9"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
-    ok "JSON→XML 产出为属性 9 且显式含 <stop_core_on_exit>1</stop_core_on_exit>"
+if [ -f "$CONFIG" ] && grep -q 'version="10"' "$CONFIG" && grep -q "<stop_core_on_exit>1</stop_core_on_exit>" "$CONFIG"; then
+    ok "JSON→XML 产出为属性 10 且显式含 <stop_core_on_exit>1</stop_core_on_exit>"
 else
-    bad "JSON→XML 产出不含 stop_core_on_exit=1 / 版本不是 9（本路径保存即落 9，<8 迁移块不触发，缺值即 migration.c 未补写）"
+    bad "JSON→XML 产出不含 stop_core_on_exit=1 / 版本不是 10（本路径保存即落 10，<8/<10 迁移块不触发，缺值即 migration.c 未补写）"
 fi
 if [ "$(stop_live)" = "1" ]; then
     ok "迁移后 Config.GetAll 的 stop_core_on_exit=1"
@@ -462,6 +462,71 @@ if grep -q "<volume_percent>60</volume_percent>" "$CONFIG"; then
     ok "JSON 里的显式 volume_percent=60 被带入 XML（迁移没有吞掉用户数据）"
 else
     bad "JSON→XML 后 volume_percent=60 丢失"
+fi
+
+
+# ── v9 → v10：只新增 appearance_mode，绝不改写已有 theme 值 ──────────
+# 守的点（t3 设计 §C2/C3）：迁移只补默认 auto 与版本号；用户显式改过的
+# theme 字段（controls_fg=15、highlight_bg=4）必须原样保留；手工写入的
+# 合法 mode=2 也不能被默认 0 覆盖。
+info "v9 → v10：补写 appearance_mode=0 且不改写显式 theme 值"
+"$TM_BIN" daemon stop >/dev/null 2>&1 || true
+wait_core_down || bad "核心未下线即写夹具，本轮断言不可信"
+cat > "$CONFIG" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="9">
+  <theme>
+    <playlist_fg>7</playlist_fg>
+    <controls_fg>15</controls_fg>
+    <highlight_bg>4</highlight_bg>
+  </theme>
+  <preferences>
+    <volume_percent>66</volume_percent>
+  </preferences>
+</ter-music-config>
+EOF
+"$TM_BIN" daemon start >/dev/null 2>&1
+sleep 2
+DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
+if [ -f "$CONFIG" ] && grep -q 'version="10"' "$CONFIG" && grep -q "<appearance_mode>0</appearance_mode>" "$CONFIG"; then
+    ok "v9 文件首启后升为 10 且补写 <appearance_mode>0</appearance_mode>"
+else
+    bad "v9→v10 迁移缺失（版本 $(grep -o 'version="[^"]*"' "$CONFIG" | head -1)，appearance_mode $(grep -o '<appearance_mode>[0-9]*</appearance_mode>' "$CONFIG" | head -1)）"
+fi
+if grep -q "<playlist_fg>7</playlist_fg>" "$CONFIG" &&
+   grep -q "<controls_fg>15</controls_fg>" "$CONFIG" &&
+   grep -q "<highlight_bg>4</highlight_bg>" "$CONFIG"; then
+    ok "v9→v10 迁移不改写已有 theme 值（playlist_fg=7、controls_fg=15、highlight_bg=4 原样）"
+else
+    bad "v9→v10 迁移改写了显式 theme 值（theme 段被静默修改）"
+fi
+if grep -q "<volume_percent>66</volume_percent>" "$CONFIG"; then
+    ok "v9→v10 迁移不误伤 preferences 显式值（volume_percent=66 保留）"
+else
+    bad "v9→v10 迁移后 volume_percent=66 丢失或被改写"
+fi
+
+info "v9 + 手工 appearance_mode=2：合法值不被默认 auto 覆盖"
+"$TM_BIN" daemon stop >/dev/null 2>&1 || true
+wait_core_down || bad "核心未下线即写夹具，本轮断言不可信"
+cat > "$CONFIG" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ter-music-config version="9">
+  <theme>
+    <playlist_fg>2</playlist_fg>
+  </theme>
+  <preferences>
+    <appearance_mode>2</appearance_mode>
+  </preferences>
+</ter-music-config>
+EOF
+"$TM_BIN" daemon start >/dev/null 2>&1
+sleep 2
+DAEMON_PID="$("$TM_BIN" daemon status 2>/dev/null | sed -n 's/.*pid \([0-9]\+\).*/\1/p')"
+if grep -q 'version="10"' "$CONFIG" && grep -q "<appearance_mode>2</appearance_mode>" "$CONFIG"; then
+    ok "手工写入的 appearance_mode=2 在 v9→v10 迁移后保留"
+else
+    bad "appearance_mode=2 被迁移覆盖（实际 $(grep -o '<appearance_mode>[0-9]*</appearance_mode>' "$CONFIG" | head -1)）"
 fi
 
 info "结果"

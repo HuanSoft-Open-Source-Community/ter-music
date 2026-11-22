@@ -45,6 +45,7 @@
 #include "ui/rainbow.h"
 #include "ui/tty_guard.h"
 #include "ui/remote_view.h"
+#include "ui/appearance.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -523,6 +524,7 @@ static void sync_player_revisions(void)
         /* 远端前端的配置镜像来自核心：核心/CLI 改了 keybindings 时，
          * 这里必须同步重建键位表，否则设置页显示已改而按键仍是旧语义。 */
         keymap_reload();
+        appearance_sync_from_config();
         apply_color_theme();
         request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
                            UI_DIRTY_LYRICS | UI_DIRTY_INFO);
@@ -587,6 +589,7 @@ static void ui_on_config_reloaded(void)
     ui_context_menu_close_now(0);
     controls_reset_popup();
     keymap_reload();
+    appearance_sync_from_config();
     apply_color_theme();
     request_ui_refresh(UI_DIRTY_PLAYLIST | UI_DIRTY_CONTROLS |
                        UI_DIRTY_LYRICS | UI_DIRTY_INFO);
@@ -955,6 +958,10 @@ int handle_main_action(ActionId action)
                 int visible_lines = max_y - 8;
                 int selected = 0, offset = 0;
 
+                /* 模态弹层同样走 appearance 输入过滤器：终端背景应答不得
+                 * 取消弹层或作为按键分发。 */
+                appearance_drop_dangling_reply();
+
                 while (1) {
                     for (int i = 0; i < visible_lines && (offset + i) < g_playlist_manager.count; i++) {
                         int idx = offset + i;
@@ -978,8 +985,12 @@ int handle_main_action(ActionId action)
                               i18n_get("playlist_mgr.select_hint"));
                     wrefresh(win_win);
                     wtimeout(win_win, UI_INPUT_TIMEOUT_MS);
-                    int c = wgetch(win_win);
-                    if (c == ERR) { media_session_tick(); continue; }
+                    int c = appearance_wgetch(win_win);
+                    if (c == ERR) {
+                        appearance_drop_dangling_reply();
+                        media_session_tick();
+                        continue;
+                    }
                     /* Esc 为系统保留键；其余按弹窗上下文解析。 */
                     ActionId popup_action = (c == 27)
                         ? ACTION_POPUP_CANCEL
@@ -1169,6 +1180,8 @@ int handle_main_action(ActionId action)
             rounded_box(w);
             mvwprintw(w, 0, 2, "%s", i18n_get("play_history.title"));
             int sel = 0, off = 0;
+            /* 模态弹层同样走 appearance 输入过滤器。 */
+            appearance_drop_dangling_reply();
             while (1) {
                 if (sel < off) off = sel;
                 else if (sel >= off + visible) off = sel - visible + 1;
@@ -1193,8 +1206,12 @@ int handle_main_action(ActionId action)
                 mvwprintw(w, ph - 2, 2, "%s", i18n_get("play_history.hint"));
                 wrefresh(w);
                 wtimeout(w, UI_INPUT_TIMEOUT_MS);
-                int c = wgetch(w);
-                if (c == ERR) { media_session_tick(); continue; }
+                int c = appearance_wgetch(w);
+                if (c == ERR) {
+                    appearance_drop_dangling_reply();
+                    media_session_tick();
+                    continue;
+                }
                 ActionId popup_action = (c == 27)
                     ? ACTION_POPUP_CANCEL
                     : keymap_resolve(CTX_POPUP, c);
@@ -1369,7 +1386,7 @@ void run_event_loop(void)
                     : (ui_tty_guard_repair_active()
                            ? UI_TTY_REPAIR_INPUT_TIMEOUT_MS
                            : UI_INPUT_TIMEOUT_MS));
-        ch = getch();
+        ch = appearance_getch();
         /* 立刻恢复空闲超时：随后可能打开的模态输入框会继承 getch 的
          * 全局 timeout，绝不能让它按 1ms 空转。 */
         timeout(UI_INPUT_TIMEOUT_MS);
@@ -1406,6 +1423,12 @@ void run_event_loop(void)
                 uint64_t now = get_ui_time_ms();
                 if (now - esc_pending_time > ESC_TIMEOUT_MS) esc_pending = 0;
             }
+            continue;
+        }
+
+        /* 焦点上报（\e[?1004h 的 \e[I/\e[O]）：只用于运行期非阻塞重探，
+         * 必须在右键菜单/视图分发之前消费，避免被当成“未知键关菜单”。 */
+        if (appearance_handle_focus(ch)) {
             continue;
         }
 
@@ -1621,6 +1644,9 @@ void cleanup(void)
     /* 退出前把 TTY 守卫统计落进调试日志（验收证据：帧数/写入量/burst/
      * 修复轮数/最大修复带/F2/F3 次数）。非容器内是空操作。 */
     ui_tty_guard_log_stats();
+
+    /* 关闭焦点上报（终端能力开关，必须在 endwin 之前写回）。 */
+    appearance_shutdown();
 
     endwin();
     ui_restore_stdio();  /* 恢复真实 stderr，随后的退出错误才能显示在终端 */

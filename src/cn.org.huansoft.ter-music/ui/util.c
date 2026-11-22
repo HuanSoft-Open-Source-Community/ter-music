@@ -300,6 +300,15 @@ const char *menu_color_name(int color_value)
         case 75:  return i18n_get("color.sky_blue");
         case 203: return i18n_get("color.coral");
         case 118: return i18n_get("color.lime");
+        /* 亮色变体使用的 xterm 索引：Settings 里给它们明确名称，
+         * 而不是显示 general.unknown。 */
+        case 236: return i18n_get("color.charcoal");
+        case 24:  return i18n_get("color.deep_teal");
+        case 94:  return i18n_get("color.dark_amber");
+        case 28:  return i18n_get("color.dark_green");
+        case 90:  return i18n_get("color.dark_magenta");
+        case 25:  return i18n_get("color.deep_blue");
+        case 126: return i18n_get("color.dark_pink");
     }
     return i18n_get("general.unknown");
 }

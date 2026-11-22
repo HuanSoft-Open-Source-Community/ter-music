@@ -273,6 +273,14 @@ ter-music -o webdav://host/music/
 
 24 套调色板加 1 个自定义颜色槽位负责侧边栏、高亮和边框；每个窗格也可单独设置前景/背景色。完整格式见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)。
 
+### 终端亮/暗自适应
+
+`F2` → 界面外观 → **默认外观模式** 可选 `自动`（默认）、`亮色`、`暗色`；选择存于 `config.xml` 的 `preferences.appearance_mode`（契约版本 10）。`自动` 模式在首帧前先向终端查询背景色（OSC 11），查不到再依次尝试终端自身主题（当前为 deepin-terminal 适配器，只读，最多每 2 秒检查一次文件变化）、XDG 系统外观、`COLORFGBG`、`TERM` 提示（名含 `light`/`dark`），最后保持原有暗色外观——不应答的终端/portal 观感与旧版一致（OSC 11 探测上限约 200ms、portal 读取上限约 120ms，且仅在 `自动` 模式发生）。终端应答会从按键流中移除、绝不进入界面；只有“本程序刚发过查询、仍在等待应答”的窗口内收到的完整应答（BEL 或 ST 终止）才会被当作应答，手工输入同样的字符仍会正常送达（该窗口内最多有界 80ms 的预读）。 `自动` 模式的探测优先级为 OSC 11（终端实际底色，权威）→ 终端主题适配器（当前仅 deepin-terminal，读取其自身配置/配色，优先于桌面偏好）→ XDG 桌面 portal 的 `org.freedesktop.appearance color-scheme`（系统偏好，通过 `SettingChanged` 运行期跟随）→ `COLORFGBG` → `TERM` 提示 → 原有暗色回退；设置页会显示探测来源。终端主题适配器只在 deepin-terminal 下启用，其它终端不会读取该配置、行为保持不变。身份识别优先使用 `TERM_PROGRAM`；仅当其未设置时才查看祖先进程链。前端本地 `~/.config/ter-music/appearance-terminals.json` 可按终端覆盖全局 `preferences.appearance_mode`（全局键仍是默认值，也是 `config.xml` 里唯一持久化的外观键）。内置预设直接适配；用户 `layouts.json` 中与内置预设同名的布局，只有前景色仍等于该预设出厂暗色值时才参与亮色替换——用户改过的值保留，`TER_MUSIC_LAYOUTS` 始终逐字生效。
+
+亮色背景下，出厂主题色与全部 7 个内置预设切换到亮色安全配色，预设内各窗格颜色在 256/16/8 色终端上仍互不相同；暗色配色完全不变。只替换出厂值：你改过的主题色会保留。`~/.config/ter-music/layouts.json` 中的用户布局不会被改写；若其 id 与内置预设同名，且某窗格前景仍等于该预设出厂暗色值，则该前景随亮色变体。因此用户预设副本中未改的出厂值会继续适配（布局编辑器显示存储值，Settings 显示生效值）；你改过的值与 `TER_MUSIC_LAYOUTS` 原样使用。在布局编辑器中保存内置预设会先把当前屏幕上的颜色物化并固定。
+
+终端支持焦点上报时（`自动` 模式启用 `\e[?1004h` 且 terminfo 定义了焦点键），离开再回到窗口会自动重探，无需重启；不支持的终端可用同页的 **重新探测终端背景**。设置页的颜色页会为亮色变体索引显示名称（炭灰、深青、暗琥珀……），出厂默认色显示为“自动（亮/暗）”。探测到的变体属于各前端进程，绝不写入 `config.xml`；外观模式属于共享配置，运行中的 TUI 经既有 `ConfigChanged` 重载路径生效。
+
 ## 配置与数据
 
 `$XDG_CONFIG_HOME/ter-music`（默认 `~/.config/ter-music`）：
@@ -300,6 +308,7 @@ help/          用户快速上手文本
 | `default_play_mode` | 0-16 |
 | `ui_language` | `zh_CN`、`en_US`、`zh-PQ` 或已安装的语言包 ID |
 | `karaoke_mode` | 0 关，1 弱，2 全 |
+| `appearance_mode` | 0 自动（跟随终端），1 亮色，2 暗色 |
 | `resume_last_playback` | 恢复上次曲目与位置 |
 | `stop_core_on_exit` | 1 退出时停止核心，0 继续播放 |
 | `core_exit_when_no_frontend` | 最后一个前端离开 10 秒后退出核心 |

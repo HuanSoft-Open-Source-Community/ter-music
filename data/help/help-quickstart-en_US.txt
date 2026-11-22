@@ -70,6 +70,22 @@ ter-music Quick Start Guide
   Built-in: /usr/share/ter-music/layouts/layouts.json (source: data/layouts/)
   User override: ~/.config/ter-music/layouts.json (same id overrides built-in)
   Selection: ~/.config/ter-music/ui-layout (front-end local, not config.xml)
+  Terminal light/dark: F2 -> Appearance -> Appearance Mode (Auto/Light/Dark,
+  stored as preferences.appearance_mode). In Auto the TUI asks the terminal
+  (OSC 11), then the terminal's own theme on deepin-terminal (read-only,
+  refreshed at most every 2s; TERM_PROGRAM is authoritative and the ancestor
+  chain is used only when it is unset; other terminals are not probed), then
+  the XDG desktop portal color-scheme
+  (followed live), then COLORFGBG, a TERM hint, and finally keeps the legacy
+  dark look; the
+  Settings row shows the detection source. A per-terminal override in the
+  front-end-local ~/.config/ter-music/appearance-terminals.json wins over the
+  global default. On a light background factory theme colours and the seven
+  built-in presets switch to a light-safe palette; changed colours are kept and
+  user layouts only adapt foregrounds that still equal the preset's shipped
+  dark value (TER_MUSIC_LAYOUTS is used verbatim). With focus reporting,
+  leaving and returning to the window re-detects; otherwise use "Re-detect
+  Terminal Background".
 
 3. Focus Switching
 ------------------
@@ -504,8 +520,10 @@ ter-music Quick Start Guide
             when ui-layout does not exist.
   Config:   ~/.config/ter-music/config.xml, written only by the core (the XML
             root version attribute carries the config contract number,
-            currently 9; legacy "2.2" files still load and are rewritten with
+            currently 10; legacy "2.2" files still load and are rewritten with
             the number by the migration on the first upgrade run).
+            appearance_mode lives under <preferences> (0 auto, 1 light, 2 dark);
+            the detected light/dark variant is per front end and is never saved.
             A front end changes its own mirror and sends the difference via
             Config.Set.
   Content:  ~/.config/ter-music/library.db, the front-end SQLite library: track

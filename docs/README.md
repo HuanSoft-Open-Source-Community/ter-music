@@ -273,6 +273,14 @@ Select or edit layouts in `F2` → Appearance → UI Layout. Files:
 
 24 theme palettes and a custom color slot color the sidebar, highlight and border; each pane can also carry its own foreground/background. The full schema is in [UI_LAYOUTS_en_US.md](UI_LAYOUTS_en_US.md).
 
+### Terminal light/dark adaptation
+
+`F2` → Appearance → **Default Appearance Mode** selects `Auto` (default), `Light` or `Dark`; the choice is stored as `preferences.appearance_mode` in `config.xml` (contract version 10). In `Auto` the TUI asks the terminal for its background colour (OSC 11) before the first frame, then falls back to the terminal's own theme (currently the deepin-terminal adapter, read-only and refreshed at most every 2 s), the XDG system appearance, `COLORFGBG`, a `TERM` hint (`*light*` / `*dark*`) and finally the legacy dark look — a terminal/portal that never answers looks exactly as before (the OSC 11 probe is capped at about 200 ms, the portal read at about 120 ms, and both only run in `Auto`). Terminal replies are removed from the key stream and never reach the UI; only a complete reply (BEL- or ST-terminated) received while an answer to the program's own query is still pending is treated as a reply, so typing the same characters by hand is delivered normally (at most a bounded 80 ms look-ahead in that window). In `Auto` the detection order is OSC 11 (the terminal's actual background, authoritative) → the terminal theme adapter (currently only deepin-terminal; it reads the terminal's own config/colorscheme before the desktop preference) → the XDG desktop portal `org.freedesktop.appearance color-scheme` (the system preference, followed live through `SettingChanged`) → `COLORFGBG` → a `TERM` hint → the legacy dark look; the Settings page shows the source. The terminal theme adapter is enabled only for deepin-terminal; every other terminal is never probed for it and keeps its previous behaviour. Identification uses `TERM_PROGRAM` when it is set; the ancestor process chain is consulted only when `TERM_PROGRAM` is unset. A per-terminal override in the front-end-local `~/.config/ter-music/appearance-terminals.json` wins over the global `preferences.appearance_mode` (the global key stays the default and the only value stored in `config.xml`). Built-in presets adapt directly; a user `layouts.json` entry with the same id adapts only for foregrounds that still equal that preset's shipped dark value — values you changed are kept, and `TER_MUSIC_LAYOUTS` stays verbatim.
+
+On a light background the factory theme colours and all seven built-in presets switch to a light-safe palette whose pane colours stay distinct on 256-, 16- and 8-colour terminals; the dark palette is unchanged. Only factory values are substituted: a theme colour you changed is kept. A layout in `~/.config/ter-music/layouts.json` is never rewritten; if its id matches a built-in preset and a pane's explicit foreground still equals that preset's shipped dark value, that foreground follows the light variant. Unchanged factory values in a user preset copy therefore keep adapting (the layout editor shows stored values, Settings shows effective values), while values you changed and `TER_MUSIC_LAYOUTS` stay verbatim. Saving a built-in preset from the layout editor materialises the colours currently on screen and fixes them.
+
+Where the terminal reports focus (`\e[?1004h` is enabled in `Auto` and terminfo defines focus keys), leaving and returning to the window re-detects the background without a restart; terminals that do not report focus can use **Re-detect Terminal Background** in the same page. The Settings colour page names the light-variant indices (Charcoal, Deep Teal, Dark Amber, …) and shows `Auto (light/dark)` for factory-default colours. The detected variant is per front-end process and is never written to `config.xml`; the mode is shared configuration and reaches a running TUI through the usual `ConfigChanged` reload path.
+
 ## Configuration and data
 
 `$XDG_CONFIG_HOME/ter-music` (default `~/.config/ter-music`):
@@ -300,6 +308,7 @@ Common `config.xml` keys:
 | `default_play_mode` | 0-16 |
 | `ui_language` | `zh_CN`, `en_US`, `zh-PQ` or an installed pack id |
 | `karaoke_mode` | 0 off, 1 soft, 2 full |
+| `appearance_mode` | 0 auto (follow terminal), 1 light, 2 dark |
 | `resume_last_playback` | resume the last track and position |
 | `stop_core_on_exit` | 1 stop the core on exit, 0 keep playing |
 | `core_exit_when_no_frontend` | exit 10 s after the last front end leaves |

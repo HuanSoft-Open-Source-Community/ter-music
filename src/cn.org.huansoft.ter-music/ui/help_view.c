@@ -14,6 +14,7 @@
 #include "ui/menus.h"
 #include "ui/menu_internal.h"
 #include "ui/menu_anim.h"
+#include "ui/appearance.h"
 #include "ui/keymap.h"
 #include "ui/scrollbar.h"
 #include "search/search.h"
@@ -191,6 +192,7 @@ static void help_search_prompt(void)
 {
     /* 模态输入接管屏幕：先收掉右键菜单退场 ghost，避免它压在提示行上。 */
     ui_menu_anim_cancel_all(1);
+    appearance_drop_dangling_reply();
     curs_set(1);
 
     MenuContentArea area;
@@ -206,8 +208,17 @@ static void help_search_prompt(void)
 
     flushinp();
 
-    while ((ch = getch()) != '\n' && ch != KEY_ENTER && ch != 27 && strlen(input) < MAX_META_LEN - 1) {
-        if (ch == ERR) continue;
+    /* 与主循环共用 appearance 输入过滤器：OSC 11 应答绝不取消模态框
+     * 或作为文本注入。ERR 分支每 10 次补一次非阻塞悬挂应答清理。 */
+    int err_ticks = 0;
+    while ((ch = appearance_getch()) != '\n' && ch != KEY_ENTER && ch != 27 &&
+           strlen(input) < MAX_META_LEN - 1) {
+        if (ch == ERR) {
+            if (++err_ticks % 10 == 0) {
+                appearance_drop_dangling_reply();
+            }
+            continue;
+        }
         if (ch == KEY_MOUSE || ch == KEY_RESIZE) {
             /* 鼠标事件与终端尺寸变化都不是可输入字符：这两类键码都 >255，
              * 截断成 char 会直接写坏正在输入的搜索串。搜索输入框是模态的，

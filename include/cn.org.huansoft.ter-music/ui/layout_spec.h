@@ -267,6 +267,39 @@ int layout_spec_colour_effective(const LayoutSpec *spec, LayoutPaneKind kind,
                                  int field, int base, int *from_layout);
 
 /**
+ * @brief 取内置预设的**亮色变体**前景色（纯数据表，便于单测）。
+ *
+ * 只有 7 个内置预设（classic/vinyl/karaoke/visualizer/focus/stage/neon）
+ * 定义了亮色值；用户 `layouts.json`、`TER_MUSIC_LAYOUTS` 以及布局编辑器
+ * 保存的副本一律不查这张表（由 layout.c 按 origin 判定，原样使用）。
+ * 背景两套都是终端默认（-1），边框默认继承 body，因此只查前景。
+ *
+ * @param layout_id 布局 id（内置预设 id）
+ * @param kind      窗格种类
+ * @param field     LAYOUT_COLOUR_FG / LAYOUT_COLOUR_BG
+ * @param out       非空时写入亮色值
+ * @return 1 = 有定义；0 = 该 id/窗格/字段没有亮色变体
+ */
+int layout_preset_light_colour(const char *layout_id, LayoutPaneKind kind,
+                               int field, int *out);
+
+/**
+ * @brief 取内置预设的**暗色出厂值**（用于 USER 布局值匹配）。
+ *
+ * 用户布局 id 与内置预设同名、且某窗格前景色仍等于这里的内置暗色出厂值时，
+ * 才允许在亮色变体下替换为该预设的亮色值；改过的值一律保留。
+ * 背景两套都是终端默认（-1），当前只查 `LAYOUT_COLOUR_FG`。
+ *
+ * @param layout_id 布局 id（内置预设 id）
+ * @param kind      窗格种类
+ * @param field     LAYOUT_COLOUR_FG / LAYOUT_COLOUR_BG
+ * @param out       非空时写入暗色出厂值
+ * @return 1 = 有定义；0 = 该 id/窗格/字段没有定义
+ */
+int layout_preset_dark_colour(const char *layout_id, LayoutPaneKind kind,
+                              int field, int *out);
+
+/**
  * @brief 双格布局 + 当前曲目无歌词 → 歌词格是否应当让位。
  *
  * 只做判定，不改动 spec；调用方（ui/layout.c）据此在解析前派生一份"去掉
