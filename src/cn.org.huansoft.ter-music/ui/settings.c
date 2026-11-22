@@ -26,7 +26,9 @@
 #include "ui/rainbow.h"
 #include "ui/scrollbar.h"
 #include "ui/remote_view.h"
+#include "ui/appearance.h"
 #include "config/config.h"
+#include "config/appearance.h"
 #include "logger/logger.h"
 #include "info/info.h"
 #include "playlist/playlist.h"
@@ -170,13 +172,17 @@ static const char *settings_options[] = {
     "settings.opt.vinyl_fg",
     "settings.opt.vinyl_bg",
     /* ── 卡拉OK（消人声）：尾部追加，不重排既有下标 ── */
-    "settings.opt.karaoke_mode"
+    "settings.opt.karaoke_mode",
+    /* ── 终端亮/暗外观（config v10）：尾部追加，不重排既有下标 ── */
+    "settings.opt.appearance_mode",
+    "settings.opt.detect_background",
+    "settings.opt.terminal_mode"
 };
 
 /* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
  * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new，
  * 54..59 的窗格颜色项，以及 60 的卡拉OK（消人声）档位）。 */
-#define SETTINGS_OPTION_COUNT 61
+#define SETTINGS_OPTION_COUNT 64
 
 /* 编译期护栏：文案表必须与枚举/段数组使用同一数量。 */
 typedef char settings_option_arrays_must_match_count[
@@ -256,7 +262,11 @@ enum {
     SETTINGS_IDX_PANE_VINYL_FG       = 58,
     SETTINGS_IDX_PANE_VINYL_BG       = 59,
     /* ── 卡拉OK（消人声）档位：尾部追加，不重排既有下标 ── */
-    SETTINGS_IDX_KARAOKE_MODE        = 60
+    SETTINGS_IDX_KARAOKE_MODE        = 60,
+    /* ── 终端亮/暗外观（config v10）：尾部追加，不重排既有下标 ── */
+    SETTINGS_IDX_APPEARANCE_MODE     = 61,
+    SETTINGS_IDX_DETECT_BACKGROUND   = 62,
+    SETTINGS_IDX_TERMINAL_MODE       = 63
 };
 
 typedef struct {
@@ -265,6 +275,9 @@ typedef struct {
 } SettingsSectionSpec;
 
 static const int settings_theme_option_indices[] = {
+    /* 终端亮/暗外观（置于颜色页最前，便于发现与操作）。 */
+    SETTINGS_IDX_APPEARANCE_MODE,
+    SETTINGS_IDX_DETECT_BACKGROUND,
     /* 窗格颜色：按屏幕上的阅读顺序（左列上→下、右列上→下）成对排列。
      * 值来自当前布局，切换/重载布局后这些行立刻变成该布局的配色。 */
     SETTINGS_IDX_PANE_PLAYLIST_FG,
@@ -286,6 +299,8 @@ static const int settings_theme_option_indices[] = {
     SETTINGS_IDX_THEME_HIGHLIGHT_BG,
     SETTINGS_IDX_THEME_BORDER_FG,
     SETTINGS_IDX_THEME_BORDER_BG,
+    /* 按终端覆盖：追加在颜色行之后，既有外观/颜色行的导航顺序不变。 */
+    SETTINGS_IDX_TERMINAL_MODE,
     SETTINGS_IDX_UI_LAYOUT,
     SETTINGS_IDX_LAYOUT_RELOAD,
     SETTINGS_IDX_LAYOUT_EDIT,
@@ -674,25 +689,11 @@ enum {
     THEME_SLOT_BORDER_FG,       THEME_SLOT_BORDER_BG
 };
 
-/* 全文件唯一的"主题槽 → 字段指针"表（取代原先散落在 5 处的重复数组）。 */
+/* 全文件唯一的"主题槽 → 字段指针"表（槽序与 config/appearance.h 一致，
+ * 直接复用该模块的单一定义，避免两处漂移）。 */
 static int *theme_color_slot(int slot)
 {
-    ColorTheme *t = &g_app_config.theme;
-    switch (slot) {
-        case THEME_SLOT_PLAYLIST_FG:  return &t->playlist_fg;
-        case THEME_SLOT_PLAYLIST_BG:  return &t->playlist_bg;
-        case THEME_SLOT_CONTROLS_FG:  return &t->controls_fg;
-        case THEME_SLOT_CONTROLS_BG:  return &t->controls_bg;
-        case THEME_SLOT_LYRICS_FG:    return &t->lyrics_fg;
-        case THEME_SLOT_LYRICS_BG:    return &t->lyrics_bg;
-        case THEME_SLOT_SIDEBAR_FG:   return &t->sidebar_fg;
-        case THEME_SLOT_SIDEBAR_BG:   return &t->sidebar_bg;
-        case THEME_SLOT_HIGHLIGHT_FG: return &t->highlight_fg;
-        case THEME_SLOT_HIGHLIGHT_BG: return &t->highlight_bg;
-        case THEME_SLOT_BORDER_FG:    return &t->border_fg;
-        case THEME_SLOT_BORDER_BG:    return &t->border_bg;
-        default:                      return NULL;
-    }
+    return appearance_theme_slot_ptr(&g_app_config, slot);
 }
 
 typedef struct {
@@ -767,9 +768,109 @@ static int colour_row_value(const ColourRow *row, int *from_layout)
     }
     if (row->kind < 0) {
         int *slot = theme_color_slot(row->slot);
-        return slot ? *slot : 0;
+        if (!slot) {
+            return 0;
+        }
+        /* 界面色行显示**生效值**：亮色终端下出厂值显示为亮色变体。 */
+        return appearance_theme_effective(row->slot, *slot, appearance_variant());
     }
     return ui_layout_pane_colour((LayoutPaneKind)row->kind, row->field, from_layout);
+}
+
+/* 外观模式文案（Auto/Light/Dark）。 */
+static const char *appearance_mode_label(int mode)
+{
+    switch (mode) {
+        case APPEARANCE_MODE_LIGHT: return i18n_get("settings.appearance.light");
+        case APPEARANCE_MODE_DARK:  return i18n_get("settings.appearance.dark");
+        default:                    return i18n_get("settings.appearance.auto");
+    }
+}
+
+/* 探测来源文案（t15 D7：Settings 检测行与手动重探共用）。 */
+static const char *appearance_source_label(int source)
+{
+    switch (source) {
+        case APPEARANCE_SOURCE_OSC11:      return i18n_get("settings.appearance.source_osc11");
+        case APPEARANCE_SOURCE_TERMINAL_THEME:
+            return i18n_get("settings.appearance.source_terminal_theme");
+        case APPEARANCE_SOURCE_XDG:        return i18n_get("settings.appearance.source_xdg");
+        case APPEARANCE_SOURCE_COLORFGBG:  return i18n_get("settings.appearance.source_colorfgbg");
+        case APPEARANCE_SOURCE_TERM:       return i18n_get("settings.appearance.source_term");
+        case APPEARANCE_SOURCE_EXPLICIT:   return i18n_get("settings.appearance.source_explicit");
+        default:                           return i18n_get("settings.appearance.source_fallback");
+    }
+}
+
+/* 检测结论（短文案；未知沿用完整提示，避免“unknown (fallback)”重复）。 */
+static const char *appearance_detected_label(int bg)
+{
+    if (bg == APPEARANCE_BG_LIGHT) return i18n_get("settings.appearance.light");
+    if (bg == APPEARANCE_BG_DARK)  return i18n_get("settings.appearance.dark");
+    return i18n_get("settings.appearance.detected_unknown");
+}
+
+static void appearance_format_detection(char *out, size_t out_size,
+                                        const char *fmt_key)
+{
+    int detected = appearance_detected();
+    int source = appearance_detection_source();
+    if (detected == APPEARANCE_BG_UNKNOWN) {
+        snprintf(out, out_size, "%s", i18n_get("settings.appearance.detected_unknown"));
+        return;
+    }
+    snprintf(out, out_size, i18n_get(fmt_key),
+             appearance_detected_label(detected), appearance_source_label(source));
+}
+
+/**
+ * @brief 颜色行是否处于“自动（跟随终端亮/暗）”状态。
+ *
+ * RULE：界面色行直接看主题原值；窗格行只有“继承主题”时才有主题槽，
+ * 且原值等于出厂默认值才算自动。与 appearance_theme_effective() 的判定一致。
+ */
+static int colour_row_is_auto(const ColourRow *row, int *slot_out)
+{
+    if (!row || row->slot < 0) {
+        return 0;
+    }
+    int slot = row->slot;
+    if (row->kind >= 0) {
+        int from_layout = 0;
+        colour_row_value(row, &from_layout);
+        if (from_layout) {
+            return 0;   /* 布局显式色：用户自定义，不是自动 */
+        }
+    }
+    if (!appearance_theme_slot_is_adaptive(slot)) {
+        return 0;
+    }
+    int *raw = theme_color_slot(slot);
+    if (!raw || *raw != appearance_theme_factory_colour(slot)) {
+        return 0;
+    }
+    if (slot_out) {
+        *slot_out = slot;
+    }
+    return 1;
+}
+
+/**
+ * @brief 颜色弹层的光标定位值。
+ *
+ * Auto 行（存储值==出厂默认、亮/暗由终端决定）必须用**存储值**定位：
+ * 亮色变体的生效值（如 236）不在调色板候选表里，用生效值会让光标落到
+ * “自定义”槽，而不是“自动（亮/暗）”条目。其余行仍用生效值（WYSIWYG）。
+ */
+static int colour_row_cursor_value(const ColourRow *row)
+{
+    if (colour_row_is_auto(row, NULL)) {
+        int *raw = theme_color_slot(row->slot);
+        if (raw) {
+            return *raw;
+        }
+    }
+    return colour_row_value(row, NULL);
 }
 
 /* 颜色弹层：候选值表 + 两个哨兵（都不会与真实颜色值相撞）。 */
@@ -941,9 +1042,40 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
                          i18n_get("settings.color.pane_disabled"));
             }
         }
+        const char *colour_name = menu_color_name(color_val);
+        if (colour_row_is_auto(colour, NULL)) {
+            /* 值等于出厂默认：亮/暗由终端决定，不显示单个固定色名。 */
+            colour_name = i18n_get("settings.color.auto_terminal");
+        }
         snprintf(line, line_size, "%s%s%s (%d)%s",
                  i18n_get(current_settings_options[option_index]), separator,
-                 menu_color_name(color_val), color_val, mark);
+                 colour_name, color_val, mark);
+    } else if (option_index == SETTINGS_IDX_APPEARANCE_MODE) {
+        /* 行显示全局默认；本终端的覆盖在下一行单独显示。 */
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 appearance_mode_label(appearance_global_mode()));
+    } else if (option_index == SETTINGS_IDX_DETECT_BACKGROUND) {
+        char detection[192];
+        appearance_format_detection(detection, sizeof(detection),
+                                    "settings.appearance.detected_inline");
+        snprintf(line, line_size, "%s [%s]",
+                 i18n_get(current_settings_options[option_index]), detection);
+    } else if (option_index == SETTINGS_IDX_TERMINAL_MODE) {
+        int override = appearance_terminal_override_get();
+        char value[128];
+        if (override < 0) {
+            snprintf(value, sizeof(value),
+                     i18n_get("settings.appearance.terminal_inherit"),
+                     appearance_mode_label(appearance_global_mode()));
+        } else {
+            snprintf(value, sizeof(value),
+                     i18n_get("settings.appearance.terminal_override"),
+                     appearance_mode_label(override));
+        }
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 value);
     } else if (option_index == SETTINGS_IDX_DEFAULT_PATH) {
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
@@ -1114,9 +1246,10 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
  * @brief 渲染一个分区的选项列表，放不下时按选中项滑动窗口。
  * @param reserved_bottom 列表下方留给说明文字的行数。
  *
- * 界面外观分区共 22 行（18 个颜色 + 4 个布局项），加上两行说明与底部三条
- * 提示，32 行以下终端就放不下了（24 行终端只剩 14 行列表位），因此这里做
- * 滑动窗口并在保留列画滚动条（与快捷键编辑器、选择弹层同一套做法）。
+ * 界面外观分区共 25 行（2 外观 + 12 窗格颜色 + 6 界面颜色 + 1 本终端覆盖
+ * + 4 布局项），加上顶部两行说明与底部五条提示：列表可见行数为 LINES-12，
+ * 因此 25 行不滚动需要 LINES≥37（<37 行滚动）；24 行终端只剩 12 行列表位。
+ * 这里做滑动窗口并在保留列画滚动条（与快捷键编辑器、选择弹层同一套做法）。
  * 偏移量直接由选中位置推出，不引入额外状态。
  */
 static void render_settings_option_group(int start_y, int max_y,
@@ -1266,6 +1399,19 @@ static void adjust_or_toggle_settings_option(int option_index, int delta)
             g_app_config.stop_core_on_exit = !g_app_config.stop_core_on_exit;
             player_config_persist();
             break;
+        case SETTINGS_IDX_APPEARANCE_MODE: {
+            int mode = g_app_config.appearance_mode;
+            mode = (delta < 0) ? (mode - 1 + APPEARANCE_MODE_COUNT) % APPEARANCE_MODE_COUNT
+                               : (mode + 1) % APPEARANCE_MODE_COUNT;
+            g_app_config.appearance_mode = mode;
+            if (player_config_persist() != 0) {
+                show_status_message(i18n_get("settings.appearance.unsupported"));
+            }
+            appearance_sync_from_config();
+            apply_color_theme();
+            rerender_settings_view();
+            break;
+        }
         case SETTINGS_IDX_UI_LAYOUT: {
             int count = ui_layout_count();
             if (count <= 0) {
@@ -1396,7 +1542,7 @@ static int colour_menu_build(const ColourRow *row)
 /* 当前生效值在候选表里的位置；不在预置里就落到最后的自定义槽。 */
 static int colour_menu_cursor(const ColourRow *row, int n)
 {
-    int current = colour_row_value(row, NULL);
+    int current = colour_row_cursor_value(row);
     for (int i = 0; i < n; i++) {
         if (g_colour_vals[i] == current) {
             return i;
@@ -1416,7 +1562,7 @@ static void colour_sel_option_text(const ColourRow *row, int i,
     int v = g_colour_vals[i];
     if (v == COLOUR_MENU_CUSTOM) {
         /* 自定义槽：当前值本来就落在某个预置上时不重复显示数值。 */
-        int val = colour_row_value(row, NULL);
+        int val = colour_row_cursor_value(row);
         int in_pre = 0;
         for (int k = 0; k < sel_color_count(); k++) {
             if (sel_color_val(k) == val) {
@@ -1434,6 +1580,18 @@ static void colour_sel_option_text(const ColourRow *row, int i,
     if (v == LAYOUT_COLOR_INHERIT) {
         snprintf(out, out_size, "%s", i18n_get("settings.color.follow_theme"));
         return;
+    }
+    /* 自适应主题槽：出厂默认值在亮/暗变体下会被替换，显示为“自动”。 */
+    {
+        int from_layout = 0;
+        colour_row_value(row, &from_layout);
+        if (!from_layout && row->slot >= 0 &&
+            appearance_theme_slot_is_adaptive(row->slot) &&
+            v == appearance_theme_factory_colour(row->slot)) {
+            snprintf(out, out_size, "%s (%d)",
+                     i18n_get("settings.color.auto_terminal"), v);
+            return;
+        }
     }
     snprintf(out, out_size, "%s (%d)", menu_color_name(v), v);
 }
@@ -1520,6 +1678,29 @@ static void close_sel_menu(int apply, int animate)
                 g_app_config.lyrics_alignment = g_sel_idx;
                 player_config_persist();
                 break;
+
+            case SETTINGS_IDX_APPEARANCE_MODE:
+                g_app_config.appearance_mode = g_sel_idx;
+                if (player_config_persist() != 0) {
+                    show_status_message(i18n_get("settings.appearance.unsupported"));
+                }
+                appearance_sync_from_config();
+                apply_color_theme();
+                break;
+
+            case SETTINGS_IDX_TERMINAL_MODE: {
+                int mode = (g_sel_idx == 0) ? -1 : g_sel_idx - 1;
+                if (appearance_terminal_set_override(mode) != 0) {
+                    show_status_message(i18n_get("settings.appearance.terminal_save_failed"));
+                } else {
+                    appearance_sync_from_config();
+                    apply_color_theme();
+                    show_status_message(i18n_get(mode < 0
+                        ? "settings.appearance.terminal_cleared"
+                        : "settings.appearance.terminal_saved"));
+                }
+                break;
+            }
 
             case SETTINGS_IDX_UI_LAYOUT: {
                 const char *layout_id = ui_layout_id_at(g_sel_idx);
@@ -1690,6 +1871,18 @@ static void open_sel_menu(int option_index)
             count = KARAOKE_MODE_COUNT;
             cur   = g_app_config.karaoke_mode;
             break;
+        case SETTINGS_IDX_APPEARANCE_MODE:
+            /* 0=Auto、1=Light、2=Dark，与 APPEARANCE_MODE_* 一一对应 */
+            count = APPEARANCE_MODE_COUNT;
+            cur   = g_app_config.appearance_mode;
+            break;
+        case SETTINGS_IDX_TERMINAL_MODE: {
+            /* 0=Inherit、1=Auto、2=Light、3=Dark */
+            int override = appearance_terminal_override_get();
+            count = APPEARANCE_MODE_COUNT + 1;
+            cur = (override < 0) ? 0 : override + 1;
+            break;
+        }
         case SETTINGS_IDX_EQ_PRESET:
             count = EQ_PRESET_COUNT;
             cur   = eq_preset_index_from_config();
@@ -1922,6 +2115,25 @@ static void create_sel_window(void)
                 }
                 break;
             }
+            case SETTINGS_IDX_APPEARANCE_MODE:{
+                const char *a[]={i18n_get("settings.appearance.auto"),
+                                 i18n_get("settings.appearance.light"),
+                                 i18n_get("settings.appearance.dark")};
+                if (i<APPEARANCE_MODE_COUNT) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
+            }
+            case SETTINGS_IDX_TERMINAL_MODE:{
+                const char *a[]={i18n_get("settings.appearance.terminal_inline_inherit"),
+                                 i18n_get("settings.appearance.auto"),
+                                 i18n_get("settings.appearance.light"),
+                                 i18n_get("settings.appearance.dark")};
+                if (i<=APPEARANCE_MODE_COUNT) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
+            }
             case SETTINGS_IDX_LATENCY:{
                 /* 输出延迟弹窗：按 "%d ms" 表渲染（Task 5.3，独立完整的 case）。 */
                 int lat[]={20,40,60,80,100,120,150,200,250};
@@ -2138,6 +2350,25 @@ static void draw_sel_menu(void)
                 }
                 break;
             }
+            case SETTINGS_IDX_APPEARANCE_MODE:{
+                const char *a[]={i18n_get("settings.appearance.auto"),
+                                 i18n_get("settings.appearance.light"),
+                                 i18n_get("settings.appearance.dark")};
+                if (i<APPEARANCE_MODE_COUNT) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
+            }
+            case SETTINGS_IDX_TERMINAL_MODE:{
+                const char *a[]={i18n_get("settings.appearance.terminal_inline_inherit"),
+                                 i18n_get("settings.appearance.auto"),
+                                 i18n_get("settings.appearance.light"),
+                                 i18n_get("settings.appearance.dark")};
+                if (i<=APPEARANCE_MODE_COUNT) {
+                    snprintf(opts[i],48,"%s",a[i]);
+                }
+                break;
+            }
             case SETTINGS_IDX_LATENCY:{
                 /* 输出延迟弹窗：按 "%d ms" 表渲染（Task 5.3，独立完整的 case，
                  * 修复原先直落 EQ 预设、毫秒行不可达的结构错乱）。 */
@@ -2198,6 +2429,8 @@ static void draw_sel_menu(void)
         case SETTINGS_IDX_LATENCY:           title = i18n_get("popup.latency"); break;
         case SETTINGS_IDX_CUE_ENCODING:      title = i18n_get("popup.cue_enc"); break;
         case SETTINGS_IDX_KARAOKE_MODE:      title = i18n_get("popup.karaoke"); break;
+        case SETTINGS_IDX_APPEARANCE_MODE:   title = i18n_get("settings.opt.appearance_mode"); break;
+        case SETTINGS_IDX_TERMINAL_MODE:     title = i18n_get("settings.opt.terminal_mode"); break;
         case SETTINGS_IDX_EQ_PRESET:        title = i18n_get("popup.eq_preset"); break;
         case SETTINGS_IDX_UI_LAYOUT:         title = i18n_get("settings.opt.ui_layout"); break;
         case SETTINGS_IDX_INFO_PRESET:
@@ -2312,7 +2545,7 @@ static int handle_sel_action(ActionId action)
             const ColourRow *crow = colour_row(g_sel_src);
             if (crow && g_sel_idx == g_sel_count - 1) {
                 char buf[8];
-                int cur = colour_row_value(crow, NULL);
+                int cur = colour_row_cursor_value(crow);
                 if (cur == LAYOUT_COLOR_INHERIT) {
                     cur = -1;         /* 继承态下提示行按"透明"起步 */
                 }
@@ -2373,6 +2606,17 @@ static void activate_settings_current_option(void)
 {
     if (g_settings_current_option == SETTINGS_IDX_DEFAULT_PATH) {
         edit_default_startup_path();
+        return;
+    }
+
+    /* 动作项：重新探测终端背景（完整链路：portal→OSC11→COLORFGBG→TERM）。 */
+    if (g_settings_current_option == SETTINGS_IDX_DETECT_BACKGROUND) {
+        (void)appearance_force_probe();
+        char message[192];
+        appearance_format_detection(message, sizeof(message),
+                                    "settings.appearance.detected_fmt");
+        show_status_message(message);
+        rerender_settings_view();
         return;
     }
 
@@ -2455,6 +2699,8 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_SORT_MODE ||
         g_settings_current_option == SETTINGS_IDX_CUE_ENCODING ||
         g_settings_current_option == SETTINGS_IDX_KARAOKE_MODE ||
+        g_settings_current_option == SETTINGS_IDX_APPEARANCE_MODE ||
+        g_settings_current_option == SETTINGS_IDX_TERMINAL_MODE ||
         g_settings_current_option == SETTINGS_IDX_EQ_PRESET ||
         g_settings_current_option == SETTINGS_IDX_INFO_PRESET ||
         g_settings_current_option == SETTINGS_IDX_INFO_FIELDS ||
@@ -2781,10 +3027,12 @@ void render_settings_content(void)
                  i18n_get("settings.color.layer_hint"));
         menu_content_puts(&area, start_y + 1, hint_buf);
         start_y += 2;
-        /* 三条说明钉在底部（多留一行间隔），列表在剩余空间里滑动。 */
-        const int hint_rows = 3;
+        /* 五条说明钉在底部（多留一行间隔），列表在剩余空间里滑动。
+         * 外观模式/自动跟随/本终端覆盖说明都必须一起算进保留行数，
+         * 否则小终端会盖住最后一条提示。 */
+        const int hint_rows = 5;
         render_settings_option_group(start_y, area.max_y, spec, hint_rows + 1);
-        int hint_y = area.max_y - 3 - (hint_rows - 1);
+        int hint_y = area.max_y - 4 - (hint_rows - 1);
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.color.auto_avoid_same"));
         menu_content_puts(&area, hint_y, hint_buf);
@@ -2794,6 +3042,16 @@ void render_settings_content(void)
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.layout.edit_hint"));
         menu_content_puts(&area, hint_y + 2, hint_buf);
+        snprintf(hint_buf, sizeof(hint_buf), "%s",
+                 i18n_get("settings.appearance.hint"));
+        menu_content_puts(&area, hint_y + 3, hint_buf);
+        {
+            char key[96];
+            snprintf(key, sizeof(key), "%.60s", appearance_terminal_key());
+            snprintf(hint_buf, sizeof(hint_buf),
+                     i18n_get("settings.appearance.terminal_hint"), key);
+            menu_content_puts(&area, hint_y + 4, hint_buf);
+        }
     } else if (g_menu_selected_idx == 1) {  /* 默认路径 */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.path.hint"));
@@ -3261,8 +3519,9 @@ static int handle_settings_action(ActionId action)
 
         case ACTION_SETTINGS_LEFT:
             if (g_focus_area == FOCUS_CONTENT) {
-                if (g_settings_current_option == SETTINGS_IDX_UI_LAYOUT) {
-                    adjust_or_toggle_settings_option(SETTINGS_IDX_UI_LAYOUT, -1);
+                if (g_settings_current_option == SETTINGS_IDX_UI_LAYOUT ||
+                    g_settings_current_option == SETTINGS_IDX_APPEARANCE_MODE) {
+                    adjust_or_toggle_settings_option(g_settings_current_option, -1);
                     rerender_settings_view();
                     return 1;
                 }
@@ -3283,8 +3542,9 @@ static int handle_settings_action(ActionId action)
                     render_settings_content();
                 }
             } else {
-                if (g_settings_current_option == SETTINGS_IDX_UI_LAYOUT) {
-                    adjust_or_toggle_settings_option(SETTINGS_IDX_UI_LAYOUT, 1);
+                if (g_settings_current_option == SETTINGS_IDX_UI_LAYOUT ||
+                    g_settings_current_option == SETTINGS_IDX_APPEARANCE_MODE) {
+                    adjust_or_toggle_settings_option(g_settings_current_option, 1);
                 } else {
                     /* RIGHT in content mode behaves like ENTER */
                     activate_settings_current_option();

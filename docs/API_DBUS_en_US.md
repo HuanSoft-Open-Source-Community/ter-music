@@ -430,11 +430,11 @@ one of them.
 `GetAll` mirrors `config.xml`, using the same section and key names:
 
 ```json
-{ "version": 9,
+{ "version": 10,
   "paths": { "default_startup_path": "…", "last_opened_path": "…" },
   "theme": { "playlist_fg": 7, "playlist_bg": -1, "…": 0 },
   "preferences": { "volume_percent": 100, "default_playback_speed": 1.00,
-                   "stop_core_on_exit": 1,
+                   "stop_core_on_exit": 1, "appearance_mode": 0,
                    "info_preset": 0, "info_fields": 2047, "…": 0 },
   "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] },
   "keybindings": { "track.next": "]" } }
@@ -445,29 +445,57 @@ Notes:
 - Numeric values outside their range are clamped, not rejected
   (`volume_percent: 999` becomes `100`).
 - `GetAll`'s `version` is the configuration contract version
-  (`CONFIG_CURRENT_VERSION`, currently `9`). The `version` attribute of
-  `config.xml` is now written with that same number (`"9"`); it used to read
+  (`CONFIG_CURRENT_VERSION`, currently `10`). The `version` attribute of
+  `config.xml` is now written with that same number (`"10"`); it used to read
   `2.2`. Historical `2.2` files still load — the attribute parses as `2`, which
   is above the minimum supported version — and the first run after an upgrade
   migrates them and rewrites the attribute to the number. Sending `version`
   back inside a patch is accepted and ignored, so a front end can re-apply a
   full snapshot.
+- `preferences.appearance_mode` (contract v10) is an integer `0` auto,
+  `1` light, `2` dark; default `0`. It is the **only** appearance key persisted
+  to `config.xml`, and it is the **global default**. In `auto` each front end
+  probes the terminal background in this fixed order: OSC 11 (actual terminal
+  background, authoritative) → the terminal theme adapter (currently only
+  deepin-terminal; reads that terminal's own config/colorscheme read-only,
+  refreshed at most every 2 s; only deepin-terminal enables it, and `TERM_PROGRAM` is authoritative—the ancestor chain is consulted only when it is unset) → the XDG desktop portal's
+  `org.freedesktop.appearance color-scheme` (system preference, followed live
+  via `SettingChanged`) → `COLORFGBG` → a `TERM` hint → the legacy dark look.
+  It then substitutes the light variant for factory-default theme colours and
+  built-in layout presets at render time; the detected variant and source are
+  per front-end process and are never written to `config.xml` or
+  `layouts.json`. Explicitly customised theme values are used verbatim. A user
+  layout with the same id as a built-in preset adapts only foregrounds that
+  still equal that preset's shipped dark value; values changed by the user and
+  `TER_MUSIC_LAYOUTS` stay verbatim.
+- A TUI front end may additionally store a per-terminal override in its local
+  `~/.config/ter-music/appearance-terminals.json` (never `config.xml`, keyed by
+  a stable terminal identity). It wins over the global
+  `preferences.appearance_mode`; `Config.Set` writes only the global default,
+  and the per-terminal override is **not exposed over D-Bus**, so a remote
+  controller cannot assume that setting the global mode changes a specific TUI.
+  Migrating a v9 file only adds the key (default `0`) and bumps the version —
+  theme values are never rewritten.
 - The `info_fields` mask also drives the TUI info pane, but only for the bits
   it can display (state/mode/title/artist/album/queue/format);
   `index`/`path`/`volume`/`speed` remain CLI/D-Bus-only. `info_show_cover`
   toggles both the info-pane cover and the CLI text cover; the TUI pane also
   requires the playback `show_album_cover` master switch.
   `info_cover_cols/rows/charset` only affect CLI/D-Bus text covers.
-  **Downgrade:** a build from before contract v9 reads the attribute with the
-  same integer parse, so `version="9"` loads without error and its own migration
-  blocks (`file_version < 4`, `< 7`, `< 8`) correctly stay inactive. But that
-  build has no `<keybindings>` section — it ignores the overrides, and on its
-  next save it writes only its own keys (the explicit bindings are lost). Builds
-  from before contract v8 additionally lack `stop_core_on_exit`: they ignore
-  that key too, exit by detaching (the core keeps playing), and on their next
-  save write the attribute back as `2.2`. After moving back to the current build,
-  the one-shot migrations re-apply the defaults (`stop_core_on_exit` = `1`), and
-  the lost keybindings stay at their built-in defaults.
+  **Downgrade:** two cases must be kept apart. A build from **just before
+  contract v10** (the latest v9 build) reads the attribute with the same integer
+  parse, so `version="10"` loads without error and its own migration blocks
+  (`file_version < 4`, `< 7`, `< 8`, `< 9`) correctly stay inactive. That build
+  still understands `<keybindings>` and keeps explicit overrides; it only lacks
+  `<appearance_mode>`, which it ignores and drops on its next save (the file is
+  rewritten with attribute `9`). Theme values and layouts are never touched.
+  A **pre-v9** build additionally lacks `<keybindings>`: it ignores the
+  overrides and its next save drops them; builds from before v8 also lack
+  `stop_core_on_exit` (they ignore it, exit by detaching, and write `2.2` back).
+  After moving back to the current build, the one-shot migrations re-apply the
+  defaults (`stop_core_on_exit` = `1`, `appearance_mode` = `0`); a previously
+  selected appearance mode has to be chosen again, while keybindings dropped by
+  a pre-v9 build stay at their built-in defaults.
 - `preferences.stop_core_on_exit` is a boolean that defaults to `1`. Contract
   version 8 added it: existing files below v8 are migrated once and receive the
   default `1`, flipping the upgrade-time behaviour from "the core keeps playing

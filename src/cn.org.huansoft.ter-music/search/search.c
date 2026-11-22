@@ -2,6 +2,7 @@
 #include "ui/menus.h"
 #include "ui/ui.h"
 #include "ui/menu_anim.h"
+#include "ui/appearance.h"
 #include "i18n/i18n.h"
 #include "playlist/playlist.h"
 #include "logger/logger.h"
@@ -177,6 +178,9 @@ void search_prompt(void) {
     /* 搜索框是模态输入：先收掉菜单退场 ghost。 */
     ui_menu_anim_cancel_all(1);
 
+    /* 入口先清一次可能悬挂的终端背景应答（非阻塞，仅当最近发过查询）。 */
+    appearance_drop_dangling_reply();
+
     curs_set(1);
 
     int max_y, max_x;
@@ -194,8 +198,15 @@ void search_prompt(void) {
 
     flushinp();
 
-    while ((ch = getch()) != '\n' && ch != KEY_ENTER && ch != 27 && strlen(input) < MAX_META_LEN - 1) {
+    /* 与主循环共用 appearance 输入过滤器：OSC 11 应答绝不作为文本/按键。
+     * ERR 分支每 10 次再补一次非阻塞清理，覆盖应答分片迟到的窗口。 */
+    int err_ticks = 0;
+    while ((ch = appearance_getch()) != '\n' && ch != KEY_ENTER && ch != 27 &&
+           strlen(input) < MAX_META_LEN - 1) {
         if (ch == ERR) {
+            if (++err_ticks % 10 == 0) {
+                appearance_drop_dangling_reply();
+            }
             media_session_tick();
             continue;
         }

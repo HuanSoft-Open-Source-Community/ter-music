@@ -179,7 +179,7 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 9   /* 与 config/schema.h 保持同步 */
+#define CONFIG_CURRENT_VERSION 10  /* 与 config/schema.h 保持同步 */
 
 /* ── 可配置键位覆盖（config v9）────────────────────────────────────
  * 只保存相对默认键位的覆盖项；action 为稳定动作 ID（见 keymap/actions.h），
@@ -309,6 +309,9 @@ typedef struct {
     char last_played_folder_path[MAX_PATH_LEN];
     char last_played_track_path[MAX_PATH_LEN];
     ColorTheme theme;
+    /* 外观模式（config v10）：APPEARANCE_MODE_*（0=自动跟随终端、1=亮色、
+     * 2=暗色）。唯一持久化的外观键；探测结果绝不落盘。 */
+    int appearance_mode;
     int auto_play_on_start;
     int remember_last_path;
     int clear_history_on_startup;

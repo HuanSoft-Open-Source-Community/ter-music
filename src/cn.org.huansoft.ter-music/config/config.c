@@ -21,6 +21,7 @@
 
 #include "types.h"
 #include "config/config.h"
+#include "config/appearance.h"
 #include "config/schema.h"
 #include "config/migration.h"
 #include "logger/logger.h"
@@ -222,18 +223,15 @@ void init_default_config(void)
         }
     }
 
-    g_app_config.theme.playlist_fg   = C_WHITE;
-    g_app_config.theme.playlist_bg   = -1;  /* transparent */
-    g_app_config.theme.controls_fg   = C_YELLOW;
-    g_app_config.theme.controls_bg   = -1;  /* transparent */
-    g_app_config.theme.lyrics_fg     = C_GREEN;
-    g_app_config.theme.lyrics_bg     = -1;  /* transparent */
-    g_app_config.theme.sidebar_fg    = C_CYAN;
-    g_app_config.theme.sidebar_bg    = -1;  /* transparent */
-    g_app_config.theme.highlight_fg  = C_BLACK;
-    g_app_config.theme.highlight_bg  = C_WHITE;
-    g_app_config.theme.border_fg     = C_CYAN;
-    g_app_config.theme.border_bg     = -1;  /* transparent */
+    /* 主题出厂默认值：单一来源 = config/appearance.c 的工厂表。
+     * 暗色终端上观感与旧版逐值一致；亮色变体只在前端渲染期替换，
+     * 绝不写回配置。 */
+    for (int slot = 0; slot < APPEARANCE_THEME_SLOT_COUNT; slot++) {
+        int *field = appearance_theme_slot_ptr(&g_app_config, slot);
+        if (field) {
+            *field = appearance_theme_factory_colour(slot);
+        }
+    }
 
     g_app_config.auto_play_on_start    = 0;
     g_app_config.remember_last_path    = 1;
@@ -256,6 +254,8 @@ void init_default_config(void)
     g_app_config.sort_mode             = SORT_DEFAULT;
     /* 卡拉OK（消人声）默认不启用：升级既有配置不改变任何听感 */
     g_app_config.karaoke_mode          = KARAOKE_MODE_OFF;
+    /* 外观模式（config v10）：默认自动跟随终端亮/暗背景 */
+    g_app_config.appearance_mode       = APPEARANCE_MODE_AUTO;
     /* 信息显示（CLI `ter-music show` / D-Bus）默认值：
      * 与 config.c 中 xml_get_int 的默认值保持一致 */
     g_app_config.info_preset           = 0;       /* 全量 */
@@ -389,6 +389,20 @@ int config_run_migrations(void)
     if (loaded && file_version < 9) {
         log_info("menu_views", "Migrating config v%d → v9: keybindings default to built-in keys",
                  file_version);
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+
+    /* v9 → v10：新增 preferences.appearance_mode。纯新增键：补默认值 0
+     * （自动跟随终端）并落盘一次；**绝不改写任何已有 theme 值/layouts.json**。
+     * 手工写入的合法值（1/2）原样保留。 */
+    if (loaded && file_version < 10) {
+        log_info("menu_views", "Migrating config v%d → v10: appearance_mode defaults to auto",
+                 file_version);
+        if (g_app_config.appearance_mode < APPEARANCE_MODE_AUTO ||
+            g_app_config.appearance_mode >= APPEARANCE_MODE_COUNT) {
+            g_app_config.appearance_mode = APPEARANCE_MODE_AUTO;
+        }
         g_app_config.config_version = CONFIG_CURRENT_VERSION;
         save_config();
     }
@@ -567,6 +581,7 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_SORT_MODE,       cfg->sort_mode);
         SAVE_INT(XML_PREF_CUE_ENCODING,    cfg->cue_encoding);
         SAVE_INT(XML_PREF_KARAOKE_MODE,    cfg->karaoke_mode);
+        SAVE_INT(XML_PREF_APPEARANCE_MODE, cfg->appearance_mode);
 
         /* ── Info display (CLI `ter-music show` / D-Bus) ────────── */
         SAVE_INT(XML_PREF_INFO_PRESET,         cfg->info_preset);
@@ -814,18 +829,30 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
     /* ── <theme> ────────────────────────────────────────────────── */
     xmlNodePtr theme = xml_find_child(root, XML_SECTION_THEME);
     if (theme) {
-        cfg->theme.playlist_fg  = xml_get_int(theme, XML_THEME_PLAYLIST_FG, C_WHITE);
-        cfg->theme.playlist_bg  = xml_get_int(theme, XML_THEME_PLAYLIST_BG, C_BLACK);
-        cfg->theme.controls_fg  = xml_get_int(theme, XML_THEME_CONTROLS_FG, C_YELLOW);
-        cfg->theme.controls_bg  = xml_get_int(theme, XML_THEME_CONTROLS_BG, C_BLACK);
-        cfg->theme.lyrics_fg    = xml_get_int(theme, XML_THEME_LYRICS_FG, C_GREEN);
-        cfg->theme.lyrics_bg    = xml_get_int(theme, XML_THEME_LYRICS_BG, C_BLACK);
-        cfg->theme.sidebar_fg   = xml_get_int(theme, XML_THEME_SIDEBAR_FG, C_CYAN);
-        cfg->theme.sidebar_bg   = xml_get_int(theme, XML_THEME_SIDEBAR_BG, C_BLACK);
-        cfg->theme.highlight_fg = xml_get_int(theme, XML_THEME_HIGHLIGHT_FG, C_BLACK);
-        cfg->theme.highlight_bg = xml_get_int(theme, XML_THEME_HIGHLIGHT_BG, C_WHITE);
-        cfg->theme.border_fg    = xml_get_int(theme, XML_THEME_BORDER_FG, C_CYAN);
-        cfg->theme.border_bg    = xml_get_int(theme, XML_THEME_BORDER_BG, C_BLACK);
+        cfg->theme.playlist_fg  = xml_get_int(theme, XML_THEME_PLAYLIST_FG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_PLAYLIST_FG));
+        cfg->theme.playlist_bg  = xml_get_int(theme, XML_THEME_PLAYLIST_BG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_PLAYLIST_BG));
+        cfg->theme.controls_fg  = xml_get_int(theme, XML_THEME_CONTROLS_FG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_CONTROLS_FG));
+        cfg->theme.controls_bg  = xml_get_int(theme, XML_THEME_CONTROLS_BG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_CONTROLS_BG));
+        cfg->theme.lyrics_fg    = xml_get_int(theme, XML_THEME_LYRICS_FG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_LYRICS_FG));
+        cfg->theme.lyrics_bg    = xml_get_int(theme, XML_THEME_LYRICS_BG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_LYRICS_BG));
+        cfg->theme.sidebar_fg   = xml_get_int(theme, XML_THEME_SIDEBAR_FG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_SIDEBAR_FG));
+        cfg->theme.sidebar_bg   = xml_get_int(theme, XML_THEME_SIDEBAR_BG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_SIDEBAR_BG));
+        cfg->theme.highlight_fg = xml_get_int(theme, XML_THEME_HIGHLIGHT_FG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_HIGHLIGHT_FG));
+        cfg->theme.highlight_bg = xml_get_int(theme, XML_THEME_HIGHLIGHT_BG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_HIGHLIGHT_BG));
+        cfg->theme.border_fg    = xml_get_int(theme, XML_THEME_BORDER_FG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_BORDER_FG));
+        cfg->theme.border_bg    = xml_get_int(theme, XML_THEME_BORDER_BG,
+            appearance_theme_factory_colour(APPEARANCE_THEME_SLOT_BORDER_BG));
     }
 
     /* ── <preferences> ──────────────────────────────────────────── */
@@ -874,6 +901,9 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->cue_encoding             = xml_get_int(prefs, XML_PREF_CUE_ENCODING, CUE_ENCODING_AUTO);
         /* 旧配置里没有这个元素时取默认值 0（不启用） */
         cfg->karaoke_mode             = xml_get_int(prefs, XML_PREF_KARAOKE_MODE, KARAOKE_MODE_OFF);
+        /* 外观模式（config v10）：缺省 = 自动跟随终端 */
+        cfg->appearance_mode          = xml_get_int(prefs, XML_PREF_APPEARANCE_MODE,
+                                                    APPEARANCE_MODE_AUTO);
 
         /* ── Info display (config v5)。旧配置缺少这些元素时使用下列默认值，
          *    与 menus.c:init_default_config() 保持一致。 */
@@ -1240,6 +1270,11 @@ static void clamp_config_values(AppConfig *cfg)
     /* ── 卡拉OK（消人声）：越界一律退回不启用 ── */
     if (cfg->karaoke_mode < KARAOKE_MODE_OFF || cfg->karaoke_mode >= KARAOKE_MODE_COUNT)
         cfg->karaoke_mode = KARAOKE_MODE_OFF;
+
+    /* ── 外观模式（config v10）：越界一律退回自动 ── */
+    if (cfg->appearance_mode < APPEARANCE_MODE_AUTO ||
+        cfg->appearance_mode >= APPEARANCE_MODE_COUNT)
+        cfg->appearance_mode = APPEARANCE_MODE_AUTO;
 
     /* ── Equalizer ── */
     cfg->eq_enabled = cfg->eq_enabled ? 1 : 0;
