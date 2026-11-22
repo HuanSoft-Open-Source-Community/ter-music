@@ -152,6 +152,10 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/library/library_query.c
     src/cn.org.huansoft.ter-music/library/browser/browser.c
     src/cn.org.huansoft.ter-music/ui/ui.c
+    src/cn.org.huansoft.ter-music/ui/appearance.c
+    src/cn.org.huansoft.ter-music/ui/appearance_portal.c
+    src/cn.org.huansoft.ter-music/ui/appearance_terminal.c
+    src/cn.org.huansoft.ter-music/ui/appearance_terminal_theme.c
     src/cn.org.huansoft.ter-music/ui/rainbow.c
     src/cn.org.huansoft.ter-music/ui/rainbow_gradient.c
     src/cn.org.huansoft.ter-music/ui/tty_guard.c
@@ -221,6 +225,7 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/remote/remote_store.c
     src/cn.org.huansoft.ter-music/remote/remote_cache.c
     src/cn.org.huansoft.ter-music/config/config.c
+    src/cn.org.huansoft.ter-music/config/appearance.c
     src/cn.org.huansoft.ter-music/config/config_diff.c
     src/cn.org.huansoft.ter-music/config/migration.c
     src/cn.org.huansoft.ter-music/config/crypto.c

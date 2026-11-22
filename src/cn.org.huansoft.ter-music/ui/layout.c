@@ -14,6 +14,8 @@
 
 #include "types.h"
 #include "config/config.h"
+#include "config/appearance.h"
+#include "ui/appearance.h"
 #include "i18n/i18n.h"
 #include "logger/logger.h"
 #include "ui/layout.h"
@@ -349,6 +351,62 @@ static int role_pair(LayoutPaneKind kind)
 
 static void role_colors(LayoutPaneKind kind, int *fg, int *bg);
 
+/* 窗格种类 → 继承时使用的主题槽（与 role_colors 的映射一致）。 */
+static int role_theme_slot(LayoutPaneKind kind, int field)
+{
+    int base;
+    switch (kind) {
+        case LAYOUT_PANE_PLAYLIST:
+        case LAYOUT_PANE_INFO:
+            base = APPEARANCE_THEME_SLOT_PLAYLIST_FG;
+            break;
+        case LAYOUT_PANE_CONTROLS:
+            base = APPEARANCE_THEME_SLOT_CONTROLS_FG;
+            break;
+        case LAYOUT_PANE_SPECTRUM:
+        case LAYOUT_PANE_LYRICS:
+        case LAYOUT_PANE_VINYL:
+            base = APPEARANCE_THEME_SLOT_LYRICS_FG;
+            break;
+        default:
+            return -1;
+    }
+    return base + (field == LAYOUT_COLOUR_BG ? 1 : 0);
+}
+
+/* 布局显式色的生效值（t15 D5，只读内存、绝不写文件）：
+ *   - 非亮色变体 → 原值；
+ *   - BUILTIN origin → 直接查该预设亮色表（既有行为）；
+ *   - USER origin 且与内置预设同名 → **只有前景色等于该预设暗色出厂值**
+ *     才替换为亮色值；用户改过的值、ENV/TER_MUSIC_LAYOUTS 覆盖一律原样；
+ *   - 背景/边框不参与值匹配（背景两套都是终端默认 -1，边框继承 body）。
+ * 用户 layouts.json 不会被改写；布局编辑器保存的副本写的是当前生效的暗色
+ * 出厂值，因此下次亮色变体仍能命中。 */
+static int layout_pane_effective_colour(LayoutPaneKind kind, int field, int raw)
+{
+    if (raw == LAYOUT_COLOR_INHERIT) {
+        return raw;
+    }
+    if (appearance_variant() != APPEARANCE_VARIANT_LIGHT) {
+        return raw;
+    }
+    int origin = layout_id_origin(g_current_id);
+    int light = 0;
+    if (origin == LAYOUT_ORIGIN_BUILTIN) {
+        return layout_preset_light_colour(g_current_id, kind, field, &light)
+                   ? light : raw;
+    }
+    if (origin == LAYOUT_ORIGIN_USER && field == LAYOUT_COLOUR_FG) {
+        int dark = 0;
+        if (layout_preset_dark_colour(g_current_id, kind, field, &dark) &&
+            raw == dark &&
+            layout_preset_light_colour(g_current_id, kind, field, &light)) {
+            return light;
+        }
+    }
+    return raw;
+}
+
 int ui_layout_pane_colour(LayoutPaneKind kind, int field, int *from_layout)
 {
     if (!g_initialized) {
@@ -358,7 +416,12 @@ int ui_layout_pane_colour(LayoutPaneKind kind, int field, int *from_layout)
     int role_bg = -1;
     role_colors(kind, &role_fg, &role_bg);
     int base = (field == LAYOUT_COLOUR_BG) ? role_bg : role_fg;
-    return layout_spec_colour_effective(&g_current, kind, field, base, from_layout);
+    int from = 0;
+    int value = layout_spec_colour_effective(&g_current, kind, field, base, &from);
+    if (from_layout) {
+        *from_layout = from;
+    }
+    return from ? layout_pane_effective_colour(kind, field, value) : value;
 }
 
 int ui_layout_pane_enabled(LayoutPaneKind kind)
@@ -374,21 +437,33 @@ int ui_layout_pane_enabled(LayoutPaneKind kind)
 
 static void role_colors(LayoutPaneKind kind, int *fg, int *bg)
 {
+    int variant = appearance_variant();
+    int fg_slot = role_theme_slot(kind, LAYOUT_COLOUR_FG);
+    int bg_slot = role_theme_slot(kind, LAYOUT_COLOUR_BG);
+
+    /* 主题生效值（出厂值在亮底下被替换，显式自定义原样），
+     * 继承窗格因此也跟着亮/暗变体一起变。 */
     switch (kind) {
         case LAYOUT_PANE_PLAYLIST:
         case LAYOUT_PANE_INFO:
-            *fg = g_app_config.theme.playlist_fg;
-            *bg = g_app_config.theme.playlist_bg;
+            *fg = appearance_theme_effective(fg_slot,
+                    g_app_config.theme.playlist_fg, variant);
+            *bg = appearance_theme_effective(bg_slot,
+                    g_app_config.theme.playlist_bg, variant);
             break;
         case LAYOUT_PANE_CONTROLS:
-            *fg = g_app_config.theme.controls_fg;
-            *bg = g_app_config.theme.controls_bg;
+            *fg = appearance_theme_effective(fg_slot,
+                    g_app_config.theme.controls_fg, variant);
+            *bg = appearance_theme_effective(bg_slot,
+                    g_app_config.theme.controls_bg, variant);
             break;
         case LAYOUT_PANE_SPECTRUM:
         case LAYOUT_PANE_LYRICS:
         case LAYOUT_PANE_VINYL:
-            *fg = g_app_config.theme.lyrics_fg;
-            *bg = g_app_config.theme.lyrics_bg;
+            *fg = appearance_theme_effective(fg_slot,
+                    g_app_config.theme.lyrics_fg, variant);
+            *bg = appearance_theme_effective(bg_slot,
+                    g_app_config.theme.lyrics_bg, variant);
             break;
         default:
             *fg = COLOR_WHITE;
@@ -430,8 +505,14 @@ void ui_layout_apply_colors(void)
 
         int role_fg, role_bg;
         role_colors(kind, &role_fg, &role_bg);
-        int fg = pane->fg == LAYOUT_COLOR_INHERIT ? role_fg : clamp_color(pane->fg);
-        int bg = pane->bg == LAYOUT_COLOR_INHERIT ? role_bg : clamp_color(pane->bg);
+        int fg = pane->fg == LAYOUT_COLOR_INHERIT
+                     ? role_fg
+                     : clamp_color(layout_pane_effective_colour(kind, LAYOUT_COLOUR_FG,
+                                                                pane->fg));
+        int bg = pane->bg == LAYOUT_COLOR_INHERIT
+                     ? role_bg
+                     : clamp_color(layout_pane_effective_colour(kind, LAYOUT_COLOUR_BG,
+                                                                pane->bg));
 
         int body = LAYOUT_BODY_PAIR_BASE + i;
         if (init_pair((short)body, (short)fg, (short)bg) != OK) {
@@ -760,12 +841,40 @@ const char *ui_layout_current_name(void)
     return ui_layout_name_at(index);
 }
 
+/* 亮色变体下“内置预设”的 WYSIWYG 物化：把显式前景色替换为亮色表值。
+ * 保存后 origin 变 USER，副本不再自适应（否则会写回暗色值，亮底下其他
+ * 窗格瞬间不可读）。用户布局/ENV 来源不物化。 */
+static void layout_materialize_light_variant(LayoutSpec *spec)
+{
+    if (!spec) {
+        return;
+    }
+    if (appearance_variant() != APPEARANCE_VARIANT_LIGHT) {
+        return;
+    }
+    if (layout_id_origin(spec->id) != LAYOUT_ORIGIN_BUILTIN) {
+        return;
+    }
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        LayoutPaneKind kind = (LayoutPaneKind)i;
+        if (spec->panes[i].fg == LAYOUT_COLOR_INHERIT) {
+            continue;   /* 继承仍然跟随主题（亮色变体下主题也是亮色） */
+        }
+        int light = 0;
+        if (layout_preset_light_colour(spec->id, kind, LAYOUT_COLOUR_FG, &light)) {
+            spec->panes[i].fg = light;
+        }
+    }
+}
+
 int ui_layout_current_spec(LayoutSpec *out)
 {
     if (!out || !g_initialized) {
         return -1;
     }
     *out = g_current;
+    /* 编辑器入口拿到的是“当前终端所见”的亮色副本，保存即固定。 */
+    layout_materialize_light_variant(out);
     return 0;
 }
 
@@ -825,6 +934,9 @@ int ui_layout_set_pane_colour(LayoutPaneKind kind, int field, int value,
     }
 
     LayoutSpec cand = g_current;
+    /* 亮色终端里改内置预设：先把整份副本物化成亮色，再写这一格，
+     * 避免保存后其它窗格退回暗色值。origin 变 USER 后不再自适应。 */
+    layout_materialize_light_variant(&cand);
     if (field == LAYOUT_COLOUR_BG) {
         cand.panes[kind].bg = value;
     } else {

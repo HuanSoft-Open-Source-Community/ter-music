@@ -8,6 +8,7 @@
 #include "ui/dialog.h"
 #include "ui/ui.h"
 #include "ui/menu_anim.h"
+#include "ui/appearance.h"
 #include "i18n/i18n.h"
 #include "ui/menus.h"
 #include "playlist/playlist.h"
@@ -209,6 +210,9 @@ int prompt_text_input(WINDOW *win, int row, int col, const char *prompt,
 
     /* 模态输入接管屏幕：先收掉菜单退场 ghost，避免它压在输入框上。 */
     ui_menu_anim_cancel_all(1);
+
+    /* 清一次可能悬挂的终端背景应答（仅当最近发过 OSC 11 查询）。 */
+    appearance_drop_dangling_reply();
 
     if (!prefill) {
         buffer[0] = '\0';

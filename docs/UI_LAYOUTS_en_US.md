@@ -252,15 +252,59 @@ differ too. Colours are picked so the guarantee survives the fallback chain:
 
 The values map down without collapsing: on a 16-colour terminal each preset still
 has distinct colours, and on an 8-colour terminal they land on distinct base
-colours (white / cyan / yellow / green / magenta / red). Every value is also one
-of the colours the Settings palette offers, so the name shown there ("bright
-white", "teal", …) is meaningful. On a monochrome terminal pane colours are not
-enabled at all — that is the third fallback level.
+colours (white / cyan / yellow / green / magenta / red). Every dark-table value
+is also one of the colours the Settings palette offers, so the name shown there
+("bright white", "teal", …) is meaningful. The light-variant indices have their
+own Settings names too (Charcoal, Deep Teal, Dark Amber, Dark Green, Dark
+Magenta, Deep Blue, Dark Pink) even though they are not palette entries. On a
+monochrome terminal pane colours are not enabled at all — that is the third
+fallback level.
 
 Because the presets colour every pane they contain, Settings shows each of those
 rows as `[layout]` while a preset is selected (a pane the preset does not contain
 reads `[theme] …`, `no pane` when it is absent); pick `Follow theme` on a row to
 hand that field back to the global theme.
+
+### Light/dark variants
+
+All seven built-in presets have a compile-time **light variant** in
+`ui/layout_spec.c` (`layout_preset_light_colour`). It is applied at render time
+only when all of these hold:
+
+- `preferences.appearance_mode` is `0` (auto) and the terminal background was
+  detected as light, or the mode is explicitly `1` (light);
+- the current layout comes from the built-in file (or the compiled-in classic
+  fallback) — `layout_id_origin() == BUILTIN`;
+- the pane has an explicit foreground for that field.
+
+User layouts (`~/.config/ter-music/layouts.json`) that use the **same id as a
+built-in preset** participate in a narrowly-scoped value match: only a pane's
+explicit foreground (never background or border) is replaced by the preset's
+light value when it still equals that preset's shipped dark value
+(`layout_preset_dark_colour`). A value the user changed is kept verbatim, and
+`TER_MUSIC_LAYOUTS` (origin ENV) always stays verbatim for deterministic
+development tests. The user's `layouts.json` is never rewritten by the
+adaptation. Saving a preset from the editor first materialises the colours
+currently on screen into the copy and saves it as a fixed user layout: saving
+under a dark terminal writes the shipped dark values (so the copy still matches
+the value rule later), while saving under a light terminal writes the light
+values (a fixed light copy that no longer adapts).
+
+Light values use only the ANSI black / red / green / blue / magenta / cyan
+buckets (0, 1, 2, 4, 5, 6 — never bright white 7 or yellow 3), so 256-colour,
+16-colour and 8-colour terminals quantize to the same distinct colours within a
+preset. The Settings colour page names these indices instead of showing
+"unknown", and an auto row displays `Auto (light/dark)`; opening its palette
+puts the cursor on the stored factory value (for example `White (7)`), not on
+the Custom slot. Every light value has at least 4.5:1 contrast against a pure white
+background. Backgrounds stay `-1` (transparent) and borders keep inheriting the
+pane foreground, so the "no two panes share a colour" guarantee and the
+`COLOR_PAIRS`-tight fallback to theme pairs are unchanged. Monochrome terminals
+still disable pane colours entirely.
+
+The dark palette is byte-for-byte identical to earlier releases: on a dark
+terminal (or an unsupporting terminal, where the fallback is dark) nothing
+changes.
 
 ## Custom tree example
 
@@ -436,8 +480,13 @@ unusually proportioned layouts visually intact.
 
 ## Colour precedence
 
-Per-pane explicit colours (tree leaves / user file) → theme colours from
-Settings (`playlist`/`controls`/`lyrics` fg+bg). To hand a pane back to the
+Terminal light/dark variant (render-time only; never written to a file) →
+per-pane explicit colours (tree leaves / user file) → theme colours from
+Settings (`playlist`/`controls`/`lyrics` fg+bg).
+
+The variant layer substitutes a colour only when the stored value is the
+factory default (and the layout comes from the built-in file); anything you
+changed stays exactly as stored. To hand a pane back to the
 theme, use the layout editor (`c` → `r`/`R`) or the Settings colour page
 (choose `Follow theme` in the palette).
 
@@ -496,6 +545,64 @@ Changing a row writes to exactly one layer, following this order:
    becomes independent (the tag flips to `[layout]`);
 4. sidebar / highlight / border are interface colours → always the theme.
 
+The same page starts with two terminal-appearance rows:
+
+| Row | Effect |
+| --- | --- |
+| `Default Appearance Mode` | `Auto (follow terminal)`, `Light` or `Dark`; stored as `preferences.appearance_mode` (0/1/2) in `config.xml` (contract v10). `←`/`→` cycles, `ENTER` opens the picker. This is the global default. |
+| `Re-detect Terminal Background` | Runs the full detection chain (terminal theme adapter; XDG portal up to 200 ms when the adapter is unknown; OSC 11 up to 250 ms; `COLORFGBG`; a `TERM` hint) and reports the light/dark/unknown conclusion **and its source** in one status message. The row itself keeps a live `background: light (terminal reply)` suffix; the source is one of terminal theme / terminal reply / system appearance / COLORFGBG / TERM hint / fallback. Use it when the terminal does not report focus. |
+
+After the colour rows, the same page has one more appearance row:
+
+| Row | Effect |
+| --- | --- |
+| `This Terminal's Appearance` | Per-terminal override: `Inherit (Auto)`, `Auto`, `Light` or `Dark`; `Inherit` removes the entry. Stored in the front-end-local `~/.config/ter-music/appearance-terminals.json` (version 1, atomic write), keyed by a stable terminal identity (TERM_PROGRAM, then an allowlisted terminal in the ancestor process chain, then TMUX/STY/SSH/TERM/COLORTERM fallbacks — see below). It never writes `config.xml`; the override wins over the global default. |
+
+In `Auto` the detection order is fixed: OSC 11 (the terminal's actual
+background, authoritative) → the terminal theme adapter (currently only
+deepin-terminal; see below) → the XDG desktop portal's
+`org.freedesktop.appearance color-scheme` (1 dark / 2 light / 0 no preference;
+`SettingChanged` is followed live without blocking the TUI) → `COLORFGBG` → a
+`TERM` hint → the legacy dark look. A started portal connection is private to
+this front end and is shut down with it; no bus, no portal, timeouts and
+`HAVE_DBUS`-disabled builds fall back to the previous behaviour. Once OSC 11 has
+answered, an XDG change does not override it: a single debounced, non-blocking
+OSC 11 re-probe decides instead.
+
+**Terminal theme adapter (deepin-terminal).** When the front end identifies the
+current terminal as deepin-terminal (`$TERM_PROGRAM=deepin-terminal`; only
+when `TERM_PROGRAM` is unset, a deepin-terminal entry in the ancestor process
+chain), it reads the terminal's
+own theme read-only: `$XDG_CONFIG_HOME/deepin/deepin-terminal/config.conf`
+(`[basic.interface.theme] value=Light|Dark`,
+`[basic.interface.expand_theme] value`), the matching
+`terminalwidget6/color-schemes/<name>.colorscheme` under
+`$XDG_DATA_HOME`/`$XDG_DATA_DIRS`/`/usr/share`, or
+`customTheme.colorscheme` in the config directory when `expand_theme` is
+`customTheme`. The scheme's `[Background] Color=R, G, B` is classified with the
+same WCAG rule; missing/corrupt files mean "unknown" and the original chain
+continues. The result sits **above** XDG (the desktop preference) and below
+OSC 11. While `Auto` is active the adapter stats the config/theme files at most
+once every 2 s (mtime + size, reading only when they change), so switching
+deepin-terminal's own theme follows within a couple of seconds without a
+restart, focus event or portal signal. Other terminals are never probed.
+
+**Terminal identity degradation.** `TERM_PROGRAM` is preferred when set. If it
+is not (deepin-terminal does not set it), the front end looks for an allowlisted
+terminal emulator in its ancestor process chain and takes the outermost match
+(`anc:deepin-terminal`). Without a usable `/proc` the key falls back to
+`tmux:<TERM>`, `screen:<TERM>`, `ssh:<TERM>`, `term:<TERM>` or
+`ct:<COLORTERM>`, and finally `default` (no entry is written). SSH clients that
+report the same `TERM` therefore share one override, and a tmux server started
+outside the pane's terminal lineage falls back to `tmux:<TERM>`; the Settings
+hint line shows the exact key in use.
+
+While a row's stored value is the factory default, its value is shown as
+`Auto (light/dark)` and follows the detected variant; picking any other colour
+in the palette fixes it (`Auto (light/dark)` disappears). This applies to the
+adaptive theme slots only (playlist/controls/lyrics/sidebar/highlight/border
+foregrounds and `highlight_bg`); backgrounds are transparent and do not adapt.
+
 Writing the layout persists first and only then mutates memory, so a failed
 write leaves the interface untouched:
 
@@ -515,9 +622,13 @@ write leaves the interface untouched:
   so explicit layout colours are ignored there; the page still shows the layout
   values with the `[layout]` tag.
 
-The section needs 22 list rows plus the header and three pinned hint lines, so on
-terminals shorter than 32 rows the list scrolls with the selection and draws a
-scrollbar in the reserved column; the three hint lines stay at the bottom.
+The section has **25 list rows** (2 appearance + 12 pane colours + 6 interface
+colours + 1 per-terminal override + 4 layout actions), a two-line explanation
+header and **five pinned hint lines**. The list viewport is `LINES - 12` rows,
+so with 25 rows a terminal needs at least 37 lines to avoid scrolling
+(terminals shorter than 37 rows scroll with the selection and draw a scrollbar
+in the reserved column); a 24-line terminal shows 12 option rows, and the five
+hint lines stay at the bottom.
 
 ## Troubleshooting
 

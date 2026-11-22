@@ -352,6 +352,98 @@ int layout_spec_colour_effective(const LayoutSpec *spec, LayoutPaneKind kind,
     return value;
 }
 
+/* ============================================================
+ * 内置预设的亮色变体（纯数据表）
+ *
+ * 亮色值只使用 ANSI 0/1/2/4/5/6 桶（不用 7 白、3 黄），因此 256/16/8 色
+ * 三级终端的量化结果一致，且同一预设内各窗格颜色互不相同。
+ * 未定义的窗格（该预设没有这个窗格）返回 0，调用方保持原值/继承主题。
+ * 用户布局（origin=USER/ENV）绝不查这张表。
+ * ============================================================ */
+
+typedef struct {
+    const char *id;
+    int fg[LAYOUT_PANE_COUNT];   /* -1 = 该预设在亮色下没有这个窗格 */
+} LayoutPresetLightColours;
+
+static const LayoutPresetLightColours k_preset_light_colours[] = {
+    /* playlist, info, controls, spectrum, lyrics, vinyl */
+    { "classic",    { 236, 24, 94, 28, 90, -1 } },
+    { "vinyl",      { 236, 24, 94, 28, -1, 90 } },
+    { "karaoke",    {  94, 236, 90, -1, 24, -1 } },
+    { "visualizer", { 236, 25, 94, 28, -1, 126 } },
+    { "focus",      { 236, 24, 94, -1, -1, -1 } },
+    { "stage",      {  94, 236, 24, 28, 90, -1 } },
+    { "neon",       { 236, 24, 94, 28, 90, -1 } },
+};
+
+/* 内置预设的暗色出厂值（data/layouts/layouts.json 的 fg）。
+ * 顺序与亮色表一致：playlist, info, controls, spectrum, lyrics, vinyl。 */
+static const LayoutPresetLightColours k_preset_dark_colours[] = {
+    { "classic",    { 15, 37, 208, 10, 198, -1 } },
+    { "vinyl",      { 15, 37, 208, 10, -1, 203 } },
+    { "karaoke",    { 208, 15, 198, -1, 203, -1 } },
+    { "visualizer", { 15, 75, 118, 10, -1, 93 } },
+    { "focus",      { 15, 37, 208, -1, -1, -1 } },
+    { "stage",      { 208, 15, 37, 10, 198, -1 } },
+    { "neon",       { 15, 14, 11, 10, 13, -1 } },
+};
+
+int layout_preset_dark_colour(const char *layout_id, LayoutPaneKind kind,
+                              int field, int *out)
+{
+    if (!layout_id || !layout_id[0] || kind < 0 || kind >= LAYOUT_PANE_COUNT) {
+        return 0;
+    }
+    if (field != LAYOUT_COLOUR_FG) {
+        return 0;
+    }
+    for (size_t i = 0;
+         i < sizeof(k_preset_dark_colours) / sizeof(k_preset_dark_colours[0]);
+         i++) {
+        if (strcmp(k_preset_dark_colours[i].id, layout_id) != 0) {
+            continue;
+        }
+        int value = k_preset_dark_colours[i].fg[kind];
+        if (value < 0) {
+            return 0;
+        }
+        if (out) {
+            *out = value;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+int layout_preset_light_colour(const char *layout_id, LayoutPaneKind kind,
+                               int field, int *out)
+{
+    if (!layout_id || !layout_id[0] || kind < 0 || kind >= LAYOUT_PANE_COUNT) {
+        return 0;
+    }
+    /* 背景两套都是终端默认 -1；边框默认继承 body。只查前景。 */
+    if (field != LAYOUT_COLOUR_FG) {
+        return 0;
+    }
+    for (size_t i = 0;
+         i < sizeof(k_preset_light_colours) / sizeof(k_preset_light_colours[0]);
+         i++) {
+        if (strcmp(k_preset_light_colours[i].id, layout_id) != 0) {
+            continue;
+        }
+        int value = k_preset_light_colours[i].fg[kind];
+        if (value < 0) {
+            return 0;
+        }
+        if (out) {
+            *out = value;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 /* xterm 调色板 0-15 的 RGB；8 色终端只用到前 8 项。 */
 static const int k_ansi_rgb[16][3] = {
     {0, 0, 0},       {205, 0, 0},     {0, 205, 0},     {205, 205, 0},

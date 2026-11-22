@@ -84,6 +84,8 @@ static const ConfigFieldEntry k_fields[] = {
     {"sort_mode",                CFG_INT, OFF(sort_mode), 0, 0, 4, "preferences"},
     {"cue_encoding",             CFG_INT, OFF(cue_encoding), 0, 0, 0, "preferences"},
     {"karaoke_mode",             CFG_INT, OFF(karaoke_mode), 0, 0, KARAOKE_MODE_COUNT - 1, "preferences"},
+    /* 外观模式（config v10）：0=auto、1=light、2=dark */
+    {"appearance_mode",          CFG_INT, OFF(appearance_mode), 0, 0, 2, "preferences"},
 
     /* info display（config v5） */
     {"info_preset",         CFG_INT, OFF(info_preset), 0, 0, 2, "preferences"},
