@@ -148,7 +148,7 @@ A remote URL opened this way uses only the credentials embedded in the URL. For 
 
 The full list is in `F8` and `ter-music keys list`. Rebind actions in Settings → Hotkeys. `F3` is folder history; `h` is the playback-history popup.
 
-Mouse: left click selects and activates, the wheel scrolls, and right click opens a context menu. Middle click opens the same menu on terminals that intercept right click. Menu slide animations compose one frame per movement and degrade or switch off on slow terminals and in Aurora Flow; input is handled without waiting for an animation to finish. Force the tier with `TER_MUSIC_MENU_ANIM=full|reduced|off` (default auto). The layout follows terminal resizes.
+Mouse: left click selects and activates, the wheel scrolls, and right click opens a context menu. Middle click opens the same menu on terminals that intercept right click. The Equalizer page is an exception: a left click only selects a band and changes no gain, and the wheel changes the selected band's gain by ±1 dB (the pre-amp the same way; the enable row does not respond to the wheel). Menu slide animations compose one frame per movement and degrade or switch off on slow terminals and in Aurora Flow; input is handled without waiting for an animation to finish. Force the tier with `TER_MUSIC_MENU_ANIM=full|reduced|off` (default auto). The layout follows terminal resizes.
 
 ## CLI
 

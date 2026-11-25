@@ -13,6 +13,9 @@
 #      （既不动列表也不动控制区），并且外点收起后一切恢复正常。
 #   S8 底部功能键栏点击 = 切页（与按 F1..F8 同一条 execute_global_action 链路）。
 #   S8b 子视图单击 = 选中并执行；设置选择弹层在选项冒号后展开、贴边翻转且不越界。
+#   S8c 均衡器页鼠标：点击频带列只选中（不改增益、不执行）；滚轮改当前选中
+#       频带/预增益的值（上滚 +1 dB、下滚 -1 dB，钳制在 ±12 dB），点另一个
+#       频带后滚轮的作用目标随之切换；开关行上的滚轮只被消费，不切换开关。
 #   S9 子视图（设置）侧栏与内容区各自认领滚轮，归属不串台。
 #   S10 控制区第 8 个按钮（卡拉OK/消人声）：点击开弹层、弹层滚轮移选、
 #       Enter 落定写进核心，Esc 取消则不改档。
@@ -55,7 +58,7 @@ DRIVER_PID=""
 CTL_FILE=""
 LOG_DIR=""
 
-usage() { sed -n '2,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,47p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 ORIG_ARGS=("$@")
 while [ $# -gt 0 ]; do
@@ -220,6 +223,71 @@ sel_menu_line() {   # 最近一条 [settings] sel menu 日志行
 route_count() {   # 日志里匹配 $1 的路由行条数
     local L; L="$(mlog)"; [ -n "$L" ] || { echo 0; return; }
     grep -hc "$1" "$L" 2>/dev/null || echo 0; }
+
+# ── 均衡器鼠标用例的观测面：核心落盘的 config.xml ──────────────────
+# 配置树形如 <equalizer><enabled>..</enabled><preamp>..</preamp>
+#            <band frequency="125">0</band>…</equalizer>。
+# 增益由 player_eq_* 经 player_config_persist 交给核心异步落盘，故读取失败
+# 或尚未收敛时都要短重试；返回 "ERR" 表示始终读不到/解析不了。
+eq_cfg() {   # $1 = enabled | preamp | <频带频率，如 125>
+    local key="$1" i out
+    for i in 1 2 3 4 5 6 7 8; do
+        out="$(python3 - "$XDG_CONFIG_HOME/ter-music/config.xml" "$key" 2>/dev/null <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    eq = ET.parse(sys.argv[1]).getroot().find("equalizer")
+except Exception:
+    raise SystemExit(1)
+if eq is None:
+    raise SystemExit(1)
+if sys.argv[2] in ("enabled", "preamp"):
+    node = eq.find(sys.argv[2])
+else:
+    node = next((b for b in eq.findall("band")
+                 if b.get("frequency") == sys.argv[2]), None)
+try:
+    value = (node.text or "").strip()
+except AttributeError:
+    raise SystemExit(1)
+if not value:
+    raise SystemExit(1)
+print(value)
+PY
+)"
+        case "$out" in ''|ERR) sleep 0.25 ;; *) printf '%s' "$out"; return 0 ;; esac
+    done
+    printf 'ERR'; return 1; }
+
+eq_expect() {   # $1=字段 $2=期望值 [$3=超时秒]；成功打印实测值，失败打印最后实测
+    local key="$1" want="$2" secs="${3:-8}" i out=""
+    for i in $(seq 1 "$(( secs * 4 ))"); do
+        out="$(eq_cfg "$key")"
+        [ "$out" = "$want" ] && { printf '%s' "$out"; return 0; }
+        sleep 0.25
+    done
+    printf '%s' "$out"; return 1; }
+
+eq_snapshot() {   # 均衡器落盘面全量：preamp/enabled + 10 段增益
+    local b out=""
+    for b in 31 62 125 250 500 1000 2000 4000 8000 16000; do
+        out="$out $b=$(eq_cfg "$b")"
+    done
+    printf 'preamp=%s enabled=%s%s' "$(eq_cfg preamp)" "$(eq_cfg enabled)" "$out"; }
+
+eq_log_seen() {   # $1 = 模式；在 [settings] eq mouse 日志里等它出现（块缓冲有延迟）
+    local pat="$1" secs="${2:-5}" i L
+    for i in $(seq 1 "$(( secs * 4 ))"); do
+        L="$(mlog)"
+        [ -n "$L" ] && grep -h "\[settings\] eq mouse" "$L" | grep -q -- "$pat" && return 0
+        sleep 0.25
+    done
+    return 1; }
+
+eq_log_last() {   # 最近一条均衡器鼠标日志（排障用）
+    local L; L="$(mlog)"; [ -n "$L" ] || { echo ""; return; }
+    grep -h "\[settings\] eq mouse" "$L" | tail -1; }
 
 info "起会话（-o music，--debug 以便读路由日志）"
 send "<click:6:3>" 1.6                        # 点列表第 1 行，把播放推起来
@@ -513,6 +581,146 @@ else
     bad "解析不到底部选项的弹层日志：${sel:-无日志}"
 fi
 send "<Esc>" 0.8
+send "<F1>" 1.0
+
+# ── S8c 均衡器鼠标：点击只选中频带，滚轮增减选中项的值 ────────────
+#       契约（与 eq.hint / 帮助文档一致）：
+#         · 左键点频带列（柱体/0dB 线/频率标签/增益值这一整列）只选中该频带，
+#           不改增益、也不执行任何动作；
+#         · 滚轮不再轮询选中，而是改**当前选中项**的值：上滚 +1 dB、下滚
+#           -1 dB；频带与预增益都钳制在 ±12 dB；开关行只消费、不切换；
+#         · 点击另一个频带后，滚轮的作用目标随之切换（指针停在哪一列无关）。
+#       100x30 classic 布局：设置内容区 content_x=27（0 基），每频带 5 列，
+#       频带 b 的中心列（SGR 1 基）= 30+5b，命中行 7..18；125 Hz 是 b=2。
+#       观测面：前端 [settings] eq mouse 日志 + 核心落盘的 config.xml。
+info "S8c 均衡器：点击只选中频带，滚轮增减选中频带 ±1 dB"
+send "<F2>" 1.2
+send "<click:10:9>" 1.2                     # 侧栏「均衡器」在 SGR 行 9
+t="$(last_route)"
+[ "$t" = "target=13" ] && ok "点击设置侧栏“均衡器”归侧栏（target=13）" \
+    || bad "点击设置侧栏“均衡器”归属异常：期望 target=13，实测 $t"
+eq_page=0
+for _ in 1 2 3 4 5 6; do
+    screen_has '±1dB' && { eq_page=1; break; }
+    sleep 0.5
+done
+[ "$eq_page" = "1" ] && ok "均衡器页已打开（提示行含新版鼠标说明 ±1dB）" \
+    || bad "没进入均衡器页（屏幕上找不到新版 ±1dB 提示）"
+
+snap0="$(eq_snapshot)"
+send "<click:40:12>" 1.0                    # 125 Hz（b=2）柱体所在列
+t="$(last_route)"
+[ "$t" = "target=14" ] && ok "点击频带列归设置内容区（target=14）" \
+    || bad "点击频带列归属异常：期望 target=14，实测 $t"
+sleep 0.8
+snap1="$(eq_snapshot)"
+[ "$snap1" = "$snap0" ] && ok "点击 125 Hz 只选中、不改增益（前后一致：$snap1）" \
+    || bad "点击频带改了增益：$snap0 → $snap1"
+eq_log_seen "eq mouse select band=2" \
+    && ok "点击命中 125 Hz（band=2），没有落到执行分支" \
+    || bad "点击频带没有 select 日志（最后一条：$(eq_log_last)）"
+
+send "<wheel-up:40:12>" 1.0
+t="$(last_route)"
+[ "$t" = "target=14" ] && ok "频带滚轮归设置内容区（target=14）" \
+    || bad "频带滚轮归属异常：期望 target=14，实测 $t"
+if got="$(eq_expect 125 1)"; then
+    ok "125 Hz 上滚一格 +1 dB（config.xml：0 → +1）"
+else
+    bad "125 Hz 上滚一格不是 +1 dB（config.xml 实测 $got）"
+fi
+eq_log_seen "option=31 gain=1$" \
+    && ok "滚轮日志确认选中项仍是 band=2（option=31）、值 +1" \
+    || bad "滚轮日志不符（最后一条：$(eq_log_last)）"
+send "<wheel-down:40:12>" 1.0
+if got="$(eq_expect 125 0)"; then
+    ok "125 Hz 下滚一格 -1 dB（config.xml：+1 → 0）"
+else
+    bad "125 Hz 下滚一格没回到 0（config.xml 实测 $got）"
+fi
+
+# 点击另一个频带：既验证“点击只选中”，也验证滚轮作用目标会跟着切。
+send "<click:50:12>" 1.0                    # 500 Hz（b=4）
+t="$(last_route)"
+[ "$t" = "target=14" ] && ok "点击 500 Hz 频带列归内容区（target=14）" \
+    || bad "点击 500 Hz 频带列归属异常（$t）"
+sleep 0.8
+snap2="$(eq_snapshot)"
+[ "$snap2" = "$snap0" ] && ok "点击 500 Hz 同样只选中、不改增益（$snap2）" \
+    || bad "点击 500 Hz 改了增益：$snap0 → $snap2"
+eq_log_seen "eq mouse select band=4" && ok "点击命中 500 Hz（band=4）" \
+    || bad "点击 500 Hz 没有 select 日志（最后一条：$(eq_log_last)）"
+# 指针故意停在 125 Hz 那一列：滚轮必须只作用于“选中的 500 Hz”。
+send "<wheel-up:40:12>" 1.0
+if got="$(eq_expect 500 1)"; then
+    ok "滚轮只改当前选中频带：500 Hz → +1 dB（指针停在 125 Hz 列亦然）"
+else
+    bad "滚轮没作用于选中的 500 Hz（config.xml 实测 $got）"
+fi
+[ "$(eq_cfg 125)" = "0" ] && ok "同一次滚轮没有波及 125 Hz（仍 0）" \
+    || bad "滚轮串台：125 Hz 变成了 $(eq_cfg 125)"
+eq_log_seen "option=33 gain=1$" \
+    && ok "滚轮日志确认作用目标已切到 500 Hz（option=33）" \
+    || bad "滚轮日志不符（最后一条：$(eq_log_last)）"
+send "<wheel-down:50:12>" 1.0               # 收回 0，下一段做钳制
+if ! eq_expect 500 0 >/dev/null; then
+    bad "500 Hz 下滚没回到 0（config.xml 实测 $(eq_cfg 500)）"
+fi
+
+# ±12 dB 钳制：选中 125 Hz 连滚 13 格到 +12，再多滚不退格；500 Hz 连滚到 -12。
+send "<click:40:12>" 1.0
+for _ in $(seq 1 13); do send "<wheel-up:40:12>" 0.2; done
+if got="$(eq_expect 125 12 12)"; then
+    ok "125 Hz 连续上滚 13 格钳制在 +12 dB"
+else
+    bad "125 Hz 上滚没有钳制在 +12 dB（config.xml 实测 $got）"
+fi
+for _ in 1 2 3; do send "<wheel-up:40:12>" 0.2; done
+[ "$(eq_cfg 125)" = "12" ] && ok "越过 +12 dB 后再滚仍停在 +12 dB" \
+    || bad "+12 dB 后越界（实测 $(eq_cfg 125)）"
+eq_log_seen "option=31 gain=12$" \
+    && ok "钳制日志确认 band=2 的值停在 max（12）" \
+    || bad "钳制日志不符（最后一条：$(eq_log_last)）"
+send "<click:50:12>" 0.9
+for _ in $(seq 1 12); do send "<wheel-down:50:12>" 0.2; done
+if got="$(eq_expect 500 -12 12)"; then
+    ok "500 Hz 连续下滚 12 格钳制在 -12 dB"
+else
+    bad "500 Hz 下滚没有钳制在 -12 dB（config.xml 实测 $got）"
+fi
+for _ in 1 2 3; do send "<wheel-down:50:12>" 0.2; done
+[ "$(eq_cfg 500)" = "-12" ] && ok "越过 -12 dB 后再滚仍停在 -12 dB" \
+    || bad "-12 dB 后越界（实测 $(eq_cfg 500)）"
+
+# 预增益：点 31 Hz 后按 Left 退到预增益行，滚轮同样 ±1 dB，且不动开关。
+send "<click:30:12>" 0.9                    # 31 Hz（b=0）
+send "<Left>" 0.8
+send "<wheel-up:50:15>" 1.0
+if got="$(eq_expect preamp 1)"; then
+    ok "选中预增益后上滚 +1 dB（config.xml preamp：0 → +1，enabled 仍 0）"
+else
+    bad "预增益上滚不是 +1 dB（config.xml 实测 $got）"
+fi
+eq_log_seen "option=28 gain=1$" \
+    && ok "滚轮日志确认作用目标是预增益（option=28）" \
+    || bad "预增益滚轮日志不符（最后一条：$(eq_log_last)）"
+[ "$(eq_cfg enabled)" = "0" ] && ok "改预增益没有顺带切换开关（enabled 仍 0）" \
+    || bad "改预增益把开关切成了 $(eq_cfg enabled)"
+
+# 再按 Left 到开关行：滚轮只被消费，不翻转。
+send "<Left>" 0.8
+send "<wheel-up:50:15>" 1.0
+sleep 0.6
+[ "$(eq_cfg enabled)" = "0" ] && ok "开关行上滚只消费不切换（enabled 仍 0）" \
+    || bad "开关行上的滚轮把开关切成了 $(eq_cfg enabled)"
+eq_log_seen "option=27 ignored" && ok "开关行滚轮日志为 ignored（无值变更）" \
+    || bad "开关行滚轮日志不符（最后一条：$(eq_log_last)）"
+
+# 全量盘点：只有 125=+12、500=-12、preamp=+1 三处被鼠标改动过。
+want="preamp=1 enabled=0 31=0 62=0 125=12 250=0 500=-12 1000=0 2000=0 4000=0 8000=0 16000=0"
+snapf="$(eq_snapshot)"
+[ "$snapf" = "$want" ] && ok "全量盘点只剩预期改动（$snapf）" \
+    || bad "均衡器状态与预期不符：期望 $want，实测 $snapf"
 send "<F1>" 1.0
 
 # ── S9 倍速滚轮换档 + 回绕（**放在最后**：改倍速会让核心停播，

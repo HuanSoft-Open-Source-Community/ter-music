@@ -570,7 +570,7 @@
 
   <string key="eq.title_enabled">Equalizer [Enabled]</string>
   <string key="eq.title_disabled">Equalizer [Disabled]</string>
-  <string key="eq.hint">←/→ select     ↑/↓ adjust  P:preset  ESC back  ENTER toggle</string>
+  <string key="eq.hint">click/←/→ select  wheel/↑/↓ ±1dB  P:preset  ESC back  ENTER toggle</string>
   <string key="eq.preampl">Pre-amp</string>
   <string key="eq.enabled">Equalizer enabled</string>
   <string key="eq.disabled">Equalizer disabled</string>

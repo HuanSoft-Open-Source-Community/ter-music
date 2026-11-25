@@ -162,14 +162,17 @@ ter-music Quick Start Guide
     · Sub-view sidebar and content area: a click selects the row and runs it
       (same as Enter); the wheel moves the selection within the column under the
       pointer. On the Settings page it follows the section you are in (option
-      list, hotkey list, remote device list); on the Equalizer page it only moves
-      between bands — the wheel never changes a gain value; on the Help page it
-      scrolls one line at a time. The About view's content area is read-only text
-      and the Language view's sidebar holds a single "back" entry, so the wheel
-      there is only claimed and moves nothing. The highlight follows the pointer:
-      scrolling or clicking in the content column also moves the keyboard focus
-      there. A double or triple click has no extra meaning — it is treated as
-      that one click and never fires twice.
+      list, hotkey list, remote device list); on the Help page it scrolls one
+      line at a time. The Equalizer page is the exception: a left click only
+      selects the band under the pointer, changes no gain and runs nothing; the
+      wheel adjusts the selected band's gain by ±1 dB (selected pre-amp likewise;
+      on the master switch the wheel is consumed but does not toggle it). The
+      About view's content area is read-only text and the Language view's sidebar
+      holds a single "back" entry, so the wheel there is only claimed and moves
+      nothing. The highlight follows the pointer: scrolling or clicking in the
+      content column also moves the keyboard focus there. A double or triple
+      click has no extra meaning — it is treated as that one click and never
+      fires twice.
     · While a popup is open (control-bar play mode / speed / volume / karaoke
       menus, the settings option picker, the layout editor's modal menus): the
       wheel scrolls the popup wherever the pointer is; a click inside selects
@@ -370,6 +373,9 @@ ter-music Quick Start Guide
   10-band ISO graphic equalizer (31Hz - 16kHz).
   Tune it in the Settings -> Equalizer section: ←/→ selects a band, ↑/↓ changes
   the gain (±12dB), ENTER toggles the master switch; pre-amp is also ±12dB.
+  With the mouse, a left click only selects the band under the pointer and
+  changes no gain; the wheel changes the selected band's gain by ±1 dB (the
+  pre-amp the same way; the master switch ignores the wheel).
   Press P to open the separate "EQ Preset" popup (Rock, Pop, Classical, Jazz,
   Electronic, Vocal, Bass Boost, Live, Balanced, Flat — 10 presets). A preset
   changes band gains only and keeps the pre-amp.
