@@ -517,7 +517,7 @@
   <string key="eq.preset.flat">平坦</string>
   <string key="eq.title_enabled">均音 [已啟]</string>
   <string key="eq.title_disabled">均音 [已禁]</string>
-  <string key="eq.hint">←/→ 擇     ↑/↓ 調  P:預設  ESC 返  ENTER 啟閉</string>
+  <string key="eq.hint">左鍵/←/→ 擇    滾輪/↑/↓ ±1dB  P:預設  ESC 返  ENTER 啟閉</string>
   <string key="eq.preampl">預增</string>
   <string key="eq.enabled">均音已啟</string>
   <string key="eq.disabled">均音已禁</string>

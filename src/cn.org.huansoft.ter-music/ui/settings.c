@@ -3675,6 +3675,34 @@ static void settings_focus_content_area(void)
     render_menu_sidebar(g_menu_selected_idx, settings_sidebar_items, SETTINGS_ITEM_COUNT);
 }
 
+/* 均衡器页的滚轮：改**当前选中项**的 dB 值，绝不在选项之间移动选中。
+ * wheel<0 = 上滚 = +1 dB，wheel>0 = 下滚 = -1 dB；增益/预增益的边界
+ * 钳制与落盘复用 adjust_or_toggle_settings_option（含 player_eq_* 与
+ * player_config_persist），不在这里另写一份。
+ * 开关行没有"±1 dB"语义：滚轮只被消费，绝不翻转，避免误操作。
+ * 返回 1 = 事件已被内容区消费。 */
+static int eq_mouse_wheel_adjust(int wheel)
+{
+    const int option = g_settings_current_option;
+    const int delta = (wheel < 0) ? 1 : -1;
+    const int is_band = (option >= SETTINGS_IDX_EQ_BAND_0 &&
+                         option <= SETTINGS_IDX_EQ_BAND_9);
+
+    if (option == SETTINGS_IDX_EQ_PREAMP || is_band) {
+        adjust_or_toggle_settings_option(option, delta);
+        rerender_settings_view();
+        const int gain = is_band
+            ? g_app_config.eq_band_gains[option - SETTINGS_IDX_EQ_BAND_0]
+            : g_app_config.eq_preamp;
+        log_debug("settings", "eq mouse wheel option=%d gain=%d", option, gain);
+        return 1;
+    }
+
+    /* 均衡器开关行（及其它无 ±1 dB 语义的项）：消费但不改值。 */
+    log_debug("settings", "eq mouse wheel option=%d ignored", option);
+    return 1;
+}
+
 /* 侧栏切到远程设备页时回到连接列表模式：浏览目录后离开再回来不应停留在
  * 旧目录/动作菜单里（也复用既有的 remote_enter_list_mode 入口）。 */
 static void settings_sidebar_changed(void)
@@ -3878,10 +3906,9 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
 
     if (ev->wheel) {
         if (g_menu_selected_idx == 6) {
-            /* 均衡器：滚轮只在频带之间移动，绝不改增益——
-             * 一格滚轮就动 EQ 参数是破坏性的，必须留给明确的按键。 */
-            return handle_eq_action(ev->wheel < 0 ? ACTION_EQ_BAND_PREV
-                                                  : ACTION_EQ_BAND_NEXT);
+            /* 均衡器：滚轮增减当前选中项的值（频带/预增益 ±1 dB），
+             * 不再在频带之间轮询选中。 */
+            return eq_mouse_wheel_adjust(ev->wheel);
         }
         if (g_menu_selected_idx == 4) {
             return handle_hotkey_editor_action(ev->wheel < 0 ? ACTION_SETTINGS_UP
@@ -3901,10 +3928,13 @@ int settings_handle_mouse(const UIMouseEvent *ev, const UIMouseDecision *d)
         int band = eq_band_at_point(ev->y, ev->x);
         if (band < 0) return 1;
 
-        const int option = SETTINGS_IDX_EQ_BAND_0 + band;
-        g_settings_current_option = option;
+        /* 点击频带列只选中并高亮该频带（焦点已在上面交给内容区），
+         * 绝不改增益、也不触发其它执行动作：旧路径走 ACTION_EQ_ACTIVATE
+         * 会落到 activate 的兜底分支把该频带 +1 dB，属于破坏性误操作。 */
+        g_settings_current_option = SETTINGS_IDX_EQ_BAND_0 + band;
+        log_debug("settings", "eq mouse select band=%d", band);
         render_settings_content();
-        return handle_eq_action(ACTION_EQ_ACTIVATE);
+        return 1;
     }
 
     if (g_menu_selected_idx == 4) {
