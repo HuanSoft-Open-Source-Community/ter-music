@@ -6,6 +6,7 @@
  */
 
 #include "config/config_diff.h"
+#include "ui/file_picker.h"   /* 文件选择器的纯逻辑（static inline，无需额外源文件） */
 
 #include <stdio.h>
 #include <string.h>
@@ -215,6 +216,75 @@ int main(void)
         CHECK(n > 2 && n < sizeof(big) && big[n] == '\0', "最大覆盖量 diff 未截断");
         CHECK(strstr(big, "\"action.127.") != NULL, "最大覆盖量 diff 含最后一条");
         CHECK(big[n - 1] == '}', "最大覆盖量 diff 以 } 收尾");
+    }
+
+    /* 16. 卡拉OK（config v12）：`karaoke_mode` 仍是普通配置键（登记在
+     *     config_fields.h 的 k_fields[] 里即自动进补丁）；v11 的
+     *     karaoke_feature / karaoke_model 已删除，任何 diff 里都不得出现。
+     *     模型随包内置（uvr-mdxnet-3-9662），不再有功能开关/模型选择。 */
+    {
+        AppConfig km = before;
+        km.karaoke_mode = 2;
+        diff_of(&before, &km, buf, sizeof(buf));
+        CHECK(strstr(buf, "\"preferences\"") != NULL,
+              "karaoke_mode 落在 preferences 分区");
+        CHECK(strstr(buf, "\"karaoke_mode\":2") != NULL,
+              "karaoke_mode 键与值正确（三档取值域 0/1/2）");
+        CHECK(strstr(buf, "karaoke_feature") == NULL,
+              "config v12 的 diff 不再包含已删除的 karaoke_feature");
+        CHECK(strstr(buf, "karaoke_model") == NULL,
+              "config v12 的 diff 不再包含已删除的 karaoke_model");
+
+        /* 默认值：新配置 karaoke_mode=0（按钮/三档可见，但默认不消音）。 */
+        AppConfig fresh;
+        memset(&fresh, 0, sizeof(fresh));
+        CHECK(fresh.karaoke_mode == KARAOKE_MODE_OFF,
+              "全新配置默认 karaoke_mode=0（Off，按钮仍可见）");
+    }
+
+    /* 17. 文件选择器的纯逻辑（ui/file_picker.h 的 static inline 部分）：
+     *     - TERM_MUSIC_FILE_CHOOSER 可强制 portal/zenity/kdialog/tty，
+     *       未知值回退 auto（契约要求：写错也不能打不开选择框）；
+     *     - ~/ 只在行首展开，其余字节原样保留（含空格/UTF-8）。 */
+    {
+        CHECK(file_picker_backend_from_env(NULL) == FILE_PICKER_BACKEND_AUTO,
+              "未设 TERM_MUSIC_FILE_CHOOSER → auto");
+        CHECK(file_picker_backend_from_env("") == FILE_PICKER_BACKEND_AUTO,
+              "空值 → auto");
+        CHECK(file_picker_backend_from_env("portal") == FILE_PICKER_BACKEND_PORTAL,
+              "portal 后端可强制");
+        CHECK(file_picker_backend_from_env("ZENITY") == FILE_PICKER_BACKEND_ZENITY,
+              "后端名大小写不敏感");
+        CHECK(file_picker_backend_from_env("kdialog") == FILE_PICKER_BACKEND_KDIALOG,
+              "kdialog 后端可强制");
+        CHECK(file_picker_backend_from_env("tty") == FILE_PICKER_BACKEND_TTY,
+              "tty 后端可强制");
+        CHECK(file_picker_backend_from_env("no-such-backend") == FILE_PICKER_BACKEND_AUTO,
+              "未知值回退 auto");
+        CHECK(strcmp(file_picker_backend_name(FILE_PICKER_BACKEND_PORTAL), "portal") == 0 &&
+              strcmp(file_picker_backend_name(FILE_PICKER_BACKEND_AUTO), "auto") == 0,
+              "后端名稳定（日志/错误文案用）");
+
+        char pbuf[256];
+        CHECK(file_picker_expand_tilde("~/models/a.onnx", "/home/u",
+                                       pbuf, sizeof(pbuf)) == 0 &&
+              strcmp(pbuf, "/home/u/models/a.onnx") == 0, "~/ 展开到 HOME");
+        CHECK(file_picker_expand_tilde("~", "/home/u", pbuf, sizeof(pbuf)) == 0 &&
+              strcmp(pbuf, "/home/u") == 0, "单独的 ~ 展开到 HOME");
+        CHECK(file_picker_expand_tilde("/data/My Models/模型 1.onnx", "/home/u",
+                                       pbuf, sizeof(pbuf)) == 0 &&
+              strcmp(pbuf, "/data/My Models/模型 1.onnx") == 0,
+              "含空格/UTF-8 的绝对路径原样保留");
+        CHECK(file_picker_expand_tilde("rel/a b.onnx", "/home/u",
+                                       pbuf, sizeof(pbuf)) == 0 &&
+              strcmp(pbuf, "rel/a b.onnx") == 0, "相对路径不展开");
+        CHECK(file_picker_expand_tilde("~user/a.onnx", "/home/u",
+                                       pbuf, sizeof(pbuf)) == 0 &&
+              strcmp(pbuf, "~user/a.onnx") == 0, "~user 形式不展开（不臆造语义）");
+        CHECK(file_picker_expand_tilde("~/x", NULL, pbuf, sizeof(pbuf)) == 0 &&
+              strcmp(pbuf, "~/x") == 0, "HOME 不可用时不展开");
+        CHECK(file_picker_expand_tilde("/very/long", "/home/u", pbuf, 4) == -1 &&
+              pbuf[0] == '\0', "超出缓冲时报错并清空输出（绝不截断路径）");
     }
 
     printf("%d checks, %d failures\n", checks, failures);

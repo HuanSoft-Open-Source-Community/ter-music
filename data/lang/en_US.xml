@@ -125,6 +125,7 @@
   <string key="settings.eq_disabled">Equalizer disabled</string>
   <string key="settings.saved">Settings saved</string>
   <string key="settings.path.prompt">Enter default path: </string>
+  <string key="settings.path.picker_title">Select default music folder</string>
   <string key="settings.path.invalid">Invalid path</string>
   <string key="settings.path.saved">Default path saved</string>
   <string key="settings.opt.latency_hint">Latency will take effect on next playback</string>
@@ -135,6 +136,11 @@
   <string key="settings.cue.saved">CUE encoding saved</string>
   <string key="settings.karaoke.saved">Karaoke setting saved</string>
   <string key="settings.karaoke.unsupported">The running player core does not support karaoke (core too old)</string>
+  <string key="settings.karaoke.model_credit">Model credit: %s</string>
+  <string key="settings.karaoke.model_url">Model URL: %s</string>
+  <string key="settings.karaoke.model_sha256">SHA256: %s</string>
+  <string key="settings.karaoke.model_sha256_short">SHA256: %s...%s (full value in models/NOTICE.md)</string>
+  <string key="settings.karaoke.model_license">Model license: %s</string>
   <string key="settings.color.prompt">Enter color (0-255): </string>
   <string key="settings.color.same_error">Foreground and background colors cannot be the same</string>
   <string key="settings.hotkeys.volume">+ / -: Adjust volume</string>
@@ -324,7 +330,19 @@
   <string key="karaoke.level.off">Off</string>
   <string key="karaoke.level.soft">Faint vocals</string>
   <string key="karaoke.level.full">No vocals</string>
-  <string key="karaoke.hint">Vocal removal: stereo only, accompaniment untouched</string>
+  <string key="karaoke.hint">Karaoke: uses the built-in UVR-MDX-NET 3 model (off/faint/no vocals); no setup or model installation needed. One separation per track, the first play waits for the first accompaniment segment (about 7-10 s, at most 30 s); falls back to the original if it is not ready or the model is missing/damaged</string>
+  <string key="karaoke.status.running">Preparing karaoke accompaniment in the background (segmented)</string>
+  <string key="karaoke.status.ready">Karaoke accompaniment is ready to play</string>
+  <string key="karaoke.status.failed_fmt">Karaoke separation failed (%s); playing the original audio</string>
+  <string key="karaoke.status.cancelled">Karaoke separation cancelled</string>
+  <string key="karaoke.status.preparing">Preparing karaoke accompaniment, please wait...</string>
+  <string key="karaoke.status.preparing_fmt">Preparing karaoke accompaniment (%d%%), please wait...</string>
+  <string key="karaoke.status.segment_wait">The accompaniment segment is not ready yet, please wait...</string>
+  <string key="karaoke.status.fallback_original">Accompaniment not ready; playing the original audio</string>
+  <string key="karaoke.status.switch_pending">Waiting for the current accompaniment segment; the audio source will switch automatically...</string>
+  <string key="karaoke.status.switch_done_fmt">Switched to %s (waited %d s); playback continues from the current position</string>
+  <string key="karaoke.status.switch_timeout">Timed out waiting for the accompaniment; playing the original audio (switch the level again to retry)</string>
+  <string key="karaoke.status.model_unavailable_fmt">Karaoke built-in model unavailable (%s); playing the original audio</string>
 
   <!-- ===== Popup titles ===== -->
   <string key="popup.play_mode"> Play Mode </string>
@@ -456,9 +474,24 @@
   <!-- ===== Dialog ===== -->
   <string key="dialog.append_folder">Append folder: </string>
   <string key="dialog.folder_path">Folder path: </string>
+  <string key="dialog.open_folder_title">Open music folder</string>
+  <string key="dialog.append_folder_title">Append music folder</string>
   <string key="dialog.path_invalid">Invalid path</string>
   <string key="dialog.no_audio_found">No audio files found</string>
   <string key="dialog.no_new_audio">No new audio files to append</string>
+  <string key="file_picker.title">Select a file</string>
+  <string key="file_picker.folder_title">Select a folder</string>
+  <string key="file_picker.filter_name">File</string>
+  <string key="file_picker.tty_prompt_fmt">File path (%s; press Enter to cancel): </string>
+  <string key="file_picker.tty_prompt_dir">File path (%s; start directory %s; press Enter to cancel): </string>
+  <string key="file_picker.tty_folder_prompt_fmt">Folder path (%s; press Enter to cancel): </string>
+  <string key="file_picker.tty_folder_prompt_dir">Folder path (%s; start directory %s; press Enter to cancel): </string>
+  <string key="file_picker.err.no_backend">File chooser backend unavailable: %s</string>
+  <string key="file_picker.err.spawn">Cannot start the file chooser: %s</string>
+  <string key="file_picker.err.exit">The file chooser exited abnormally (code %d)</string>
+  <string key="file_picker.err.path_too_long">Path is too long</string>
+  <string key="file_picker.err.not_dir">The selected path is not an existing folder: %s</string>
+  <string key="file_picker.err.no_curses">The file chooser needs the terminal interface</string>
 
   <!-- ===== Remote ===== -->
   <string key="remote.list_failed">Cannot list remote directory</string>
@@ -730,6 +763,8 @@
   <string key="lang_mgr.hint">Up/Down: select  ENTER: switch  A: add  D: delete  ESC: back</string>
   <string key="lang_mgr.actions">[ENTER]=Activate  [A]=Add pack  [D]=Delete  [ESC]=Back</string>
   <string key="lang_mgr.add_prompt">Enter language pack .tar.gz path:</string>
+  <string key="lang_mgr.add_title">Select a language pack (.tar.gz)</string>
+  <string key="lang_mgr.add_filter_name">Language pack</string>
   <string key="lang_mgr.switched">Language switched</string>
   <string key="lang_mgr.added">Language pack added</string>
   <string key="lang_mgr.add_failed">Add failed: invalid or malformed file</string>
@@ -999,7 +1034,7 @@
   <string key="cli.help.cmd.mode.detail">With no argument, print the current mode (name, number and display name); with an argument, set it by stable name or number, e.g. list_repeat or folder_shuffle_repeat.</string>
   <string key="cli.help.cmd.karaoke.summary">Show or set the karaoke (vocal removal) level</string>
   <string key="cli.help.cmd.karaoke.usage">Usage: {prog} karaoke [off|soft|full|0-2|cycle]</string>
-  <string key="cli.help.cmd.karaoke.detail">With no argument, print the current level (name, number and display name); with an argument, set it by stable name or number; cycle steps 0->1->2->0. Only stereo audio is affected (mono tracks play unchanged). The level is stored in preferences.karaoke_mode and applies to the track that is already playing.</string>
+  <string key="cli.help.cmd.karaoke.detail">With no argument, print the current level (name, number and display name); with an argument, set it by stable name or number; cycle steps 0->1->2->0. All three levels are model-based: the model separates vocals once per track in the background; off plays the original audio, soft mixes 40% original with 60% model accompaniment, full plays the model accompaniment alone. The first playback of a track waits for the first accompaniment segment (about 7-10 seconds, at most 30 seconds) and then starts with the selected level; on timeout or separation failure it starts with the original audio. A complete whole-track cache from an older version is read-only and takes priority. When playback reaches a segment that is not ready, or after a seek to such a position, the player waits at most 8 seconds and then falls back to the original audio from that position. With seamless_preload=1 the next queued track is prepared in the background once the current track is ready. No lyrics are required; the model is bundled with the package (uvr-mdxnet-3-9662, MIT, see models/NOTICE.md), so no setup or model installation is needed. A missing/damaged model is reported in the status line and the original audio keeps playing. The level is stored in preferences.karaoke_mode. Mono tracks and tracks longer than 30 minutes are not separated and keep playing the original.</string>
   <string key="cli.help.cmd.show.summary">Print the current playback info block</string>
   <string key="cli.help.cmd.show.usage">Usage: {prog} show [options]</string>
   <string key="cli.help.cmd.show.detail">Print the current track information from the core, including basic info, text cover, progress and lyric lines; options apply to this call only and do not change saved settings.</string>

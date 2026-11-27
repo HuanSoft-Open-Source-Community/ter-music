@@ -126,7 +126,14 @@ for el in "${EL_ARRAY[@]}"; do
     rm -rf "$WORK"
     mkdir -p "$RPMBUILD"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} "$OUT_BIN" "$OUT_SRC"
 
+    # 内置消音模型：下载/校验到 .tmp/models 缓存并复用。rpmbuild 的 %setup
+    # 只解压 SOURCES 里的 tarball，因此把模型复制进 staging 的临时目录，
+    # 由 spec %build 用 -DTER_MUSIC_BUNDLED_MODEL=<staging 路径> 注入。
+    tm_ensure_model || exit 1
     tm_stage_source "$SRC"
+    mkdir -p "${SRC}/.tm-bundled-model"
+    cp -f -- "$TM_MODEL_PATH" "${SRC}/.tm-bundled-model/${TM_MODEL_NAME}"
+    tm_log_info "bundled karaoke model staged: ${SRC}/.tm-bundled-model/${TM_MODEL_NAME}"
     archive="${RPMBUILD}/SOURCES/${PACKAGE_NAME}-${VERSION}.tar.gz"
     tar -czf "$archive" -C "$(dirname "$SRC")" "$(basename "$SRC")"
     cp -f "${REPO_ROOT}/rpm/${PACKAGE_NAME}.spec" "${RPMBUILD}/SPECS/"
@@ -217,8 +224,38 @@ for el in "${EL_ARRAY[@]}"; do
         tm_log_error "main rpm has libav* runtime dependency (FFmpeg is not static)"
         exit 1
     fi
-    if ! rpm -qpl "$main_rpm" | grep -q '/ter-music$'; then
-        tm_log_error "main rpm does not contain /usr/bin/ter-music"
+    # 安装布局（Linyaps 目录规范）：实体在 /opt/apps/<appid>/files，
+    # /usr/bin 等位置只有符号链接；模型与 NOTICE 必须随包分发。
+    rpm_listing="$(rpm -qpl "$main_rpm")"
+    for required in \
+        "/opt/apps/${PACKAGE_NAME}/files/bin/ter-music" \
+        "/opt/apps/${PACKAGE_NAME}/files/share/ter-music/models/uvr-mdxnet-3-9662.onnx" \
+        "/opt/apps/${PACKAGE_NAME}/files/share/ter-music/models/NOTICE.md" \
+        "/opt/apps/${PACKAGE_NAME}/files/share/ter-music/lang/zh_CN.xml" \
+        "/opt/apps/${PACKAGE_NAME}/files/share/ter-music/help/help-quickstart-zh_CN.txt" \
+        "/opt/apps/${PACKAGE_NAME}/files/share/ter-music/layouts/layouts.json" \
+        "/opt/apps/${PACKAGE_NAME}/files/share/applications/ter-music.desktop" \
+        "/usr/bin/ter-music" \
+        "/usr/share/applications/ter-music.desktop" \
+        "/usr/share/icons/hicolor/32x32/apps/ter-music.png"; do
+        if ! grep -qx "$required" <<< "$rpm_listing"; then
+            tm_log_error "main rpm is missing required path: ${required}"
+            exit 1
+        fi
+    done
+    rpm_mode="$(rpm -qp --queryformat '[%{FILEMODES:octal} %{FILENAMES}\n]' "$main_rpm")"
+    if grep -Eq "^0?100[0-9]{3} /usr/bin/ter-music$" <<< "$rpm_mode"; then
+        tm_log_error "main rpm still ships a real /usr/bin/ter-music file"
+        exit 1
+    fi
+    if ! grep -Eq "^0?120[0-9]{3} /usr/bin/ter-music$" <<< "$rpm_mode"; then
+        tm_log_error "main rpm does not ship /usr/bin/ter-music as a symlink"
+        exit 1
+    fi
+    rpm_model_size="$(rpm -qp --queryformat '[%{FILESIZES} %{FILENAMES}\n]' "$main_rpm" \
+        | awk '/\/models\/uvr-mdxnet-3-9662\.onnx$/{print $1}')"
+    if [ "${rpm_model_size:-0}" != "$TM_MODEL_SIZE" ]; then
+        tm_log_error "main rpm bundled model size ${rpm_model_size:-<missing>} != ${TM_MODEL_SIZE}"
         exit 1
     fi
 

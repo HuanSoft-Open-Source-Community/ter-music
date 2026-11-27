@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "${SCRIPT_DIR}/scripts/build/common.sh"
 
 PROJECT_NAME="ter-music"
+APP_ID="cn.org.huansoft.ter-music"
 REPO_ROOT="$SCRIPT_DIR"
 
 show_help() {
@@ -82,24 +83,49 @@ mkdir -p "$BUILD_DIR" "$APPDIR" "$OUT_DIR"
 
 tm_log_info "AppImage build: version=${VERSION} arch=${ARCH}"
 
+# 内置消音模型：下载/校验到 .tmp/models 缓存，注入 AppDir 的
+# opt/apps/<appid>/files/share/ter-music/models/（CMake 再校验大小 + SHA256）。
+tm_ensure_model || exit 1
+
 (
     cd "$BUILD_DIR"
     cmake "$REPO_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_PREFIX=/opt/apps/${APP_ID}/files \
+        -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' \
         -DSTATIC_LINKING=ON \
-        -DTER_MUSIC_VERSION="$VERSION"
+        -DTER_MUSIC_VERSION="$VERSION" \
+        -DTER_MUSIC_BUNDLED_MODEL="$TM_MODEL_PATH"
     make -j"$(nproc)"
     make install DESTDIR="$APPDIR"
 )
 
-# AppRun / desktop / AppInfo / icon
-cat > "${APPDIR}/AppRun" <<'EOF'
+# >>> t3-appdir-layout
+# AppRun / desktop / AppInfo / 图标，以及 AppDir 内 /usr 兼容链接。
+# 本段会被 scripts/test/package-layout-check.sh 原样提取执行（只读结构校验），
+# 依赖 APPDIR / APP_ID / PROJECT_NAME / VERSION / REPO_ROOT 这几个变量。
+cat > "${APPDIR}/AppRun" <<EOF
 #!/bin/bash
-HERE=$(dirname "$(readlink -f "$0")")
-export PATH="${HERE}/usr/bin:${PATH}"
-export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH:-}"
-exec "${HERE}/usr/bin/ter-music" "$@"
+# 实体文件在 opt/apps/${APP_ID}/files 下；AppDir/usr 只放兼容链接。
+HERE=\$(dirname "\$(readlink -f "\$0")")
+FILES="\${HERE}/opt/apps/${APP_ID}/files"
+# 内置消音模型运行期按 <XDG_DATA_HOME>/ter-music/models 查找：把数据目录指向
+# 包内只读 share/（不写用户目录）。用户自己的 XDG 数据目录通过 XDG_DATA_DIRS
+# 继续可见（例如 deepin 终端主题配色），不改变既有外观行为。
+if [ -n "\${XDG_DATA_HOME:-}" ]; then
+    _orig_data_home="\$XDG_DATA_HOME"
+elif [ -n "\${HOME:-}" ]; then
+    _orig_data_home="\${HOME}/.local/share"
+else
+    _orig_data_home=""
+fi
+export XDG_DATA_HOME="\${FILES}/share"
+if [ -n "\$_orig_data_home" ]; then
+    export XDG_DATA_DIRS="\${_orig_data_home}:\${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+fi
+export LD_LIBRARY_PATH="\${FILES}/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"
+export PATH="\${FILES}/bin:\${PATH}"
+exec "\${FILES}/bin/ter-music" "\$@"
 EOF
 chmod +x "${APPDIR}/AppRun"
 
@@ -118,22 +144,47 @@ EOF
 cat > "${APPDIR}/AppInfo.xml" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <AppImage xmlns="http://www.appimage.org/1.0">
-  <id>ter-music</id>
+  <id>${APP_ID}</id>
   <name>Ter-Music</name>
   <summary>A terminal-based music player with ncurses interface</summary>
   <version>${VERSION}</version>
   <release>1</release>
-  <project_license>GPL-3.0-or-later</project_license>
+  <project_license>GPL-3.0-or-later AND MIT</project_license>
   <developer_name>浣软科技（HuanSoft）</developer_name>
 </AppImage>
 EOF
 
-cp -f "${REPO_ROOT}/resources/icons/hicolor/128x128/apps/ter-music.png" "${APPDIR}/ter-music.png"
-cp -f "${REPO_ROOT}/resources/icons/hicolor/128x128/apps/ter-music.png" "${APPDIR}/.DirIcon"
+cp -f "${REPO_ROOT}/resources/icons/hicolor/128x128/apps/${PROJECT_NAME}.png" "${APPDIR}/${PROJECT_NAME}.png"
+cp -f "${REPO_ROOT}/resources/icons/hicolor/128x128/apps/${PROJECT_NAME}.png" "${APPDIR}/.DirIcon"
+
+# AppDir/usr 只放指向 opt 实体的相对符号链接（不放任何实体文件）。
+USR_ROOT="${APPDIR}/usr"
+install -d "${USR_ROOT}/bin" \
+           "${USR_ROOT}/share/applications" \
+           "${USR_ROOT}/share/icons/hicolor/32x32/apps" \
+           "${USR_ROOT}/share/icons/hicolor/48x48/apps" \
+           "${USR_ROOT}/share/icons/hicolor/128x128/apps" \
+           "${USR_ROOT}/share/icons/hicolor/scalable/apps"
+ln -sfn "../../../opt/apps/${APP_ID}/files/bin/${PROJECT_NAME}" \
+    "${USR_ROOT}/bin/${PROJECT_NAME}"
+ln -sfn "../../../opt/apps/${APP_ID}/files/share/applications/${PROJECT_NAME}.desktop" \
+    "${USR_ROOT}/share/applications/${PROJECT_NAME}.desktop"
+ICON_BASE="../../../../../../opt/apps/${APP_ID}/files/share/icons/hicolor"
+ln -sfn "${ICON_BASE}/32x32/apps/${PROJECT_NAME}.png" \
+    "${USR_ROOT}/share/icons/hicolor/32x32/apps/${PROJECT_NAME}.png"
+ln -sfn "${ICON_BASE}/48x48/apps/${PROJECT_NAME}.png" \
+    "${USR_ROOT}/share/icons/hicolor/48x48/apps/${PROJECT_NAME}.png"
+ln -sfn "${ICON_BASE}/128x128/apps/${PROJECT_NAME}.png" \
+    "${USR_ROOT}/share/icons/hicolor/128x128/apps/${PROJECT_NAME}.png"
+ln -sfn "${ICON_BASE}/scalable/apps/${PROJECT_NAME}.svg" \
+    "${USR_ROOT}/share/icons/hicolor/scalable/apps/${PROJECT_NAME}.svg"
+# <<< t3-appdir-layout
 
 # 递归复制动态库（跳过 glibc/loader），并额外打包 libxml2.so.2。
+# 动态库放在 opt 实体的 files/lib 下（AppRun 用 LD_LIBRARY_PATH 指向它）；
+# AppDir/usr 保持“只有链接”。
 declare -A COPIED=()
-LIB_DIR="${APPDIR}/usr/lib"
+LIB_DIR="${APPDIR}/opt/apps/${APP_ID}/files/lib"
 mkdir -p "$LIB_DIR"
 
 copy_one_dep() {
@@ -166,7 +217,7 @@ copy_elf_deps() {
     done
 }
 
-copy_elf_deps "${APPDIR}/usr/bin/ter-music"
+copy_elf_deps "${APPDIR}/opt/apps/${APP_ID}/files/bin/${PROJECT_NAME}"
 
 libxml2_path="$(find /usr/lib /lib -name 'libxml2.so.2' -type f 2>/dev/null | head -n 1)"
 if [ -z "$libxml2_path" ]; then
@@ -204,9 +255,25 @@ mkdir -p "$VERIFY_DIR"
 if ! (
     cd "$VERIFY_DIR"
     "$OUTPUT" --appimage-extract >/dev/null 2>&1
-    ./squashfs-root/AppRun --version
+    sq="${VERIFY_DIR}/squashfs-root"
+    opt_root="${sq}/opt/apps/${APP_ID}/files"
+    test -x "${opt_root}/bin/${PROJECT_NAME}"
+    test -f "${opt_root}/share/ter-music/models/uvr-mdxnet-3-9662.onnx"
+    test -f "${opt_root}/share/ter-music/models/NOTICE.md"
+    model_size="$(wc -c < "${opt_root}/share/ter-music/models/uvr-mdxnet-3-9662.onnx" | tr -d ' \n')"
+    test "$model_size" = "$TM_MODEL_SIZE"
+    test -f "${opt_root}/share/ter-music/lang/zh_CN.xml"
+    test -f "${opt_root}/share/ter-music/layouts/layouts.json"
+    test -L "${sq}/usr/bin/${PROJECT_NAME}"
+    test ! -e "${sq}/usr/lib"
+    usr_regular_files="$(find "${sq}/usr" -type f -print)"
+    if [ -n "$usr_regular_files" ]; then
+        echo "AppDir/usr contains regular files; only symlinks are allowed: ${usr_regular_files}" >&2
+        exit 1
+    fi
+    "./squashfs-root/AppRun" --version
 ); then
-    tm_log_error "AppImage self-extract verification failed (runtime 与压缩算法不匹配？)"
+    tm_log_error "AppImage self-extract verification failed (runtime/压缩算法或目录布局不符)"
     exit 1
 fi
 

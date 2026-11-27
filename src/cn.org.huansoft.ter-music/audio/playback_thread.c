@@ -12,6 +12,8 @@
 #include "types.h"
 #include "audio/audio.h"
 #include "audio/audio_internal.h"
+#include "audio/karaoke_cache.h"
+#include "audio/karaoke_worker.h"
 #include "audio/progress/progress.h"
 #include "audio/play_queue.h"
 #include "audio/visualizer.h"
@@ -145,6 +147,8 @@ static void append_decoded_frame_to_segment(Segment *seg, AVFrame *frame,
 
 /* 读错误熔断计数：单播放线程内使用，track 起播时清零 */
 static int g_decode_read_errors = 0;
+/* 当前预加载数据来自哪个播放源（KARAOKE_SOURCE_*）；起播时用于丢弃"源已变"的预加载。 */
+static int g_preload_source_kind = KARAOKE_SOURCE_ORIGINAL;
 
 static int decode_segment_fill(AVFormatContext *fmt_ctx,
                                AVCodecContext *codec_ctx,
@@ -283,6 +287,94 @@ static int decode_segment_fill(AVFormatContext *fmt_ctx,
  * Seek-in-decoder handler (segment-aware)
  * ============================================================ */
 
+/* 普通（原声 / v1 整曲缓存）解码器定位到 target_position（子曲目相对秒）。
+ * 段内偏移按输出帧精确跳过（此前从段首重播的误差 ≤15s）。 */
+static int decoder_seek_to(AVFormatContext *fmt_ctx,
+                           AVCodecContext *codec_ctx,
+                           SwrContext *swr_ctx,
+                           AVPacket *packet,
+                           AVFrame *frame,
+                           AVFrame *filtered_frame,
+                           SegmentPool *pool,
+                           int audio_stream_index,
+                           int output_sample_rate,
+                           int output_channels,
+                           int use_resampler,
+                           int *decoder_draining,
+                           int *decoder_finished,
+                           int target_position,
+                           int cue_offset)
+{
+    extern int g_current_position;
+    extern float g_playback_speed;
+
+    AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
+    int64_t target_ts = av_rescale_q(target_position + cue_offset,
+                                     (AVRational){1, 1}, time_base);
+    int ret = av_seek_frame(fmt_ctx, audio_stream_index, target_ts, 0);
+    if (ret < 0) {
+        core_status_push(i18n_get("audio.err.seek_failed"));
+        return -1;
+    }
+    avcodec_flush_buffers(codec_ctx);
+    if (swr_ctx) swr_init(swr_ctx);
+    if (packet) av_packet_unref(packet);
+
+    int target_seg = segment_id_from_position(target_position);
+    int saved_total = pool->total_segments;
+    segment_pool_seek_to(pool, target_seg);
+    pool->total_segments = saved_total;
+
+    /* Reset atempo filter to clear stale pre-seek samples */
+    if (atempo_is_active()) {
+        float speed = atempo_get_speed();
+        cleanup_atempo_filter();
+        if (speed > 0.01f)
+            init_atempo_filter(codec_ctx, speed);
+    }
+
+    audio_backend_flush_stream();
+    progress_tracker_seek(target_position);
+    g_current_position = target_position;
+
+    if (decoder_draining) *decoder_draining = 0;
+    if (decoder_finished) *decoder_finished = 0;
+
+    int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
+    int fill_ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame,
+                                       filtered_frame, pool, pool->current_slot,
+                                       target_frames, 0 /*整段*/,
+                                       audio_stream_index, output_sample_rate,
+                                       output_channels, use_resampler,
+                                       decoder_draining, decoder_finished);
+    if (fill_ret < 0) {
+        log_error("audio", "handle_seek_request: decode_segment_fill failed, aborting seek");
+        core_status_push(i18n_get("audio.err.seek_failed"));
+        return -1;
+    }
+
+    /* 段内偏移：从 target_seg 的段首跳过 offset 秒对应的输出帧。 */
+    Segment *cur = &pool->slots[pool->current_slot];
+    int offset_sec = target_position - target_seg * SEGMENT_DURATION_SEC;
+    if (offset_sec > 0 && cur->frame_count > 0) {
+        long long skip = (long long)((double)offset_sec * output_sample_rate *
+                                     (double)g_playback_speed + 0.5);
+        if (skip >= cur->frame_count)
+            skip = cur->frame_count > 0 ? cur->frame_count - 1 : 0;
+        cur->consumed_frames = (int)skip;
+    }
+
+    int is_last = (*decoder_finished) || (target_seg >= pool->total_segments - 1);
+    segment_pool_mark_ready(pool, pool->current_slot, cur->frame_count, target_seg,
+                            is_last);
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), i18n_get("status.seek_fmt"),
+             target_position / 60, target_position % 60);
+    core_status_push(msg);
+    return 0;
+}
+
 static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
                                           AVCodecContext *codec_ctx,
                                           SwrContext *swr_ctx,
@@ -296,12 +388,11 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
                                           int use_resampler,
                                           int *decoder_draining,
                                           int *decoder_finished,
-                                          int cue_offset  /* CUE sub-track offset; added to target_position for absolute file seek */)
+                                          int cue_offset)
 {
     extern pthread_mutex_t g_seek_mutex;
     extern int g_seek_request;
     extern int g_seek_position;
-    extern int g_current_position;
 
     int handled = 0;
     pthread_mutex_lock(&g_seek_mutex);
@@ -309,67 +400,13 @@ static int handle_seek_request_in_decoder(AVFormatContext *fmt_ctx,
         int target_position = g_seek_position;
         g_seek_request = 0;
         handled = 1;
-
-        AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
-        int64_t target_ts = av_rescale_q(target_position + cue_offset, (AVRational){1, 1}, time_base);
-        int ret = av_seek_frame(fmt_ctx, audio_stream_index, target_ts, 0);
-        if (ret < 0) {
-            core_status_push(i18n_get("audio.err.seek_failed"));
-        } else {
-            avcodec_flush_buffers(codec_ctx);
-            if (swr_ctx) swr_init(swr_ctx);
-            if (packet) av_packet_unref(packet);
-
-            /* Reset segment pool to target segment */
-            int target_seg = segment_id_from_position(target_position);
-            int saved_total = pool->total_segments;
-            segment_pool_seek_to(pool, target_seg);
-            pool->total_segments = saved_total;
-
-            /* Reset atempo filter to clear stale pre-seek samples */
-            if (atempo_is_active()) {
-                float speed = atempo_get_speed();
-                cleanup_atempo_filter();
-                if (speed > 0.01f)
-                    init_atempo_filter(codec_ctx, speed);
-            }
-
-            /* seek 之后同样的道理：消人声的滤波器状态必须丢掉旧位置的历史 */
-            karaoke_reset();
-
-            audio_backend_flush_stream();
-            progress_tracker_seek(target_position);
-            g_current_position = target_position;
-
-            if (decoder_draining) *decoder_draining = 0;
-            if (decoder_finished) *decoder_finished = 0;
-
-            /* Immediately decode the target segment into slot 0 */
-            int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
-            int fill_ret = decode_segment_fill(fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
-                                pool, pool->current_slot, target_frames, 0 /*整段*/,
-                                audio_stream_index, output_sample_rate, output_channels,
-                                use_resampler, decoder_draining, decoder_finished);
-            if (fill_ret < 0) {
-                log_error("audio", "handle_seek_request: decode_segment_fill failed, aborting seek");
-                core_status_push(i18n_get("audio.err.seek_failed"));
-                pthread_mutex_unlock(&g_seek_mutex);
-                return handled;  /* leave decoder state as-is; main loop can retry */
-            }
-
-            /* Mark the decoded segment as ready — was missing, causing
-             * segment_pool_current() to return NULL and skip playback */
-            int is_last = (*decoder_finished) || (target_seg >= pool->total_segments - 1);
-            segment_pool_mark_ready(pool, pool->current_slot,
-                                    pool->slots[pool->current_slot].frame_count,
-                                    target_seg, is_last);
-
-            char msg[64];
-            snprintf(msg, sizeof(msg),
-                     i18n_get("status.seek_fmt"),
-                     target_position / 60, target_position % 60);
-            core_status_push(msg);
-        }
+        pthread_mutex_unlock(&g_seek_mutex);
+        (void)decoder_seek_to(fmt_ctx, codec_ctx, swr_ctx, packet, frame,
+                              filtered_frame, pool, audio_stream_index,
+                              output_sample_rate, output_channels, use_resampler,
+                              decoder_draining, decoder_finished, target_position,
+                              cue_offset);
+        return handled;
     }
     pthread_mutex_unlock(&g_seek_mutex);
     return handled;
@@ -449,6 +486,25 @@ static void attempt_next_track_preload(int current_track_index,
 
     char file_path[MAX_PATH_LEN];
     snprintf(file_path, sizeof(file_path), "%s", next_entry.path);
+    int preload_source_kind = KARAOKE_SOURCE_ORIGINAL;
+    {
+        /* 预加载同样走 cache resolve；起播时会再 resolve 一次，若两次源不同
+         * 则丢弃预加载数据（仍然只在曲目起点选源，不中途切换）。 */
+        KaraokeCacheConfig kcfg;
+        char kroot[MAX_PATH_LEN];
+        char kmodel[MAX_PATH_LEN];
+        int mode = karaoke_get_mode();
+        if (mode != KARAOKE_MODE_OFF &&
+            audio_karaoke_cache_config(&kcfg, kroot, sizeof(kroot), kmodel,
+                                       sizeof(kmodel))) {
+            char resolved[MAX_PATH_LEN];
+            if (karaoke_cache_resolve(&kcfg, next_entry.path, mode, resolved,
+                                      sizeof(resolved), NULL, 0) == 1) {
+                snprintf(file_path, sizeof(file_path), "%s", resolved);
+                preload_source_kind = mode;
+            }
+        }
+    }
 
     log_info("segment", "preload: attempting next track pos=%d path='%s'", next_index, file_path);
 
@@ -630,6 +686,7 @@ static void attempt_next_track_preload(int current_track_index,
     if (preloaded_count > 0) {
         pthread_mutex_lock(&g_preload_data.lock);
         g_preload_data.valid = 1;
+        g_preload_source_kind = preload_source_kind;
         g_preload_data.track_index = next_index;
         g_preload_data.segment_count = preloaded_count;
         g_preload_data.sample_rate = output_sample_rate;
@@ -650,6 +707,422 @@ preload_cleanup:
 
     if (!success)
         log_debug("segment", "preload: no segments preloaded for track idx=%d", next_index);
+}
+
+/* ============================================================
+ * v2 分段播放源（D1/D3/D4，15s 段 /tmp 会话缓存）
+ *
+ * 与整曲解码路径的关键差异：
+ *   - 音频来自 `<session_root>/<model>/<track_hash>/segNNN.{inst,soft}.flac`，
+ *     每段独立打开 FLAC 解码（44100/2ch/16bit），段内整段解完再交给段池；
+ *   - swr 与 atempo 跨段复用（同一 44.1k 输入坐标），保证段边界状态连续；
+ *   - 段未就绪时播放线程最多等待（首段 30s / 一般 8s），超时或 job 失败
+ *     就从段边界回退原声继续播到曲终；
+ *   - seek 到未处理段时先给 worker 发优先提示，再等待/回退。
+ * ============================================================ */
+
+typedef struct {
+    int valid;                          /* manifest 可读 */
+    int mode;                           /* KARAOKE_SOURCE_SOFT / _FULL */
+    char root[KARAOKE_CACHE_PATH_CAP];
+    char model_id[128];
+    char model_sha256[65];
+    float overlap;
+    float soft_inst_mix;
+    KaraokeCacheConfig cfg;             /* 指针指向上面缓冲区 */
+    KaraokeSegmentPaths paths;
+    KaraokeSegmentManifest manifest;
+    int total;                          /* manifest 总段数（0 = 未知） */
+    int complete;
+} SegSource;
+
+static void seg_source_setup(SegSource *s, const KaraokeCacheConfig *base, int mode)
+{
+    memset(s, 0, sizeof(*s));
+    s->mode = mode;
+    snprintf(s->root, sizeof(s->root), "%s", base->root);
+    snprintf(s->model_id, sizeof(s->model_id), "%s", base->model_id);
+    snprintf(s->model_sha256, sizeof(s->model_sha256), "%s", base->model_sha256);
+    s->overlap = base->overlap;
+    s->soft_inst_mix = base->soft_inst_mix;
+    memset(&s->cfg, 0, sizeof(s->cfg));
+    s->cfg.root = s->root;
+    s->cfg.model_id = s->model_id;
+    s->cfg.model_sha256 = s->model_sha256;
+    s->cfg.overlap = s->overlap;
+    s->cfg.soft_inst_mix = s->soft_inst_mix;
+    s->cfg.limit_mb = 0;
+}
+
+/* 读 manifest / 段状态；返回 1 表示 manifest 可读。 */
+static int seg_source_refresh(SegSource *s, const char *track_path)
+{
+    if (!s || !s->root[0] || !track_path)
+        return 0;
+    KaraokeSegmentPaths paths;
+    KaraokeSegmentManifest m;
+    if (karaoke_cache_segment_lookup(&s->cfg, track_path, &paths, &m) != 1)
+        return 0;
+    s->valid = 1;
+    s->paths = paths;
+    s->manifest = m;
+    s->total = m.total_segments;
+    s->complete = m.complete;
+    return 1;
+}
+
+static int seg_source_ready(SegSource *s, int seg)
+{
+    if (!s || !s->valid || seg < 0)
+        return 0;
+    return karaoke_cache_segment_ready(&s->paths, &s->manifest, seg, NULL, NULL, 0);
+}
+
+/* 段播放文件路径；1=就绪并回填。 */
+static int seg_source_file(SegSource *s, int seg, char *out, size_t cap)
+{
+    if (!seg_source_ready(s, seg))
+        return 0;
+    int n = snprintf(out, cap, "%s/seg%03d.%s.flac", s->paths.dir, seg,
+                     s->mode == KARAOKE_SOURCE_SOFT ? "soft" : "inst");
+    return (n > 0 && (size_t)n < cap) ? 1 : 0;
+}
+
+/* 轮询等待某段就绪（≤timeout_ms，100ms 粒度）。 */
+static int seg_wait_ready(SegSource *s, const char *track_path, int seg,
+                          int timeout_ms)
+{
+    extern int g_play_thread_running;
+    int waited = 0;
+    while (waited < timeout_ms) {
+        if (!g_play_thread_running)
+            return 0;
+        if (seg_source_refresh(s, track_path) && seg_source_ready(s, seg))
+            return 1;
+        KaraokeWorkerStatus st;
+        if (karaoke_worker_status(&st) == 0 && st.track_path[0] &&
+            strcmp(st.track_path, track_path) == 0 &&
+            (st.state == KARAOKE_JOB_FAILED || st.state == KARAOKE_JOB_CANCELLED))
+            return 0;
+        usleep(100 * 1000);
+        waited += 100;
+    }
+    return 0;
+}
+
+/* D1：首次起播等待首段（target_seg 一般 0；倍速/切档重启在当前位置）。
+ * 等待期间状态栏显示"正在准备伴奏"及百分比；失败/超时返回 0（回退原声）。 */
+static int seg_wait_first(SegSource *s, const char *track_path, int target_seg,
+                          int timeout_ms)
+{
+    extern int g_play_thread_running;
+    core_status_push(i18n_get("karaoke.status.preparing"));
+    int waited = 0;
+    int last_pct = -1;
+    while (waited < timeout_ms) {
+        if (!g_play_thread_running)
+            return 0;
+        if (seg_source_refresh(s, track_path) && seg_source_ready(s, target_seg))
+            return 1;
+        KaraokeWorkerStatus st;
+        int have_status = (karaoke_worker_status(&st) == 0);
+        if (have_status && st.track_path[0] &&
+            strcmp(st.track_path, track_path) == 0 &&
+            (st.state == KARAOKE_JOB_FAILED || st.state == KARAOKE_JOB_CANCELLED))
+            return 0;
+        if (have_status && st.state == KARAOKE_JOB_RUNNING && st.percent != last_pct) {
+            last_pct = st.percent;
+            char msg[192];
+            snprintf(msg, sizeof(msg), i18n_get("karaoke.status.preparing_fmt"),
+                     last_pct);
+            core_status_push(msg);
+        }
+        /* 没有 job 也没有 manifest：说明根本不会产出段（CUE/单声道/超长等），
+         * 给 1s 宽限后直接回退，避免无意义等待。 */
+        if (waited >= 1000 && (!have_status || st.state == KARAOKE_JOB_IDLE) &&
+            !s->valid)
+            return 0;
+        usleep(100 * 1000);
+        waited += 100;
+    }
+    return 0;
+}
+
+/* 段解码上下文：swr 跨段复用（S16 44100 2ch → S32 44100 2ch）。 */
+typedef struct {
+    SwrContext *swr;
+    int atempo_inited;      /* atempo 是否已按 44.1k 段格式初始化 */
+} SegDecodeState;
+
+/* 把 seg 段整段解码进池槽 slot。
+ * skip_output_frames：seek 时丢弃段首的输出帧（按倍速换算后的帧数）。
+ * 返回 1=已解码；0=未就绪/文件不可用；-1=解码失败。 */
+static int seg_decode_into_pool(SegSource *src, SegmentPool *pool, int slot, int seg,
+                                SegDecodeState *dec, int out_rate, int out_ch,
+                                int skip_output_frames, float speed,
+                                char *why, size_t why_cap)
+{
+    char file[KARAOKE_CACHE_PATH_CAP];
+    if (!seg_source_file(src, seg, file, sizeof(file))) {
+        snprintf(why, why_cap, "段 %d 未就绪", seg);
+        return 0;
+    }
+    AVFormatContext *fmt = NULL;
+    AVCodecContext *codec = NULL;
+    AVPacket *pkt = NULL;
+    AVFrame *frame = NULL;
+    AVFrame *filtered = NULL;
+    int stream = -1;
+    int result = 0;
+    if (avformat_open_input(&fmt, file, NULL, NULL) != 0) {
+        snprintf(why, why_cap, "无法打开段文件 %.120s", file);
+        avformat_close_input(&fmt);
+        return 0;
+    }
+    if (avformat_find_stream_info(fmt, NULL) < 0)
+        goto done;
+    for (unsigned i = 0; i < fmt->nb_streams; i++) {
+        if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            stream = (int)i;
+            break;
+        }
+    }
+    if (stream < 0)
+        goto done;
+    {
+        AVCodecParameters *par = fmt->streams[stream]->codecpar;
+        const AVCodec *c = avcodec_find_decoder(par->codec_id);
+        if (!c)
+            goto done;
+        codec = avcodec_alloc_context3(c);
+        if (!codec || avcodec_parameters_to_context(codec, par) < 0 ||
+            avcodec_open2(codec, c, NULL) < 0)
+            goto done;
+    }
+    if (!dec->swr) {
+        dec->swr = swr_alloc();
+        if (!dec->swr)
+            goto done;
+        AVChannelLayout in_layout, out_layout;
+        av_channel_layout_default(&in_layout, 2);
+        av_channel_layout_default(&out_layout, 2);
+        av_opt_set_chlayout(dec->swr, "in_chlayout", &in_layout, 0);
+        av_opt_set_chlayout(dec->swr, "out_chlayout", &out_layout, 0);
+        av_opt_set_int(dec->swr, "in_sample_rate", KARAOKE_SEGMENT_SAMPLE_RATE, 0);
+        av_opt_set_int(dec->swr, "out_sample_rate", out_rate, 0);
+        av_opt_set_sample_fmt(dec->swr, "in_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+        av_opt_set_sample_fmt(dec->swr, "out_sample_fmt", AV_SAMPLE_FMT_S32, 0);
+        if (swr_init(dec->swr) < 0) {
+            swr_free(&dec->swr);
+            goto done;
+        }
+    }
+    if (speed != 1.0f && !dec->atempo_inited) {
+        /* atempo 输入必须是 44.1k 段格式（不能沿用原曲采样率的滤波器）。 */
+        cleanup_atempo_filter();
+        if (init_atempo_filter(codec, speed) < 0) {
+            snprintf(why, why_cap, "段倍速滤镜初始化失败");
+            goto done;
+        }
+        dec->atempo_inited = 1;
+    }
+    pkt = av_packet_alloc();
+    frame = av_frame_alloc();
+    filtered = av_frame_alloc();
+    if (!pkt || !frame || !filtered) {
+        snprintf(why, why_cap, "段解码缓冲分配失败");
+        goto done;
+    }
+    {
+        Segment *seg_slot = &pool->slots[slot];
+        seg_slot->frame_count = 0;
+        seg_slot->consumed_frames = 0;
+        seg_slot->is_valid = 0;
+        seg_slot->segment_id = seg;
+        int target = segment_pool_capacity_frames(pool);
+        int draining = 0, finished = 0;
+        int rc = decode_segment_fill(fmt, codec, dec->swr, pkt, frame, filtered,
+                                     pool, slot, target, 0, stream, out_rate,
+                                     out_ch, 1, &draining, &finished);
+        if (rc < 0) {
+            snprintf(why, why_cap, "段 %d 解码失败", seg);
+            goto done;
+        }
+        if (!finished) {
+            /* 段文件输出超过池容量：按容量取前一部分会丢帧，宁可回退。 */
+            snprintf(why, why_cap, "段 %d 超出池容量", seg);
+            seg_slot->frame_count = 0;
+            goto done;
+        }
+        if (seg_slot->frame_count <= 0) {
+            snprintf(why, why_cap, "段 %d 空", seg);
+            goto done;
+        }
+        if (skip_output_frames > 0) {
+            if (skip_output_frames >= seg_slot->frame_count) {
+                seg_slot->frame_count = 0;
+                snprintf(why, why_cap, "段 %d seek 偏移越界", seg);
+                goto done;
+            }
+            memmove(seg_slot->data,
+                    seg_slot->data + (size_t)skip_output_frames * out_ch,
+                    (size_t)(seg_slot->frame_count - skip_output_frames) * out_ch *
+                        sizeof(int32_t));
+            seg_slot->frame_count -= skip_output_frames;
+        }
+        result = 1;
+    }
+done:
+    av_frame_free(&filtered);
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    avcodec_free_context(&codec);
+    avformat_close_input(&fmt);
+    return result;
+}
+
+/* R1：回退到原声时优先把 worker 对该曲目的具体失败原因带到状态行
+ * （单声道/超 30 分钟/模型缺失/缓存不可写等）；没有原因才用笼统文案。 */
+static void seg_push_fallback_status(const char *track_path, int position)
+{
+    KaraokeWorkerStatus st;
+    memset(&st, 0, sizeof(st));
+    const char *reason = NULL;
+    if (track_path && track_path[0] && karaoke_worker_status(&st) == 0 &&
+        st.track_path[0] && strcmp(st.track_path, track_path) == 0 &&
+        st.error[0])
+        reason = st.error;
+    if (reason) {
+        char msg[KARAOKE_WORKER_ERR_CAP + 128];
+        snprintf(msg, sizeof(msg), i18n_get("karaoke.status.failed_fmt"), reason);
+        core_status_push(msg);
+        log_info("audio", "karaoke segment fallback to original at %ds: %s",
+                 position, reason);
+    } else {
+        core_status_push(i18n_get("karaoke.status.fallback_original"));
+        log_info("audio", "karaoke segment fallback to original at %ds", position);
+    }
+}
+
+/* seek/段未就绪时回退原声：从 position 秒继续，后续整曲都走原声解码。 */
+static void seg_fallback_to_original(int position, const char *track_path,
+                                     int *seg_mode, int *source_kind)
+{
+    extern int g_seek_request;
+    extern int g_seek_position;
+    extern pthread_mutex_t g_seek_mutex;
+    extern int g_karaoke_playback_source;
+    pthread_mutex_lock(&g_seek_mutex);
+    g_seek_position = position;
+    g_seek_request = 1;
+    pthread_mutex_unlock(&g_seek_mutex);
+    *seg_mode = 0;
+    *source_kind = KARAOKE_SOURCE_ORIGINAL;
+    pthread_mutex_lock(&g_play_mutex);
+    g_karaoke_playback_source = KARAOKE_SOURCE_ORIGINAL;
+    pthread_mutex_unlock(&g_play_mutex);
+    seg_push_fallback_status(track_path, position);
+}
+
+/* v2 分段源 seek（D4）：优先提示 worker，等待 ≤8s；就绪则从目标段精确续播，
+ * 否则回退原声从目标位置继续。返回 1=已处理 seek。 */
+static int handle_seek_request_segmented(AVFormatContext *fmt_ctx,
+                                         AVCodecContext *codec_ctx,
+                                         SwrContext *swr_ctx,
+                                         AVPacket *packet,
+                                         AVFrame *frame,
+                                         AVFrame *filtered_frame,
+                                         SegmentPool *pool,
+                                         int audio_stream_index,
+                                         int output_sample_rate,
+                                         int output_channels,
+                                         int use_resampler,
+                                         int *decoder_draining,
+                                         int *decoder_finished,
+                                         int cue_offset,
+                                         const char *track_path,
+                                         SegSource *src,
+                                         SegDecodeState *dec,
+                                         int *seg_mode,
+                                         int *source_kind)
+{
+    extern pthread_mutex_t g_seek_mutex;
+    extern int g_seek_request;
+    extern int g_seek_position;
+    extern int g_current_position;
+    extern float g_playback_speed;
+
+    int target_position = -1;
+    pthread_mutex_lock(&g_seek_mutex);
+    if (g_seek_request) {
+        target_position = g_seek_position;
+        g_seek_request = 0;
+    }
+    pthread_mutex_unlock(&g_seek_mutex);
+    if (target_position < 0)
+        return 0;
+
+    int target_seg = segment_id_from_position(target_position);
+    if (target_seg < 0)
+        target_seg = 0;
+    (void)karaoke_worker_hint_segment(track_path, target_seg);
+    (void)seg_source_refresh(src, track_path);
+    if (!seg_source_ready(src, target_seg)) {
+        core_status_push(i18n_get("karaoke.status.segment_wait"));
+        log_info("audio", "karaoke seek to seg %d not ready, waiting up to 8s", target_seg);
+        if (!seg_wait_ready(src, track_path, target_seg, 8000)) {
+            log_info("audio", "karaoke seek seg %d not ready, fallback to original", target_seg);
+            seg_fallback_to_original(target_position, track_path, seg_mode,
+                                 source_kind);
+            return handle_seek_request_in_decoder(fmt_ctx, codec_ctx, swr_ctx, packet,
+                                                  frame, filtered_frame, pool,
+                                                  audio_stream_index,
+                                                  output_sample_rate, output_channels,
+                                                  use_resampler, decoder_draining,
+                                                  decoder_finished, cue_offset);
+        }
+    }
+    int offset_sec = target_position - target_seg * SEGMENT_DURATION_SEC;
+    int skip = 0;
+    if (offset_sec > 0)
+        skip = (int)((double)offset_sec * output_sample_rate *
+                     (double)g_playback_speed + 0.5);
+    int saved_total = pool->total_segments;
+    segment_pool_seek_to(pool, target_seg);
+    pool->total_segments = saved_total;
+    char why[192] = {0};
+    /* seek 后 atempo 旧位置历史必须丢弃：下次段解码按 44.1k 段格式重建。 */
+    if (atempo_is_active()) {
+        cleanup_atempo_filter();
+        dec->atempo_inited = 0;
+    }
+    int rc = seg_decode_into_pool(src, pool, pool->current_slot, target_seg, dec,
+                                  output_sample_rate, output_channels, skip,
+                                  g_playback_speed, why, sizeof(why));
+    if (rc != 1) {
+        log_warn("audio", "karaoke seek seg %d decode failed (%s), fallback to original",
+                 target_seg, why);
+        seg_fallback_to_original(target_position, track_path, seg_mode,
+                                 source_kind);
+        return handle_seek_request_in_decoder(fmt_ctx, codec_ctx, swr_ctx, packet,
+                                              frame, filtered_frame, pool,
+                                              audio_stream_index,
+                                              output_sample_rate, output_channels,
+                                              use_resampler, decoder_draining,
+                                              decoder_finished, cue_offset);
+    }
+    Segment *cur = &pool->slots[pool->current_slot];
+    int is_last = (src->complete && target_seg >= pool->total_segments - 1);
+    segment_pool_mark_ready(pool, pool->current_slot, cur->frame_count, target_seg,
+                            is_last);
+    audio_backend_flush_stream();
+    progress_tracker_seek(target_position);
+    g_current_position = target_position;
+    char msg[64];
+    snprintf(msg, sizeof(msg), i18n_get("status.seek_fmt"),
+             target_position / 60, target_position % 60);
+    core_status_push(msg);
+    return 1;
 }
 
 /* ============================================================
@@ -704,6 +1177,57 @@ void *play_audio_thread(void *arg)
     }
     log_debug("audio", "Playback thread file_path='%s'", file_path);
 
+    /* ── 播放源选择（只在曲目起点做一次，绝不曲中切换）──
+     * off=原声；soft/full=对应缓存（命中时）。缓存打开失败会回退原声并删除
+     * 坏缓存（见下面的 avformat_open_input 失败分支）。 */
+    char decode_path[MAX_PATH_LEN];
+    snprintf(decode_path, sizeof(decode_path), "%s", file_path);
+    int source_kind = KARAOKE_SOURCE_ORIGINAL;
+    KaraokeCacheConfig cache_cfg;
+    int cache_cfg_ok = 0;
+    int v1_source = 0;
+    int seg_candidate = 0;         /* 可能走 v2 分段源（等首段就绪） */
+    int seg_mode = 0;              /* 实际使用 v2 分段源 */
+    SegSource seg_src;
+    memset(&seg_src, 0, sizeof(seg_src));
+    SegDecodeState seg_dec;
+    memset(&seg_dec, 0, sizeof(seg_dec));
+    {
+        char cache_root[MAX_PATH_LEN];
+        char model_path[MAX_PATH_LEN];
+        int mode = karaoke_get_mode();
+        if (mode != KARAOKE_MODE_OFF &&
+            audio_karaoke_cache_config(&cache_cfg, cache_root, sizeof(cache_root),
+                                       model_path, sizeof(model_path))) {
+            cache_cfg_ok = 1;
+            char resolved[MAX_PATH_LEN];
+            if (karaoke_cache_resolve(&cache_cfg, file_path, mode, resolved,
+                                      sizeof(resolved), NULL, 0) == 1) {
+                /* v1 整曲缓存优先（只读兼容，行为不变，不产生 /tmp 分段）。 */
+                snprintf(decode_path, sizeof(decode_path), "%s", resolved);
+                source_kind = mode;
+                v1_source = 1;
+            } else {
+                /* v2 分段候选：段文件在 /tmp 会话根下，由 worker 产出。 */
+                char session_root[KARAOKE_CACHE_PATH_CAP];
+                if (karaoke_cache_session_root(session_root, sizeof(session_root)) ==
+                    0) {
+                    KaraokeCacheConfig seg_cfg = cache_cfg;
+                    seg_cfg.root = session_root;
+                    seg_cfg.limit_mb = 0;
+                    seg_source_setup(&seg_src, &seg_cfg, mode);
+                    seg_candidate = 1;
+                    source_kind = mode;
+                }
+            }
+        }
+    }
+    /* CUE 子曲目不用 v2 分段源（段坐标是物理文件从 0 开始的内容轴）。 */
+    if (cue_offset > 0)
+        seg_candidate = 0;
+    if (!v1_source)
+        source_kind = KARAOKE_SOURCE_ORIGINAL;   /* v2 决策在首段等待之后 */
+
     /* ── FFmpeg context ── */
     AVFormatContext *fmt_ctx = NULL;
     AVCodecContext *codec_ctx = NULL;
@@ -727,8 +1251,22 @@ void *play_audio_thread(void *arg)
     int pool_initialized = 0;
     int preload_attempted = 0;
 
-    if (avformat_open_input(&fmt_ctx, file_path, NULL, NULL) != 0) {
-        log_error("audio", "avformat_open_input failed for '%s' (index=%d)", file_path, index);
+    if (avformat_open_input(&fmt_ctx, decode_path, NULL, NULL) != 0) {
+        if (source_kind != KARAOKE_SOURCE_ORIGINAL) {
+            /* 缓存损坏/打不开：删除坏缓存，回退原声（同一曲目、不打断起播）。 */
+            log_warn("audio", "karaoke cache open failed, falling back to original: %s",
+                     decode_path);
+            if (cache_cfg_ok)
+                (void)karaoke_cache_remove(&cache_cfg, file_path);
+            snprintf(decode_path, sizeof(decode_path), "%s", file_path);
+            source_kind = KARAOKE_SOURCE_ORIGINAL;
+            pthread_mutex_lock(&g_play_mutex);
+            g_karaoke_playback_source = KARAOKE_SOURCE_ORIGINAL;
+            pthread_mutex_unlock(&g_play_mutex);
+        }
+    }
+    if (fmt_ctx == NULL && avformat_open_input(&fmt_ctx, decode_path, NULL, NULL) != 0) {
+        log_error("audio", "avformat_open_input failed for '%s' (index=%d)", decode_path, index);
         core_status_push(i18n_get("audio.err.cannot_open_file"));
         goto cleanup;
     }
@@ -857,6 +1395,56 @@ void *play_audio_thread(void *arg)
     }
     snprintf(g_audio_codec_name, sizeof(g_audio_codec_name), "%s", codec->name);
 
+    /* ── v2 分段源决策（D1）：无 v1 缓存时等待首段就绪再起播 ──
+     * 单声道 / >30min / CUE 子曲目保持原声（与 worker 的拒绝条件一致）。 */
+    if (seg_candidate) {
+        if (input_channels != 2 || g_total_duration <= 0 ||
+            g_total_duration > KARAOKE_WORKER_MAX_SECONDS) {
+            log_info("audio",
+                     "karaoke segments skipped: channels=%d duration=%ds (keep original)",
+                     input_channels, g_total_duration);
+            seg_candidate = 0;
+        }
+    }
+    if (seg_candidate) {
+        int wait_target = initial_seek_position > 0
+                              ? initial_seek_position / SEGMENT_DURATION_SEC
+                              : 0;
+        int wait_ms = initial_seek_position > 0 ? 8000 : 30000;
+        if (seg_wait_first(&seg_src, file_path, wait_target, wait_ms)) {
+            seg_mode = 1;
+            source_kind = seg_src.mode;
+            output_sample_rate = KARAOKE_SEGMENT_SAMPLE_RATE;
+            output_channels = KARAOKE_SEGMENT_CHANNELS;
+            log_info("audio", "karaoke segmented source ready (seg=%d) for '%s'",
+                     wait_target, file_path);
+        } else {
+            seg_mode = 0;
+            source_kind = KARAOKE_SOURCE_ORIGINAL;
+            /* R1：首段等待失败（worker FAILED/超时）同样带出具体原因。 */
+            seg_push_fallback_status(file_path, 0);
+            log_info("audio",
+                     "karaoke segments not ready (timeout/failed), keep original: '%s'",
+                     file_path);
+        }
+    }
+    {
+        int mode_now = seg_mode ? seg_src.mode : source_kind;
+        pthread_mutex_lock(&g_play_mutex);
+        g_karaoke_playback_source = mode_now;
+        pthread_mutex_unlock(&g_play_mutex);
+        if (mode_now != KARAOKE_SOURCE_ORIGINAL) {
+            log_info("audio", "playing karaoke cache source=%d%s for '%s'", mode_now,
+                     seg_mode ? " (segmented)" : "", file_path);
+        } else {
+            /* 以原声起播的取证点（E2E 断言"off 回原声 / 缓存未就绪回退"用；
+             * 只在 debug 日志里多一行，不改变播放行为）。config v12 起没有
+             * feature 开关，判据就是档位本身：mode=0 表示确为 Off 档。 */
+            log_info("audio", "playing original audio (karaoke mode=%d, source=original)",
+                     karaoke_get_mode());
+        }
+    }
+
     log_debug("audio", "Audio stream: rate=%d, channels=%d, codec=%s, duration=%ds",
               output_sample_rate, output_channels, codec ? codec->name : "unknown", g_total_duration);
 
@@ -871,8 +1459,11 @@ void *play_audio_thread(void *arg)
 
     /* Set total segments for this track */
     seg_pool.total_segments = segment_pool_total_for_duration(g_total_duration);
-    log_debug("audio", "Total segments for track: %d (%d sec)",
-              seg_pool.total_segments, g_total_duration);
+    if (seg_mode && seg_source_refresh(&seg_src, file_path) && seg_src.complete &&
+        seg_src.total > 0)
+        seg_pool.total_segments = seg_src.total;
+    log_debug("audio", "Total segments for track: %d (%d sec, seg_mode=%d)",
+              seg_pool.total_segments, g_total_duration, seg_mode);
 
     if (use_resampler) {
         swr_ctx = swr_alloc();
@@ -882,13 +1473,16 @@ void *play_audio_thread(void *arg)
         }
     }
 
-    if (init_atempo_filter(codec_ctx, g_playback_speed) < 0) {
+    if (seg_mode) {
+        /* v2 段是 44.1k 输入：atempo 由首次段解码按段格式惰性初始化。 */
+        cleanup_atempo_filter();
+        seg_dec.atempo_inited = 0;
+    } else if (init_atempo_filter(codec_ctx, g_playback_speed) < 0) {
         core_status_push(i18n_get("audio.err.init_speed_filter")); goto cleanup;
     }
 
     /* 每首曲子起播都从干净状态开始消人声：带着上一曲的延迟线出声
      * 会在前几帧冒出可闻的瞬态。 */
-    karaoke_reset();
 
     packet = av_packet_alloc();
     frame = av_frame_alloc();
@@ -914,7 +1508,8 @@ void *play_audio_thread(void *arg)
     /* Only use preload at 1.0x speed (preloaded PCM is not atempo-adjusted) */
     int used_preload = 0;
     pthread_mutex_lock(&g_preload_data.lock);
-    if (g_preload_data.valid && g_preload_data.track_index == index &&
+    if (!seg_mode && g_preload_data.valid && g_preload_data.track_index == index &&
+        g_preload_source_kind == source_kind &&
         g_preload_data.sample_rate == output_sample_rate &&
         g_preload_data.channels == output_channels &&
         g_playback_speed >= 0.99f && g_playback_speed <= 1.01f) {
@@ -994,7 +1589,27 @@ void *play_audio_thread(void *arg)
     /* ── If no preload, decode first segment(s) normally ── */
     /* For CUE tracks (cue_offset > 0): skip position-0 decode entirely;
      * the CUE seek block below will seek to the correct offset and decode. */
-    if (!used_preload && cue_offset == 0) {
+    if (seg_mode && !used_preload && cue_offset == 0 && initial_seek_position <= 0) {
+        /* v2：解码段 0 进池（首段等待已保证就绪；极小窗口再补 1s）。 */
+        char why[192] = {0};
+        if (!seg_source_refresh(&seg_src, file_path) || !seg_source_ready(&seg_src, 0))
+            (void)seg_wait_ready(&seg_src, file_path, 0, 1000);
+        int rc = seg_decode_into_pool(&seg_src, &seg_pool, seg_pool.current_slot, 0,
+                                      &seg_dec, output_sample_rate, output_channels,
+                                      0, g_playback_speed, why, sizeof(why));
+        if (rc == 1) {
+            segment_pool_mark_ready(&seg_pool, seg_pool.current_slot,
+                                    seg_pool.slots[seg_pool.current_slot].frame_count,
+                                    0, seg_pool.total_segments <= 1);
+            seg_pool.current_slot = 0;
+            seg_pool.current_segment_id = 0;
+        } else {
+            log_warn("audio",
+                     "karaoke segment 0 decode failed (%s), falling back to original",
+                     why);
+            seg_fallback_to_original(0, file_path, &seg_mode, &source_kind);
+        }
+    } else if (!used_preload && cue_offset == 0) {
         int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
         for (int s = 0; s < SEGMENT_POOL_SIZE && !decoder_finished; s++) {
             int seg_id = s;
@@ -1056,7 +1671,6 @@ void *play_audio_thread(void *arg)
             }
 
             /* 回到开头重新起播：清掉消人声滤波器的上一轮历史 */
-            karaoke_reset();
 
             audio_backend_flush_stream();
             g_current_position = 0;
@@ -1099,19 +1713,60 @@ void *play_audio_thread(void *arg)
         if (!wait_while_paused()) break;
 
         /* ── Phase 2: Seek check ── */
-        if (handle_seek_request_in_decoder(fmt_ctx, codec_ctx, swr_ctx,
-                                           packet, frame, filtered_frame,
-                                           &seg_pool, audio_stream_index,
-                                           output_sample_rate, output_channels,
-                                           use_resampler,
-                                           &decoder_draining, &decoder_finished,
-                                           cue_offset)) {
+        int seek_handled = 0;
+        if (seg_mode) {
+            seek_handled = handle_seek_request_segmented(
+                fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
+                &seg_pool, audio_stream_index, output_sample_rate, output_channels,
+                use_resampler, &decoder_draining, &decoder_finished, cue_offset,
+                file_path, &seg_src, &seg_dec, &seg_mode, &source_kind);
+        } else {
+            seek_handled = handle_seek_request_in_decoder(
+                fmt_ctx, codec_ctx, swr_ctx, packet, frame, filtered_frame,
+                &seg_pool, audio_stream_index, output_sample_rate, output_channels,
+                use_resampler, &decoder_draining, &decoder_finished, cue_offset);
+        }
+        if (seek_handled) {
             if (g_current_position >= g_total_duration) { g_play_thread_running = 0; break; }
             continue;
         }
 
         /* ── Phase 3: Fill empty slots ── */
-        if (!playback_error) {
+        if (seg_mode && !playback_error) {
+            /* v2：从段文件整段解码进池槽（未就绪就留空，后续等待/回退）。 */
+            int free_slot;
+            while ((free_slot = segment_pool_free_slot(&seg_pool)) >= 0) {
+                Segment *fs = &seg_pool.slots[free_slot];
+                int offset = (free_slot - seg_pool.current_slot + SEGMENT_POOL_SIZE) %
+                             SEGMENT_POOL_SIZE;
+                int want_seg = seg_pool.current_segment_id + offset;
+                if (fs->segment_id < 0)
+                    fs->segment_id = want_seg;
+                int global_seg = fs->segment_id;
+                if (global_seg != want_seg) {
+                    if (global_seg < seg_pool.current_segment_id) {
+                        fs->frame_count = 0;
+                        fs->consumed_frames = 0;
+                        fs->segment_id = global_seg = want_seg;
+                    } else {
+                        break;
+                    }
+                }
+                if (global_seg >= seg_pool.total_segments) break;
+                if (!seg_src.valid)
+                    (void)seg_source_refresh(&seg_src, file_path);
+                char why[160] = {0};
+                int rc = seg_decode_into_pool(&seg_src, &seg_pool, free_slot,
+                                              global_seg, &seg_dec,
+                                              output_sample_rate, output_channels, 0,
+                                              g_playback_speed, why, sizeof(why));
+                if (rc != 1)
+                    break;   /* 段未就绪/损坏：留给 Phase 4/5 等待或回退 */
+                segment_pool_mark_ready(
+                    &seg_pool, free_slot, fs->frame_count, global_seg,
+                    (seg_src.complete && global_seg >= seg_pool.total_segments - 1));
+            }
+        } else if (!playback_error) {
             int target_frames = output_sample_rate * SEGMENT_DURATION_SEC;
             int free_slot;
             while ((free_slot = segment_pool_free_slot(&seg_pool)) >= 0 && !decoder_finished) {
@@ -1166,6 +1821,87 @@ void *play_audio_thread(void *arg)
 
         /* ── Phase 4: Advance if current segment is done ── */
         if (segment_pool_current_done(&seg_pool)) {
+            if (seg_mode) {
+                /* 当前段无效 = 该段还没解码进池（切档重启/seek 之后常见：
+                 * 池里只有当前段，后面的段 worker 还没产出）。旧实现把
+                 * "无效当前段"当成 done 一路 advance（静默跳段），到段数
+                 * 用尽就直接 EOS，播放会提前结束。按 D3 语义处理：提示
+                 * worker 优先当前段、最多等 8s，就绪则解码继续；仍不就绪
+                 * 则从该位置回退原声继续（后续由 audio.c 的 re-acquire 恢复）。 */
+                if (!segment_pool_current(&seg_pool)) {
+                    int seg = seg_pool.current_segment_id;
+                    if (seg * SEGMENT_DURATION_SEC >= g_total_duration) {
+                        reached_end_of_stream = 1;
+                        break;
+                    }
+                    (void)karaoke_worker_hint_segment(file_path, seg);
+                    core_status_push(i18n_get("karaoke.status.segment_wait"));
+                    int okw = seg_wait_ready(&seg_src, file_path, seg, 8000);
+                    if (okw) {
+                        char why[160] = {0};
+                        int rc = seg_decode_into_pool(&seg_src, &seg_pool,
+                                                      seg_pool.current_slot, seg,
+                                                      &seg_dec, output_sample_rate,
+                                                      output_channels, 0,
+                                                      g_playback_speed, why,
+                                                      sizeof(why));
+                        if (rc == 1) {
+                            Segment *ns = &seg_pool.slots[seg_pool.current_slot];
+                            segment_pool_mark_ready(
+                                &seg_pool, seg_pool.current_slot,
+                                ns->frame_count, seg,
+                                (seg_src.complete &&
+                                 seg >= seg_pool.total_segments - 1));
+                            continue;
+                        }
+                        log_warn("audio", "karaoke segment %d decode failed (%s)",
+                                 seg, why);
+                    }
+                    log_info("audio",
+                             "karaoke segment %d not ready after wait, fallback original",
+                             seg);
+                    seg_fallback_to_original(seg * SEGMENT_DURATION_SEC, file_path,
+                                             &seg_mode, &source_kind);
+                    continue;
+                }
+                (void)seg_source_refresh(&seg_src, file_path);
+                if (seg_src.complete && seg_src.total > 0)
+                    seg_pool.total_segments = seg_src.total;
+                int next = seg_pool.current_segment_id + 1;
+                if (seg_src.complete && next >= seg_pool.total_segments) {
+                    reached_end_of_stream = 1;
+                    break;
+                }
+                if (next >= seg_pool.total_segments) {
+                    /* 估算段数用尽：D3 最长等 8s 等下一段；仍无则回退原声。 */
+                    if (next * SEGMENT_DURATION_SEC >= g_total_duration) {
+                        reached_end_of_stream = 1;
+                        break;
+                    }
+                    if (seg_wait_ready(&seg_src, file_path, next, 8000)) {
+                        if (next + 1 > seg_pool.total_segments)
+                            seg_pool.total_segments = next + 1;
+                    } else {
+                        seg_fallback_to_original(next * SEGMENT_DURATION_SEC, file_path,
+                                                 &seg_mode, &source_kind);
+                        continue;
+                    }
+                }
+                /* PCM 预加载仍服务原声/v1 下一曲；模型分离预取由 audio.c 状态
+                 * 回调（D5）负责，此处不重复。 */
+                extern AppConfig g_app_config;
+                if (g_app_config.seamless_preload && !preload_attempted &&
+                    seg_pool.current_segment_id >= seg_pool.total_segments - 2) {
+                    preload_attempted = 1;
+                    attempt_next_track_preload(index, &seg_pool,
+                                               output_sample_rate, output_channels);
+                }
+                if (segment_pool_advance(&seg_pool) < 0) {
+                    reached_end_of_stream = 1;
+                    break;
+                }
+                continue;
+            }
             if (segment_pool_is_last(&seg_pool)) {
                 reached_end_of_stream = 1;
                 break;
@@ -1229,6 +1965,43 @@ void *play_audio_thread(void *arg)
 
         /* ── Phase 5: Write batch from current segment ── */
         Segment *cur = segment_pool_current(&seg_pool);
+        if (!cur && seg_mode) {
+            /* 当前段未就绪：提示 worker + 等待 ≤8s；超时/失败回退原声（D3）。 */
+            int seg = seg_pool.current_segment_id;
+            if (seg * SEGMENT_DURATION_SEC >= g_total_duration) {
+                reached_end_of_stream = 1;
+                break;
+            }
+            (void)karaoke_worker_hint_segment(file_path, seg);
+            core_status_push(i18n_get("karaoke.status.segment_wait"));
+            int ok = seg_wait_ready(&seg_src, file_path, seg, 8000);
+            if (ok) {
+                char why[160] = {0};
+                int rc = seg_decode_into_pool(&seg_src, &seg_pool,
+                                              seg_pool.current_slot, seg, &seg_dec,
+                                              output_sample_rate, output_channels, 0,
+                                              g_playback_speed, why, sizeof(why));
+                if (rc == 1) {
+                    Segment *ns = &seg_pool.slots[seg_pool.current_slot];
+                    segment_pool_mark_ready(
+                        &seg_pool, seg_pool.current_slot, ns->frame_count, seg,
+                        (seg_src.complete && seg >= seg_pool.total_segments - 1));
+                    cur = segment_pool_current(&seg_pool);
+                } else {
+                    log_warn("audio", "karaoke segment %d decode failed (%s)", seg, why);
+                    ok = 0;
+                }
+            }
+            if (!cur) {
+                if (!ok)
+                    log_info("audio",
+                             "karaoke segment %d not ready after wait, fallback original",
+                             seg);
+                seg_fallback_to_original(seg * SEGMENT_DURATION_SEC, file_path,
+                                         &seg_mode, &source_kind);
+                continue;
+            }
+        }
         if (!cur) {
             /* Current slot invalid: try to recover by finding another
              * valid slot in the pool that still has unconsumed data.
@@ -1262,12 +2035,6 @@ void *play_audio_thread(void *arg)
         int remaining = segment_pool_current_remaining(&seg_pool);
         int batch = (remaining < WRITE_BATCH_FRAMES) ? remaining : WRITE_BATCH_FRAMES;
         int32_t *write_ptr = cur->data + cur->consumed_frames * seg_pool.channels;
-
-        /* 卡拉OK（消人声）：先消人声，再交给均衡器做整体音色塑形。
-         * 无条件调用：档位请求的消化与起坡/收坡都在 karaoke_process
-         * 块首完成，外部先查 is_active 再调用会让"降回不启用"的淡出
-         * 坡被掐断，退回成硬切。不启用时函数内部即刻直通返回。 */
-        karaoke_process(write_ptr, batch, seg_pool.channels, output_sample_rate);
 
         /* Equalizer */
         if (eq_is_enabled()) {
@@ -1321,6 +2088,7 @@ cleanup:
     audio_backend_cleanup_stream();
 
     if (pool_initialized) segment_pool_destroy(&seg_pool);
+    if (seg_dec.swr) swr_free(&seg_dec.swr);
     av_frame_free(&filtered_frame);
     av_frame_free(&frame);
     av_packet_free(&packet);

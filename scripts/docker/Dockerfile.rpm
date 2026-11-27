@@ -6,6 +6,9 @@
 ARG BASE_IMAGE=rockylinux:8
 FROM ${BASE_IMAGE}
 
+# 构建期下载内置消音模型（scripts/build/common.sh tm_ensure_model）：
+# aria2c 优先，宿主/镜像缺失时构建脚本回退 curl/wget。
+
 ARG FFMPEG_VERSION=8.1.2
 ARG EL_VERSION=8
 ARG DEBIAN_FRONTEND=noninteractive
@@ -32,7 +35,7 @@ RUN if [ "$EL_VERSION" = "7" ]; then \
             'gpgcheck=0' \
             > /etc/yum.repos.d/centos-sclo.repo; \
         yum install -y \
-            gcc gcc-c++ make cmake3 pkgconfig rpm-build rsync ca-certificates tar gzip \
+            gcc gcc-c++ make cmake3 pkgconfig rpm-build rsync ca-certificates tar gzip curl aria2 \
             ncurses-devel libcurl-devel libpng-devel libjpeg-turbo-devel \
             libxml2-devel dbus-devel sqlite-devel zlib-devel elfutils \
             devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-make && \
@@ -51,10 +54,14 @@ RUN if [ "$EL_VERSION" = "7" ]; then \
         else \
             dnf config-manager --set-enabled crb || true; \
         fi && \
+        { dnf install -y epel-release || \
+            echo "epel-release unavailable; aria2 may be missing (curl fallback applies)"; } && \
         dnf install -y \
-            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip \
+            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip curl \
             ncurses-devel libcurl-devel libpng-devel libjpeg-turbo-devel \
             libxml2-devel dbus-devel sqlite-devel zlib-devel elfutils && \
+        { dnf install -y aria2 || \
+            echo "aria2 unavailable on this EL; tm_ensure_model will fall back to curl/wget"; } && \
         { dnf install -y debugedit || echo "debugedit unavailable; debuginfo may be limited"; } && \
         dnf clean all; \
     fi

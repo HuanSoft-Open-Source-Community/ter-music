@@ -86,6 +86,12 @@ fi
 
 tm_log_info "DEB build: version=${VERSION} arch=${ARCH} source=${WITH_SOURCE} debug=${WITH_DEBUGINFO}"
 
+# 内置消音模型：下载/校验到 .tmp/models 缓存并复用；debian/rules 通过
+# TER_MUSIC_BUNDLED_MODEL 拿绝对路径注入，模型不复制进源码树。
+tm_ensure_model || exit 1
+export TER_MUSIC_BUNDLED_MODEL="$TM_MODEL_PATH"
+tm_log_info "bundled karaoke model: ${TER_MUSIC_BUNDLED_MODEL}"
+
 WORK="${REPO_ROOT}/.tmp/deb"
 SRC="${WORK}/${PACKAGE_NAME}-${VERSION}"
 OUT_BIN="${REPO_ROOT}/build/deb/amd64"
@@ -95,6 +101,10 @@ rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT_BIN" "$OUT_SRC"
 
 tm_stage_source "$SRC"
+# 模型复制进 staging 的 .tm-bundled-model/：debian/rules 在无环境变量时回退到
+# 该路径，--with-source 产出的源码包因此自包含（模型不会进入 git）。
+mkdir -p "${SRC}/.tm-bundled-model"
+cp -f -- "$TM_MODEL_PATH" "${SRC}/.tm-bundled-model/${TM_MODEL_NAME}"
 cd "$SRC"
 
 # 用 dch 在临时副本里追加当前版本条目；失败时用 Python 兜底。
@@ -197,10 +207,82 @@ fi
 extract="${WORK}/extract"
 rm -rf "$extract"
 dpkg-deb -x "$main_deb" "$extract"
-if readelf -d "${extract}/usr/bin/ter-music" | grep -E 'NEEDED.*(libav|libxml2)' >/dev/null; then
+
+# 安装布局（Linyaps 目录规范）：实体在 /opt/apps/<appid>/files，/usr 只有链接。
+opt_root="${extract}/opt/apps/${PACKAGE_NAME}/files"
+if [ ! -x "${opt_root}/bin/ter-music" ]; then
+    tm_log_error "binary is not installed at /opt/apps/${PACKAGE_NAME}/files/bin/ter-music"
+    exit 1
+fi
+if readelf -d "${opt_root}/bin/ter-music" | grep -E 'NEEDED.*(libav|libxml2)' >/dev/null; then
     tm_log_error "binary has libav*/libxml2 DT_NEEDED"
     exit 1
 fi
+
+# 内置模型 + 第三方 NOTICE 必须随包分发且内容正确。
+model_path="${opt_root}/share/ter-music/models/uvr-mdxnet-3-9662.onnx"
+if [ ! -f "$model_path" ]; then
+    tm_log_error "deb is missing bundled karaoke model: ${model_path}"
+    exit 1
+fi
+model_size="$(wc -c < "$model_path" | tr -d ' \n')"
+if [ "$model_size" != "$TM_MODEL_SIZE" ]; then
+    tm_log_error "bundled model size ${model_size} != expected ${TM_MODEL_SIZE}"
+    exit 1
+fi
+model_sha="$(tm_sha256_of "$model_path")"
+if [ "$model_sha" != "$TM_MODEL_SHA256" ]; then
+    tm_log_error "bundled model sha256 ${model_sha} != expected ${TM_MODEL_SHA256}"
+    exit 1
+fi
+if [ ! -f "${opt_root}/share/ter-music/models/NOTICE.md" ]; then
+    tm_log_error "deb is missing third-party notice: ${opt_root}/share/ter-music/models/NOTICE.md"
+    exit 1
+fi
+for data in \
+    "${opt_root}/share/ter-music/lang/zh_CN.xml" \
+    "${opt_root}/share/ter-music/lang/en_US.xml" \
+    "${opt_root}/share/ter-music/lang/zh-PQ.xml" \
+    "${opt_root}/share/ter-music/help/help-quickstart-zh_CN.txt" \
+    "${opt_root}/share/ter-music/help/help-quickstart-en_US.txt" \
+    "${opt_root}/share/ter-music/help/help-quickstart-zh-PQ.txt" \
+    "${opt_root}/share/ter-music/layouts/layouts.json" \
+    "${opt_root}/share/applications/ter-music.desktop"; do
+    if [ ! -f "$data" ]; then
+        tm_log_error "deb is missing packaged data file: ${data#${extract}}"
+        exit 1
+    fi
+done
+
+deb_listing_file="${WORK}/deb-listing.txt"
+dpkg-deb -c "$main_deb" > "$deb_listing_file"
+assert_deb_path() { # <正则> <说明>
+    if ! grep -Eq "$1" "$deb_listing_file"; then
+        tm_log_error "deb layout check failed: $2 (pattern: $1)"
+        exit 1
+    fi
+}
+assert_deb_path "^-.* \./opt/apps/${PACKAGE_NAME}/files/bin/ter-music$" \
+    "实体二进制必须装在 /opt/apps/<appid>/files/bin"
+assert_deb_path " \./usr/bin/ter-music -> .*opt/apps/${PACKAGE_NAME}/files/bin/ter-music$" \
+    "/usr/bin/ter-music 必须是指向 opt 实体的符号链接"
+assert_deb_path " \./usr/share/applications/ter-music\.desktop -> " \
+    "desktop 必须是指向 opt 实体的符号链接"
+assert_deb_path " \./usr/share/icons/hicolor/(32x32|48x48|128x128)/apps/ter-music\.png -> " \
+    "PNG 图标必须是符号链接"
+assert_deb_path " \./usr/share/icons/hicolor/scalable/apps/ter-music\.svg -> " \
+    "SVG 图标必须是符号链接"
+assert_deb_path "^-.* \./opt/apps/${PACKAGE_NAME}/files/share/ter-music/models/uvr-mdxnet-3-9662\.onnx$" \
+    "内置模型必须以普通文件随包安装"
+if grep -Eq "^-.* \./usr/bin/ter-music$" "$deb_listing_file"; then
+    tm_log_error "deb still ships a real /usr/bin/ter-music file"
+    exit 1
+fi
+if grep -Eq "^-.* \./usr/share/ter-music/" "$deb_listing_file"; then
+    tm_log_error "deb still ships real data files under /usr/share/ter-music"
+    exit 1
+fi
+tm_log_info "deb layout verified: /opt entity + /usr symlinks + bundled model + NOTICE"
 
 tm_fix_ownership
 if [ "$KEEP_TEMP" != true ]; then

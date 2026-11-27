@@ -56,6 +56,14 @@
  *     SetKaraoke 回 UnknownMethod，前端只记日志、档位显示为“不启用”
  *     （旧核心的配置里也没有这个键），不会因此拒绝接入。
  *
+ *     **config v12 的语义澄清（api_version 仍为 7）**：模型随包内置（固定
+ *     uvr-mdxnet-3-9662），没有“功能开关/模型选择”两个配置键，因此
+ *     SetKaraoke 没有前置条件——取值域 0/1/2 一律接受，越界回 false；
+ *     GetKaraoke 恒回当前档位。方法名/参数/返回类型都没变，属于放松前置
+ *     条件而非协议变更，故不抬 api_version；旧前端（不知道 v12）照旧可用，
+ *     新前端接更旧的核心时仍按“核心拒绝”处理（SetKaraoke 回 false、档位
+ *     显示退回 off），双向兼容。
+ *
  * 7 = 命名空间迁移（**破坏性**，非增量）：接口与错误前缀由
  *     org.yxzl.ter_music.* 整体改为 cn.org.huansoft.ter_music.*（随包名
  *     cn.org.huansoft.ter-music 一并迁移）。方法面本身与 6 完全相同，

@@ -9,6 +9,9 @@
 #define SEGMENT_DURATION_SEC     15
 #define SEGMENT_POOL_SIZE          3    /* current + next + next+1 */
 #define SEGMENT_MIN_SPEED       0.75f  /* lowest atempo for worst-case buffer sizing */
+/* atempo 跨段复用会带来固定算法延迟（输出可能略多于 15s/0.75），留一点余量，
+ * 避免段尾被容量截断（v2 分段播放按整段 FLAC 解码，容量即最坏输出）。 */
+#define SEGMENT_CAPACITY_MARGIN_FRAMES 8192
 #define PRELOAD_SEGMENT_COUNT      1    /* segments to pre-decode for next track */
 
 /* ── Segment: a single 15-second PCM buffer ── */
@@ -76,7 +79,8 @@ void segment_pool_reset(SegmentPool *pool);
 static inline int segment_pool_capacity_frames(const SegmentPool *pool)
 {
     if (!pool || pool->sample_rate <= 0) return 0;
-    return (int)(pool->sample_rate * SEGMENT_DURATION_SEC / SEGMENT_MIN_SPEED);
+    return (int)(pool->sample_rate * SEGMENT_DURATION_SEC / SEGMENT_MIN_SPEED) +
+           SEGMENT_CAPACITY_MARGIN_FRAMES;
 }
 
 static inline int segment_id_from_position(int position_sec)

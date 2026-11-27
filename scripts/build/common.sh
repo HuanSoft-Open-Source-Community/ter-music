@@ -397,6 +397,172 @@ tm_ensure_appimage_runtime() {
     tm_lock_run "${TM_LOCK_DIR}/appimage-runtime.lock" tm__ensure_appimage_runtime_locked
 }
 
+# ── 内置消音模型（UVR-MDX-NET 3 / 9662）────────────────────────────
+#
+# 模型是随包数据文件（不是 git 内容）：构建时下载到 .tmp/models/ 缓存，
+# 命中后校验大小 + SHA256 直接复用；下载走 aria2c（构建镜像内安装），
+# 缺失时回退 curl/wget。下载先写 .part 再原子改名，坏文件绝不入库。
+#
+# 这里的常量必须与 CMakeLists.txt（TER_MUSIC_BUNDLED_MODEL_SIZE / _SHA256）
+# 和 resources/models/NOTICE.md 完全一致；CMake 在出包前还会再校验一次。
+TM_MODEL_ID="uvr-mdxnet-3-9662"
+TM_MODEL_NAME="UVR_MDXNET_3_9662.onnx"
+TM_MODEL_SIZE=29704436
+TM_MODEL_SHA256="e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc"
+TM_MODEL_URL="${TER_MUSIC_MODEL_URL:-https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx}"
+TM_MODEL_CACHE_DIR="${TER_MUSIC_MODEL_CACHE_DIR:-${TM_REPO_ROOT}/.tmp/models}"
+TM_MODEL_CACHE="${TM_MODEL_CACHE_DIR}/${TM_MODEL_NAME}"
+# tm_ensure_model / tm_stage_bundled_model 成功后指向可用模型的绝对路径。
+TM_MODEL_PATH=""
+TM_MODEL_STAGED_PATH=""
+
+# 计算文件 SHA256：优先 coreutils sha256sum，再退 shasum / python3。
+tm_sha256_of() {
+    local file="${1:-}"
+    [ -f "$file" ] || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 - "$file" <<'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[1], "rb") as handle:
+    for chunk in iter(lambda: handle.read(1 << 20), b""):
+        digest.update(chunk)
+print(digest.hexdigest())
+PY
+    else
+        return 1
+    fi
+}
+
+# 文件字节数；文件不存在时输出 0。
+tm_file_size() {
+    local size
+    size="$(wc -c < "${1:-/nonexistent}" 2>/dev/null | tr -d ' \n')"
+    printf '%s' "${size:-0}"
+}
+
+# 模型是否命中缓存且内容正确（大小 + SHA256）。
+tm_model_is_valid() {
+    local file="${1:-}"
+    [ -n "$file" ] && [ -f "$file" ] || return 1
+    [ "$(tm_file_size "$file")" = "$TM_MODEL_SIZE" ] || return 1
+    [ "$(tm_sha256_of "$file")" = "$TM_MODEL_SHA256" ]
+}
+
+# 用 aria2c 下载到 dest（调用方传 .part 临时路径）；aria2c 不存在时返回 127。
+tm__download_model_with_aria2() {
+    local url="${1:-}"
+    local dest="${2:-}"
+    command -v aria2c >/dev/null 2>&1 || return 127
+    if [ -z "$url" ] || [ -z "$dest" ]; then
+        tm_log_error "tm__download_model_with_aria2: url and destination are required"
+        return 1
+    fi
+    local dir name
+    dir="$(dirname "$dest")"
+    name="$(basename "$dest")"
+    mkdir -p -- "$dir"
+    tm_log_info "downloading karaoke model with aria2c: ${url}"
+    aria2c --allow-overwrite=true --auto-file-renaming=false \
+        --file-allocation=none --console-log-level=warn \
+        --summary-interval=0 --retry-wait=3 --max-tries=3 \
+        --connect-timeout=20 -d "$dir" -o "$name" "$url"
+}
+
+# 锁内执行：校验缓存 → aria2c 优先 → curl/wget 回退 → 校验 → 原子改名。
+tm__ensure_model_locked() {
+    if tm_model_is_valid "$TM_MODEL_CACHE"; then
+        tm_log_info "using cached karaoke model: ${TM_MODEL_CACHE}"
+        return 0
+    fi
+
+    if [ -e "$TM_MODEL_CACHE" ]; then
+        tm_log_warn "cached karaoke model failed validation, discarding: ${TM_MODEL_CACHE}"
+        rm -f -- "$TM_MODEL_CACHE"
+    fi
+
+    mkdir -p -- "$TM_MODEL_CACHE_DIR"
+    local tmp="${TM_MODEL_CACHE}.part.$$"
+    rm -f -- "$tmp"
+
+    local aria_rc=1
+    if tm__download_model_with_aria2 "$TM_MODEL_URL" "$tmp"; then
+        aria_rc=0
+    else
+        aria_rc=$?
+        rm -f -- "$tmp"
+        tm_log_info "aria2c unavailable or failed (rc=${aria_rc}); falling back to curl/wget"
+        if ! tm_download_to "$TM_MODEL_URL" "$tmp"; then
+            rm -f -- "$tmp"
+            tm_log_error "failed to download karaoke model: ${TM_MODEL_URL}"
+            tm_log_error "offline build: put a valid ${TM_MODEL_NAME} (${TM_MODEL_SIZE} bytes, sha256 ${TM_MODEL_SHA256}) at ${TM_MODEL_CACHE} first"
+            return 1
+        fi
+    fi
+
+    if ! tm_model_is_valid "$tmp"; then
+        local got_size got_sha
+        got_size="$(tm_file_size "$tmp")"
+        got_sha="$(tm_sha256_of "$tmp" 2>/dev/null || true)"
+        rm -f -- "$tmp"
+        tm_log_error "downloaded karaoke model failed validation: size=${got_size:-0} (expect ${TM_MODEL_SIZE}), sha256=${got_sha:-<unknown>} (expect ${TM_MODEL_SHA256})"
+        tm_log_error "refusing to package a wrong/corrupted model: ${TM_MODEL_URL}"
+        return 1
+    fi
+
+    mv -f -- "$tmp" "$TM_MODEL_CACHE"
+    tm_log_info "karaoke model cached: ${TM_MODEL_CACHE}"
+}
+
+# tm_ensure_model
+# 确保 .tmp/models/UVR_MDXNET_3_9662.onnx 存在且校验通过；成功后
+# TM_MODEL_PATH 指向该文件。失败给出可读错误并返回非 0。
+tm_ensure_model() {
+    TM_MODEL_PATH=""
+    if tm_model_is_valid "$TM_MODEL_CACHE"; then
+        TM_MODEL_PATH="$TM_MODEL_CACHE"
+        tm_log_info "using cached karaoke model: ${TM_MODEL_PATH}"
+        return 0
+    fi
+
+    tm_log_info "karaoke model ${TM_MODEL_ID} missing or invalid in cache; fetching..."
+    if ! tm_lock_run "${TM_LOCK_DIR}/karaoke-model.lock" tm__ensure_model_locked; then
+        tm_log_error "karaoke model is not available (cache: ${TM_MODEL_CACHE}); packaging aborted"
+        return 1
+    fi
+    if ! tm_model_is_valid "$TM_MODEL_CACHE"; then
+        tm_log_error "karaoke model cache is still invalid after download: ${TM_MODEL_CACHE}"
+        return 1
+    fi
+    TM_MODEL_PATH="$TM_MODEL_CACHE"
+    tm_log_info "karaoke model ready: ${TM_MODEL_PATH} (size=${TM_MODEL_SIZE}, sha256=${TM_MODEL_SHA256})"
+}
+
+# tm_stage_bundled_model <dest-dir>
+# 把校验过的模型复制进构建 staging（rpm/aur/linyaps 需要源码树内路径；
+# staging 都在 .tmp/ 下，不会出现在 git 工作树）。成功后
+# TM_MODEL_STAGED_PATH 指向复制后的文件。
+tm_stage_bundled_model() {
+    local dest_dir="${1:-}"
+    TM_MODEL_STAGED_PATH=""
+    if [ -z "$dest_dir" ]; then
+        tm_log_error "tm_stage_bundled_model: destination directory is required"
+        return 1
+    fi
+    tm_ensure_model || return 1
+    mkdir -p -- "$dest_dir"
+    local dest="${dest_dir}/${TM_MODEL_NAME}"
+    cp -f -- "$TM_MODEL_PATH" "$dest"
+    TM_MODEL_STAGED_PATH="$dest"
+    tm_log_info "bundled karaoke model staged: ${dest}"
+}
+
 # 容器构建后用宿主 UID/GID 修复 build/ 与 .tmp/；非 root 时只保证可写。
 tm_fix_ownership() {
     local dir

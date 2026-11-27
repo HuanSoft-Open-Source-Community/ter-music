@@ -484,7 +484,13 @@ DBusMessage *rpc_control_handle(DBusMessage *message) {
     }
     /* 卡拉OK（消人声）档位：与 SetSpeed/SetPlayMode 同构——校验取值域、
      * 交给 rpc_action_* 同步镜像并去抖落盘；越界回 false（不是错误），
-     * 与 SetPlayMode 的口径一致。 */
+     * 与 SetPlayMode 的口径一致。
+     *
+     * config v12：模型随包内置、没有"功能开关/模型选择"，因此**不再有
+     * "功能未启用"拒绝**：SetKaraoke(0..2) 一律接受，GetKaraoke 恒回当前档位。
+     * 接口面（方法名/参数/返回类型）与 v7 完全相同，api_version 不变。
+     * 模型缺失/损坏不影响档位设置本身，只影响分离成功与否（失败回退原声
+     * 并在状态行给出原因）。 */
     if (strcmp(member, "SetKaraoke") == 0) {
         DBusError error;
         dbus_int32_t mode = 0;
@@ -506,6 +512,7 @@ DBusMessage *rpc_control_handle(DBusMessage *message) {
         return rpc_reply_bool(message, rpc_action_set_karaoke_mode((int)mode));
     }
     if (strcmp(member, "GetKaraoke") == 0) {
+        /* config v12：没有功能开关，档位就是唯一事实来源。 */
         return rpc_reply_int(message, karaoke_get_mode());
     }
     if (strcmp(member, "ReloadConfig") == 0) {

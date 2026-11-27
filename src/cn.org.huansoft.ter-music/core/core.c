@@ -11,6 +11,8 @@
 #include "core/core.h"
 
 #include "audio/audio.h"
+#include "audio/audio_internal.h"   /* karaoke_tick()：播放中切档的待切换检查 */
+#include "audio/karaoke_worker.h"
 #include "config/config.h"
 #include "lyrics/lyrics.h"
 #include "media/rpc.h"
@@ -164,6 +166,9 @@ void core_config_apply_runtime(void)
      * 必须立刻反映到播放线程，不能像均衡器那样只在引擎初始化时同步一次。
      * karaoke_set_mode 幂等（同值直接返回），去抖落盘只会重写同一份值。 */
     karaoke_set_mode(g_app_config.karaoke_mode);
+    /* config v12 起没有"功能开关/模型选择"：模型固定在包内，档位即开关。
+     * 切到 Off 不取消正在跑的分离 job（与旧版 feature 保持开启时一致），
+     * 避免用户来回切档时反复丢弃已完成的进度。 */
 }
 
 void core_config_apply(void)
@@ -187,6 +192,10 @@ void core_tick(void)
 {
     reap_finished_playback_thread();
     process_pending_playback_action();
+
+    /* 播放中切档（Off→Soft/Full 等）的待切换检查：内部限频 250ms，
+     * 目标段就绪后自动换源（见 audio/karaoke_tick()）。 */
+    karaoke_tick();
 
     /* 歌词高亮由后端按播放位置推进（数据与推进都归后端） */
     if (lyrics_tick()) {

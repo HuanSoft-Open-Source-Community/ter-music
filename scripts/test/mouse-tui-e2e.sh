@@ -17,10 +17,13 @@
 #       频带/预增益的值（上滚 +1 dB、下滚 -1 dB，钳制在 ±12 dB），点另一个
 #       频带后滚轮的作用目标随之切换；开关行上的滚轮只被消费，不切换开关。
 #   S9 子视图（设置）侧栏与内容区各自认领滚轮，归属不串台。
+#   S10a 按钮常显（config v12）：没有功能开关，默认 Off 下控制区第 8 个按钮
+#       也在——命中表里格7 有行列、屏幕有按钮文案、点击能开消人声弹层。
 #   S10 控制区第 8 个按钮（卡拉OK/消人声）：点击开弹层、弹层滚轮移选、
 #       Enter 落定写进核心，Esc 取消则不改档。
-#   S11 设置页「播放设置」子页末行的消人声档位（键盘路径：F2 → 侧栏 →
-#       内容区 → 弹层选定），并用弹层标题反证行序没有变。
+#   S11 设置页「播放设置」子页的消人声三档行（键盘路径：F2 → 侧栏 →
+#       内容区 → 弹层选定）：v12 删除了功能行，本组末行就是档位行。
+#   S11b 设置页不再有「启用卡拉OK（选择模型）」功能行（v12 删除）。
 #
 # 排障开关：TM_DUMP=1 时，弹层检测失败会把当时的屏幕网格片段打到结果里。
 #
@@ -86,6 +89,7 @@ if [ -z "${TM_TEST_BUS_READY:-}" ] && [ "${TM_TEST_REUSE_SESSION_BUS:-0}" != "1"
 fi
 
 cleanup() {
+    [ -n "${CORE_FG_PID:-}" ] && kill "$CORE_FG_PID" 2>/dev/null || true
     [ -n "$DRIVER_PID" ] && kill -9 "$DRIVER_PID" 2>/dev/null || true
     wait "$DRIVER_PID" 2>/dev/null || true   # 收掉后台作业的状态回显，别在 CI 日志里留噪声
     "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true
@@ -102,6 +106,7 @@ command -v python3 >/dev/null 2>&1 || { echo "错误：需要 python3" >&2; exit
 DRIVER="$SCRIPT_DIR/lifecycle-driver.py"
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tm-mouse-XXXXXX")"
+CORE_FG_PID=""
 export HOME="$WORK_DIR/home"
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_CACHE_HOME="$HOME/.cache"
@@ -127,6 +132,20 @@ printf '[00:02.00]第一句\n[00:05.00]第二句\n[00:08.00]第三句\n[00:12.00
 # ── 会话与观测 ────────────────────────────────────────────────────
 CTL_FILE="$WORK_DIR/keys.cmd"; : > "$CTL_FILE"
 send() { printf 'key:%s\n' "$1" >> "$CTL_FILE"; sleep "${2:-0.9}"; }
+
+# 先在私有总线上起一个前台核心，TUI 起来后直接接入该实例。
+# 常规宿主的 TUI 会自己 fork 核心；受限宿主/容器里 CLI 可能拒绝 detach fork，
+# 预起核心让"鼠标/布局/控制面"这些真正的断言不受进程归属影响。
+daemon_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
+"$TM_BIN" daemon start >/dev/null 2>&1
+for _ in $(seq 1 40); do daemon_up && break; sleep 0.25; done
+if ! daemon_up; then
+    "$TM_BIN" daemon foreground >"$WORK_DIR/core-foreground.log" 2>&1 &
+    CORE_FG_PID=$!
+    for _ in $(seq 1 80); do daemon_up && break; sleep 0.25; done
+fi
+daemon_up && ok "预起播放核心上线（TUI 将 attach 到该实例）" \
+    || { bad "播放核心未上线"; exit 1; }
 
 python3 "$DRIVER" drive "$TM_BIN" "$MUSIC" "$WORK_DIR/tui.log" \
     --ctl "$CTL_FILE" --rc-file "$WORK_DIR/tui.rc" --pid-file "$WORK_DIR/tui.pid" \
@@ -749,12 +768,43 @@ else
     bad "倍速连续下滚 8 次没回到 ${s0}x（末值 $prev）"
 fi
 
+# ── S10a 按钮常显（config v12）：默认 Off 也显示第 8 个卡拉OK按钮 ──
+#       模型随包内置、没有"功能开关/模型选择"，控制栏按钮不再被门禁隐藏。
+#       控制按钮可见性仍收在唯一几何来源 controls_compute_layout()，因此三处
+#       一起验：命中表格7 有行列（鼠标命中/滚轮几何）、屏幕有按钮文案、
+#       点击按钮能打开消人声弹层。
+info "S10a 按钮常显：默认配置下控制区就有卡拉OK按钮"
+send "<Esc>" 0.5                        # 收掉前面用例可能残留的弹层
+"$TM_BIN" karaoke off >/dev/null 2>&1
+kar_wait 0 >/dev/null 2>&1
+KARA_CELL="$(cell 7)"
+if [ -n "$KARA_CELL" ]; then
+    ok "默认配置下命中表有格7（按钮参与布局/渲染/命中，格7=$KARA_CELL）"
+else
+    bad "默认配置下命中表没有格7（按钮被隐藏，违反 v12 常显契约）"
+fi
+HT="$(grep -h "控制区命中表" "$(mlog)" 2>/dev/null | tail -1)"
+case "$HT" in
+    *"格7=-1"*) bad "命中表原始行仍把格7 标成未分配（$HT）" ;;
+    *)          ok "命中表原始行确认格7 已分配行列（默认 Off 也常显）" ;;
+esac
+if screen_has '卡拉OK:(不启用|人声较弱|消除人声)|Karaoke:(Off|Faint vocals|No vocals)'; then
+    ok "主界面显示卡拉OK按钮文案（默认 Off 也常显）"
+else
+    bad "主界面没有卡拉OK按钮文案（按钮应常显）"
+fi
+send "<click:10:23>" 0.8                # 控制区第一行空白（不压任何按钮）
+if karaoke_popup_on_screen; then
+    bad "点击控制区空白处竟打开了消人声弹层"
+else
+    ok "点击控制区空白处不命中卡拉OK入口（无弹层）"
+fi
+
 # ── S10 卡拉OK按钮：点击开弹层 → 滚轮移选 → Enter 生效 ──────────
-#       新增的第 8 个按钮（CONTROL_IDX_KARAOKE=7）走的正是模式/倍速/音量
+#       第 8 个按钮（CONTROL_IDX_KARAOKE=7）走的正是模式/倍速/音量
 #       那一套弹层机制。这里既验它没被 100 列布局挤掉（命中表里得有格7），
 #       也验"鼠标开层 + 弹层滚轮选定 + Enter 落定"真的把档位写进了核心。
 info "S10 控制区卡拉OK按钮：弹层选档写进核心"
-KARA_CELL="$(cell 7)"
 if [ -z "$KARA_CELL" ]; then
     bad "命中表里没有格7（卡拉OK按钮在当前宽度下被丢弃，按钮排布需重新测量）"
 else
@@ -815,20 +865,27 @@ else
     "$TM_BIN" karaoke off >/dev/null 2>&1
 fi
 
-# ── S11 设置页「播放设置」里的消人声档位 ─────────────────────────
+# ── S11 设置页「播放设置」里的消人声三档行 ──────────────────────
 #       设置页是纯键盘路径（弹层只有 Enter，没有 ←/→ 微调），所以这里
 #       走完"进视图 → 侧栏切子页 → 移到末行 → Enter 开层 → 选定"整条链。
-#       行号对不对，用弹层标题的制表符锚点来验：开错行就没有 "─ 消人声" 这行。
-info "S11 设置页：播放设置子页的消人声档位"
+#       config v12 删除了 v11 的"启用卡拉OK（选择模型）"功能行：本组末行
+#       就是消人声档位行（不再需要"再上一行"）。行号对不对，用弹层标题的
+#       制表符锚点来验：开错行就没有 "─ 消人声" 这行。
+info "S11 设置页：播放设置子页的消人声三档行（v12 唯一一行）"
 "$TM_BIN" karaoke off >/dev/null 2>&1
 kar_wait 0 >/dev/null 2>&1
 send "<F2>" 1.4                      # 进设置视图（侧栏复位到第 0 项）
 send "<Down>" 0.6; send "<Down>" 0.6 # 侧栏 0→2 = 播放设置
 send "<Right>" 0.8                   # 焦点进内容区，选中项回到本组第 0 行
-send "<Up>" 0.8                      # 第 0 行再往上＝回绕到本组末行（消人声）
+send "<Up>" 0.8                      # 回绕到本组末行 = 消人声档位行
+if screen_has '启用卡拉OK|Enable Karaoke|启 ?用 ?卡 ?拉 ?OK'; then
+    bad "设置页仍有「启用卡拉OK（选择模型）」功能行（v12 已删除）"
+else
+    ok "设置页没有「启用卡拉OK（选择模型）」功能行（v12 删除）"
+fi
 send "<Enter>" 1.0                   # 弹出三档选择层
 if karaoke_popup_on_screen; then
-    ok "设置页末行的弹层标题是消人声（行序正确）"
+    ok "设置页末行的弹层标题是消人声（末行=三档行，行序正确）"
 else
     bad "设置页末行开出来的弹层不是消人声（子页项序变了，需重新数行）"
     send "<Esc>" 0.5
@@ -840,7 +897,27 @@ if kar_wait 2; then
 else
     bad "设置页的选定没写进核心（档位 $(kar_level)，期望 2）"
 fi
-send "<Esc>" 0.8                     # 退出设置视图，恢复主页给后面的用例
+send "<Esc>" 0.8                     # 退出设置视图，回主界面
+
+# ── S11b 设置页不再有功能行（config v12 删除）─────────────────────
+#       v11 的「启用卡拉OK（选择模型）」功能行（更换模型/关闭功能）已删除，
+#       配置里也不再有 karaoke_feature/karaoke_model 两个键。
+info "S11b 设置页与配置面都不再有功能开关/模型选择"
+"$TM_BIN" config get karaoke_feature >/dev/null 2>&1 \
+    && bad "config get karaoke_feature 仍可用（键应已删除）" \
+    || ok "config get karaoke_feature 被拒绝（v12 已删除该键）"
+"$TM_BIN" config get karaoke_model >/dev/null 2>&1 \
+    && bad "config get karaoke_model 仍可用（键应已删除）" \
+    || ok "config get karaoke_model 被拒绝（v12 已删除该键）"
+send "<F2>" 1.4                      # 重新进设置视图，扫一遍播放设置页
+send "<Down>" 0.6; send "<Down>" 0.6
+send "<Right>" 0.8
+if screen_has '更换模型文件|Change the model file|关闭卡拉OK|Disable karaoke'; then
+    bad "设置页/弹层仍出现「更换模型文件/关闭卡拉OK」（模型选择 UI 应已删除）"
+else
+    ok "设置页不再出现「更换模型文件/关闭卡拉OK」模型选择 UI"
+fi
+send "<Esc>" 0.8
 "$TM_BIN" karaoke off >/dev/null 2>&1
 kar_wait 0 >/dev/null 2>&1
 

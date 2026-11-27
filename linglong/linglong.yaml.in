@@ -25,15 +25,36 @@ sources:
 
 build: |
   cd ter-music
+  # 内置消音模型（UVR-MDX-NET 3 / 9662）已由 scripts/build/build-linyaps.sh
+  # 从 .tmp/models 缓存复制进源码树的 bundled-model/，随 linyaps 源码一起进入
+  # 构建容器；这里用 CMake 注入并在安装后自检大小 + SHA256 + NOTICE。
+  BUNDLED_MODEL="$PWD/bundled-model/UVR_MDXNET_3_9662.onnx"
+  if [ ! -f "$BUNDLED_MODEL" ]; then
+    echo "missing bundled karaoke model: $BUNDLED_MODEL" >&2
+    echo "build with scripts/build/build-linyaps.sh (tm_ensure_model downloads it)" >&2
+    exit 1
+  fi
   mkdir -p build
   cd build
   cmake .. -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=${PREFIX} \
     -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' \
     -DTER_MUSIC_VERSION=@VERSION@ \
+    -DTER_MUSIC_BUNDLED_MODEL="$BUNDLED_MODEL" \
     -DINSTALL_LINYAPS_INTEGRATION=ON
   make -j$(nproc)
   make install
+  MODEL_DIR="${PREFIX}/share/ter-music/models"
+  if [ ! -f "${MODEL_DIR}/uvr-mdxnet-3-9662.onnx" ] || [ ! -f "${MODEL_DIR}/NOTICE.md" ]; then
+    echo "bundled model/NOTICE not installed under ${MODEL_DIR}" >&2
+    exit 1
+  fi
+  if [ "$(stat -c %s "${MODEL_DIR}/uvr-mdxnet-3-9662.onnx")" != "29704436" ]; then
+    echo "bundled model size mismatch under ${MODEL_DIR}" >&2
+    exit 1
+  fi
+  echo "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc  ${MODEL_DIR}/uvr-mdxnet-3-9662.onnx" | sha256sum -c - || exit 1
+  echo "bundled karaoke model verified: ${MODEL_DIR}/uvr-mdxnet-3-9662.onnx"
   mkdir -p ${PREFIX}/lib
   for dep in libblas.so.3 liblapack.so.3 libmpg123.so.0; do
     dep_path=$(find /usr/lib /lib \( -type f -o -type l \) -name "${dep}" 2>/dev/null | head -n 1)

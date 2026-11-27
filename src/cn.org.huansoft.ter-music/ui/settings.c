@@ -12,8 +12,10 @@
 
 #include "types.h"
 #include "audio/audio.h"
+#include "audio/karaoke_model.h"   /* 内置消音模型表（署名/来源/SHA256 展示） */
 #include "audio/play_queue.h"
 #include "ui/dialog.h"
+#include "ui/file_picker.h"
 #include "player/player.h"
 #include "ui/ui.h"
 #include "ui/layout.h"
@@ -177,11 +179,14 @@ static const char *settings_options[] = {
     "settings.opt.appearance_mode",
     "settings.opt.detect_background",
     "settings.opt.terminal_mode"
+    /* config v12：删除了 v11 尾部那行「启用卡拉OK（选择模型）」（模型随包
+     * 内置、固定 uvr-mdxnet-3-9662），设置页只保留三档行。 */
 };
 
 /* 与 SETTINGS_IDX_* 一一对应的选项总数（含 eq_preset、reload/reset；Task 5.4/5.5，
  * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new，
- * 54..59 的窗格颜色项，以及 60 的卡拉OK（消人声）档位）。 */
+ * 54..59 的窗格颜色项，60 的卡拉OK（消人声）档位，61..63 的终端外观）。
+ * config v12 删除了 64 号"启用/更换模型"功能行（模型随包内置）。 */
 #define SETTINGS_OPTION_COUNT 64
 
 /* 编译期护栏：文案表必须与枚举/段数组使用同一数量。 */
@@ -267,6 +272,8 @@ enum {
     SETTINGS_IDX_APPEARANCE_MODE     = 61,
     SETTINGS_IDX_DETECT_BACKGROUND   = 62,
     SETTINGS_IDX_TERMINAL_MODE       = 63
+    /* config v12：v11 尾部的 SETTINGS_IDX_KARAOKE_FEATURE(64) 已删除 ——
+     * 模型随包内置，设置页不再有"启用/更换/关闭模型"行。 */
 };
 
 typedef struct {
@@ -330,7 +337,8 @@ static const int settings_playback_option_indices[] = {
     SETTINGS_IDX_AUDIO_BACKEND,
     SETTINGS_IDX_SORT_MODE,
     SETTINGS_IDX_CUE_ENCODING,
-    /* 卡拉OK（消人声）：与延迟/后端同属音频链路，尾部追加 */
+    /* 卡拉OK（消人声）：与延迟/后端同属音频链路，尾部追加。
+     * config v12 起这是本组最后一行（功能行已删除），按钮/三档始终可用。 */
     SETTINGS_IDX_KARAOKE_MODE
 };
 
@@ -486,7 +494,7 @@ static const char *info_preset_label(int preset)
     }
 }
 
-/* 卡拉OK（消人声）档位的显示名：取值域就是 audio/karaoke.h 的 KARAOKE_MODE_*。
+/* 卡拉OK（消人声）档位的显示名：取值域就是 audio/karaoke_mode.h 的 KARAOKE_MODE_*。
  * 与主页控制窗格的弹层用同一组 i18n 键，两处不会各说各话。 */
 static const char *karaoke_mode_label(int mode)
 {
@@ -1179,6 +1187,7 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator, enc_str);
     } else if (option_index == SETTINGS_IDX_KARAOKE_MODE) {
+        /* config v12：三档行始终可用（模型随包内置），直接显示当前档位。 */
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
                  karaoke_mode_label(g_app_config.karaoke_mode));
@@ -1346,38 +1355,56 @@ static void move_settings_content_selection(int delta)
 
 static void edit_default_startup_path(void)
 {
-    noecho();
-    curs_set(1);
+    /* 统一目录选择器：有桌面对话框就用（portal 偏好 / zenity --directory /
+     * kdialog --getexistingdirectory），没有就回退 curses 里手输路径。
+     * 取消不改配置；选择器已校验"存在且是目录"，失败只提示可读原因。 */
+    const char *initial_dir = NULL;
+    if (g_app_config.default_startup_path[0]) {
+        initial_dir = g_app_config.default_startup_path;
+    } else if (g_app_config.last_opened_path[0]) {
+        initial_dir = g_app_config.last_opened_path;
+    }
 
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
-    int menu_width = max_x / 4;
-
-    const char *path_prompt = i18n_get("settings.path.prompt");
-    char input_path[MAX_PATH_LEN];
-    prompt_text_input(stdscr, max_y - 2, menu_width + 2,
-                      path_prompt, input_path, sizeof(input_path), 1, 0, 0);
-
+    char selected[MAX_PATH_LEN];
+    char picker_err[256];
+    int rc = file_picker_pick_folder(i18n_get("settings.path.picker_title"),
+                                     initial_dir, selected, sizeof(selected),
+                                     picker_err, sizeof(picker_err));
     noecho();
     curs_set(0);
+    flushinp();
 
-    if (strlen(input_path) > 0) {
-        if (!is_valid_path(input_path)) {
-            show_status_message(i18n_get("settings.path.invalid"));
-            return;
-        }
-        if (input_path[0] == '~') {
-            const char *home = getenv("HOME");
-            if (home) {
-                snprintf(g_app_config.default_startup_path, MAX_PATH_LEN, "%s%s", home, input_path + 1);
-            }
-        } else {
-            strncpy(g_app_config.default_startup_path, input_path, MAX_PATH_LEN - 1);
-            g_app_config.default_startup_path[MAX_PATH_LEN - 1] = '\0';
-        }
-        player_config_persist();
-        show_status_message(i18n_get("settings.path.saved"));
+    if (rc == FILE_PICKER_CANCEL) {
+        return;
     }
+    if (rc != FILE_PICKER_OK) {
+        show_status_message(picker_err[0] ? picker_err
+                                          : i18n_get("settings.path.invalid"));
+        return;
+    }
+
+    /* 选择器已展开 ~/，这里保留原有的路径合法性校验（控制字符/裸 ~ 语法），
+     * 再做一次防御性检查；任一步失败都不写配置，保留用户原来的默认路径。 */
+    char expanded[MAX_PATH_LEN];
+    if (file_picker_expand_tilde(selected, getenv("HOME"), expanded,
+                                 sizeof(expanded)) != 0) {
+        show_status_message(i18n_get("settings.path.invalid"));
+        return;
+    }
+    if (!is_valid_path(expanded)) {
+        show_status_message(i18n_get("settings.path.invalid"));
+        return;
+    }
+    struct stat st;
+    if (stat(expanded, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        show_status_message(i18n_get("settings.path.invalid"));
+        return;
+    }
+
+    snprintf(g_app_config.default_startup_path,
+             sizeof(g_app_config.default_startup_path), "%s", expanded);
+    player_config_persist();
+    show_status_message(i18n_get("settings.path.saved"));
 }
 
 static void adjust_or_toggle_settings_option(int option_index, int delta)
@@ -1666,7 +1693,8 @@ static void close_sel_menu(int apply, int animate)
             case SETTINGS_IDX_KARAOKE_MODE:
                 /* 只走门面：本地 = 引擎 + save_config；远端 = Control.SetKaraoke，
                  * 由核心同步它自己的镜像并去抖落盘。这里不另发 Config.Set：
-                 * 契约里没有这个键的旧核心会把整包补丁一起拒掉。 */
+                 * 契约里没有这个键的旧核心会把整包补丁一起拒掉。
+                 * config v12 起没有功能开关，三档始终可选。 */
                 player_set_karaoke_mode(g_sel_idx);
                 if (player_karaoke_mode() == g_sel_idx) {
                     show_status_message(i18n_get("settings.karaoke.saved"));
@@ -1808,6 +1836,100 @@ static void close_sel_menu(int apply, int animate)
 }
 
 /* ============================================================
+ * 内置消音模型的署名 / 许可 / 来源 / SHA256（发布前合规展示）
+ *
+ * config v12 起模型**随包分发**（MIT），因此设置页**始终**展示第三方声明
+ * 要点：署名（UVR 要求）、许可说明、官方来源 URL、整文件 SHA256 —— 即使
+ * 用户从不打开消音档位也能看到（MIT 要求分发时保留版权与许可声明；完整
+ * 声明在随包安装的 resources/models/NOTICE.md）。内容全部取自
+ * audio/karaoke_model.h 的模型表（KaraokeModelSpec），本文件不另建一份
+ * 模型信息，模型表更新后这里自动跟随；模型固定为内置 id，不再读配置。
+ *
+ * 布局：画在 Playback 分区选项列表下方的空白行，逐行经 menu_content_puts()
+ * 按内容区宽度裁剪，**不改动任何既有选项的行位置**：
+ *   1) 署名（任何情况下都最先画，绝不省略）；
+ *   2) 许可说明；
+ *   3) 官方 URL；
+ *   4) SHA256 —— 完整 64 位放得下就画完整值；放不下退化为"前 16 + … +
+ *      后 16"，并在同一行注明完整值见 NOTICE/文档（该形态在 80 列终端也放得下）。
+ * 只有内容区确实没有空行（列表已占满的极矮终端）时才整体不画：此时调用点
+ * 也会跳过末尾的语言提示行，绝不把署名画到状态行/提示条上。
+ *
+ * @return 实际占用的行数（0 = 未画）。调用方据此继续排后续提示行。
+ * ============================================================ */
+static int render_karaoke_credit_block(const MenuContentArea *area, int top)
+{
+    if (!area) {
+        return 0;
+    }
+
+    const KaraokeModelSpec *spec = karaoke_model_by_id(KARAOKE_MODEL_BUNDLED_ID);
+    if (!spec) {
+        /* 编译期模型表缺项（不该发生）：不编造署名/URL/SHA256。 */
+        return 0;
+    }
+
+    const int last_row = area->max_y - 3;   /* 内容区末行（其下是状态行/提示条） */
+    if (top < 0 || top > last_row) {
+        return 0;
+    }
+
+    char line[768];
+    int row = top;
+
+    /* 1) 署名：最优先。终端过窄时由 menu_content_puts 在尾部加 "..."，
+     *    但这一行永远最先占用空行，不会被 URL/SHA256 挤掉。 */
+    snprintf(line, sizeof(line), i18n_get("settings.karaoke.model_credit"),
+             spec->credit);
+    menu_content_puts(area, row, line);
+    row++;
+
+    /* 2) 许可说明（MIT：随包分发必须保留版权/许可声明，完整文本见 NOTICE）。 */
+    if (row <= last_row) {
+        snprintf(line, sizeof(line), i18n_get("settings.karaoke.model_license"),
+                 spec->license);
+        menu_content_puts(area, row, line);
+        row++;
+    }
+
+    /* 3) 官方来源 URL（用户/审计据此独立下载核对）。 */
+    if (row <= last_row) {
+        snprintf(line, sizeof(line), i18n_get("settings.karaoke.model_url"),
+                 spec->url);
+        menu_content_puts(area, row, line);
+        row++;
+    }
+
+    /* 4) SHA256：完整值优先；太窄时前 16 + "..." + 后 16（同一行注明完整值见文档）。 */
+    if (row <= last_row) {
+        snprintf(line, sizeof(line), i18n_get("settings.karaoke.model_sha256"),
+                 spec->sha256);
+        if (utf8_str_width(line) <= area->content_width) {
+            menu_content_puts(area, row, line);
+            row++;
+        } else {
+            const size_t sha_len = strlen(spec->sha256);
+            if (sha_len >= 32) {
+                char head[17];
+                char tail[17];
+                memcpy(head, spec->sha256, 16);
+                head[16] = '\0';
+                memcpy(tail, spec->sha256 + sha_len - 16, 16);
+                tail[16] = '\0';
+                snprintf(line, sizeof(line),
+                         i18n_get("settings.karaoke.model_sha256_short"),
+                         head, tail);
+            }
+            /* sha_len < 32 的未知形态：保持完整值，让 puts 按宽度裁剪 */
+            menu_content_puts(area, row, line);
+            row++;
+        }
+    }
+
+    return row - top;
+}
+
+/* ============================================================
  * Selection menu — open
  * ============================================================ */
 
@@ -1869,7 +1991,8 @@ static void open_sel_menu(int option_index)
             cur   = g_app_config.cue_encoding;
             break;
         case SETTINGS_IDX_KARAOKE_MODE:
-            /* 值域与弹层下标一一对应（0/1/2），不需要映射表 */
+            /* config v12：模型随包内置，三档行始终可用；
+             * 值域与弹层下标一一对应（0/1/2），不需要映射表。 */
             count = KARAOKE_MODE_COUNT;
             cur   = g_app_config.karaoke_mode;
             break;
@@ -2676,6 +2799,9 @@ static void activate_settings_current_option(void)
         return;
     }
 
+    /* config v12：不再有"启用/更换模型"功能行；消音档位行恒可用，
+     * 走下面 Multi-choice 分支打开三档弹层。 */
+
     /* Toggle-only: ENTER flips the boolean */
     if (g_settings_current_option == SETTINGS_IDX_AUTO_PLAY ||
         g_settings_current_option == SETTINGS_IDX_REMEMBER_PATH ||
@@ -3071,9 +3197,15 @@ void render_settings_content(void)
         start_y += 2;
         render_settings_option_group(start_y, area.max_y, spec, 0);
         start_y += spec.count + 1;
-        snprintf(hint_buf, sizeof(hint_buf), "%s",
-                 i18n_get("settings.playback.language"));
-        menu_content_puts(&area, start_y, hint_buf);
+        /* 可选模型消人声：功能启用后在选项下方展示署名/官方 URL/SHA256
+         * （UVR 许可要求的"应用内署名"）。它优先于末尾的语言提示行——空间
+         * 不够时先挤掉提示（提示不是设置项），但绝不隐藏署名。 */
+        start_y += render_karaoke_credit_block(&area, start_y);
+        if (start_y <= area.max_y - 3) {
+            snprintf(hint_buf, sizeof(hint_buf), "%s",
+                     i18n_get("settings.playback.language"));
+            menu_content_puts(&area, start_y, hint_buf);
+        }
     } else if (g_menu_selected_idx == 3) {  /* 播放模式 */
         snprintf(hint_buf, sizeof(hint_buf), "%s",
                  i18n_get("settings.play_mode.hint"));

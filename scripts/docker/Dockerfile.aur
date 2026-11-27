@@ -1,6 +1,9 @@
 # Arch Linux/AUR 构建与验收镜像。默认 USTC 源。
 FROM archlinux:latest
 
+# 构建期下载内置消音模型（scripts/build/common.sh tm_ensure_model）：
+# aria2c 优先，宿主/镜像缺失时构建脚本回退 curl/wget。
+
 RUN printf '%s\n' \
         'Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch' \
         > /etc/pacman.d/mirrorlist && \
@@ -17,6 +20,7 @@ RUN printf '%s\n' \
         libpng \
         libjpeg-turbo \
         curl \
+        aria2 \
         sqlite \
         zlib \
         dbus \

@@ -70,6 +70,8 @@ for f in build-deb build-rpm build-aur; do
 done
 check_eq "$APP_ID" "scripts/build/build-linyaps.sh APP_ID" \
     "$(grep1 scripts/build/build-linyaps.sh '^APP_ID="([^"]+)"')"
+check_eq "$APP_ID" "scripts/build/build-appimage.sh APP_ID" \
+    "$(grep1 scripts/build/build-appimage.sh '^APP_ID="([^"]+)"')"
 check_eq "ter-music" "可执行文件名（project 第一参数）" "$BIN_NAME"
 check_eq "ter-music" "build-appimage.sh PROJECT_NAME" \
     "$(grep1 scripts/build/build-appimage.sh '^PROJECT_NAME="([^"]+)"')"
@@ -194,6 +196,125 @@ fi
 grep -q '#commit=' .SRCINFO \
     && ok ".SRCINFO 与固定 commit 来源一致" \
     || bad ".SRCINFO 仍使用 tag 来源"
+
+printf '=== 检查 8：统一 /opt/apps 安装布局（实体在 opt，/usr 只放链接）===\n'
+PREFIX="/opt/apps/$APP_ID/files"
+for f in debian/rules rpm/cn.org.huansoft.ter-music.spec PKGBUILD \
+         scripts/build/build-appimage.sh linglong/linglong.yaml.in; do
+    if grep -q -- '-DCMAKE_INSTALL_PREFIX=/usr' "$f"; then
+        bad "$f 仍把 /usr 当作 CMAKE_INSTALL_PREFIX"
+    else
+        ok "$f 不再使用 /usr 安装前缀"
+    fi
+done
+grep -q '^APP_ID := cn.org.huansoft.ter-music$' debian/rules \
+    && ok "debian/rules 定义 APP_ID" || bad "debian/rules 缺少 APP_ID"
+grep -q '^PREFIX := /opt/apps/$(APP_ID)/files$' debian/rules \
+    && ok "debian/rules 前缀 = $PREFIX" || bad "debian/rules 前缀不是 $PREFIX"
+grep -q -- '-DCMAKE_INSTALL_PREFIX=\$(PREFIX)' debian/rules \
+    && ok "debian/rules 用 \$(PREFIX) 配置 CMake" || bad "debian/rules 未注入 \$(PREFIX)"
+if grep -q '%global tm_prefix /opt/apps/%{name}/files' rpm/cn.org.huansoft.ter-music.spec; then
+    ok "rpm spec 前缀 = /opt/apps/%{name}/files"
+else
+    bad "rpm spec 前缀不是 /opt 布局"
+fi
+grep -q '^_prefix=/opt/apps/\$_appid/files$' PKGBUILD \
+    && ok "PKGBUILD 前缀 = /opt/apps/\$_appid/files" || bad "PKGBUILD 前缀不是 /opt 布局"
+grep -q 'CMAKE_INSTALL_PREFIX=/opt/apps/\${APP_ID}/files' scripts/build/build-appimage.sh \
+    && ok "build-appimage.sh 前缀 = /opt/apps/\${APP_ID}/files" || bad "build-appimage.sh 前缀不是 /opt 布局"
+grep -q -- '-DCMAKE_INSTALL_PREFIX=\${PREFIX}' linglong/linglong.yaml.in \
+    && ok "linglong.yaml.in 前缀 = \${PREFIX}（files/ 布局）" || bad "linglong.yaml.in 前缀不是 files/ 布局"
+grep -q "/opt/apps/$APP_ID/files/bin/ter-music" linglong/linglong.yaml.in \
+    && ok "linglong command 指向 /opt/apps/<appid>/files/bin" || bad "linglong command 未指向 opt 实体"
+
+# /usr 只放指向 opt 实体的链接（deb/rpm/aur/appimage 四条链路）
+for dst in usr/bin/ter-music usr/share/applications/ter-music.desktop \
+           usr/share/icons/hicolor/32x32/apps/ter-music.png \
+           usr/share/icons/hicolor/48x48/apps/ter-music.png \
+           usr/share/icons/hicolor/128x128/apps/ter-music.png \
+           usr/share/icons/hicolor/scalable/apps/ter-music.svg; do
+    if grep -q "/opt/apps/$APP_ID/files/[^ ]* $dst\$" debian/links 2>/dev/null; then
+        ok "debian/links -> $dst"
+    else
+        bad "debian/links 缺少 $dst"
+    fi
+done
+if grep -q '^ln -sfn ../../opt/apps/%{name}/files/bin/%{binname}' \
+        rpm/cn.org.huansoft.ter-music.spec && \
+   grep -q '^%{tm_prefix}$' rpm/cn.org.huansoft.ter-music.spec && \
+   grep -q '^/usr/bin/%{binname}$' rpm/cn.org.huansoft.ter-music.spec; then
+    ok "rpm spec %install 建链接、%files 同时收录 opt 实体与 /usr 链接"
+else
+    bad "rpm spec 缺少 opt 实体 + /usr 链接布局"
+fi
+if grep -q 'ln -sfn "../../../opt/apps/\$_appid/files/bin/ter-music"' PKGBUILD && \
+   grep -q 'DESTDIR="$pkgdir" cmake --install build' PKGBUILD; then
+    ok "PKGBUILD 安装 opt 实体并在 /usr 建相对链接"
+else
+    bad "PKGBUILD 缺少 opt 实体 + /usr 链接布局"
+fi
+if grep -q 'ln -sfn "../../../opt/apps/\${APP_ID}/files/bin/\${PROJECT_NAME}"' \
+        scripts/build/build-appimage.sh && \
+   grep -q 'AppDir/usr 只放指向 opt 实体的相对符号链接' scripts/build/build-appimage.sh; then
+    ok "build-appimage.sh 的 AppDir/usr 只放相对链接"
+else
+    bad "build-appimage.sh 的 AppDir/usr 布局不符合要求"
+fi
+
+printf '=== 检查 9：9662 模型构建期获取/校验/注入 ===\n'
+MODEL_SIZE_COMMON="$(grep1 scripts/build/common.sh '^TM_MODEL_SIZE=([0-9]+)$')"
+MODEL_SIZE_CMAKE="$(grep1 CMakeLists.txt 'set\(TER_MUSIC_BUNDLED_MODEL_SIZE ([0-9]+)\)')"
+MODEL_SHA_COMMON="$(grep1 scripts/build/common.sh '^TM_MODEL_SHA256="([0-9a-f]{64})"$')"
+MODEL_SHA_CMAKE="$(grep1 CMakeLists.txt '^\s*"([0-9a-f]{64})"\)')"
+check_eq "29704436" "common.sh TM_MODEL_SIZE" "$MODEL_SIZE_COMMON"
+check_eq "$MODEL_SIZE_COMMON" "CMakeLists 模型大小与 common.sh 一致" "$MODEL_SIZE_CMAKE"
+check_eq "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc" \
+    "common.sh TM_MODEL_SHA256" "$MODEL_SHA_COMMON"
+check_eq "$MODEL_SHA_COMMON" "CMakeLists 模型 SHA256 与 common.sh 一致" "$MODEL_SHA_CMAKE"
+grep -q "$MODEL_SHA_COMMON" resources/models/NOTICE.md \
+    && ok "NOTICE.md 记录模型 SHA256" || bad "NOTICE.md 缺少模型 SHA256"
+grep -q '29,704,436' resources/models/NOTICE.md \
+    && ok "NOTICE.md 记录模型字节数" || bad "NOTICE.md 缺少模型字节数"
+grep -q 'UVR_MDXNET_3_9662.onnx' resources/models/NOTICE.md \
+    && ok "NOTICE.md 记录上游模型文件名" || bad "NOTICE.md 缺少上游文件名"
+grep -q 'TRvlvr/model_repo' scripts/build/common.sh \
+    && ok "common.sh 记录模型官方 URL" || bad "common.sh 缺少模型官方 URL"
+for f in build-deb build-rpm build-linyaps build-appimage build-aur; do
+    if grep -q 'tm_ensure_model' "scripts/build/$f.sh"; then
+        ok "scripts/build/$f.sh 调用 tm_ensure_model"
+    else
+        bad "scripts/build/$f.sh 没有调用 tm_ensure_model"
+    fi
+done
+for f in debian/rules rpm/cn.org.huansoft.ter-music.spec PKGBUILD \
+         linglong/linglong.yaml.in scripts/build/build-appimage.sh; do
+    if grep -q -- '-DTER_MUSIC_BUNDLED_MODEL' "$f"; then
+        ok "$f 注入 -DTER_MUSIC_BUNDLED_MODEL"
+    else
+        bad "$f 没有注入 -DTER_MUSIC_BUNDLED_MODEL"
+    fi
+done
+grep -q 'export TER_MUSIC_BUNDLED_MODEL=' scripts/build/build-deb.sh \
+    && ok "build-deb.sh 通过环境变量把模型绝对路径传给 debian/rules" \
+    || bad "build-deb.sh 没有导出 TER_MUSIC_BUNDLED_MODEL"
+grep -q '\.tm-bundled-model' rpm/cn.org.huansoft.ter-music.spec \
+    && ok "rpm spec 从 staging 的 .tm-bundled-model 注入模型" \
+    || bad "rpm spec 缺少 staged 模型路径"
+grep -q 'bundled-model' linglong/linglong.yaml.in \
+    && ok "linglong.yaml.in 从源码树 bundled-model 注入模型" \
+    || bad "linglong.yaml.in 缺少 bundled-model 注入"
+for f in scripts/docker/Dockerfile.debian10 scripts/docker/Dockerfile.rpm scripts/docker/Dockerfile.aur; do
+    if grep -q 'aria2' "$f"; then
+        ok "$f 安装 aria2（构建期下载模型）"
+    else
+        bad "$f 没有安装 aria2"
+    fi
+done
+grep -qx '\*\.onnx' .gitignore \
+    && ok ".gitignore 忽略 *.onnx" || bad ".gitignore 没有忽略 *.onnx"
+TRACKED_ONNX="$(git ls-files -- '*.onnx' 2>/dev/null)"
+[ -z "$TRACKED_ONNX" ] && ok "仓库没有受版本控制的 .onnx" \
+    || bad "仓库仍跟踪模型二进制：$TRACKED_ONNX"
 
 printf '\n--- 结果 ---\n'
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"
