@@ -413,11 +413,14 @@ on slow terminals so input does not wait for an animation to finish.
 
 - The editor needs at least 60 columns × 16 rows.
 - A pane must keep at least 1% of each axis (`LAYOUT_MIN_PANE_UNITS = 10`
-  per-mille). Operations that would violate this are refused with a status
-  message and the layout is unchanged. Ratio nudges are the exception: a step
-  that would break the limit is shortened (half, quarter, …, down to one unit) so
-  the split keeps moving until it really is at the limit; only then does the
-  status line say the ratio is already at its limit.
+  per-mille) for loading, parsing and validation; that schema rule is unchanged.
+  In addition, the editor checks every edit against the current terminal's
+  minimum readable size — about 12×3 content cells, 12×2 for lyrics, 8×2 for
+  spectrum and 8×3 for vinyl — and snaps to the nearest readable ratio (leaving the
+  current layout untouched when no readable result exists) with a status
+  message instead of writing an unreadable layout. Ratio nudges are
+  shortened to the largest readable step. Older layouts below the editor minimum
+  still load and render unchanged; the editor only logs a debug line for them.
 - A split never offers a kind that is already used in the layout; `lyrics` and
   `vinyl` are ordinary kinds and can both appear. Changing type with `t` only
   offers unused kinds as well (the leaf's own kind is not a candidate, since
@@ -455,17 +458,26 @@ remaining content width, and a pane that is too small for a particular renderer
 shows only its background and border instead of overflowing. The scrollbar is
 clamped to the content height as well.
 
-The info pane rearranges itself from its own size: wide panes put the metadata
-column and the audio-parameter column side by side with the colored half-block cover on
-the right, while narrow-and-tall panes stack the cover above the metadata and
-audio blocks. Its rows are driven by Settings -> Info Display: the metadata
-column uses the enabled state/mode/title/artist/album-or-queue fields, and the
-audio column appears only while `format` is enabled (all four audio parameters
-belong to that bit). Unsupported `index`/`path`/`volume`/`speed` bits are
-CLI/D-Bus only. The content block is **vertically centred** in the pane (cover and
-text move together in stacked mode), so a tall info pane no longer pins the text
-to the title row. The cover is dropped when it cannot keep a blank column before the
-right border, and every block is clipped to the region chosen by the layout. The
+The info pane rearranges itself from its own size. Wide panes put the metadata
+block and the audio-parameter block side by side with the colored half-block
+cover on the right; their widths follow the actual text width (20 columns
+minimum each, and a block with no rows hands its width to the other), while
+narrow-and-tall panes stack the cover above the metadata and audio blocks. Its
+rows are driven by Settings -> Info Display: the metadata block uses the enabled
+state/mode/title/artist/album-or-queue fields, and the audio block appears only
+while `format` is enabled (all four audio parameters belong to that bit).
+Unsupported `index`/`path`/`volume`/`speed` bits are CLI/D-Bus only. Long
+values are elided with `…` (text at the end, the path field in the middle), a
+wide but short pane flows a block's rows into up to three sub-columns, and when
+rows are scarce the layout keeps lines by importance — state, title, artist,
+mode, then album/queue; sample rate, bit depth, bitrate, then codec — while the
+display order stays unchanged. The content block is **vertically centred** in
+the pane (cover and text move together in stacked mode), so a tall info pane no
+longer pins the text to the title row. The cover keeps its 2:1 ratio and shrinks
+to as few as 3 rows (12 at most); it is hidden when it cannot keep a blank column
+before the right border or when the cover/text priority asks for text
+(`preferences.info_cover_priority`: 0 auto, 1 text-first, 2 cover-first), and
+every block is clipped to the region chosen by the layout. The
 TUI cover is drawn with colored half-block characters so its glyph advance matches the
 terminal cell grid, and is colored with an automatic 256-color → 8-color →
 monochrome fallback (a tight color-pair budget can reduce the palette further).
@@ -715,10 +727,12 @@ Remote playback and cache behaviour are documented in the README's
   auto-fitted. The reload message reports the count; open the editor to see the
   notice and adjust the split tree. It is no longer removed from the list.
 - **The editor refuses a split / ratio change**: the result would make a pane
-  smaller than 1% of an axis. The status line says so and the layout is
-  unchanged. Pressing `{` / `}` on a pane whose ancestors are all horizontal
-  splits reports that there is no split on that axis — the pane genuinely has no
-  vertical neighbour to resize.
+  smaller than the minimum readable size for the current terminal (about 12×3
+  content cells, 8–12 columns depending on pane type). The editor snaps to the
+  nearest readable ratio and the status line says so; if no readable result
+  exists it leaves the layout unchanged. Pressing `{` / `}` on a pane whose
+  ancestors are all horizontal splits reports that there is no split on that
+  axis — the pane genuinely has no vertical neighbour to resize.
 - **I edited `panes` by hand and nothing changed**: `tree` is authoritative.
   Edit `tree`, or use the editor and let it write both.
 - **Colours do not follow the theme**: the pane carries explicit `fg`/`bg`

@@ -42,6 +42,7 @@ Ter-Music者，端闱之乐部也。以斐氏FFmpeg解声，纽氏ncursesw绘界
 - 二十四套调色之谱，加一自定槽位；每格可别立前景、背景之色。
 - 端闈明暗之自適：自探端闈之底（OSC 11、deepin-terminal之題、XDG案牘、COLORFGBG、TERM之示），出廠之色與七預設隨之而易；於设置→界面外观擇自、明、暗。
 - 专辑封面以彩色半块绘之；黑胶格有旋转之封面圆标。
+- info之格，隨其地而自適：按文之廣而分列、長文以 `…` 終省、封面可縮或讓位於文、地不足則按要而裁行、寬而矮則至多三子列（見 [info之格](#info-之格)）。
 - 键鼠并用；内置`zh_CN`、`en_US`、`zh-PQ`三语。
 - 一統之擇文/擇目器：有圖形之會則用案牘之器（`zenity`/`kdialog`，先經 XDG 之門戶），純端闈則手書其途；開目錄、附目錄、裝語言包與默樂目錄四處共之。
 
@@ -361,6 +362,12 @@ ter-music -o webdav://host/music/
 
 二十四套调色之谱加一自定槽位，主侧栏、高亮、边框；每格亦可别立前景/背景。全式见 [UI_LAYOUTS_en_US.md](../UI_LAYOUTS_en_US.md)。
 
+局度之編者，於編輯之時行非破壞之最小可讀度：每調比例、分欄、易格之型與相易，皆按今端闈之實 cells 校之（常格約 12×3；歌辭 12×2、頻譜 8×2、黑膠 8×3），下於此者吸附於最近可讀之比例（無合法者則守其舊）而示之。此限惟在編者：已存之小局仍舊載入而繪之。
+
+### info 之格
+
+info 之格依其實地而布。曲目之文與音聲之式二塊，按各自之文廣而分列（每列至少 20）；一塊無行，則以其廣讓之。長值以 `…` 終省；高不足時按要留行——曲目之文為 狀態、標題、藝術家、模式、專輯/隊列，音聲為 採樣率、位深、比特率、編碼——而先後之序不易。封面守 2:1，可縮至 3 行（至多 12 行）；於 節度 → 信息顯示 → **封面與文之先後** 擇 自定（此為常）、文先或封先。寬而矮之格，其塊之文可鋪於至多三子列。
+
 ### 端闈明暗之自適
 
 `F2`→界面外观→**通體色式**，可擇`自`（默）、`明`、`暗`；藏於`config.xml`之`preferences.appearance_mode`（契約十）。`自`者，先於首帧前問端闈之底色（OSC 11）；不答，則次端闈之本題（今惟 deepin-terminal 之適，讀而不寫，至多每二秒察其變）、次 XDG 系統之式、次`COLORFGBG`、次`TERM`之示（名含`light`/`dark`），終守舊暗之貌——故不答之端闈/案牘，其觀與舊版無異（OSC 11 探之限約二百毫秒，案牘讀之限約百二十毫秒，且惟`自`者行之）。端闈之答自鍵流而去，不入界面；惟本程序方發問、猶待答之窗內，得全答（BEL 或 ST 終）乃以為答；手書同文，仍得逕達（窗內預讀至多八十毫秒）。 `自`者之序：先 OSC 11（端闈實底，為準）→ 次端闈本題之適（今惟 deepin-terminal，讀其本題之配，先於案牘之好）→ 次 XDG 案牘之 `org.freedesktop.appearance color-scheme`（系統之好，以 `SettingChanged` 隨之）→ 次 `COLORFGBG` → 次 `TERM` 之示 → 終守舊暗；設置之頁顯其源。端闈本題之適，惟 deepin-terminal 用之；他端不讀其文，其行如故。識之也，先`TERM_PROGRAM`；未設，乃察祖之鏈。前端本地 `~/.config/ter-music/appearance-terminals.json` 可按端闈覆通體 `preferences.appearance_mode`（通體之鍵仍為默，亦 `config.xml` 中惟一存者）。內置預設徑自適；用戶 `layouts.json` 與預設同名者，惟其前景猶等預設出廠暗值乃易明色——君所改者存，`TER_MUSIC_LAYOUTS` 則如其文而用。
@@ -402,6 +409,7 @@ help/          用户速上之文
 | `resume_last_playback` | 复上次之曲与位 |
 | `stop_core_on_exit` | 1退时止核心，0续播 |
 | `core_exit_when_no_frontend` | 末前端去后十秒核心自退 |
+| `info_cover_priority` | 0 自定（常），1 文先，2 封先；默 0；不升節度之契約版 |
 
 節度之契約為十二版。十二版**刪** `preferences.karaoke_feature` 與 `preferences.karaoke_model` 二鍵：型隨包內置，無復功能之開關與擇型之事。以倉庫之實史為準：契約四 = 標籤 `v2.1.0`（其根屬嘗為字面 `"2.2"`，按整數析之為二，故仍可載，而由遷改書一次），七 = 常駐核心，八 = `stop_core_on_exit`，九 = `<keybindings>` 覆表**與** `karaoke_mode`（DSP 時之档），十 = `preferences.appearance_mode`，十二 = 內置 ONNX 之型並刪 DSP 時之卡拉 OK 鍵。倉庫未嘗發布契約十一之構，故已發之文必不可含此二刪鍵。v10 或更早之 `config.xml`，於新核心首啟之時遷之：其文以 `version="12"` 整卷重書，諸餘之鍵（含 `karaoke_mode`、主題、途徑、均音與鍵綁）皆如其舊；早於 v10 之文亦受前遷之一時默值（v4 以下背景 0→-1，v7 以下 `core_exit_when_no_frontend=0`，v8 以下 `stop_core_on_exit=1`，v10 以下 `appearance_mode=auto`）；再啟則其文字節不變。`config get karaoke_feature` 與 `config set karaoke_feature …` 今以未知之鍵而敗，`Config.Set` 遇尚含二鍵之補則舉而拒之。降版不為之支持：v12 之前（契約十）之構讀 v12 之文（版本之屬按整數而析，其舊遷之塊皆不中），視二刪鍵為亡——汰聲為勿汰——而於次存之時以版本之屬書回十。升級之際，新前端遇尚行之 v12 前核心，其節度之鏡按已知之鍵而填（惟一之握手門為 `api_version` 七）；惟載荷尚帶刪鍵乃舉而拒之，而此惟未發布之契約十一開發構所為——重啟核心（`ter-music daemon restart`）或復登即自癒。
 

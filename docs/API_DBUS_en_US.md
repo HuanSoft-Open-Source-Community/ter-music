@@ -509,6 +509,13 @@ Notes:
   toggles both the info-pane cover and the CLI text cover; the TUI pane also
   requires the playback `show_album_cover` master switch.
   `info_cover_cols/rows/charset` only affect CLI/D-Bus text covers.
+- `preferences.info_cover_priority` (integer `0` auto, `1` text-first, `2`
+  cover-first; default `0`) decides, for the TUI info pane, whether the cover
+  yields space to the text (`1`), takes the largest size the pane allows
+  (`2`) or balances both (`0`). It is a new key in contract **12** and the
+  version does not change, because an absent element already defaults to
+  auto; it is exposed as `info_cover_priority` in `Config.GetAll`/`Config.Set`
+  and in `config.xml`.
 - **Downgrade:** the version attribute is parsed as an integer and each build
   only runs its own `file_version < N` migration blocks. A build from before
   contract v12 (the latest pre-v12 build is contract 10; no contract-11 build

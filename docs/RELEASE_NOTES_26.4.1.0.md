@@ -103,6 +103,12 @@ Linyaps-related runtime code path remains in the tree and builds, it is just not
 - **JSON layouts**: six panes (playlist, info, controls, spectrum, lyrics, vinyl), seven presets,
   forced tiling, per-pane colours and a layout editor; user overrides live in
   `~/.config/ter-music/layouts.json`.
+- **Info pane and layout editor**: the info pane now adapts to its space — content-sized columns,
+  `…` elision, a cover that shrinks to three rows or yields to text
+  (`preferences.info_cover_priority`: auto / text-first / cover-first), importance-ordered line
+  dropping and up to three sub-columns on wide, short panes — and the layout editor checks edits
+  against the current terminal's minimum readable pane size, snapping with a notice while older
+  smaller layouts keep loading unchanged.
 - **Terminal light/dark adaptation**: Auto (default), Light or Dark (`preferences.appearance_mode`,
   contract 10). In Auto the TUI probes OSC 11, the deepin-terminal theme adapter, the XDG portal
   `color-scheme` (live `SettingChanged`), `COLORFGBG`, a `TERM` hint and finally the legacy dark

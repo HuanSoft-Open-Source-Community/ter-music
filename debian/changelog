@@ -118,6 +118,29 @@ cn.org.huansoft.ter-music (26.4.1.0-1) unstable; urgency=medium
     Each pane can carry its own foreground and background colour in addition
     to the 24 theme palettes.
 
+  * Info pane adaptive layout and a layout editor guard. The main-window info
+    pane now lays itself out from the pane size: the metadata and audio
+    blocks share the width by their content (at least 20 columns each, and a
+    block with no rows gives its width to the other), long values are elided
+    with an ellipsis, the cover keeps its 2:1 ratio and shrinks to as little
+    as 3 rows (12 at most), a short pane keeps lines by importance (status,
+    title, artist, mode, then album/queue; sample rate, bit depth, bitrate,
+    then codec) while the display order stays unchanged, and a wide, short
+    pane flows a block's lines into up to three sub-columns. The new
+    preferences.info_cover_priority key (0 auto, 1 text-first, 2
+    cover-first; default 0) chooses whether the cover yields space to the
+    text or takes the largest size; it is available in Settings -> Info
+    Display, in config.xml and over D-Bus, and does not raise the
+    configuration contract, because an absent element defaults to auto. The
+    layout editor now enforces a minimum readable pane size while editing:
+    ratio changes, splits, pane-type changes and swaps are checked against
+    the current terminal's actual cell grid (about 12x3 cells; 12x2 for
+    lyrics, 8x2 for spectrum, 8x3 for vinyl) and snap to the nearest readable
+    ratio (or keep the current layout when none exists) with a notice. The
+    JSON schema and the loader/validator are
+    unchanged, so layouts saved with smaller panes still load and render
+    unchanged.
+
   * Terminal light/dark adaptation (contract 10). Settings -> Appearance ->
     Default Appearance Mode selects Auto (default), Light or Dark and is
     stored as preferences.appearance_mode. In Auto the TUI probes OSC 11
