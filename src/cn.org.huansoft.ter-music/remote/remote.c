@@ -505,6 +505,12 @@ static int smb_run(const RemoteConnectionConfig *conn, const char *command,
         }
         setenv("LC_ALL", "C.UTF-8", 1);
         setenv("LANG", "C.UTF-8", 1);
+        /* 与 ui/file_picker.c 同理：AppImage AppRun 的 LD_LIBRARY_PATH 指向包内
+         * Debian 10 库，只服务 ter-music 自身；宿主的 smbclient（Samba）若继承
+         * 会被旧 libstdc++/libgcc 污染。外部命令不继承动态链接器环境。 */
+        unsetenv("LD_LIBRARY_PATH");
+        unsetenv("LD_PRELOAD");
+        unsetenv("LD_AUDIT");
         execvp("smbclient", argv);
         _exit(127);
     }

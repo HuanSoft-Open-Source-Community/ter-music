@@ -28,6 +28,10 @@
 #       的时刻抓 pty 片段断言，而不是只看结束后。
 #   X2  子进程 stderr：假对话框故意向 stderr 写噪音，pty 流里必须看不到
 #       （stdout 仍只回传路径）。
+#   L1  AppImage 旧库污染（t18）：AppRun 的 LD_LIBRARY_PATH 不得传给宿主
+#       zenity/kdialog（子进程看到的必须为空）；对话框异常退出（127，模拟
+#       GLIBCXX 不匹配崩溃）时回退 TTY 手输并在提示里说明原因；用户取消
+#       （1/5）不回退。
 #
 # 判定依据（都是程序自己的事实，不靠猜屏幕）：
 #   · PATH 里的假 zenity/kdialog 记录到的 argv（--directory/--getexistingdirectory/
@@ -189,6 +193,8 @@ cat > "$FAKEBIN/zenity" <<'FAKE'
   n=0
   for a in "$@"; do printf 'ARG%d=%s\n' "$n" "$a"; n=$((n+1)); done
   printf 'END\n'
+  printf 'ENV_LD_LIBRARY_PATH=%s\n' "${LD_LIBRARY_PATH:-}"
+  printf 'ENV_LD_PRELOAD=%s\n' "${LD_PRELOAD:-}"
 } >> "${TM_FAKE_DIALOG_LOG:?}"
 # 子进程 stderr 必须被选择器丢弃：这里故意写噪音，E2E 断言它从不出现在 pty。
 printf 'TM_FAKE_DIALOG_STDERR_NOISE prog=%s\n' "${0##*/}" >&2
@@ -844,6 +850,93 @@ if start_session tty; then
 
     stop_session
 fi
+
+# ════════════════════════════════════════════════════════════════════
+# 会话 5：AppImage 旧库污染 + GUI 失败回退 TTY（t18）
+# ════════════════════════════════════════════════════════════════════
+info "会话 5：AppImage 旧库污染 + GUI 失败回退 TTY（t18）"
+export DISPLAY="${DISPLAY:-:0}"
+unset WAYLAND_DISPLAY
+export PATH="$FAKEBIN:$BASE_PATH"
+export TERM_MUSIC_FILE_CHOOSER=zenity
+export TM_FAKE_DIALOG_LOG="$FAKE_LOG" TM_FAKE_DIALOG_SPEC="$FAKE_SPEC"
+# 模拟 AppImage AppRun：把捆绑库目录放在 LD_LIBRARY_PATH。修复前这个值会
+# 原样传给宿主的 zenity/kdialog（t18 根因）；修复后子进程必须看不到它。
+APPIMAGE_LIB="$WORK_DIR/appimage-bundled-lib"
+mkdir -p "$APPIMAGE_LIB"
+export LD_LIBRARY_PATH="$APPIMAGE_LIB"
+
+if start_session appimage; then
+    # L1a 正常对话框：子进程继承环境里不得有 AppImage 的 LD_LIBRARY_PATH。
+    mark="$(fake_mark)"
+    fake_spec "$OPEN_DIR" 0
+    send o 1.6
+    env_seen="$(fake_since "$mark" | grep '^ENV_LD_LIBRARY_PATH=' | head -1)"
+    if [ "$env_seen" = "ENV_LD_LIBRARY_PATH=" ]; then
+        ok "AppImage 环境：zenity 子进程看不到 LD_LIBRARY_PATH（旧库不泄漏）"
+    else
+        bad "AppImage 环境：zenity 子进程仍继承 LD_LIBRARY_PATH（$env_seen）"
+    fi
+    if wait_screen '目录加载成功' 3; then
+        ok "清理环境后 zenity 仍能正常工作（目录加载成功）"
+    else
+        bad "清理环境后 zenity 选择失败（没有目录加载成功提示）"
+    fi
+    cfg_expect last_opened_path "$OPEN_DIR" "AppImage 环境正常选中目录写入配置"
+
+    # L1b 对话框异常退出（127，模拟旧 libstdc++ 导致 GLIBCXX 崩溃）：
+    # 必须回退 TTY 手输，提示可见，手输路径仍按原语义加载。
+    mark="$(fake_mark)"
+    fake_spec "" 127
+    send o 1.2
+    if wait_screen '图形对话框不可用' 6; then
+        ok "对话框异常退出后回退 TTY（提示说明图形对话框不可用）"
+    else
+        bad "对话框异常退出后没有回退 TTY（无“图形对话框不可用”提示）"
+    fi
+    send "$TTY_DIR" 0.3
+    send '<Enter>' 2.0
+    if wait_screen '目录加载成功' 3; then
+        ok "回退 TTY 手输路径成功（目录加载成功）"
+    else
+        bad "回退 TTY 手输路径没有成功加载"
+    fi
+    cfg_expect last_opened_path "$TTY_DIR" "TTY 回退选中目录写入 last_opened_path"
+    if flog_has 'falling back to TTY'; then
+        ok "前端日志记录 GUI 失败回退 TTY（可诊断）"
+    else
+        bad "前端日志没有记录回退 TTY"
+    fi
+    if [ "$(fake_mark)" -gt "$mark" ]; then
+        ok "回退前确实尝试过外置对话框（不是跳过对话框直接 TTY）"
+    else
+        bad "没有尝试外置对话框就回退（无法证明失败回退语义）"
+    fi
+
+    # L1c 用户取消（exit 1）：不触发 TTY 回退、不改配置。
+    prev_last="$(cfg_get last_opened_path)"
+    c_before="$(flog_count 'cancelled via zenity')"
+    fake_spec "" 1
+    send o 1.6
+    if [ "$(flog_count 'cancelled via zenity')" -gt "$c_before" ]; then
+        ok "AppImage 环境：zenity 取消仍识别为 CANCEL"
+    else
+        bad "AppImage 环境：zenity 取消没有被识别"
+    fi
+    if [ "$(cfg_get last_opened_path)" = "$prev_last" ]; then
+        ok "AppImage 环境：取消不写配置"
+    else
+        bad "AppImage 环境：取消改动了配置"
+    fi
+    if ! screen_has '图形对话框不可用' && ! screen_has '请直接输入目录路径'; then
+        ok "用户取消不触发 TTY 回退（没有回退提示）"
+    else
+        bad "用户取消后仍出现 TTY 回退提示"
+    fi
+
+    stop_session
+fi
+unset LD_LIBRARY_PATH
 
 printf '\n%d passed, %d skipped, %d failed\n' "$PASS" "$SKIPPED" "$FAIL"
 [ "$FAIL" -eq 0 ] && exit 0

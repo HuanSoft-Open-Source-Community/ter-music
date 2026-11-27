@@ -491,6 +491,9 @@
   <string key="file_picker.err.path_too_long">Path is too long</string>
   <string key="file_picker.err.not_dir">The selected path is not an existing folder: %s</string>
   <string key="file_picker.err.no_curses">The file chooser needs the terminal interface</string>
+  <string key="file_picker.tty_fallback_file_fmt">Graphical dialog unavailable (%s). Enter the file path: </string>
+  <string key="file_picker.tty_fallback_folder_fmt">Graphical dialog unavailable (%s). Enter the folder path: </string>
+  <string key="file_picker.err.gui_unavailable">Could not start the graphical dialog</string>
 
   <!-- ===== Remote ===== -->
   <string key="remote.list_failed">Cannot list remote directory</string>

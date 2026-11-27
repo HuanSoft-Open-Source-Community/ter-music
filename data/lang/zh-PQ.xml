@@ -445,6 +445,9 @@
   <string key="file_picker.err.path_too_long">路太長</string>
   <string key="file_picker.err.not_dir">所擇之路非現存之目錄：%s</string>
   <string key="file_picker.err.no_curses">擇文之器須於終端之界面</string>
+  <string key="file_picker.tty_fallback_file_fmt">圖形之器不可用（%s）。請直書文之路：</string>
+  <string key="file_picker.tty_fallback_folder_fmt">圖形之器不可用（%s）。請直書目錄之路：</string>
+  <string key="file_picker.err.gui_unavailable">圖形之器不能起</string>
   <string key="remote.list_failed">不能列遠方之目錄</string>
   <string key="remote.refresh_failed">更之敗：</string>
   <string key="remote.connection_ok">聯成，共</string>

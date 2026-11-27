@@ -51,6 +51,9 @@ const char *i18n_get(const char *key)
         { "file_picker.tty_prompt_dir", "File path (%s; start %s): " },
         { "file_picker.tty_folder_prompt_fmt", "Folder path (%s): " },
         { "file_picker.tty_folder_prompt_dir", "Folder path (%s; start %s): " },
+        { "file_picker.tty_fallback_file_fmt", "Dialog unavailable (%s); file path: " },
+        { "file_picker.tty_fallback_folder_fmt", "Dialog unavailable (%s); folder path: " },
+        { "file_picker.err.gui_unavailable", "dialog could not start" },
         { "file_picker.err.no_backend", "backend unavailable: %s" },
         { "file_picker.err.spawn", "cannot start chooser: %s" },
         { "file_picker.err.exit", "chooser exited abnormally (code %d)" },
@@ -211,6 +214,9 @@ static const char *k_fake_dialog_body =
     "  printf 'cwd=%s\\n' \"$(pwd)\"\n"
     "  printf 'argc=%s\\n' \"$#\"\n"
     "  for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n"
+    "  printf 'env_LD_LIBRARY_PATH=%s\\n' \"${LD_LIBRARY_PATH:-}\"\n"
+    "  printf 'env_LD_PRELOAD=%s\\n' \"${LD_PRELOAD:-}\"\n"
+    "  printf 'env_LD_AUDIT=%s\\n' \"${LD_AUDIT:-}\"\n"
     "} >> \"${TM_PICKER_TEST_LOG:?}\"\n"
     "# t8：子进程 stderr 必须被选择器丢弃；测试会捕获调用方 stderr 验证。\n"
     "printf 'TM_FAKE_DIALOG_STDERR_NOISE prog=%s\\n' \"${0##*/}\" >&2\n"
@@ -613,6 +619,59 @@ static void test_fallbacks(void)
           "文件选择在无桌面时也回退 TTY（可读错误）");
 }
 
+/* ── 6b. 外部对话框不得继承 AppImage 的动态链接器环境（t18）────────── */
+
+static void test_child_env_sanitized(void)
+{
+    printf("--- 外部对话框：LD_LIBRARY_PATH/LD_PRELOAD/LD_AUDIT 必须清理\n");
+
+    char path_env[8192];
+    snprintf(path_env, sizeof(path_env), "%s:%s", g_fakebin, g_saved_path);
+    env_set("PATH", path_env);
+    env_set("DISPLAY", ":0");
+    env_set(FILE_PICKER_ENV, "zenity");
+
+    char dir[600];
+    path_join(dir, sizeof(dir), g_root, "env dir");
+    mkdir(dir, 0755);
+
+    char saved_ld[1024] = "";
+    char saved_pre[1024] = "";
+    char saved_audit[1024] = "";
+    const char *v = getenv("LD_LIBRARY_PATH");
+    if (v) snprintf(saved_ld, sizeof(saved_ld), "%s", v);
+    v = getenv("LD_PRELOAD");
+    if (v) snprintf(saved_pre, sizeof(saved_pre), "%s", v);
+    v = getenv("LD_AUDIT");
+    if (v) snprintf(saved_audit, sizeof(saved_audit), "%s", v);
+
+    env_set("LD_LIBRARY_PATH", "/tmp/appimage-old-libs");
+    env_set("LD_PRELOAD", "/tmp/appimage-old-libs/libstdc++.so.6");
+    env_set("LD_AUDIT", "/tmp/appimage-old-libs/libaudit.so");
+
+    char out[4096];
+    char err[512];
+    log_reset();
+    spec_set(dir, 0);
+    int rc = file_picker_pick_folder("env", NULL, out, sizeof(out), err, sizeof(err));
+    CHECK(rc == FILE_PICKER_OK && strcmp(out, dir) == 0,
+          "清理动态链接器环境后仍能正常选中（PATH 仍可解析 zenity）");
+    CHECK(log_has("env_LD_LIBRARY_PATH=\n") &&
+          !log_has("env_LD_LIBRARY_PATH=/tmp/appimage-old-libs"),
+          "子进程看不到 LD_LIBRARY_PATH（AppImage 旧库不泄漏给宿主对话框）");
+    CHECK(log_has("env_LD_PRELOAD=\n") &&
+          !log_has("env_LD_PRELOAD=/tmp/appimage-old-libs"),
+          "子进程看不到 LD_PRELOAD");
+    CHECK(log_has("env_LD_AUDIT=\n") &&
+          !log_has("env_LD_AUDIT=/tmp/appimage-old-libs"),
+          "子进程看不到 LD_AUDIT");
+
+    env_set("LD_LIBRARY_PATH", saved_ld[0] ? saved_ld : NULL);
+    env_set("LD_PRELOAD", saved_pre[0] ? saved_pre : NULL);
+    env_set("LD_AUDIT", saved_audit[0] ? saved_audit : NULL);
+    env_set(FILE_PICKER_ENV, NULL);
+}
+
 /* ── 7. 外部对话框的 stderr 不得落到调用方终端（t8）────────────────── */
 
 static void test_child_stderr_not_inherited(void)
@@ -704,6 +763,7 @@ int main(void)
     test_folder_zenity();
     test_folder_kdialog();
     test_child_stderr_not_inherited();
+    test_child_env_sanitized();
     test_file_mode_semantics();
     test_fallbacks();
 

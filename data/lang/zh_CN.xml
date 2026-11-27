@@ -491,6 +491,9 @@
   <string key="file_picker.err.path_too_long">路径过长</string>
   <string key="file_picker.err.not_dir">所选路径不是已存在的目录：%s</string>
   <string key="file_picker.err.no_curses">文件选择框需要终端界面</string>
+  <string key="file_picker.tty_fallback_file_fmt">图形对话框不可用（%s）。请直接输入文件路径：</string>
+  <string key="file_picker.tty_fallback_folder_fmt">图形对话框不可用（%s）。请直接输入目录路径：</string>
+  <string key="file_picker.err.gui_unavailable">图形对话框启动失败</string>
 
   <!-- ===== Remote ===== -->
   <string key="remote.list_failed">无法列出远程目录</string>

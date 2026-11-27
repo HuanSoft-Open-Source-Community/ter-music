@@ -84,6 +84,19 @@ static void picker_set_err(char *err, size_t err_size, const char *fmt, ...)
     va_end(ap);
 }
 
+/* 外部对话框是**宿主程序**，不是 AppImage 的一部分：AppImage 的 AppRun 为了
+ * 让 ter-music 用包内 Debian 10 库，export LD_LIBRARY_PATH=<files>/lib；若子进程
+ * 原样继承，宿主 zenity/GTK 会先加载包内旧 libstdc++/libgcc（GLIBCXX 上限
+ * 3.4.25），在现代发行版上直接因 GLIBCXX_3.4.26+ 缺失退出。LD_PRELOAD /
+ * LD_AUDIT 同理（可能把包内库强行注入宿主进程）。exec 前只清这三个动态链接器
+ * 变量；PATH 及其它环境保持不动，zenity/kdialog 仍按 PATH 解析。 */
+static void picker_sanitize_child_env(void)
+{
+    unsetenv("LD_LIBRARY_PATH");
+    unsetenv("LD_PRELOAD");
+    unsetenv("LD_AUDIT");
+}
+
 /* ── PATH 探测 ────────────────────────────────────────────────────── */
 
 /* 名字里带 '/' 时按路径判可执行，否则在 PATH 里逐个目录找。
@@ -263,6 +276,9 @@ static int picker_run_capture(char *const argv[], int argc,
             }
         }
 
+        /* AppImage 的 LD_LIBRARY_PATH 是给 ter-music 自己找包内库的，绝不能
+         * 传给宿主的 zenity/kdialog（见 picker_sanitize_child_env 注释）。 */
+        picker_sanitize_child_env();
         execvp(argv[0], argv);
         _exit(127);   /* 走到这里 = 执行失败（PATH 竞态等） */
     }
@@ -448,7 +464,8 @@ static int picker_pick_kdialog(PickerMode mode, const char *title,
 
 /* ── 纯 TTY：手输路径 ─────────────────────────────────────────────── */
 
-static int picker_pick_tty(PickerMode mode, const char *title, const char *initial_dir,
+static int picker_pick_tty(PickerMode mode, const char *title,
+                           const char *initial_dir, const char *notice,
                            char *out, size_t out_size,
                            char *err, size_t err_size)
 {
@@ -472,7 +489,9 @@ static int picker_pick_tty(PickerMode mode, const char *title, const char *initi
     }
 
     /* 提示里带上标题与初始目录（如果有），让用户知道该填什么。
-     * 目录模式换一组文案（"目录路径"而不是"文件路径"）。 */
+     * 目录模式换一组文案（"目录路径"而不是"文件路径"）。
+     * 桌面对话框启动失败时 notice 非空：回退提示必须写明“对话框不可用”的原因，
+     * 否则用户只会看到路径输入而不知道为什么没弹窗（AppImage 旧库污染场景）。 */
     char prompt[768];
     const char *hint = (title && title[0])
         ? title
@@ -482,7 +501,12 @@ static int picker_pick_tty(PickerMode mode, const char *title, const char *initi
         ? "file_picker.tty_folder_prompt_fmt" : "file_picker.tty_prompt_fmt";
     const char *dir_key = (mode == PICKER_MODE_FOLDER)
         ? "file_picker.tty_folder_prompt_dir" : "file_picker.tty_prompt_dir";
-    if (initial_dir && initial_dir[0]) {
+    const char *fallback_key = (mode == PICKER_MODE_FOLDER)
+        ? "file_picker.tty_fallback_folder_fmt"
+        : "file_picker.tty_fallback_file_fmt";
+    if (notice && notice[0]) {
+        snprintf(prompt, sizeof(prompt), i18n_get(fallback_key), notice);
+    } else if (initial_dir && initial_dir[0]) {
         snprintf(prompt, sizeof(prompt), i18n_get(dir_key), hint, initial_dir);
     } else {
         snprintf(prompt, sizeof(prompt), i18n_get(fmt_key), hint);
@@ -552,11 +576,12 @@ static int picker_pick(PickerMode mode, const char *title,
     }
 
     int rc = FILE_PICKER_ERROR;
+    int tty_fallback = 0;
 
     switch (backend) {
         case FILE_PICKER_BACKEND_TTY:
-            rc = picker_pick_tty(mode, title, initial_dir, out, out_size,
-                                 err, err_size);
+            rc = picker_pick_tty(mode, title, initial_dir, NULL,
+                                 out, out_size, err, err_size);
             break;
 
         case FILE_PICKER_BACKEND_ZENITY:
@@ -596,12 +621,43 @@ static int picker_pick(PickerMode mode, const char *title,
         picker_sync_tui();
     }
 
+    /* 桌面对话框启动失败/异常退出（非用户取消 1/5）→ 回退 TTY 手输。
+     * AppImage 场景：zenity 继承捆绑旧库后可能直接 dlopen 失败；没有这一步
+     * 用户只看到一条错误、既没有弹窗也无法手输路径。取消（FILE_PICKER_CANCEL）
+     * 不触发回退，避免用户主动取消后又弹一个输入框。 */
+    if (rc == FILE_PICKER_ERROR && gui_dialog && picker_curses_active()) {
+        char gui_err[512];
+        snprintf(gui_err, sizeof(gui_err), "%s",
+                 (err && err[0]) ? err : i18n_get("file_picker.err.gui_unavailable"));
+        log_warn("file_picker",
+                 "GUI dialog failed (%s); falling back to TTY input", gui_err);
+        if (err && err_size) {
+            err[0] = '\0';
+        }
+        int tty_rc = picker_pick_tty(mode, title, initial_dir, gui_err,
+                                     out, out_size, err, err_size);
+        if (tty_rc == FILE_PICKER_OK) {
+            rc = FILE_PICKER_OK;
+            tty_fallback = 1;
+        } else if (tty_rc == FILE_PICKER_CANCEL) {
+            rc = FILE_PICKER_CANCEL;
+            tty_fallback = 1;
+        } else {
+            rc = FILE_PICKER_ERROR;
+            if ((!err || !err[0]) && err && err_size) {
+                snprintf(err, err_size, "%s", gui_err);
+            }
+        }
+    }
+
     if (rc == FILE_PICKER_OK) {
-        log_info("file_picker", "picked '%s' via %s",
-                 out, file_picker_backend_name(backend));
+        log_info("file_picker", "picked '%s' via %s%s",
+                 out, file_picker_backend_name(backend),
+                 tty_fallback ? " (tty fallback)" : "");
     } else if (rc == FILE_PICKER_CANCEL) {
-        log_debug("file_picker", "cancelled via %s",
-                  file_picker_backend_name(backend));
+        log_debug("file_picker", "cancelled via %s%s",
+                  file_picker_backend_name(backend),
+                  tty_fallback ? " (tty fallback)" : "");
         out[0] = '\0';
     } else {
         log_warn("file_picker", "failed via %s: %s",
