@@ -49,7 +49,8 @@ Release → （决定投递时）AUR**。任何一步失败都停在上一步，
 
 - DEB 在 Debian 10（glibc 2.28）中构建，覆盖 Debian 10/11/12/13 与 Ubuntu
   20.04/22.04/24.04/26.04。
-- 仅 FFmpeg 静态；libxml2 由 `util/xml_compat.c` 在运行期 `dlopen` `.so.2`/`.so.16`。
+- 仅 FFmpeg 静态；构建镜像已启用 FFmpeg 的 FLAC encoder/muxer（内置消音写 `.flac` 分段必需，缺了会在写段时失败）。
+- libxml2 不链接，由 `util/xml_compat.c` 在运行期 `dlopen` `.so.2`/`.so.16`。
 - RPM 每个 EL 一个：EL7 的 ncursesw/libpng soname 与 EL8+ 不同，单包无法在仅 FFmpeg 静态下
   可靠覆盖。
 - AppImage 自带 `libxml2.so.2` 及其依赖。
@@ -60,9 +61,11 @@ Release → （决定投递时）AUR**。任何一步失败都停在上一步，
 - 所有包都内置消音模型 `share/ter-music/models/uvr-mdxnet-3-9662.onnx`（29,704,436 B，
   SHA-256 `e02220e8…aadc`）与 `models/NOTICE.md`；构建期由 `tm_ensure_model` 下载/校验后注入，
   缺模型或坏模型直接失败。源码包同样自包含（体积约 +28 MB）。
-- **ONNX Runtime 交付**：发布包（DEB/RPM/AppImage）静态链接 ONNX Runtime，安装后不依赖系统
-  `libonnxruntime`；源码构建保留运行期 `dlopen` 系统库的兼容路径。最终以静态化任务的实测结果
-  为准，验收时用 `readelf -d` 与"无系统运行库容器里真实分离"两条断言确认。
+- **ONNX Runtime 交付**：发布包（DEB / 4 个 RPM / AppImage）静态链接 ONNX Runtime 1.21（由 Debian
+  pool 的 `onnxruntime 1.21.0+dfsg` 源码构建），安装后不依赖系统 `libonnxruntime`，`readelf -d`
+  无 `libonnxruntime`；静态库符号上限 GLIBC_2.17（centos:7 + devtoolset-11），同一份库覆盖
+  EL7–10 与 Debian 10+；AppImage 内层二进制保持 Debian 10（glibc 2.28）基线。源码构建保留
+  运行期 `dlopen` 系统库的兼容路径（AUR 包即此路径，需 `onnxruntime-cpu` optdepends）。
 
 ## 三、可选源码包 / 调试包
 
@@ -89,6 +92,9 @@ Release → （决定投递时）AUR**。任何一步失败都停在上一步，
 - RPM 源码包通过 `rpmbuild -ba` 生成。
 - RPM 默认传 `debug_package %{nil}`；请求调试包时不传，并使用 `RelWithDebInfo` + `$RPM_OPT_FLAGS`。
 - 这些选项只对 deb/rpm 生效；其他类型会忽略并给出警告。
+
+CI 的 required 门禁只包含确定性断言；真实模型的全量 karaoke 在 advisory 作业中运行、不阻断合并
+（见 `docs/BUILD_GUIDE.md` §9.5），因此发布验收以本节矩阵与发布机实跑为准。
 
 ## 四、验收矩阵
 
@@ -171,7 +177,7 @@ rpm -qpl /pkg/*.rpm | grep 'usr/bin/ter-music'   # 必须是符号链接
 只 `sha256sum` 模型文件不算通过。可直接复用 `scripts/test/karaoke-segments-e2e.sh`：
 
 ```bash
-# 以 Debian 10 容器为例（已安装 DEB，且容器内没有 libonnxruntime）
+# 至少两处：Debian 10 容器（已安装 DEB，且容器内没有 libonnxruntime）与 centos:7 容器（EL7 RPM）
 scripts/test/karaoke-segments-e2e.sh \
   --bin /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music \
   --model /opt/apps/cn.org.huansoft.ter-music/files/share/ter-music/models/uvr-mdxnet-3-9662.onnx
@@ -188,17 +194,19 @@ readelf -d /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music | grep libonn
 ldconfig -p | grep onnxruntime || echo 'OK：容器内没有系统 ONNX Runtime'
 ```
 
-- 若某个目标环境无法静态链接（例如极旧 glibc 的 EL7 变体），必须在发布说明与验收报告里如实
-  写成"该包需要系统 `libonnxruntime`，否则原声"，不得含糊。
+- EL7–10 也已静态可用：静态库在 centos:7 + devtoolset-11 上构建，符号上限 GLIBC_2.17；验收需
+  在 `centos:7` 容器里确认 `readelf` 无 `libonnxruntime`、最高符号为 `GLIBC_2.17` 且真实分离通过。
+- 分段 e2e 必须真的写出 `segNNN.inst.flac`/`segNNN.soft.flac`；若写段失败，先查构建镜像是否
+  缺 FFmpeg 的 FLAC encoder/muxer（见 `docs/BUILD_GUIDE.md`）。
 
 ### 6. 验收矩阵总表
 
 | 目标 | DEB | RPM | AppImage | AUR |
 | --- | --- | --- | --- | --- |
 | Debian 10/11/12/13、Ubuntu 20.04–26.04 | 安装 + version + libxml2 dlopen 断言 | — | 运行 + 解包断言 | — |
-| EL7/8/9/10 | — | 安装 + version + `/usr` 链接断言 | — | — |
+| EL7/8/9/10 | — | 安装 + version + `/usr` 链接 + 静态 ONNX Runtime（`readelf`、GLIBC_2.17）断言 | — | — |
 | Arch Linux | — | — | — | `makepkg` + `pacman -U` + version |
-| 卡拉 OK 真实分离 | `karaoke-segments-e2e.sh` + 无动态 ONNX Runtime 断言 | 同左 | 解包后同左 | 同左 |
+| 卡拉 OK 真实分离（至少 Debian 10 + EL7） | `karaoke-segments-e2e.sh` + 无动态 ONNX Runtime + FLAC 分段落盘 | 同左 | 解包后同左 | `dlopen` + `onnxruntime-cpu` |
 
 ## 五、发布检查清单
 
@@ -216,11 +224,12 @@ ldconfig -p | grep onnxruntime || echo 'OK：容器内没有系统 ONNX Runtime'
 6. [ ] `scripts/test/package-layout-check.sh` 通过（无构建工具的机器可用
    `TM_LAYOUT_STATIC_ONLY=1` 只跑静态断言，不能替代真实包验收）。
 7. [ ] DEB 在 8 个目标发行版完成安装/启动验收；Ubuntu 26.04 显示 `libxml2.so.16`。
-8. [ ] RPM 在 EL7/8/9/10 完成安装/启动验收。
+8. [ ] RPM 在 EL7/8/9/10 完成安装/启动验收；至少 EL7 额外断言 `readelf` 无 `libonnxruntime` 且
+   最高符号为 `GLIBC_2.17`。
 9. [ ] AppImage 在 Debian 10 与 Ubuntu 24.04/26.04 可运行，解包后 `/opt` 为实体、`/usr` 全为
    链接、模型与 NOTICE 在位。
-10. [ ] 卡拉 OK 真实分离在无系统 ONNX Runtime 的容器里通过（`karaoke-segments-e2e.sh` + 静态链接
-    断言）。
+10. [ ] 卡拉 OK 真实分离在无系统 ONNX Runtime 的容器里通过（至少 Debian 10 与 centos:7 两处；
+    `karaoke-segments-e2e.sh` + 静态链接断言 + FLAC 分段落盘断言）。
 11. [ ] AUR 本地验收通过（`_commit` 指向最终提交候选），但未推送。
 12. [ ] 独立验收（verifier）出具 `.tmp/verify/REPORT.md`，逐项给出证据；FAIL 项不得进入下一步。
 13. [ ] **打 tag**（captain）：在最终发布提交上创建 `v26.4.1.0` 并推送；tag 不是构建前置条件。

@@ -73,6 +73,17 @@
 - `*.onnx` 与 `/.tmp/models/` 均在 `.gitignore`；`aria2` 只在构建镜像里，不新增运行时依赖。
 - deb/rpm 的源码包会包含 staging 里的 `.tm-bundled-model/`（体积约 +28 MB），无外部缓存也能重建。
 
+### ONNX Runtime 静态库（官方包内置消音）
+
+模型虽随包内置，但 Debian 10/11/12 与 EL7–10 都没有 `libonnxruntime`，不静态化就会“装得上、卖点用不了”。因此官方包（DEB、EL7–10 RPM、AppImage）把 ONNX Runtime **静态链接**进 `ter-music`：
+
+- 构建（宿主执行一次）：`./scripts/build/build-onnxruntime-static.sh`（幂等；`--force` 重建、`--clean` 清理、`--flavor debian10` 降级）。源码取 Debian pool 的 `onnxruntime 1.21.0+dfsg`，在 `centos:7` + `devtoolset-11`（gcc 11.2.1）里构建 PIC 静态库，符号上限 **GLIBC_2.17**。
+- 产物缓存：`.cache/tools/onnxruntime-static/` 下的 `libonnxruntime.a`、`cxx/libstdc++.a`、`PROVENANCE.txt`、`deps-manifest.txt`、`build.log`（不进 git）。ORT 是 C++，`cxx/libstdc++.a` 只参与链接、不进 `DT_NEEDED`。
+- 镜像接入：`Dockerfile.debian10` 与 `Dockerfile.rpm` 把两份归档 `COPY` 到 `/usr/local/lib/onnxruntime-static/`；`docker-build.sh` 检测到镜像需要但缓存缺失时，会自动先跑上面的脚本。
+- CMake：`-DTER_MUSIC_ONNXRUNTIME_STATIC=AUTO|ON|OFF`（默认 AUTO：静态库存在就静态链接，否则与旧行为完全一致），静态时向源码注入 `-DTER_MUSIC_ONNXRUNTIME_STATIC=1`。源码构建/开发机没有静态库时保持运行期 `dlopen` 路径。
+- 验收断言：官方包内 `readelf -d ter-music` 无 `libonnxruntime`、`readelf -V` 最高符号不超过 `GLIBC_2.17`，并在无系统运行库的容器里跑一次真实分离。
+- FFmpeg：构建镜像同时启用 FLAC encoder/muxer（`--enable-encoder="flac,pcm_s16le" --enable-muxer="flac,wav"`）。内置消音需要把 `segNNN.inst/soft.flac` 写入会话缓存，缺这两项会在写段时失败。
+
 ## 2. DEB（Debian 10 容器）
 
 ```bash
@@ -248,6 +259,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 | `.cache/tools/appimagetool-x86_64.AppImage` | AppImage 打包工具 | GitHub `AppImage/appimagetool` latest |
 | `.cache/sources/squashfs-tools-4.7.5.tar.gz` | 镜像内编译 `mksquashfs`（Debian 10 自带的 4.3 不支持 `-mkfs-time`） | GitHub `plougher/squashfs-tools` |
 | `.cache/tools/runtime-x86_64` | AppImage type2 runtime | GitHub `AppImage/type2-runtime` latest |
+| `.cache/tools/onnxruntime-static/` | 官方包静态链接的 ONNX Runtime（内置消音） | Debian pool `onnxruntime 1.21.0+dfsg` 源码，`build-onnxruntime-static.sh` 构建 |
 
 镜像构建只 `COPY` 上述已校验文件，容器内不再联网下载；只有 `--rebuild-image` 才会重建镜像层。AppImage 固定用 `--comp zstd`：新版 type2 runtime 只内建 zlib/zstd 解压支持，用 xz 打包会解包失败。
 
@@ -257,8 +269,8 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 
 Docker 类构建只要求宿主机有可用的 Docker：
 
-- DEB：Debian 10 / glibc 2.28，FFmpeg 8.1.2 静态；
-- RPM：EL7 使用 cmake3 + devtoolset-11，EL8/9/10 使用发行版 cmake；
+- DEB：Debian 10 / glibc 2.28，FFmpeg 8.1.2 静态 + ONNX Runtime 1.21 静态（GLIBC_2.17 上限）；
+- RPM：EL7 使用 cmake3 + devtoolset-11，EL8/9/10 使用发行版 cmake；ONNX Runtime 静态库与 DEB 同源；
 - AppImage：复用 Debian 10 镜像，镜像内已带 appimagetool、squashfs-tools 4.7.5 与 type2 runtime；
 - AUR：Arch 镜像内带 base-devel、ffmpeg、ncurses、libxml2 等。
 

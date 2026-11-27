@@ -52,7 +52,11 @@ Linyaps-related runtime code path remains in the tree and builds, it is just not
   playback thread. Accompaniment is written as 15-second segments (`segNNN.inst.flac`,
   `segNNN.soft.flac` + `segNNN.ready`, indexed by `manifest.txt`) under
   `/tmp/ter-music-karaoke-<uid>-<pid>/<model-id>/<track-hash>/` (mode 0700); one model run produces
-  both stems. The whole `/tmp` session directory is removed when the player exits.
+  both stems. The whole `/tmp` session directory is removed when the player exits. Session segments
+  have their own budget: 512 MB per session by default (`TER_MUSIC_KARAOKE_SEGMENT_MB` overrides
+  it; `0` or less disables the budget), the oldest track directories are evicted first, the current
+  track is protected and every segment write is preceded by a free-space check with a 32 MiB
+  reserve.
 - A complete legacy whole-track cache under `$XDG_CACHE_HOME/ter-music/karaoke/` is still read
   (read-only, takes priority, covered by the 2048 MB LRU setting).
 - First play of an uncached track at a level other than Off waits for the first accompaniment
@@ -62,15 +66,25 @@ Linyaps-related runtime code path remains in the tree and builds, it is just not
   Failure of any kind (missing/damaged model, runtime unavailable, timeout) keeps the original
   playing and names the reason on the status line — the player never claims a switch that did not
   happen and never falls back to an older algorithm.
+- Model verification never blocks the UI or playback: the hot path only resolves the model path and
+  checks its size (a `stat`, microseconds), while the whole-file SHA-256 runs in the background
+  worker before the first separation and is cached per process by path, size and modification time.
+  Repairing or replacing the file invalidates that cache, so no restart is needed. Karaoke model,
+  worker and cache failures are localized in all three built-in languages — the English UI no
+  longer mixes Chinese (messages printed by ONNX Runtime itself remain English technical text).
 - Mono tracks and tracks longer than 30 minutes are not separated; CUE sub-tracks use the original
   or a matching legacy cache; `seamless_preload=1` also prefetches the next queue entry.
 
 ### ONNX Runtime delivery
 
-- **Official packages are self-contained**: the DEB, RPM and AppImage link the ONNX Runtime
-  statically into `ter-music`, so no system `libonnxruntime` package is needed on any target. The
-  release acceptance matrix below therefore requires a real separation run inside each target
-  container, on a system without the runtime library.
+- **Official packages are self-contained**: the DEB, all four RPMs (including EL7) and the
+  AppImage link a static **ONNX Runtime 1.21** into `ter-music`, so no system `libonnxruntime`
+  package is needed on any target and `readelf -d` lists no `libonnxruntime`. The static library is
+  built once from the Debian pool `onnxruntime 1.21.0+dfsg` source with a **GLIBC_2.17 symbol
+  ceiling** (centos:7 + devtoolset-11), so the same copy serves EL7–10 and the Debian 10+ targets;
+  the AppImage binary keeps the Debian 10 (glibc 2.28) baseline. The release acceptance matrix
+  below requires a real separation run inside each target container, on a system without the
+  runtime library.
 - **Source builds** (and builds without the static library), including the AUR package, keep the
   compatible path: the core loads a system `libonnxruntime.so.1.21`, `.so.1` or `.so` with `dlopen`
   and uses the CPU execution provider only. The AUR recipe lists Arch's `onnxruntime-cpu` as an
@@ -116,10 +130,13 @@ files.
 
 - Cross-distro matrix from one source tree: DEB (Debian 10 build, glibc 2.28), RPM per EL7/8/9/10,
   AppImage (glibc 2.28) and AUR; Linyaps builds remain available but are not shipped this time.
-- FFmpeg is linked statically (audio-only configuration, no GPL components); libxml2 is not linked
-  at all — `util/xml_compat.c` `dlopen`s `libxml2.so.2` or `.so.16` at run time, so one binary runs
-  on old and new distributions. libcurl remains a hard build dependency; SMB needs `smbclient` at
-  run time.
+- FFmpeg is linked statically (audio-only configuration, no GPL components); the build images now
+  enable its FLAC encoder and muxer (`--enable-encoder="flac,pcm_s16le" --enable-muxer="flac,wav"`),
+  which the internal segment cache needs — without them separation would fail when writing the
+  `.flac` segments (build-time fix, no user action). libxml2 is not linked at all —
+  `util/xml_compat.c` `dlopen`s `libxml2.so.2` or `.so.16` at run time, so one binary runs on old
+  and new distributions. libcurl remains a hard build dependency; SMB needs `smbclient` at run
+  time.
 - Packaging is five packaging scripts (`build-deb.sh`, `build-rpm.sh`, `build-appimage.sh`,
   `build-aur.sh`, `build-linyaps.sh`) plus `launch-auto-build.sh`; helper scripts such as
   `build-onnxruntime-static.sh` are build dependencies, not package types. The portable builder,
@@ -162,19 +179,22 @@ so the core and every frontend must be upgraded together. The MPRIS bus name
   original, so it is a compromise, not a clean instrumental.
 - Separation is CPU-heavy; on a 6-core Ryzen 5 4500U a 30-second track took about 11 s and a
   3-minute track about a minute, with about 0.8 GiB peak RSS. Weaker machines are slower.
-- Session segments cost about 15.5 MB per minute of audio while the player runs. On systems where
-  `/tmp` is a tmpfs (Fedora/RHEL default) this counts against RAM; the directory is deleted when
-  the player exits. A complete legacy whole-track cache under
+- Session segments cost about 15.5 MB per minute of audio while the player runs. The 512 MB
+  session budget (see above) bounds their total; on systems where `/tmp` is a tmpfs (Fedora/RHEL
+  default) that budget counts against RAM, so lower `TER_MUSIC_KARAOKE_SEGMENT_MB` if space is
+  tight. The directory is deleted when the player exits. A complete legacy whole-track cache under
   `~/.cache/ter-music/karaoke/` is kept until you delete it.
 - Mono tracks, tracks over 30 minutes and CUE sub-tracks are not separated into session segments.
-- Only ONNX Runtime 1.21 with the CPU execution provider is verified; DNNL and other execution
-  providers are deliberately not used. A missing or damaged model/runtime never stops playback.
+- Only ONNX Runtime 1.21 with the CPU execution provider is verified — the official packages use
+  1.21.0 built from the Debian pool source, the source/AUR path expects `libonnxruntime.so.1.21`,
+  `.so.1` or `.so`; DNNL and other execution providers are deliberately not used. A missing or
+  damaged model/runtime never stops playback.
 - A source build without `-DTER_MUSIC_BUNDLED_MODEL` contains no model and reports it as missing.
 - Linyaps UAB is not part of this release (upstream ll-box fix not released yet); AUR is not
   submitted yet.
 - The AUR recipe pins an explicit source commit (`_commit`); it is temporarily pinned to
-  `32737f0` (the current `testing` tip) and is bumped to the final release commit before
-  submission.
+  `32737f0` (the `testing` tip before this release branch) and is bumped to the final release
+  commit before submission.
 - Remote sources were verified against local fixtures (HTTP/WebDAV/FTP/FTPS/TLS/401/slow
   downloads; SMB through a faithful fake `smbclient`; SFTP known_hosts guard). A real Samba
   server, a real SSH server and the FTPS data channel were not available to the suite.
@@ -183,7 +203,10 @@ so the core and every frontend must be upgraded together. The MPRIS bus name
 
 ## Installation and acceptance
 
-All commands are run from the repository root on the build host unless a container is named.
+CI runs only deterministic gates as required checks and keeps the full real-model karaoke suite in
+an advisory job that does not block merges (see [BUILD_GUIDE.md](BUILD_GUIDE.md) §9.5); the release
+acceptance below is the authoritative full run. All commands are run from the repository root on
+the build host unless a container is named.
 
 ### DEB — Debian 10/11/12/13, Ubuntu 20.04/22.04/24.04/26.04
 
@@ -206,6 +229,11 @@ dnf install -y /pkg/*.rpm && ter-music --help && ter-music version
 rpm -qpl /pkg/*.rpm | grep 'opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music'
 rpm -qpl /pkg/*.rpm | grep 'usr/bin/ter-music'   # must be a symlink
 rpm -qpR /pkg/*.rpm | grep -E 'libxml2|libonnxruntime' || true
+# EL7: extract the binary and check the static ONNX Runtime and the glibc ceiling
+rpm2cpio /pkg/*.el7.x86_64.rpm | cpio -idm ./opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music
+readelf -d  ./opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music | grep libonnxruntime || true
+readelf -V  ./opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1
+# expected: no libonnxruntime, highest symbol GLIBC_2.17
 ```
 
 ### AppImage
@@ -232,19 +260,22 @@ DEB/RPM/AppImage packages do not need it.
 
 The strongest acceptance assertion for this release is a real separation run, not a file hash.
 Install the package in a container that has **no** system `libonnxruntime` (the official packages
-are self-contained) and run the segment end-to-end suite against the installed binary and model:
+are self-contained) and run the segment end-to-end suite against the installed binary and model —
+at least once on Debian 10 (DEB) and once in the `centos:7` container (EL7 RPM):
 
 ```bash
-# inside Debian 10/Ubuntu 24.04 with the DEB installed and ffmpeg/dbus/python3 available
+# inside Debian 10 / Ubuntu 24.04 (DEB) or centos:7 (RPM) with ffmpeg/dbus/python3 available
 scripts/test/karaoke-segments-e2e.sh \
   --bin /opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music \
   --model /opt/apps/cn.org.huansoft.ter-music/files/share/ter-music/models/uvr-mdxnet-3-9662.onnx
 ```
 
 The suite covers the session cache lifetime, first-segment start, seek priority, replay without a
-second model run, exit cleanup, legacy whole-track priority, preload and the CUE guard. A
-`SKIP` for a missing tool must be reported as a skip, never as a pass. Also verify that the
-binary really does not depend on the system runtime:
+second model run, exit cleanup, legacy whole-track priority, preload and the CUE guard. It must
+actually write `segNNN.inst.flac`/`segNNN.soft.flac`; if writing the FLAC segments fails, the
+build image was built without FFmpeg's FLAC encoder/muxer (see BUILD_GUIDE.md). A `SKIP` for a
+missing tool must be reported as a skip, never as a pass. Also verify that the binary really does
+not depend on the system runtime:
 
 ```bash
 readelf -d .../bin/ter-music | grep libonnxruntime && echo "unexpected dynamic dependency" || echo OK
@@ -256,9 +287,9 @@ ldconfig -p | grep onnxruntime || echo "no system ONNX Runtime (expected)"
 | Target | DEB | RPM | AppImage | AUR |
 | --- | --- | --- | --- | --- |
 | Debian 10/11/12/13, Ubuntu 20.04–26.04 | install + version + `libxml2` dlopen check | — | run + self-extract | — |
-| EL7/8/9/10 | — | install + version + `/usr` symlink check | — | — |
+| EL7/8/9/10 | — | install + version + `/usr` symlink + static ONNX Runtime (`readelf`, GLIBC_2.17) check | — | — |
 | Arch Linux | — | — | — | makepkg + `pacman -U` + version |
-| Karaoke separation (any target) | `karaoke-segments-e2e.sh` + no dynamic ONNX Runtime | same | same (extracted) | same |
+| Karaoke separation (Debian 10 + EL7 at minimum) | `karaoke-segments-e2e.sh` + no dynamic ONNX Runtime + FLAC segments written | same | same (extracted) | `dlopen` + `onnxruntime-cpu` |
 
 ## Licensing
 

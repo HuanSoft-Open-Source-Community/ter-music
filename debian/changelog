@@ -47,6 +47,33 @@ cn.org.huansoft.ter-music (26.4.1.0-1) unstable; urgency=medium
     $XDG_DATA_HOME/ter-music/models/ location is read-only compatibility
     only.
 
+  * ONNX Runtime is now linked statically into the official packages, so
+    built-in vocal removal works without a system libonnxruntime in every
+    official binary package: one DEB (Debian 10-13, Ubuntu 20.04-26.04),
+    four RPMs (EL7-10) and the AppImage. The static library is built once
+    from the Debian pool onnxruntime 1.21.0+dfsg source with a GLIBC_2.17
+    symbol ceiling (centos:7 + devtoolset-11), so the same copy serves EL7
+    and the AppImage's Debian 10 baseline (glibc 2.28); readelf -d lists no
+    libonnxruntime in any package. Source builds without the static library
+    keep the runtime dlopen path (libonnxruntime.so.1.21, .so.1 or .so), and
+    the AUR recipe lists onnxruntime-cpu as an optional dependency. The
+    build images also enable FFmpeg's FLAC encoder and muxer, which the
+    internal segment cache needs; without them the segments cannot be
+    written at all (build-time fix, no user action required).
+
+  * The session segment cache now has a budget: 512 MB per session by
+    default (TER_MUSIC_KARAOKE_SEGMENT_MB overrides it; 0 or less disables
+    it), oldest track directories are evicted first, the track being played
+    or separated is protected, and every segment write is preceded by a
+    free-space check with a 32 MiB reserve. Model verification no longer
+    runs on the UI or playback thread: the hot path only resolves the model
+    path and checks its size (a stat), while the whole-file SHA-256 is
+    computed by the background worker before the first separation and cached
+    per process by path, size and modification time. Karaoke model, worker
+    and cache error messages are now i18n keys in all three built-in
+    languages, so the English UI no longer mixes Chinese (the ONNX Runtime's
+    own messages remain English technical text).
+
   * Configuration contract 12 (breaking). Version 12 removes
     preferences.karaoke_feature and preferences.karaoke_model - the model is
     bundled, so the level alone selects the feature. Every config.xml below

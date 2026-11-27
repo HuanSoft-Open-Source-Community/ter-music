@@ -18,10 +18,15 @@ Comment:
     scripts/docker/Dockerfile.rpm. Upstream source:
     https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
     (license text: https://ffmpeg.org/legal.html, LGPL v2.1 or later).
-  * ONNX Runtime 1.21, linked statically into the official DEB/RPM/AppImage
-    binaries (source builds may instead dlopen a system libonnxruntime, see
-    debian/rules and CMakeLists.txt). License: MIT (see the
-    "License: MIT" paragraph below). Source:
+    The same configure line also enables FFmpeg's FLAC encoder and muxer,
+    which the built-in vocal-separation cache uses to write its segments.
+  * ONNX Runtime 1.21.0+dfsg, linked statically into the official DEB, RPMs
+    and AppImage. The static library is built once from the Debian pool
+    source by scripts/build/build-onnxruntime-static.sh with a GLIBC_2.17
+    symbol ceiling (see CMakeLists.txt, scripts/docker/Dockerfile.debian10
+    and scripts/docker/Dockerfile.rpm); source builds without the static
+    library may instead dlopen a system libonnxruntime. License: MIT (see
+    the "License: MIT" paragraph below). Source:
     https://deb.debian.org/debian/pool/main/o/onnxruntime/ and
     https://github.com/microsoft/onnxruntime
   * The ONNX Runtime C API header vendored under
