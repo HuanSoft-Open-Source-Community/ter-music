@@ -1326,6 +1326,10 @@ static int job_run_v1(WJob *j, char *err, size_t err_cap)
         set_err(err, err_cap, i18n_get("karaoke.worker.err.model_sha_mismatch"));
         return -1;
     }
+    /* S2：模型文件的完整 SHA256 校验在 worker 线程做（结果按 路径+大小+
+     * mtime 缓存，重复 job 不重读 30MiB）；UI/播放线程只做 stat 级定位。 */
+    if (karaoke_model_verify_file_cached(spec, req->model_path, err, err_cap) != 0)
+        return -1;
 
     if (decoder_open(&j->dec, req->track_path, &j->cancelled, err, err_cap) != 0)
         return -1;
@@ -1871,6 +1875,9 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
         set_err(err, err_cap, i18n_get("karaoke.worker.err.model_sha_mismatch"));
         return -1;
     }
+    /* S2：同 v1，完整 SHA256 校验放后台 worker；缓存命中后每次 job 仅 stat。 */
+    if (karaoke_model_verify_file_cached(spec, req->model_path, err, err_cap) != 0)
+        return -1;
     char session_root[KARAOKE_CACHE_PATH_CAP];
     if (karaoke_cache_session_ensure(session_root, sizeof(session_root), err,
                                      err_cap) != 0)

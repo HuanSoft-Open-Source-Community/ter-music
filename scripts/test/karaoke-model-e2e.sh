@@ -135,7 +135,34 @@ if [ "$MODEL_SHA" != "$SUPPORTED_SHA" ]; then
     exit 0
 fi
 
+# 静态链接构建（官方 deb/rpm/AppImage）：ONNX Runtime 直接编进二进制，系统
+# 里可以完全没有 libonnxruntime。探针必须认符号而不是 .so：用 nm -C 找
+# OrtGetApiBase；**不要用 strings** —— GCC 会合并重叠字符串，strings 不可靠。
+# readelf 符号表作为 nm 缺失时的回退。
+have_static_runtime() {
+    [ -n "${TM_BIN:-}" ] && [ -x "$TM_BIN" ] || return 1
+    local syms
+    if command -v nm >/dev/null 2>&1; then
+        # 注意：本脚本 set -o pipefail，`nm | grep -q` 在 grep 提前退出时会让
+        # nm 收到 SIGPIPE（141）而把整条管道判失败；先落成变量再匹配。
+        syms="$(nm -C "$TM_BIN" 2>/dev/null || true)"
+        case "$syms" in
+            *OrtGetApiBase*) return 0 ;;
+        esac
+    fi
+    if command -v readelf >/dev/null 2>&1; then
+        syms="$(readelf -sW "$TM_BIN" 2>/dev/null || true)"
+        case "$syms" in
+            *OrtGetApiBase*) return 0 ;;
+        esac
+    fi
+    return 1
+}
+STATIC_ORT=0
+have_static_runtime && STATIC_ORT=1
+
 have_runtime() {
+    [ "$STATIC_ORT" = "1" ] && return 0
     if command -v ldconfig >/dev/null 2>&1 &&
        ldconfig -p 2>/dev/null | grep -q 'libonnxruntime\.so'; then
         return 0
@@ -149,7 +176,7 @@ have_runtime() {
 RUNTIME_OK=0
 if have_runtime; then RUNTIME_OK=1; fi
 if [ "$RUNTIME_OK" != "1" ]; then
-    echo "SKIP karaoke-model-e2e：未找到 libonnxruntime（dlopen 运行库）；不伪装通过。"
+    echo "SKIP karaoke-model-e2e：未找到 libonnxruntime（dlopen 运行库），且二进制不是静态链接 ORT；不伪装通过。"
     exit 0
 fi
 
@@ -326,7 +353,7 @@ wait_daemon() {
 # 拒绝 fork 脱离进程（沙箱判定/权限），此时回退为前台核心 + 后台作业。
 # 被测的分离/缓存/播放语义与进程归属无关，两条路径等价。
 start_core() {
-    "$TM_BIN" daemon start "$@" >/dev/null 2>&1
+    "$TM_BIN" daemon start >/dev/null 2>&1
     wait_daemon && return 0
     "$TM_BIN" daemon foreground >"$WORK_DIR/core-foreground.log" 2>&1 &
     CORE_FG_PID=$!
@@ -472,8 +499,8 @@ session_root_dir() {
 seg_dirs() {
     local sr
     sr="$(session_root_dir)"
-    [ -n "$sr" ] && find "$sr" -name manifest.txt -type f 2>/dev/null |
-        xargs -r -n1 dirname 2>/dev/null | sort -u
+    [ -n "$sr" ] && find "$sr" -name manifest.txt -type f -print0 2>/dev/null |
+        xargs -0 -r -n1 dirname 2>/dev/null | sort -u
 }
 seg_complete() {  # $1=曲目段目录
     local d="$1"
@@ -521,7 +548,11 @@ SEG_FRAMES=661500
 # ── S0 前置与静态检查 ──────────────────────────────────────────────
 info "S0 前置"
 ok "模型 $MODEL（$SUPPORTED_SIZE B，SHA256 ${MODEL_SHA:0:16}… 命中）"
-ok "libonnxruntime 可被发现"
+if [ "$STATIC_ORT" = "1" ]; then
+    ok "ONNX Runtime 静态链接在二进制内（nm 命中 OrtGetApiBase；无需系统 .so）"
+else
+    ok "libonnxruntime 可被发现（dlopen 运行库）"
+fi
 ok "真实曲目 $TRACK"
 cp -- "$TRACK" "$MUSIC/real.flac" || { bad "复制真实曲目失败"; exit 1; }
 if [ -f "${TRACK%.*}.lrc" ]; then
@@ -563,7 +594,9 @@ else
     bad "CMakeLists 缺内置模型安装规则"
 fi
 if readelf -d "$TM_BIN" 2>/dev/null | grep -qi onnx || ldd "$TM_BIN" 2>/dev/null | grep -qi onnx; then
-    bad "二进制对 libonnxruntime 有静态依赖（NEEDED），违反可选加载"
+    bad "二进制对 libonnxruntime 有 NEEDED，违反可选/静态内嵌约定"
+elif [ "$STATIC_ORT" = "1" ]; then
+    ok "静态链接构建：二进制无 libonnxruntime NEEDED（ORT 已编入二进制）"
 else
     ok "二进制无 libonnxruntime NEEDED（dlopen 可选加载）"
 fi
@@ -733,7 +766,8 @@ sleep 0.8
 # 恢复内置模型供后续分离用例使用（若随包路径不可写，则回退 XDG 路径）。
 if bundled_model_install; then
     ok "已恢复随包内置模型（后续分离用例走首选路径）"
-elif cp -- "$MODEL" "$INSTALLED" 2>/dev/null; then
+elif mkdir -p "$DATA_DIR/models" 2>/dev/null &&
+     cp -- "$MODEL" "$INSTALLED" 2>/dev/null; then
     ok "随包路径不可写，已用旧 XDG 路径恢复模型（后续分离用例走兼容路径）"
 else
     bad "无法恢复模型文件，后续分离用例会失败"
@@ -872,7 +906,12 @@ if [ -n "$SEG_DIR" ]; then
         done
         # stem 正确性判据（T2 阻断项）：正确 inst 保留侧向（乐器）与低频，
         # 只削中置（人声）；若 inst 实际是模型人声 stem，侧向/低频都会大幅塌陷。
-        if python3 - "$WORK_DIR/orig.f32" "$WORK_DIR/cache-inst.f32" "$WORK_DIR/cache-soft.f32" "$WORK_DIR/orig-low.f32" "$WORK_DIR/inst-low.f32" <<'PY'
+        if [ "${TERMUSIC_E2E_SKIP_STEM_QUALITY:-0}" = "1" ]; then
+            # 合成夹具没有真实人声，MDX 会把整段当伴奏原样输出（inst≈mixture），
+            # 质量判据只能失真。CI/合成素材环境显式跳过，真实曲目的质量门禁在
+            # 发布机/Nightly 跑（同一脚本不设该变量）。
+            skip "stem 质量断言（合成夹具无真实人声）：由发布机用真实曲目验证"
+        elif python3 - "$WORK_DIR/orig.f32" "$WORK_DIR/cache-inst.f32" "$WORK_DIR/cache-soft.f32" "$WORK_DIR/orig-low.f32" "$WORK_DIR/inst-low.f32" <<'PY'
 import sys, array, math
 orig_p, inst_p, soft_p, orig_low_p, inst_low_p = sys.argv[1:6]
 def load(p):
@@ -1229,6 +1268,11 @@ fi
 
 # ── S12 无运行库：分离失败原因（ONNX Runtime）可见、原声继续 ─────────
 info "S12 无 libonnxruntime：分离失败原因可见、原声继续、核心存活"
+if [ "$STATIC_ORT" = "1" ]; then
+    # 静态链接构建不依赖系统 .so；LD_LIBRARY_PATH 遮蔽只对 dlopen 构建有意义。
+    skip "S12 无运行库失败路径（静态链接构建不适用；由动态构建覆盖）"
+    "$TM_BIN" daemon stop --all >/dev/null 2>&1
+else
 FAKE_ORT="$WORK_DIR/fake-ort"
 mkdir -p "$FAKE_ORT"
 for so in libonnxruntime.so.1.21 libonnxruntime.so.1 libonnxruntime.so; do
@@ -1256,6 +1300,7 @@ else
     skip "无法用坏 ELF 遮蔽 libonnxruntime：无运行库 E2E 跳过（单元测试已覆盖）"
 fi
 "$TM_BIN" daemon stop --all >/dev/null 2>&1
+fi
 
 # ── 收尾 ────────────────────────────────────────────────────────────
 "$TM_BIN" daemon stop --all >/dev/null 2>&1 || true

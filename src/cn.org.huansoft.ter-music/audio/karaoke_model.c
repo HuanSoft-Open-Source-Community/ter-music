@@ -36,6 +36,8 @@
 
 #include "audio/karaoke_model.h"
 
+#include "i18n/i18n.h"
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -331,12 +333,12 @@ static int sha256_file(const char *path, char out_hex[65], long long *out_size,
                        char *err, size_t err_cap)
 {
     if (!path || !*path) {
-        set_err(err, err_cap, "模型文件路径为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.model_path_empty"));
         return -1;
     }
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-        set_err(err, err_cap, "无法打开模型文件 %s：%s", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.open_model_fmt"), path, strerror(errno));
         return -1;
     }
     Sha256Ctx ctx;
@@ -344,7 +346,7 @@ static int sha256_file(const char *path, char out_hex[65], long long *out_size,
     unsigned char *buf = malloc(256 * 1024);
     if (!buf) {
         close(fd);
-        set_err(err, err_cap, "内存不足（SHA256 缓冲）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "SHA256 buffer");
         return -1;
     }
     long long total = 0;
@@ -354,7 +356,7 @@ static int sha256_file(const char *path, char out_hex[65], long long *out_size,
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            set_err(err, err_cap, "读取模型文件失败 %s：%s", path, strerror(errno));
+            set_err(err, err_cap, i18n_get("karaoke.model.err.read_model_failed_fmt"), path, strerror(errno));
             rc = -1;
             break;
         }
@@ -377,7 +379,7 @@ int karaoke_model_sha256_file(const char *path, char out_hex[65],
                               char *err, size_t err_cap)
 {
     if (!out_hex) {
-        set_err(err, err_cap, "输出缓冲为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.output_buffer_empty"));
         return -1;
     }
     return sha256_file(path, out_hex, NULL, err, err_cap);
@@ -414,9 +416,8 @@ static void ort_load_once(void)
     const OrtApiBase *base = OrtGetApiBase();
     if (!base || !base->GetApi || !base->GetVersionString) {
         g_ort_state = -1;
-        snprintf(g_ort_err, sizeof(g_ort_err),
-                 "内置 ONNX Runtime 静态库异常：OrtGetApiBase() 返回的 API 表无效"
-                 "（二进制可能链接到了不完整的 libonnxruntime.a）");
+        snprintf(g_ort_err, sizeof(g_ort_err), "%s",
+                 i18n_get("karaoke.model.err.static_bad_api"));
         return;
     }
     /* 头部按 ORT_API_VERSION(21) 编译；静态库更旧时向下索取，只用到 1.16 之前
@@ -430,7 +431,7 @@ static void ort_load_once(void)
     if (!api) {
         g_ort_state = -1;
         snprintf(g_ort_err, sizeof(g_ort_err),
-                 "内置 ONNX Runtime 静态库版本不兼容：GetApi(%d..16) 全部不可用",
+                 i18n_get("karaoke.model.err.static_version_fmt"),
                  ORT_API_VERSION);
         return;
     }
@@ -508,8 +509,8 @@ static void ort_load_once(void)
     }
     g_ort_state = -1;
     snprintf(g_ort_err, sizeof(g_ort_err),
-             "ONNX Runtime 运行库不可用（尝试 libonnxruntime.so.1.21 / .so.1 / .so）：%s",
-             detail[0] ? detail : "dlopen 失败且无错误信息");
+             i18n_get("karaoke.model.err.runtime_unavailable_fmt"),
+             detail[0] ? detail : i18n_get("karaoke.model.err.dlopen_no_detail"));
 }
 
 #endif /* TER_MUSIC_ONNXRUNTIME_STATIC */
@@ -548,7 +549,8 @@ static int ort_status_fail(const OrtApi *api, OrtStatus *st, const char *what,
     if (!st)
         return 0;
     const char *msg = api->GetErrorMessage ? api->GetErrorMessage(st) : NULL;
-    set_err(err, err_cap, "%s：%s", what, msg ? msg : "(no message)");
+    set_err(err, err_cap, i18n_get("karaoke.model.err.ort_op_fmt"), what,
+            msg ? msg : "(no message)");
     api->ReleaseStatus(st);
     return -1;
 }
@@ -649,7 +651,7 @@ static int normalize_threads(int threads)
 static int check_io_tensor(const OrtApi *api, OrtSession *session, int is_input,
                            const KaraokeModelSpec *spec, char *err, size_t err_cap)
 {
-    const char *what = is_input ? "输入" : "输出";
+    const char *what = is_input ? i18n_get("karaoke.model.label.input") : i18n_get("karaoke.model.label.output");
     const char *want_name = is_input ? spec->input_name : spec->output_name;
     OrtTypeInfo *type_info = NULL;
     OrtStatus *st = NULL;
@@ -658,17 +660,17 @@ static int check_io_tensor(const OrtApi *api, OrtSession *session, int is_input,
     int rc = -1;
 
     st = api->GetAllocatorWithDefaultOptions(&alloc);
-    if (ort_status_fail(api, st, "取默认分配器失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_allocator"), err, err_cap))
         return -1;
 
     if (is_input)
         st = api->SessionGetInputName(session, 0, alloc, &name);
     else
         st = api->SessionGetOutputName(session, 0, alloc, &name);
-    if (ort_status_fail(api, st, "读取 ONNX 输入/输出名失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_io_names"), err, err_cap))
         goto done;
     if (!name || strcmp(name, want_name) != 0) {
-        set_err(err, err_cap, "ONNX %s名不符：期望 \"%s\"，实际 \"%s\"",
+        set_err(err, err_cap, i18n_get("karaoke.model.err.onnx_name_mismatch_fmt"),
                 what, want_name, name ? name : "(null)");
         goto done;
     }
@@ -677,43 +679,43 @@ static int check_io_tensor(const OrtApi *api, OrtSession *session, int is_input,
         st = api->SessionGetInputTypeInfo(session, 0, &type_info);
     else
         st = api->SessionGetOutputTypeInfo(session, 0, &type_info);
-    if (ort_status_fail(api, st, "读取 ONNX 输入/输出类型失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_io_type"), err, err_cap))
         goto done;
 
     const OrtTensorTypeAndShapeInfo *ts = NULL;
     st = api->CastTypeInfoToTensorInfo(type_info, &ts);
-    if (ort_status_fail(api, st, "ONNX 类型不是张量", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_status_not_tensor"), err, err_cap))
         goto done;
     if (!ts) {
-        set_err(err, err_cap, "ONNX %s类型不是张量", what);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.onnx_not_tensor_fmt"), what);
         goto done;
     }
 
     ONNXTensorElementDataType elem = ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
     st = api->GetTensorElementType(ts, &elem);
-    if (ort_status_fail(api, st, "读取 ONNX 元素类型失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_elem_type"), err, err_cap))
         goto done;
     if (elem != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-        set_err(err, err_cap, "ONNX %s元素类型不是 float32（实际 %d）", what, (int)elem);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.onnx_elem_type_fmt"), what, (int)elem);
         goto done;
     }
 
     size_t rank = 0;
     st = api->GetDimensionsCount(ts, &rank);
-    if (ort_status_fail(api, st, "读取 ONNX 形状失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_shape"), err, err_cap))
         goto done;
     if (rank != (size_t)spec->input_rank) {
-        set_err(err, err_cap, "ONNX %s秩不符：期望 %d，实际 %zu",
+        set_err(err, err_cap, i18n_get("karaoke.model.err.onnx_rank_mismatch_fmt"),
                 what, spec->input_rank, rank);
         goto done;
     }
     int64_t dims[8];
     if (rank > sizeof(dims) / sizeof(dims[0])) {
-        set_err(err, err_cap, "ONNX %s秩过大（%zu）", what, rank);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.onnx_rank_too_large_fmt"), what, rank);
         goto done;
     }
     st = api->GetDimensions(ts, dims, rank);
-    if (ort_status_fail(api, st, "读取 ONNX 维度失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_dims"), err, err_cap))
         goto done;
 
     /* dims[0] 动态时 ONNX Runtime 报 -1；只接受动态或 1（batch 固定 1 推理）。 */
@@ -722,7 +724,7 @@ static int check_io_tensor(const OrtApi *api, OrtSession *session, int is_input,
                    dims[2] == spec->dim_f && dims[3] == spec->dim_t;
     if (!shape_ok) {
         set_err(err, err_cap,
-                "ONNX %s形状不符：期望 [%s,%d,%d,%d]，实际 [%lld,%lld,%lld,%lld]",
+                i18n_get("karaoke.model.err.onnx_shape_mismatch_fmt"),
                 what, spec->batch_dynamic ? "?" : "1",
                 spec->input_channels, spec->dim_f, spec->dim_t,
                 (long long)dims[0], (long long)dims[1],
@@ -747,13 +749,13 @@ static int check_session_io(const OrtApi *api, OrtSession *session,
 {
     size_t in_count = 0, out_count = 0;
     OrtStatus *st = api->SessionGetInputCount(session, &in_count);
-    if (ort_status_fail(api, st, "读取 ONNX 输入数量失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_input_count"), err, err_cap))
         return -1;
     st = api->SessionGetOutputCount(session, &out_count);
-    if (ort_status_fail(api, st, "读取 ONNX 输出数量失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_output_count"), err, err_cap))
         return -1;
     if (in_count != 1 || out_count != 1) {
-        set_err(err, err_cap, "ONNX 模型应有 1 个输入/1 个输出，实际 %zu/%zu",
+        set_err(err, err_cap, i18n_get("karaoke.model.err.onnx_io_count_fmt"),
                 in_count, out_count);
         return -1;
     }
@@ -768,17 +770,17 @@ static int fft_plan_init(KmFftPlan **out, int n_fft, char *err, size_t err_cap)
 {
     *out = NULL;
     if (n_fft <= 0 || (n_fft % 3) != 0) {
-        set_err(err, err_cap, "不支持的 n_fft=%d（本实现要求 N=3×2^k）", n_fft);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.fft_n_unsupported_fmt"), n_fft);
         return -1;
     }
     int m = n_fft / 3;
     if (m < 2 || (m & (m - 1)) != 0) {
-        set_err(err, err_cap, "不支持的 n_fft=%d（N/3 必须是 2 的幂）", n_fft);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.fft_n_pow2_fmt"), n_fft);
         return -1;
     }
     KmFftPlan *p = calloc(1, sizeof(*p));
     if (!p) {
-        set_err(err, err_cap, "内存不足（FFT 计划）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "FFT plan");
         return -1;
     }
     p->n = n_fft;
@@ -793,7 +795,7 @@ static int fft_plan_init(KmFftPlan **out, int n_fft, char *err, size_t err_cap)
     p->wn = malloc(sizeof(KmCplx) * (size_t)m * 2);
     if (!p->cos_n || !p->sin_n || !p->cos_m || !p->sin_m || !p->bitrev ||
         !p->sub || !p->full || !p->wn) {
-        set_err(err, err_cap, "内存不足（FFT 表）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "FFT tables");
         goto fail;
     }
     for (int j = 0; j < n_fft / 2; j++) {
@@ -1034,21 +1036,21 @@ KaraokeModelSession *karaoke_model_session_open(const KaraokeModelSpec *spec,
 {
     char rt_err[KARAOKE_MODEL_ERR_CAP];
     if (!spec) {
-        set_err(err, err_cap, "模型表项为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.spec_empty"));
         return NULL;
     }
     if (!model_path || !*model_path) {
-        set_err(err, err_cap, "模型路径为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.model_path_empty"));
         return NULL;
     }
     if (karaoke_model_runtime_available(rt_err, sizeof(rt_err)) != 0) {
-        set_err(err, err_cap, "ONNX Runtime 不可用：%s", rt_err);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.runtime_unavailable_short_fmt"), rt_err);
         return NULL;
     }
     const OrtApi *api = g_ort;
     KaraokeModelSession *s = calloc(1, sizeof(*s));
     if (!s) {
-        set_err(err, err_cap, "内存不足（会话）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "session");
         return NULL;
     }
     s->spec = spec;
@@ -1057,48 +1059,48 @@ KaraokeModelSession *karaoke_model_session_open(const KaraokeModelSpec *spec,
 
     OrtStatus *st = api->CreateEnv(ORT_LOGGING_LEVEL_ERROR, "ter-music-karaoke-model",
                                    &s->env);
-    if (ort_status_fail(api, st, "创建 ONNX 环境失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_create_env"), err, err_cap))
         goto fail;
     st = api->CreateSessionOptions(&s->options);
-    if (ort_status_fail(api, st, "创建 ONNX 会话选项失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_create_options"), err, err_cap))
         goto fail;
     st = api->SetIntraOpNumThreads(s->options, s->threads);
-    if (ort_status_fail(api, st, "设置推理线程数失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_set_intra_threads"), err, err_cap))
         goto fail;
     st = api->SetInterOpNumThreads(s->options, 1);
-    if (ort_status_fail(api, st, "设置算子间线程数失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_set_inter_threads"), err, err_cap))
         goto fail;
     st = api->SetSessionGraphOptimizationLevel(s->options, ORT_ENABLE_ALL);
-    if (ort_status_fail(api, st, "设置图优化级别失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_set_graph_opt"), err, err_cap))
         goto fail;
     st = api->SetSessionLogSeverityLevel(s->options, ORT_LOGGING_LEVEL_ERROR);
-    if (ort_status_fail(api, st, "设置会话日志级别失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_set_log_level"), err, err_cap))
         goto fail;
     /* 峰值内存 1.11GiB → 0.68GiB；代价是推理慢 2–8%（可接受）。 */
     st = api->DisableCpuMemArena(s->options);
-    if (ort_status_fail(api, st, "关闭 CPU 内存 arena 失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_disable_mem_arena"), err, err_cap))
         goto fail;
 
     st = api->CreateSession(s->env, model_path, s->options, &s->session);
-    if (ort_status_fail(api, st, "创建 ONNX 会话失败（模型损坏或运行库不兼容）",
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_create_session"),
                         err, err_cap))
         goto fail;
     if (check_session_io(api, s->session, spec, err, err_cap) != 0)
         goto fail;
 
     st = api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &s->mem_info);
-    if (ort_status_fail(api, st, "创建 CPU 内存信息失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_create_meminfo"), err, err_cap))
         goto fail;
 
     s->patch_elems = karaoke_model_patch_elems(spec);
     if (s->patch_elems == 0) {
-        set_err(err, err_cap, "模型表项参数非法（patch 为空）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.patch_null"));
         goto fail;
     }
     s->in_patch = (float *)xaligned(s->patch_elems * sizeof(float));
     s->out_patch = (float *)xaligned(s->patch_elems * sizeof(float));
     if (!s->in_patch || !s->out_patch) {
-        set_err(err, err_cap, "内存不足（模型输入/输出缓冲 %zu 个 float）",
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_model_io_fmt"),
                 s->patch_elems);
         goto fail;
     }
@@ -1138,7 +1140,7 @@ static int run_patch(KaraokeModelSession *s, const float *in_patch, float *out_p
     OrtStatus *st = api->CreateTensorWithDataAsOrtValue(
         s->mem_info, (void *)in_patch, bytes, dims, 4,
         ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &in_val);
-    if (ort_status_fail(api, st, "包装 ONNX 输入张量失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_create_tensor"), err, err_cap))
         return -1;
 
     const char *in_names[1] = {spec->input_name};
@@ -1146,12 +1148,12 @@ static int run_patch(KaraokeModelSession *s, const float *in_patch, float *out_p
     st = api->Run(s->session, NULL, in_names, (const OrtValue *const *)&in_val, 1,
                   out_names, 1, &out_val);
     api->ReleaseValue(in_val);
-    if (ort_status_fail(api, st, "ONNX 推理失败", err, err_cap))
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_infer_failed"), err, err_cap))
         return -1;
 
     void *out_data = NULL;
     st = api->GetTensorMutableData(out_val, &out_data);
-    if (ort_status_fail(api, st, "读取 ONNX 输出数据失败", err, err_cap)) {
+    if (ort_status_fail(api, st, i18n_get("karaoke.model.err.ort_read_output"), err, err_cap)) {
         api->ReleaseValue(out_val);
         return -1;
     }
@@ -1166,11 +1168,11 @@ int karaoke_model_infer_patch(KaraokeModelSession *s,
                               char *err, size_t err_cap)
 {
     if (!s) {
-        set_err(err, err_cap, "会话为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.session_null"));
         return -1;
     }
     if (!in_patch || !out_patch) {
-        set_err(err, err_cap, "输入/输出缓冲为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.io_buffer_null"));
         return -1;
     }
     return run_patch(s, in_patch, out_patch, err, err_cap);
@@ -1216,7 +1218,7 @@ static int dsp_ensure(KaraokeModelSession *s, char *err, size_t err_cap)
 
     if (n_fft <= 0 || chunk == 0 || trim <= 0 || spec->dim_f <= 0 ||
         spec->dim_f > n_fft) {
-        set_err(err, err_cap, "模型表项 FFT 参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.spec_fft_invalid"));
         return -1;
     }
     if (fft_plan_init(&s->fft, n_fft, err, err_cap) != 0)
@@ -1228,7 +1230,7 @@ static int dsp_ensure(KaraokeModelSession *s, char *err, size_t err_cap)
     s->ola = calloc(cyl * 2, sizeof(float));
     s->wsum = calloc(cyl, sizeof(float));
     if (!s->frame || !s->bins || !s->window || !s->part || !s->ola || !s->wsum) {
-        set_err(err, err_cap, "内存不足（DSP 暂存）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "DSP scratch");
         session_free_dsp(s);
         return -1;
     }
@@ -1336,7 +1338,7 @@ int karaoke_model_stft_selftest(const KaraokeModelSpec *spec, char *err, size_t 
 {
     if (!spec || spec->n_fft <= 0 || spec->hop <= 0 || spec->dim_f <= 0 ||
         spec->dim_t <= 1) {
-        set_err(err, err_cap, "模型表项 DSP 参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.spec_dsp_invalid"));
         return -1;
     }
     KaraokeModelSession tmp;
@@ -1352,7 +1354,7 @@ int karaoke_model_stft_selftest(const KaraokeModelSpec *spec, char *err, size_t 
     float *ola = (float *)calloc((chunk + (size_t)spec->n_fft) * 2, sizeof(float));
     float *wsum = (float *)calloc(chunk + (size_t)spec->n_fft, sizeof(float));
     if (!part || !patch || !ola || !wsum) {
-        set_err(err, err_cap, "内存不足（DSP 自检）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "DSP self-test");
         goto done;
     }
     /* 带限测试信号（全部 <14.7kHz，落在 dim_f 内）：双声道不同相位/频率。
@@ -1390,7 +1392,7 @@ int karaoke_model_stft_selftest(const KaraokeModelSpec *spec, char *err, size_t 
     }
     double rms_rel = sqrt(num / (den > 0.0 ? den : 1.0));
     if (rms_rel > 1e-3) {
-        set_err(err, err_cap, "STFT/iSTFT 自检失败：相对 RMS 误差 %.3e（阈值 1e-3），峰值 %.3e",
+        set_err(err, err_cap, i18n_get("karaoke.model.err.selftest_failed_fmt"),
                 rms_rel, peak);
         goto done;
     }
@@ -1410,19 +1412,19 @@ int karaoke_model_separate(KaraokeModelSession *s,
                            float *out, char *err, size_t err_cap)
 {
     if (!s) {
-        set_err(err, err_cap, "会话为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.session_null"));
         return -1;
     }
     if (!mix || !out) {
-        set_err(err, err_cap, "输入/输出缓冲为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.io_buffer_null"));
         return -1;
     }
     if (frames == 0) {
-        set_err(err, err_cap, "帧数为 0");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.frames_zero"));
         return -1;
     }
     if (stem != KARAOKE_STEM_VOCALS && stem != KARAOKE_STEM_INSTRUMENTAL) {
-        set_err(err, err_cap, "未知的 stem 选择 %d", (int)stem);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.stem_unknown_fmt"), (int)stem);
         return -1;
     }
     const KaraokeModelSpec *spec = s->spec;
@@ -1430,7 +1432,7 @@ int karaoke_model_separate(KaraokeModelSession *s,
     const int trim = n_fft / 2;
     const size_t chunk = karaoke_model_chunk_frames(spec);
     if (chunk == 0 || (size_t)chunk <= (size_t)n_fft) {
-        set_err(err, err_cap, "模型表项 chunk/FFT 参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.spec_chunk_invalid"));
         return -1;
     }
     const size_t gen = chunk - (size_t)n_fft;
@@ -1444,7 +1446,7 @@ int karaoke_model_separate(KaraokeModelSession *s,
     unsigned long long total_ll = (unsigned long long)trim + (unsigned long long)frames +
                                   (unsigned long long)pad;
     if (total_ll > (unsigned long long)SIZE_MAX / (2ull * sizeof(float))) {
-        set_err(err, err_cap, "帧数过大（%zu）", frames);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.frames_too_large_fmt"), frames);
         return -1;
     }
     const size_t total = (size_t)total_ll;
@@ -1454,7 +1456,7 @@ int karaoke_model_separate(KaraokeModelSession *s,
     if (!result || !divider) {
         free(result);
         free(divider);
-        set_err(err, err_cap, "内存不足（分离结果缓冲：%.1f MiB）",
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_buffer_mib_fmt"),
                 (double)(total * 3 * sizeof(float)) / (1024.0 * 1024.0));
         return -1;
     }
@@ -1526,15 +1528,15 @@ static int stat_regular_size(const char *path, long long *out_size,
 {
     struct stat st;
     if (stat(path, &st) != 0) {
-        set_err(err, err_cap, "无法访问模型文件 %s：%s", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.cannot_access_model_fmt"), path, strerror(errno));
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
-        set_err(err, err_cap, "不是普通文件：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.not_regular_model_fmt"), path);
         return -1;
     }
     if (st.st_size < 0) {
-        set_err(err, err_cap, "文件大小异常：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.file_size_abnormal_fmt"), path);
         return -1;
     }
     *out_size = (long long)st.st_size;
@@ -1547,7 +1549,7 @@ int karaoke_model_validate_file(const char *path, const KaraokeModelSpec **out_s
     if (out_spec)
         *out_spec = NULL;
     if (!path || !*path) {
-        set_err(err, err_cap, "模型文件路径为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.model_path_empty"));
         return -1;
     }
     long long size = 0;
@@ -1563,7 +1565,7 @@ int karaoke_model_validate_file(const char *path, const KaraokeModelSpec **out_s
     }
     if (!spec) {
         set_err(err, err_cap,
-                "不支持的模型（大小 %lld 字节，不在受支持表内；受支持项：%s）",
+                i18n_get("karaoke.model.err.unsupported_size_fmt"),
                 size, g_models[0].id);
         return -1;
     }
@@ -1573,7 +1575,7 @@ int karaoke_model_validate_file(const char *path, const KaraokeModelSpec **out_s
         return -1;
     if (!hex64_equal_ci(hex, spec->sha256)) {
         set_err(err, err_cap,
-                "不支持的模型（SHA256 不匹配）：实际 %s，期望 %s（%s，%s）",
+                i18n_get("karaoke.model.err.unsupported_sha_fmt"),
                 hex, spec->sha256, spec->id, spec->url);
         return -1;
     }
@@ -1584,7 +1586,7 @@ int karaoke_model_validate_file(const char *path, const KaraokeModelSpec **out_s
     KaraokeModelSession *session = karaoke_model_session_open(spec, path, 0,
                                                               sess_err, sizeof(sess_err));
     if (!session) {
-        set_err(err, err_cap, "模型可读但无法作为受支持模型加载：%s", sess_err);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.unsupported_load_fmt"), sess_err);
         return -1;
     }
     karaoke_model_session_close(session);
@@ -1623,43 +1625,48 @@ static int bundled_candidate_state(const char *path, long long *out_size,
         if (errno == ENOENT || errno == ENOTDIR) {
             return 1;
         }
-        set_err(err, err_cap, "内置模型不可访问：%s（%s）", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_unreadable_fmt"),
+                path, strerror(errno));
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
-        set_err(err, err_cap, "内置模型不是普通文件：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_not_regular_fmt"),
+                path);
         return -1;
     }
     if (st.st_size <= 0) {
-        set_err(err, err_cap, "内置模型是空文件：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_empty_fmt"), path);
         return -1;
     }
     *out_size = (long long)st.st_size;
     return 0;
 }
 
-int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
-                                 const char *bundled_data_dir,
-                                 const char *legacy_data_dir,
-                                 char *out, size_t cap,
-                                 char *err, size_t err_cap)
+/* 定位候选文件：只做 stat + 大小校验（不算 SHA256，热路径安全）。
+ * 与旧 locate 的“定位”语义一致：第一个存在的文件即为候选；大小不符立即
+ * 报错（坏包可见，不再静默回退另一个位置）；都不存在时报缺失。 */
+static int find_bundled_candidate(const KaraokeModelSpec *spec,
+                                  const char *bundled_data_dir,
+                                  const char *legacy_data_dir,
+                                  char *out, size_t cap,
+                                  char *err, size_t err_cap)
 {
     if (out && cap)
         out[0] = '\0';
     if (err && err_cap)
         err[0] = '\0';
     if (!spec || !spec->id || !*spec->id) {
-        set_err(err, err_cap, "内置模型表项无效（id 为空）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_spec_invalid"));
         return -1;
     }
     if (!out || cap == 0) {
-        set_err(err, err_cap, "内置模型路径缓冲为空");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_path_buf_empty"));
         return -1;
     }
 
     const char *dirs[2] = { bundled_data_dir, legacy_data_dir };
-    static const char *const dir_labels[2] = {
-        "随包数据目录", "旧用户数据目录"
+    static const char *const dir_label_keys[2] = {
+        "karaoke.model.label.bundled_dir", "karaoke.model.label.legacy_dir"
     };
     int tried = 0;
     for (int i = 0; i < 2; i++) {
@@ -1672,7 +1679,9 @@ int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
 
         char candidate[KARAOKE_MODEL_PATH_CAP];
         if (karaoke_model_installed_path(spec, dir, candidate, sizeof(candidate)) != 0) {
-            set_err(err, err_cap, "%s路径过长：%s", dir_labels[i], dir);
+            set_err(err, err_cap,
+                    i18n_get("karaoke.model.err.bundled_dir_path_too_long_fmt"),
+                    i18n_get(dir_label_keys[i]), dir);
             return -1;
         }
 
@@ -1683,31 +1692,20 @@ int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
         if (state < 0)
             return -1;
 
-        /* 文件存在：从这里开始"坏包"必须可见，绝不再静默回退到另一位置。 */
+        /* 文件存在：从这里开始“坏包”必须可见，绝不再静默回退到另一位置。 */
         if (size != spec->size) {
             set_err(err, err_cap,
-                    "内置模型校验失败：%s 大小 %lld 字节，期望 %lld 字节（%s）",
+                    i18n_get("karaoke.model.err.bundled_bad_size_fmt"),
                     candidate, size, spec->size, spec->id);
             return -1;
         }
-        char hex[65];
-        if (sha256_file(candidate, hex, NULL, err, err_cap) != 0)
-            return -1;
-        if (!hex64_equal_ci(hex, spec->sha256)) {
-            set_err(err, err_cap,
-                    "内置模型校验失败：%s SHA256 %s，期望 %s（%s，官方 %s）",
-                    candidate, hex, spec->sha256, spec->id, spec->url);
-            return -1;
-        }
-
         snprintf(out, cap, "%s", candidate);
         return 0;
     }
 
-    /* 两个位置都不存在（或都没给）：明确报"内置模型缺失"。 */
+    /* 两个位置都不存在（或都没给）：明确报“内置模型缺失”。 */
     if (tried == 0) {
-        set_err(err, err_cap,
-                "内置模型缺失：没有可查的数据目录（编译期数据目录与旧用户数据目录均为空）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_missing_no_dir"));
         return -1;
     }
     char checked[2 * KARAOKE_MODEL_PATH_CAP + 128];
@@ -1719,63 +1717,199 @@ int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
         if (i == 1 && dirs[0] && strcmp(dirs[0], dir) == 0)
             continue;
         if (checked[0])
-            append_str(checked, sizeof(checked), "，或 ");
+            append_str(checked, sizeof(checked),
+                       i18n_get("karaoke.model.err.list_separator_or"));
         append_str(checked, sizeof(checked), dir);
         append_str(checked, sizeof(checked), "/models/");
         append_str(checked, sizeof(checked), spec->id);
         append_str(checked, sizeof(checked), ".onnx");
     }
-    set_err(err, err_cap,
-            "内置模型缺失：未找到 %s（模型应随包安装到 <前缀>/share/ter-music/models/，"
-            "运行期不复制到 XDG）", checked);
+    set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_missing_fmt"),
+            checked);
     return -1;
 }
 
-/* 进程内缓存：首次使用时校验一次（30MiB 文件 SHA256 + stat），之后复用结果。
- * 失败也缓存：重复起播不应反复读盘/重复刷错误提示；装好模型后重启生效。 */
-static pthread_mutex_t g_bundled_lock = PTHREAD_MUTEX_INITIALIZER;
-static int g_bundled_state = 0;    /* 0=未探测 1=可用 -1=不可用 */
-static char g_bundled_path_cache[KARAOKE_MODEL_PATH_CAP];
-static char g_bundled_err_cache[KARAOKE_MODEL_ERR_CAP];
+/* ================================================================
+ * 8.1 模型校验缓存（S2）
+ *
+ * 键 = 路径 + 大小 + mtime(ns)。缓存只保存“结论 + 原始数值”（不保存本地化
+ * 文案，避免语言切换/线程生命周期问题）；每次返回时按当前语言生成错误。
+ * 失败结论同样缓存：坏模型重复起播不会反复读 30MiB。
+ * ================================================================ */
 
+typedef enum {
+    MODEL_VERIFY_OK = 0,
+    MODEL_VERIFY_BAD_SIZE = 1,
+    MODEL_VERIFY_BAD_SHA = 2,
+    MODEL_VERIFY_IO = 3
+} ModelVerifyKind;
+
+typedef struct {
+    int have;
+    ModelVerifyKind kind;
+    char path[KARAOKE_MODEL_PATH_CAP];
+    long long size;
+    long long mtime_sec;
+    long mtime_nsec;
+    long long actual_size;
+    char actual_sha[65];
+    int io_errno;
+} ModelVerifyCache;
+
+static ModelVerifyCache g_model_verify;
+static pthread_mutex_t g_model_verify_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int karaoke_model_verify_file_cached(const KaraokeModelSpec *spec,
+                                     const char *path,
+                                     char *err, size_t err_cap)
+{
+    if (err && err_cap)
+        err[0] = '\0';
+    if (!spec || !path || !path[0]) {
+        set_err(err, err_cap, i18n_get("karaoke.model.err.model_path_empty"));
+        return -1;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        set_err(err, err_cap,
+                i18n_get("karaoke.model.err.cannot_access_model_fmt"), path,
+                strerror(errno));
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        set_err(err, err_cap, i18n_get("karaoke.model.err.not_regular_model_fmt"),
+                path);
+        return -1;
+    }
+    const long long size = (long long)st.st_size;
+    const long long mtime_sec = (long long)st.st_mtim.tv_sec;
+    const long mtime_nsec = (long)st.st_mtim.tv_nsec;
+
+    ModelVerifyKind kind;
+    long long actual_size = 0;
+    char actual_sha[65] = {0};
+    int io_errno = 0;
+
+    pthread_mutex_lock(&g_model_verify_lock);
+    int hit = g_model_verify.have &&
+              strcmp(g_model_verify.path, path) == 0 &&
+              g_model_verify.size == size &&
+              g_model_verify.mtime_sec == mtime_sec &&
+              g_model_verify.mtime_nsec == mtime_nsec;
+    if (hit) {
+        kind = g_model_verify.kind;
+        actual_size = g_model_verify.actual_size;
+        snprintf(actual_sha, sizeof(actual_sha), "%s", g_model_verify.actual_sha);
+        io_errno = g_model_verify.io_errno;
+    }
+    pthread_mutex_unlock(&g_model_verify_lock);
+
+    if (!hit) {
+        if (size != spec->size) {
+            kind = MODEL_VERIFY_BAD_SIZE;
+            actual_size = size;
+        } else {
+            char hex[65] = {0};
+            char hash_err[KARAOKE_MODEL_ERR_CAP] = {0};
+            if (karaoke_model_sha256_file(path, hex, hash_err, sizeof(hash_err)) != 0) {
+                kind = MODEL_VERIFY_IO;
+                io_errno = errno;
+            } else if (!hex64_equal_ci(hex, spec->sha256)) {
+                kind = MODEL_VERIFY_BAD_SHA;
+                snprintf(actual_sha, sizeof(actual_sha), "%s", hex);
+            } else {
+                kind = MODEL_VERIFY_OK;
+            }
+        }
+        pthread_mutex_lock(&g_model_verify_lock);
+        g_model_verify.have = 1;
+        g_model_verify.kind = kind;
+        snprintf(g_model_verify.path, sizeof(g_model_verify.path), "%s", path);
+        g_model_verify.size = size;
+        g_model_verify.mtime_sec = mtime_sec;
+        g_model_verify.mtime_nsec = mtime_nsec;
+        g_model_verify.actual_size = actual_size;
+        snprintf(g_model_verify.actual_sha, sizeof(g_model_verify.actual_sha), "%s",
+                 actual_sha);
+        g_model_verify.io_errno = io_errno;
+        pthread_mutex_unlock(&g_model_verify_lock);
+    }
+
+    switch (kind) {
+    case MODEL_VERIFY_OK:
+        return 0;
+    case MODEL_VERIFY_BAD_SIZE:
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_bad_size_fmt"),
+                path, actual_size, spec->size, spec->id);
+        return -1;
+    case MODEL_VERIFY_BAD_SHA:
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_bad_sha_fmt"),
+                path, actual_sha, spec->sha256, spec->id, spec->url);
+        return -1;
+    case MODEL_VERIFY_IO:
+    default:
+        set_err(err, err_cap,
+                i18n_get("karaoke.model.err.read_model_failed_fmt"), path,
+                strerror(io_errno ? io_errno : EIO));
+        return -1;
+    }
+}
+
+int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
+                                 const char *bundled_data_dir,
+                                 const char *legacy_data_dir,
+                                 char *out, size_t cap,
+                                 char *err, size_t err_cap)
+{
+    if (find_bundled_candidate(spec, bundled_data_dir, legacy_data_dir, out, cap,
+                               err, err_cap) != 0)
+        return -1;
+    return karaoke_model_verify_file_cached(spec, out, err, err_cap);
+}
+
+/* 热路径入口：只定位 + 大小校验（不读 30MiB）。完整 SHA256 由 worker 线程
+ * 在真正分离前用 karaoke_model_verify_file_cached() 补校验。 */
+int karaoke_model_bundled_path_fast(const char *legacy_data_dir,
+                                    char *out, size_t cap,
+                                    char *err, size_t err_cap)
+{
+    const KaraokeModelSpec *spec = karaoke_model_by_id(KARAOKE_MODEL_BUNDLED_ID);
+    if (!spec) {
+        if (out && cap)
+            out[0] = '\0';
+        if (err && err_cap)
+            err[0] = '\0';
+        /* 表里没有内置 id 属于编译期错误（改表必须同步本文件头常量）。 */
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_spec_missing_fmt"),
+                KARAOKE_MODEL_BUNDLED_ID);
+        return -1;
+    }
+    return find_bundled_candidate(spec, TER_MUSIC_DATA_DIR, legacy_data_dir, out,
+                                  cap, err, err_cap);
+}
+
+/* 完整校验入口（测试/排障/一次性初始化用；不要在 UI 热路径调用）。 */
 int karaoke_model_bundled_path(const char *legacy_data_dir,
                                char *out, size_t cap,
                                char *err, size_t err_cap)
 {
-    if (out && cap)
-        out[0] = '\0';
-    if (err && err_cap)
-        err[0] = '\0';
-
-    pthread_mutex_lock(&g_bundled_lock);
-    if (g_bundled_state == 0) {
-        const KaraokeModelSpec *spec = karaoke_model_by_id(KARAOKE_MODEL_BUNDLED_ID);
-        g_bundled_path_cache[0] = '\0';
-        g_bundled_err_cache[0] = '\0';
-        if (!spec) {
-            /* 表里没有内置 id 属于编译期错误（改表必须同步本文件头常量）。 */
-            set_err(g_bundled_err_cache, sizeof(g_bundled_err_cache),
-                    "内置模型表缺失：受支持模型表里没有 '%s'",
-                    KARAOKE_MODEL_BUNDLED_ID);
-            g_bundled_state = -1;
-        } else if (karaoke_model_locate_bundled(spec, TER_MUSIC_DATA_DIR,
-                                                legacy_data_dir,
-                                                g_bundled_path_cache,
-                                                sizeof(g_bundled_path_cache),
-                                                g_bundled_err_cache,
-                                                sizeof(g_bundled_err_cache)) != 0) {
-            g_bundled_state = -1;
-        } else {
-            g_bundled_state = 1;
-        }
+    char path[KARAOKE_MODEL_PATH_CAP];
+    if (karaoke_model_bundled_path_fast(legacy_data_dir, path, sizeof(path), err,
+                                        err_cap) != 0)
+        return -1;
+    const KaraokeModelSpec *spec = karaoke_model_by_id(KARAOKE_MODEL_BUNDLED_ID);
+    if (!spec) {
+        if (err && err_cap)
+            err[0] = '\0';
+        set_err(err, err_cap, i18n_get("karaoke.model.err.bundled_spec_missing_fmt"),
+                KARAOKE_MODEL_BUNDLED_ID);
+        return -1;
     }
-    int rc = (g_bundled_state == 1) ? 0 : -1;
-    if (rc == 0 && out && cap)
-        snprintf(out, cap, "%s", g_bundled_path_cache);
-    if (rc != 0 && err && err_cap)
-        snprintf(err, err_cap, "%s", g_bundled_err_cache);
-    pthread_mutex_unlock(&g_bundled_lock);
-    return rc;
+    if (karaoke_model_verify_file_cached(spec, path, err, err_cap) != 0)
+        return -1;
+    if (out && cap)
+        snprintf(out, cap, "%s", path);
+    return 0;
 }
 
 /* 目标文件是否已经是受支持模型的正确副本（大小 + SHA256）。 */
@@ -1798,16 +1932,16 @@ static int mkdir_models(const char *data_dir, char *models_dir, size_t cap,
 {
     int n = snprintf(models_dir, cap, "%s/models", data_dir);
     if (n < 0 || (size_t)n >= cap) {
-        set_err(err, err_cap, "数据目录路径过长（上限 %zu 字节）", cap);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.data_dir_too_long_fmt"), cap);
         return -1;
     }
     if (mkdir(models_dir, 0700) != 0 && errno != EEXIST) {
-        set_err(err, err_cap, "无法创建模型目录 %s：%s", models_dir, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.mkdir_failed_fmt"), models_dir, strerror(errno));
         return -1;
     }
     struct stat st;
     if (stat(models_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        set_err(err, err_cap, "模型目录不可用：%s", models_dir);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.dir_unusable_fmt"), models_dir);
         return -1;
     }
     return 0;
@@ -1820,7 +1954,7 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
     char dir[KARAOKE_MODEL_PATH_CAP];
     int dn = snprintf(dir, sizeof(dir), "%s", dst);
     if (dn < 0 || (size_t)dn >= sizeof(dir)) {
-        set_err(err, err_cap, "目标路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.target_path_too_long"));
         return -1;
     }
     char *slash = strrchr(dir, '/');
@@ -1838,23 +1972,23 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
         int tn = snprintf(tmp, sizeof(tmp), "%s/.%s.part.%ld.%d", dir, base,
                           (long)getpid(), attempt);
         if (tn < 0 || (size_t)tn >= sizeof(tmp)) {
-            set_err(err, err_cap, "临时文件路径过长");
+            set_err(err, err_cap, i18n_get("karaoke.model.err.temp_path_too_long"));
             return -1;
         }
         fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
         if (fd < 0 && errno != EEXIST) {
-            set_err(err, err_cap, "无法创建临时文件 %s：%s", tmp, strerror(errno));
+            set_err(err, err_cap, i18n_get("karaoke.model.err.temp_create_fmt"), tmp, strerror(errno));
             return -1;
         }
     }
     if (fd < 0) {
-        set_err(err, err_cap, "无法创建临时文件（重试 16 次仍冲突）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.temp_retry_failed"));
         return -1;
     }
 
     int src_fd = open(src, O_RDONLY | O_CLOEXEC);
     if (src_fd < 0) {
-        set_err(err, err_cap, "无法打开源模型文件 %s：%s", src, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.open_source_fmt"), src, strerror(errno));
         close(fd);
         unlink(tmp);
         return -1;
@@ -1862,7 +1996,7 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
 
     unsigned char *buf = malloc(256 * 1024);
     if (!buf) {
-        set_err(err, err_cap, "内存不足（复制缓冲）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.oom_fmt"), "copy buffer");
         close(src_fd);
         close(fd);
         unlink(tmp);
@@ -1877,7 +2011,7 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            set_err(err, err_cap, "读取源模型失败：%s", strerror(errno));
+            set_err(err, err_cap, i18n_get("karaoke.model.err.read_source_fmt"), strerror(errno));
             rc = -1;
             break;
         }
@@ -1890,7 +2024,7 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
             if (w < 0) {
                 if (errno == EINTR)
                     continue;
-                set_err(err, err_cap, "写入模型副本失败：%s", strerror(errno));
+                set_err(err, err_cap, i18n_get("karaoke.model.err.write_copy_fmt"), strerror(errno));
                 rc = -1;
                 break;
             }
@@ -1908,17 +2042,17 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
         sha256_final_hex(&ctx, hex);
         if (copied != spec->size || !hex64_equal_ci(hex, spec->sha256)) {
             set_err(err, err_cap,
-                    "复制后校验失败（源文件在校验后被改动？）：大小 %lld/%lld，SHA256 %s",
+                    i18n_get("karaoke.model.err.copy_verify_fmt"),
                     copied, spec->size, hex);
             rc = -1;
         }
     }
     if (rc == 0 && fsync(fd) != 0) {
-        set_err(err, err_cap, "fsync 模型副本失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.copy_fsync_fmt"), strerror(errno));
         rc = -1;
     }
     if (close(fd) != 0 && rc == 0) {
-        set_err(err, err_cap, "关闭模型副本失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.copy_close_fmt"), strerror(errno));
         rc = -1;
     }
     if (rc != 0) {
@@ -1926,7 +2060,7 @@ static int copy_atomic(const char *src, const char *dst, const KaraokeModelSpec 
         return -1;
     }
     if (rename(tmp, dst) != 0) {
-        set_err(err, err_cap, "安装模型失败（rename）：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.model.err.install_rename_fmt"), strerror(errno));
         unlink(tmp);
         return -1;
     }
@@ -1945,7 +2079,7 @@ int karaoke_model_install(const char *src, const char *data_dir,
     if (out_id && id_cap)
         out_id[0] = '\0';
     if (!data_dir || !*data_dir) {
-        set_err(err, err_cap, "数据目录为空（调用方应传 $XDG_DATA_HOME/ter-music）");
+        set_err(err, err_cap, i18n_get("karaoke.model.err.data_dir_empty"));
         return -1;
     }
     const KaraokeModelSpec *spec = NULL;
@@ -1958,7 +2092,7 @@ int karaoke_model_install(const char *src, const char *data_dir,
 
     char dst[KARAOKE_MODEL_PATH_CAP];
     if (karaoke_model_installed_path(spec, data_dir, dst, sizeof(dst)) != 0) {
-        set_err(err, err_cap, "安装路径过长（数据目录 %s）", data_dir);
+        set_err(err, err_cap, i18n_get("karaoke.model.err.install_path_too_long_fmt"), data_dir);
         return -1;
     }
 

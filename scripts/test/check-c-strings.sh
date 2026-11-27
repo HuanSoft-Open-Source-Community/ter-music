@@ -35,8 +35,6 @@ LIST = "--list" in ARGS
 
 # 文件白名单：仓库相对路径 -> 理由（必须能自证「不是英文界面里的中文」）。
 WHITELIST = {
-    "src/cn.org.huansoft.ter-music/audio/karaoke_model.c":
-        "S3 第二轮 t6 处理（艺术文件归属：本轮不碰 karaoke_model.c/h）",
     "src/cn.org.huansoft.ter-music/audio/playback_thread.c":
         "分段回退诊断只进 log_warn，不上状态行；不在本轮 S3 允许改文件列表",
     "src/cn.org.huansoft.ter-music/ui/mouse.c":

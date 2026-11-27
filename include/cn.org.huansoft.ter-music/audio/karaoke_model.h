@@ -206,10 +206,13 @@ int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
                                  char *err, size_t err_cap);
 
 /**
- * 生产入口：用编译期 `TER_MUSIC_DATA_DIR` 与调用方给的旧用户数据目录
+ * 完整校验入口：用编译期 `TER_MUSIC_DATA_DIR` 与调用方给的旧用户数据目录
  * （通常是 `app_data_dir(0)` = `$XDG_DATA_HOME/ter-music`）定位并校验内置
- * 模型。结果（成功或失败）在**进程内缓存**：首次使用时校验一次，之后不再
- * 重复读 30MiB 文件，也不重复报错。
+ * 模型（大小 + SHA256）。**首次调用会读 30MiB**；之后按
+ * `路径+大小+mtime` 命中进程内校验缓存。
+ *
+ * 注意：这是完整校验入口，不要放在 UI 热路径；UI/播放路径用
+ * `karaoke_model_bundled_path_fast()`，SHA256 由 worker 线程补校验。
  *
  * @param legacy_data_dir 旧用户数据目录（可为 NULL）。
  * @param out             成功时写入选中的绝对路径。
@@ -219,6 +222,38 @@ int karaoke_model_locate_bundled(const KaraokeModelSpec *spec,
 int karaoke_model_bundled_path(const char *legacy_data_dir,
                                char *out, size_t cap,
                                char *err, size_t err_cap);
+
+/**
+ * 热路径安全的内置模型定位：只做 `stat` + 大小校验，**不读 30MiB、不算
+ * SHA256**（微秒级），可在 UI/播放线程调用。
+ *
+ * 语义与 `karaoke_model_bundled_path()` 的"定位"部分一致：随包位置优先，
+ * 旧用户 XDG 位置只读回退；文件存在但大小不符时立即报错（坏包可见），
+ * 两个位置都不存在时报"内置模型缺失"。**不保证 SHA256 正确**——完整校验
+ * 由 worker 线程在真正分离前用 `karaoke_model_verify_file_cached()` 完成，
+ * 校验失败时 job FAILED、状态行给出可读原因并回退原声（绝不谎报可用）。
+ *
+ * @return 0 = 找到且大小正确；-1 = 不可用（err 写可读原因）。
+ */
+int karaoke_model_bundled_path_fast(const char *legacy_data_dir,
+                                    char *out, size_t cap,
+                                    char *err, size_t err_cap);
+
+/**
+ * 校验一个已定位模型文件（大小 + 整文件 SHA256），结果按
+ * `路径 + 大小 + mtime(ns)` 在进程内缓存：同一文件只读一次 30MiB，重复
+ * 起播/重复 job 不再重算；文件被替换（大小/mtime 变化）时自动重新校验。
+ *
+ * **首次未命中会做 30MiB 读 + SHA256**，因此只应在后台线程（worker）或
+ * 一次性排障工具里调用；UI 热路径用 `karaoke_model_bundled_path_fast()`。
+ *
+ * @param spec 受支持表项（提供期望 size/sha256）。
+ * @param path 已定位的模型文件路径。
+ * @return 0 = 通过；-1 = 不可用（err 写可读原因）。
+ */
+int karaoke_model_verify_file_cached(const KaraokeModelSpec *spec,
+                                     const char *path,
+                                     char *err, size_t err_cap);
 
 /**
  * 校验一个候选模型文件是否为受支持模型：

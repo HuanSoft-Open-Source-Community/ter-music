@@ -343,8 +343,9 @@ static void test_validate_errors(void)
     err[0] = '\0';
     CHECK(karaoke_model_validate_file(tiny, &spec, err, sizeof(err)) == -1,
           "大小不符必须拒绝");
-    CHECK(strstr(err, "不受支持") != NULL || strstr(err, "大小") != NULL,
-          "大小不符错误文本可读");
+    /* 单测链接 stub_i18n（返回键名），不依赖真实语言包；只断言错误非空，
+     * 文案内容由 check-i18n-keys.sh / e2e 状态行断言覆盖。 */
+    CHECK(err[0] != '\0', "大小不符错误文本可读");
     unlink(tiny);
 }
 
@@ -443,7 +444,9 @@ static void test_validate_forged(const char *model_path,
     int rc = karaoke_model_validate_file(forged, &hit, err, sizeof(err));
     CHECK(rc == -1, "同大小但内容被篡改的模型必须拒绝");
     CHECK(hit == NULL, "篡改模型不回填 spec");
-    CHECK(strstr(err, "SHA256") != NULL, "篡改错误提到 SHA256");
+    CHECK(strstr(err, "SHA256") != NULL ||
+              strstr(err, "unsupported_sha") != NULL,
+          "篡改错误提到 SHA256（或 i18n key）");
     unlink(forged);
 
     /* 截断到一半：大小不符 → 拒绝。 */
@@ -603,7 +606,8 @@ static void test_session_and_inference(const char *model_path,
                                                           err, sizeof(err));
     quiet_stderr_end();
     CHECK(bad == NULL, "与表项形状不符的模型必须拒绝建会话");
-    CHECK(strstr(err, "形状") != NULL, "形状不符错误文本可读");
+    CHECK(strstr(err, "形状") != NULL || strstr(err, "onnx_shape") != NULL,
+          "形状不符错误文本可读（或 i18n key）");
 
     err[0] = '\0';
     quiet_stderr_begin();
@@ -719,6 +723,201 @@ static void test_session_and_inference(const char *model_path,
     karaoke_model_session_close(session);
 }
 
+
+/* ── S2：热路径快速定位 + 校验缓存（不需要真实模型/ORT）────────────── */
+
+static int write_pattern_file(const char *path, unsigned char seed, size_t len)
+{
+    unsigned char *buf = malloc(len ? len : 1);
+    if (!buf)
+        return -1;
+    for (size_t i = 0; i < len; i++)
+        buf[i] = (unsigned char)(seed + (unsigned char)(i * 31u));
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        free(buf);
+        return -1;
+    }
+    int ok = (len == 0) || fwrite(buf, 1, len, f) == len;
+    free(buf);
+    if (fclose(f) != 0)
+        ok = 0;
+    return ok ? 0 : -1;
+}
+
+static void test_bundled_fast_and_verify_cache(void)
+{
+    char tmpl[] = "/tmp/tm-km-s2-XXXXXX";
+    char *root = mkdtemp(tmpl);
+    CHECK(root != NULL, "S2 创建临时目录");
+    if (!root)
+        return;
+    /* 单元测试编译时 TER_MUSIC_DATA_DIR 为空：内置模型只走 legacy 参数
+     * 指定的 "<data>/models/<id>.onnx" 兼容位置。 */
+    char legacy_models[KARAOKE_MODEL_PATH_CAP];
+    char candidate[KARAOKE_MODEL_PATH_CAP];
+    char file[KARAOKE_MODEL_PATH_CAP];
+    snprintf(legacy_models, sizeof(legacy_models), "%s/models", root);
+    snprintf(candidate, sizeof(candidate), "%s/%s.onnx", legacy_models,
+             KARAOKE_MODEL_BUNDLED_ID);
+    snprintf(file, sizeof(file), "%s/verify.bin", root);
+    char err[KARAOKE_MODEL_ERR_CAP] = {0};
+
+    /* 目录不存在：fast 定位应失败且给出可读原因。 */
+    char located[KARAOKE_MODEL_PATH_CAP] = {0};
+    CHECK(karaoke_model_bundled_path_fast(root, located, sizeof(located), err,
+                                          sizeof(err)) == -1,
+          "S2 fast 定位：两个位置都没有时报缺失");
+    CHECK(err[0] != '\0', "S2 fast 定位失败有可读原因");
+
+    char cmd[KARAOKE_MODEL_PATH_CAP * 2 + 32];
+    snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", legacy_models);
+    CHECK(system(cmd) == 0, "S2 创建模型目录");
+
+    /* 大小不符：fast 定位必须拒绝（坏包可见，不回退另一位置）。 */
+    CHECK(write_pattern_file(candidate, 0x11, 32) == 0, "S2 写大小不符候选");
+    err[0] = '\0';
+    CHECK(karaoke_model_bundled_path_fast(root, located, sizeof(located), err,
+                                          sizeof(err)) == -1,
+          "S2 fast 定位：大小不符拒绝");
+    CHECK(strstr(err, "karaoke.model.err.bundled_bad_size_fmt") != NULL,
+          "S2 fast 定位错误走 i18n key（单测桩返回键名）");
+
+    /* 正确大小（稀疏文件即可，fast 只 stat 不读内容）：定位成功。 */
+    (void)unlink(candidate);
+    KaraokeModelSpec spec = *karaoke_model_supported(NULL);
+    int fd = open(candidate, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0 && ftruncate(fd, (off_t)spec.size) == 0, "S2 造正确大小候选");
+    if (fd >= 0)
+        close(fd);
+    char expected[KARAOKE_MODEL_PATH_CAP];
+    snprintf(expected, sizeof(expected), "%s/%s.onnx", legacy_models,
+             KARAOKE_MODEL_BUNDLED_ID);
+    err[0] = '\0';
+    CHECK(karaoke_model_bundled_path_fast(root, located, sizeof(located), err,
+                                          sizeof(err)) == 0,
+          "S2 fast 定位：大小正确即成功（不读 30MiB）");
+    CHECK(strcmp(located, expected) == 0, "S2 fast 定位返回首选随包位置");
+
+    /* 自定义小 spec：验证「大小 + SHA256」缓存键 = 路径+大小+mtime。 */
+    KaraokeModelSpec small;
+    memset(&small, 0, sizeof(small));
+    small.id = "verify-test";
+    small.url = "https://example.invalid/verify-test.onnx";
+    small.size = 1024;
+    CHECK(write_pattern_file(file, 0x42, (size_t)small.size) == 0,
+          "S2 写校验用小文件");
+    char hex[65] = {0};
+    CHECK(karaoke_model_sha256_file(file, hex, err, sizeof(err)) == 0,
+          "S2 计算小文件 SHA256");
+    small.sha256 = hex;
+
+    double t0 = now_ms();
+    CHECK(karaoke_model_verify_file_cached(&small, file, err, sizeof(err)) == 0,
+          "S2 校验缓存：首次 SHA256 通过");
+    double cold_ms = now_ms() - t0;
+    t0 = now_ms();
+    CHECK(karaoke_model_verify_file_cached(&small, file, err, sizeof(err)) == 0,
+          "S2 校验缓存：二次命中");
+    double warm_ms = now_ms() - t0;
+    printf("  [info] S2 verify(1KiB) cold=%.3fms warm=%.3fms\n", cold_ms, warm_ms);
+    CHECK(warm_ms <= cold_ms + 1.0, "S2 校验缓存二次调用不慢于首次（粗略）");
+
+    /* 内容被替换（大小相同、mtime 变化）：缓存失效并拒绝。 */
+    usleep(20000);
+    CHECK(write_pattern_file(file, 0x43, (size_t)small.size) == 0,
+          "S2 替换小文件内容");
+    err[0] = '\0';
+    CHECK(karaoke_model_verify_file_cached(&small, file, err, sizeof(err)) == -1,
+          "S2 校验缓存：内容变化后重新校验并拒绝");
+    CHECK(err[0] != '\0', "S2 校验失败有可读原因");
+
+    /* 恢复正确内容（mtime 再次变化）：重新校验通过。 */
+    usleep(20000);
+    CHECK(write_pattern_file(file, 0x42, (size_t)small.size) == 0,
+          "S2 恢复小文件内容");
+    CHECK(karaoke_model_verify_file_cached(&small, file, err, sizeof(err)) == 0,
+          "S2 校验缓存：恢复后重新校验通过");
+
+    /* 大小变化：fast 校验拒绝（缓存键含大小）。 */
+    CHECK(write_pattern_file(file, 0x42, 10) == 0, "S2 改小文件大小");
+    err[0] = '\0';
+    CHECK(karaoke_model_verify_file_cached(&small, file, err, sizeof(err)) == -1,
+          "S2 校验缓存：大小变化后拒绝");
+    CHECK(strstr(err, "karaoke.model.err.bundled_bad_size_fmt") != NULL,
+          "S2 大小不符错误走 i18n key");
+
+    /* 不存在路径：拒绝。 */
+    err[0] = '\0';
+    CHECK(karaoke_model_bundled_path_fast(root, NULL, 0, err, sizeof(err)) == -1,
+          "S2 fast 定位：输出缓冲为空拒绝");
+
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+    (void)system(cmd);
+}
+
+/* 真实模型下测量 S2 热路径：fast 定位（stat）vs 完整校验（30MiB SHA256）。 */
+static void test_s2_hot_path_timing(const char *model_path,
+                                    const KaraokeModelSpec *spec)
+{
+    char tmpl[] = "/tmp/tm-km-timing-XXXXXX";
+    char *root = mkdtemp(tmpl);
+    CHECK(root != NULL, "S2 计时：创建临时目录");
+    if (!root)
+        return;
+    char models_dir[KARAOKE_MODEL_PATH_CAP];
+    char link_path[KARAOKE_MODEL_PATH_CAP];
+    char copy_path[KARAOKE_MODEL_PATH_CAP];
+    snprintf(models_dir, sizeof(models_dir), "%s/models", root);
+    snprintf(copy_path, sizeof(copy_path), "%s/model-copy.onnx", root);
+    char cmd[KARAOKE_MODEL_PATH_CAP * 3 + 64];
+    snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", models_dir);
+    CHECK(system(cmd) == 0, "S2 计时：创建模型目录");
+    snprintf(link_path, sizeof(link_path), "%s/%s.onnx", models_dir,
+             KARAOKE_MODEL_BUNDLED_ID);
+    CHECK(symlink(model_path, link_path) == 0, "S2 计时：链接真实模型");
+    /* 另复制一份到“从未校验过的路径”，用于测量真正的 cold SHA256 成本
+     * （原模型路径可能已被其它用例的缓存命中）。 */
+    snprintf(cmd, sizeof(cmd), "cp -- '%s' '%s'", model_path, copy_path);
+    int copied = (system(cmd) == 0 && access(copy_path, R_OK) == 0);
+    CHECK(copied, "S2 计时：复制真实模型到未缓存路径");
+
+    char located[KARAOKE_MODEL_PATH_CAP] = {0};
+    char err[KARAOKE_MODEL_ERR_CAP] = {0};
+    const int kLoops = 200;
+    double t0 = now_ms();
+    int ok = 1;
+    for (int i = 0; i < kLoops; i++) {
+        if (karaoke_model_bundled_path_fast(root, located, sizeof(located), err,
+                                            sizeof(err)) != 0)
+            ok = 0;
+    }
+    double fast_us = (now_ms() - t0) * 1000.0 / (double)kLoops;
+    CHECK(ok, "S2 计时：fast 定位 200 次全部成功");
+    printf("  [info] S2 fast bundled locate: %.1f us/call (%d calls, stat only)\n",
+           fast_us, kLoops);
+
+    if (copied) {
+        t0 = now_ms();
+        int cold_ok = karaoke_model_verify_file_cached(spec, copy_path, err,
+                                                       sizeof(err)) == 0;
+        double cold_ms = now_ms() - t0;
+        t0 = now_ms();
+        int warm_ok = karaoke_model_verify_file_cached(spec, copy_path, err,
+                                                       sizeof(err)) == 0;
+        double warm_ms = now_ms() - t0;
+        CHECK(cold_ok && warm_ok, "S2 计时：未缓存副本首次/二次校验通过");
+        printf("  [info] S2 verify real model: first=%.1fms cached=%.3fms "
+               "(30MiB SHA256 only on first miss)\n", cold_ms, warm_ms);
+        CHECK(fast_us < 1000.0, "S2 fast 定位 <1ms（热路径无 30MiB 哈希）");
+        CHECK(warm_ms < cold_ms || cold_ms < 1.0,
+              "S2 校验缓存命中不慢于首次（粗略）");
+    }
+
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+    (void)system(cmd);
+}
+
 /* ── main ───────────────────────────────────────────────────────── */
 
 /* 定义在文件后部（依赖真实模型 + 3 分钟测试曲）。 */
@@ -736,6 +935,7 @@ int main(void)
         test_dsp_selftest(spec);
     test_validate_errors();
     test_sha256_vectors();
+    test_bundled_fast_and_verify_cache();
 
     int runtime_ok = test_runtime();
     if (!runtime_ok) {
@@ -769,6 +969,7 @@ int main(void)
                validated->sha256 ? validated->sha256 : "?");
         test_validate_forged(model, validated);
         test_install(model, validated);
+        test_s2_hot_path_timing(model, validated);
         test_session_and_inference(model, validated);
         test_cache_worker_e2e(model, validated);
     }
