@@ -1375,7 +1375,7 @@ static int karaoke_request_job_for_track(const char *track_path)
     char session_root[KARAOKE_CACHE_PATH_CAP];
     if (karaoke_cache_session_root(session_root, sizeof(session_root)) == 0) {
         seg_cfg.root = session_root;
-        seg_cfg.limit_mb = 0;
+        seg_cfg.limit_mb = 0;   /* 会话预算见 karaoke_cache_segment_budget_mb() */
         if (karaoke_cache_segment_complete(&seg_cfg, track_path))
             return 1;
     }
@@ -1389,6 +1389,13 @@ static int karaoke_request_job_for_track(const char *track_path)
     job.format = KARAOKE_JOB_FORMAT_SEGMENTS_V2;   /* 生产只产出 v2 分段 */
     job.overlap = cfg.overlap;
     job.soft_inst_mix = cfg.soft_inst_mix;
+    /* S1：预取下一曲时把当前播放曲目交给 worker 保护——会话缓存预算淘汰
+     * 绝不能删掉正在播放的伴奏段。 */
+    {
+        char playing[MAX_PATH_LEN];
+        if (audio_current_track_path(playing, sizeof(playing)))
+            snprintf(job.protect_track, sizeof(job.protect_track), "%s", playing);
+    }
     if (karaoke_worker_request(&job) != 0) {
         log_debug("audio", "karaoke worker request failed for '%s'", track_path);
         return 0;
@@ -1466,7 +1473,7 @@ static int karaoke_desired_source(void)
         return KARAOKE_SOURCE_ORIGINAL;
     KaraokeCacheConfig seg_cfg = cfg;
     seg_cfg.root = session_root;
-    seg_cfg.limit_mb = 0;
+    seg_cfg.limit_mb = 0;   /* 只读查询，不触发淘汰 */
     int seg = audio_get_position_seconds() / KARAOKE_SEGMENT_SECONDS;
     if (karaoke_cache_segment_ready_for_mode(&seg_cfg, track, seg, mode))
         return mode;

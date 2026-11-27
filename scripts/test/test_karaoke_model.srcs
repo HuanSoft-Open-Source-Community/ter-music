@@ -2,3 +2,4 @@ src/cn.org.huansoft.ter-music/audio/karaoke_model.c
 src/cn.org.huansoft.ter-music/audio/karaoke_cache.c
 src/cn.org.huansoft.ter-music/audio/karaoke_worker.c
 scripts/test/stub_logger.c
+scripts/test/stub_i18n.c

@@ -85,7 +85,9 @@
   · 舊構所書之完整整曲對（inst.flac + soft.flac + meta.txt）在
     $XDG_CACHE_HOME/ter-music/karaoke/<型 id>/<曲之雜湊>/（默
     ~/.cache/ter-music/karaoke/），惟讀而優先，中則徑由其起播；2048 MB 之 LRU
-    惟此是計，會話之段不入其數。
+    惟此是計，會話之段不入其數。會話之段別有 512 MiB 之總限（環境變數
+    TER_MUSIC_KARAOKE_SEGMENT_MB 可易之，<=0 則不限）；每段未書，先察 /tmp
+    （多爲小 tmpfs）之餘地，不足則先汰最舊之他曲段，猶不足則析聲敗而退原聲。
   · 次段未就者，於段之界至多候八息，而後以原聲播至曲終。seek 至未析之位者，
     先請 worker 優為其段，至多候八息；worker 至曲尾乃補 seek 所闕之段，
     諸段皆就而其目乃書「complete」。

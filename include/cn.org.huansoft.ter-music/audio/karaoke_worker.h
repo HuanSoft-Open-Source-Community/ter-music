@@ -86,6 +86,9 @@ typedef struct {
                                                  * （旧版兼容夹具显式指定） */
     float overlap;                              /* 固定 0.25 */
     float soft_inst_mix;                        /* 固定 0.60 */
+    /* 可选：当前正在播放的曲目（预取下一曲时由 audio.c 填）。v2 会话缓存
+     * 预算淘汰时保护该曲目与本次 job 曲目的段集，绝不删除正在播放的伴奏。 */
+    char protect_track[KARAOKE_WORKER_PATH_CAP];
 } KaraokeWorkerJob;
 
 /** 状态快照（值拷贝，线程安全）。 */

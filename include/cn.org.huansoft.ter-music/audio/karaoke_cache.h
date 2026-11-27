@@ -194,6 +194,10 @@ int karaoke_cache_remove(const KaraokeCacheConfig *cfg, const char *track_path);
  *   - 正常退出：worker shutdown **之后**调 karaoke_cache_session_remove_self()；
  *   - 崩溃残留：下次启动（任意子命令）调
  *     karaoke_cache_session_cleanup_stale()，删除同 uid 且 pid 已不存在的目录；
+ *   - 会话内预算：跨曲目累计超过 KARAOKE_SEGMENT_LIMIT_MB_DEFAULT（512 MiB，
+ *     可用 TER_MUSIC_KARAOKE_SEGMENT_MB 覆盖）时按目录 mtime 淘汰最旧的
+ *     **非当前播放/非当前作业**曲目段；每段写入前做剩余空间预检（/tmp 可能是
+ *     tmpfs），不足时先淘汰其它曲目段，仍不足则失败回退原声；
  *   - 安全：根目录 0700；删除只发生在 /tmp/ter-music-karaoke-<uid>-<pid> 子树内，
  *     拒绝符号链接与越界路径。
  *
@@ -208,6 +212,29 @@ int karaoke_cache_remove(const KaraokeCacheConfig *cfg, const char *track_path);
 #define KARAOKE_SEGMENT_FRAMES         (KARAOKE_SEGMENT_SAMPLE_RATE * KARAOKE_SEGMENT_SECONDS)
 #define KARAOKE_SEGMENT_MAX_COUNT      8192
 #define KARAOKE_SEGMENT_MARKER_CAP     128
+
+/* ── 会话级分段缓存预算 / 空间预检（S1）────────────────────────────
+ *
+ * v2 分段缓存放在 /tmp（可能是内存 tmpfs），此前只有"进程退出即删"，
+ * 单次会话内多首长曲会累计占满 /tmp。现改为：
+ *   - 会话总预算默认 512 MiB（跨曲目累计，超限按目录 mtime 淘汰最旧的
+ *     **非当前播放/非当前作业**曲目段）；
+ *   - 覆盖规则：cfg->limit_mb > 0（单元测试/调用方显式值）> 环境变量
+ *     TER_MUSIC_KARAOKE_SEGMENT_MB > 默认值；<=0 表示不设总预算；
+ *   - 每段写入前做剩余空间预检（statvfs，预留 32 MiB），空间不足时先
+ *     淘汰最旧的非保护曲目段，仍不足则失败并回退原声（绝不写坏段）。
+ *
+ * 预算只约束"跨曲目累计"：单曲自身的段集允许超过预算（否则 30 分钟
+ * 长曲会被误杀），其上限由文件系统剩余空间决定。
+ * ──────────────────────────────────────────────────────────────── */
+#define KARAOKE_SEGMENT_LIMIT_MB_DEFAULT 512
+#define KARAOKE_SEGMENT_BUDGET_ENV       "TER_MUSIC_KARAOKE_SEGMENT_MB"
+#define KARAOKE_SEGMENT_SPACE_RESERVE_MB 32
+/* 每段两份 FLAC 的保守上界（frames × 2ch × 2B × 2 份 × 1.1 余量）。 */
+#define KARAOKE_SEGMENT_WRITE_BYTES \
+    ((long long)KARAOKE_SEGMENT_FRAMES * 4LL * 2LL * 11LL / 10LL)
+/* 整曲预检的保守下界（12 MB/分钟 ≈ 11.4 MiB/分钟；实测双份约 15.5 MiB/分钟）。 */
+#define KARAOKE_SEGMENT_EST_BYTES_PER_SEC 200000LL
 
 /** v2 manifest（键值文本，原子替换）。 */
 typedef struct {
@@ -307,6 +334,55 @@ int karaoke_cache_segment_resolve(const KaraokeCacheConfig *cfg, const char *tra
 
 /** v2 曲目是否完整（manifest complete=1 且全部段 ready）。1=完整。 */
 int karaoke_cache_segment_complete(const KaraokeCacheConfig *cfg, const char *track_path);
+
+/* ================================================================
+ * v2 会话缓存预算 / 淘汰 / 空间预检（S1）
+ * ================================================================ */
+
+/**
+ * 会话分段缓存总预算（MiB）。0 = 不设总预算（只做剩余空间预检）。
+ * 优先级：cfg->limit_mb > 0 > 环境变量 TER_MUSIC_KARAOKE_SEGMENT_MB >
+ * KARAOKE_SEGMENT_LIMIT_MB_DEFAULT（512）。
+ */
+int karaoke_cache_segment_budget_mb(const KaraokeCacheConfig *cfg);
+
+/** 当前会话分段缓存占用字节数；track_count 非 NULL 时写入曲目目录数。 */
+long long karaoke_cache_segment_usage_bytes(const KaraokeCacheConfig *cfg,
+                                            int *track_count);
+
+/**
+ * 剩余空间预检：cfg->root 所在文件系统当前可用字节（f_bavail × f_frsize）
+ * 必须 ≥ need_bytes + KARAOKE_SEGMENT_SPACE_RESERVE_MB。statvfs 失败时
+ * 无法判定 → 返回 1（不阻塞，out_free_bytes = -1）。
+ * @return 1 空间充足（含无法判定）；0 空间不足（err 写可读原因）；-1 参数非法。
+ */
+int karaoke_cache_segment_space_check(const KaraokeCacheConfig *cfg,
+                                      long long need_bytes,
+                                      long long *out_free_bytes,
+                                      char *err, size_t err_cap);
+
+/**
+ * 会话总预算淘汰：把 cfg->root 下所有曲目目录的总字节数压到预算内，
+ * 按目录 mtime 最旧优先；跳过 exclude_dirs 内的目录（当前作业/当前
+ * 播放曲目）、含 `.part.` 半成品的目录与 2 分钟内活跃的目录。
+ * 单曲/保护目录允许超过预算（不删除）。
+ * @return 0 成功（含无需淘汰）；-1 参数非法。
+ */
+int karaoke_cache_segment_evict(const KaraokeCacheConfig *cfg,
+                                const char *const *exclude_dirs,
+                                int exclude_count, int *out_evicted,
+                                char *err, size_t err_cap);
+
+/**
+ * 段写入前的统一闸门：先按预算淘汰，再做剩余空间预检；空间不足时继续
+ * 淘汰最旧的非保护曲目段，仍不足则写可读错误返回 -1。
+ * @param need_bytes 预计本次要写入的字节数（≤0 用 KARAOKE_SEGMENT_WRITE_BYTES）。
+ * @return 0 可以写；-1 空间不足/参数非法（err 写原因）。
+ */
+int karaoke_cache_segment_reserve(const KaraokeCacheConfig *cfg,
+                                  const char *const *exclude_dirs,
+                                  int exclude_count, long long need_bytes,
+                                  char *err, size_t err_cap);
 
 #ifdef __cplusplus
 }
