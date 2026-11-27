@@ -140,6 +140,21 @@ cn.org.huansoft.ter-music (26.4.1.0-1) unstable; urgency=medium
     TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty forces a backend and an
     unknown value falls back to auto; empty input cancels and ~/ expands.
 
+  * AppImage file chooser fix. The AppImage AppRun wrapper exports
+    LD_LIBRARY_PATH pointing at the bundled Debian 10 libraries; the external
+    zenity/kdialog child inherited it, so on modern hosts the GTK dialog stack
+    loaded the bundled old libstdc++ and failed before showing a window
+    (libLerc requires GLIBCXX_3.4.29), and its stderr was discarded so only a
+    generic error was left. The child now drops LD_LIBRARY_PATH, LD_PRELOAD
+    and LD_AUDIT before exec (the external smbclient child does the same; the
+    daemon self-restart keeps the variable because it must find its own
+    bundled libraries), and when a GUI dialog fails to start or exits
+    abnormally - anything except the user cancelling (exit 1 or 5) - the
+    chooser falls back to the typed path prompt and shows the reason, so the
+    folder can still be opened. Cancelling never falls back, and a forced
+    backend that is unavailable still reports an explicit error. DEB and RPM
+    packages are unaffected: they do not set LD_LIBRARY_PATH.
+
   * Mouse and menus. Left click selects and activates, the wheel scrolls and
     right click opens a context menu (middle click opens the same menu on
     terminals that intercept right click). On the Equalizer page a left click

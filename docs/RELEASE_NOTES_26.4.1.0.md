@@ -110,7 +110,13 @@ Linyaps-related runtime code path remains in the tree and builds, it is just not
   verbatim.
 - **One file/folder chooser** for Open folder, Append folder, language-pack install and the
   default music directory: zenity/kdialog (XDG portal preferred) on a graphical session, a typed
-  path in a pure TTY; `TERM_MUSIC_FILE_CHOOSER` forces a backend.
+  path in a pure TTY; `TERM_MUSIC_FILE_CHOOSER` forces a backend. In the AppImage the external
+  dialog (and the external `smbclient`) no longer inherits the wrapper's
+  `LD_LIBRARY_PATH`/`LD_PRELOAD`/`LD_AUDIT` — the old behaviour made zenity/kdialog load the
+  bundled Debian 10 libstdc++ on modern hosts and die with a GLIBCXX mismatch — and a dialog that
+  cannot start or exits abnormally falls back to the typed path with a notice; a user cancel
+  still cancels, and a forced backend that is unavailable still reports an explicit error. DEB
+  and RPM packages are unaffected.
 - **Mouse and menus**: click activation, right-click (or middle-click) context menu, menu
   entrance/exit animation with graceful fallback, wheel changes the selected equalizer band's gain
   by ±1 dB while a click only selects.

@@ -133,7 +133,7 @@ ter-music -o ftp://host/music/   # 在 TUI 中打开远程目录
 
 TUI 需要真实终端，不要把输出重定向到管道。按 `O` 打开目录，`↑`/`↓` 选择，`Enter` 或 `Space` 播放，`q` 退出。
 
-打开文件夹（`O`）、追加文件夹（`I`）、在 `F7` 中添加语言包，以及“设置 → 默认路径”里的默认音乐目录，都走同一个选择器。有图形会话时打开 `zenity` 或 `kdialog`（`portal` 是“优先使用桌面对话框”的偏好；ter-music 没有自己实现 D-Bus `FileChooser` 客户端）；纯 TTY 下改为手输路径——空行取消，`~/` 会展开。`TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty` 可强制后端（未知值回退自动），auto 在没有 `DISPLAY`/`WAYLAND_DISPLAY` 时回退手输。取消，或选中的不是已存在的目录，都不会改动队列与配置。
+打开文件夹（`O`）、追加文件夹（`I`）、在 `F7` 中添加语言包，以及“设置 → 默认路径”里的默认音乐目录，都走同一个选择器。有图形会话时打开 `zenity` 或 `kdialog`（`portal` 是“优先使用桌面对话框”的偏好；ter-music 没有自己实现 D-Bus `FileChooser` 客户端）；纯 TTY 下改为手输路径——空行取消，`~/` 会展开。`TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty` 可强制后端（未知值回退自动），auto 在没有 `DISPLAY`/`WAYLAND_DISPLAY` 时回退手输。AppImage 里 AppRun 会为捆绑库导出 `LD_LIBRARY_PATH`；现在外部的对话框（以及外部的 `smbclient`）在运行前会去掉 `LD_LIBRARY_PATH`/`LD_PRELOAD`/`LD_AUDIT`，改用宿主自己的库。若对话框仍启动失败或异常退出（用户取消除外），选择器会回退到手输路径并显示原因；取消不会回退，强制指定但不可用的后端仍会明确报错。取消，或选中的不是已存在的目录，都不会改动队列与配置。
 
 这样打开的远程 URL 只使用 URL 里携带的凭据。需要密码的服务器，请在 `F2` → 远程设备 里保存连接再打开目录，不要把 `user:password@` 写进 URL：URL 会留在 shell 历史和进程列表里。`ter-music play` 与 `ter-music daemon start --open` 会拒绝远程 URL，因为核心只播放本地路径。
 
@@ -467,6 +467,7 @@ CI 对每次改动运行确定性门禁，包括下列各项；真实模型的�
 - **没有声音：** 确认 PipeWire、PulseAudio 或 ALSA 正在运行；后端按此顺序探测。显式选择的后端在播放失败时会回退到下一个可用后端。可在“设置 → 音频”中切换。
 - **卡顿或爆音：** 在设置中调高输出延迟（20、40、60、80、100、120、150、200 或 250 ms）。
 - **中文乱码：** 使用 UTF-8 locale 和 UTF-8 终端；`locale` 应显示 `LC_CTYPE=UTF-8`。
+- **AppImage 里不弹文件对话框：** 打包的对话框起不来时会自动回退到手输路径；若仍看不到，检查终端日志（`GUI dialog failed` / `falling back to TTY`），在宿主机安装 `zenity` 或 `kdialog`，或用 `TERM_MUSIC_FILE_CHOOSER=zenity|kdialog|tty` 强制后端。
 - **Linyaps 里 TUI 出现重复或错乱的行：** 即上文 Linyaps 一节所述 ll-box ≤ 2.3.5 冷启动重放。守卫在检测到写入突发或背压证据时会整屏重绘；没有证据时不再按计时器重绘，损坏可能要等到终端缩放、切换视图或出现新证据才被覆盖。
 - **编译时找不到头文件：** 安装上面依赖的 `-devel`/`-dev` 包。
 - **远程目录列不出来：** 检查协议、主机、端口与基础路径（SMB 要填 `共享名/子路径`）；SMB 需要安装 `smbclient`；SFTP 需要可读的 known_hosts；https/webdavs/ftps 需要打开 TLS。页面会显示本地化原因，连接动作菜单里有“重试列目录”。

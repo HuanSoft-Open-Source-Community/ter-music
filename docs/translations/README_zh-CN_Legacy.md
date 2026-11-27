@@ -133,7 +133,7 @@ ter-music -o ftp://host/music/   # 于TUI中开远程目录
 
 文界须真端闱，勿以管道引其出。按`O`开目录，`↑`/`↓`择曲，`Enter`或`Space`播之，`q`退。
 
-開目錄（`O`）、附目錄（`I`）、於 `F7` 裝語言包，及 節度 → 默途 之默樂目錄，皆用一擇器。有圖形之會則啟 `zenity` 或 `kdialog`（`portal` 乃「先用案牘之器」之意；ter-music 未自為 D-Bus `FileChooser` 之客）；純端闈則令手書其途——空行則罷，`~/` 為之展。`TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty` 可強定其後端（未知之值歸於自擇），auto 無 `DISPLAY`/`WAYLAND_DISPLAY` 時退於手書。罷之，或所擇非已存之目，皆不改隊列與節度。
+開目錄（`O`）、附目錄（`I`）、於 `F7` 裝語言包，及 節度 → 默途 之默樂目錄，皆用一擇器。有圖形之會則啟 `zenity` 或 `kdialog`（`portal` 乃「先用案牘之器」之意；ter-music 未自為 D-Bus `FileChooser` 之客）；純端闈則令手書其途——空行則罷，`~/` 為之展。`TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty` 可強定其後端（未知之值歸於自擇），auto 無 `DISPLAY`/`WAYLAND_DISPLAY` 時退於手書。AppImage 之 AppRun 為所攜之庫而布 `LD_LIBRARY_PATH`；今外框（及外器 `smbclient`）未行之前先去 `LD_LIBRARY_PATH`/`LD_PRELOAD`/`LD_AUDIT`，而用宿主自有之庫。若其框仍不能起、或異常而退（非用戶自罷者），則擇器退於手書其途而示其故；自罷則不退，強定而不可用之後端仍明白報誤。罷之，或所擇非已存之目，皆不改隊列與節度。
 
 如此所开之远程URL，惟用URL中所携之凭据。须密码之伺服，宜于`F2` → 远程设备存其联而后开目录，勿以`user:password@`入URL：URL留于shell之史与进程之表。`ter-music play`与`ter-music daemon start --open`拒远程URL，盖核心惟播本地之路。
 
@@ -467,6 +467,7 @@ CI行諸定門於每易，如下所列；真型之全量汰聲e2e別為advisory�
 - **无声：** 察PipeWire、PulseAudio或ALSA之行；后端依此序探之。显择之后端播而不成，则退就次可用者。可于设置→音声易之。
 - **滞或爆音：** 于设置增高输出之迟（20、40、60、80、100、120、150、200 或 250 ms）。
 - **华文乱码：** 用UTF-8之locale与UTF-8之端闱；`locale`宜见`LC_CTYPE=UTF-8`。
+- **AppImage 之包不彈文檔之框：** 所攜之框不能起，則自退於手書其途；若猶不見，察端闈之誌（`GUI dialog failed` / `falling back to TTY`），於宿主裝 `zenity` 或 `kdialog`，或以 `TERM_MUSIC_FILE_CHOOSER=zenity|kdialog|tty` 強定其後端。
 - **Linyaps中文界出重复错乱之行：** 即上文Linyaps一节所述ll-box ≤ 2.3.5冷启之重放。守卫见骤写或背压之据则整屏重绘；无据之时不复以时计重绘，其损或俟端闱易修广、易视，或复见据而后覆。
 - **营构时无头文：** 装上所依之`-devel`/`-dev`包。
 - **远目录不能列：** 察协议、主机、端口与基途（SMB须填`共享名/子径`）；SMB须装`smbclient`；SFTP须可读之known_hosts；https/webdavs/ftps须启TLS。其页示本地化之由，联之动作单有「复列目录」。
