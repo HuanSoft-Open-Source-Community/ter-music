@@ -201,8 +201,10 @@ static_checks() {
         "debian/rules 在无环境变量时回退到源码树 staging 模型"
     has_grep "scripts/build/build-rpm.sh" '\.tm-bundled-model' \
         "build-rpm.sh 把模型复制进 rpm staging"
-    has_grep "scripts/build/build-aur.sh" 'cp -f -- "\$TM_MODEL_PATH" "\${SRC_STAGE}/\${TM_MODEL_NAME}"' \
-        "build-aur.sh 把模型预置到 makepkg 的 \$srcdir"
+    # t4 起 AUR 验收改为真实 git source 构建：模型预置到 makepkg 的 SRCDEST
+    # （makepkg 仍按 sha256sums 校验），不再预置到工作树 staging 的 $srcdir。
+    has_grep "scripts/build/build-aur.sh" 'cp -f -- "\$TM_MODEL_PATH" "\${SRCDEST}/\${TM_MODEL_NAME}"' \
+        "build-aur.sh 把模型预置到 makepkg 的 SRCDEST（真实 source 构建）"
 
     local dockerfile
     for dockerfile in scripts/docker/Dockerfile.debian10 scripts/docker/Dockerfile.rpm \
@@ -218,7 +220,11 @@ static_checks() {
         ok "仓库没有受版本控制的 .onnx"
     fi
     local stray
+    # .cache/ 是宿主工具/源码缓存（gitignore），静态 ONNX Runtime 源码树
+    # （.cache/tools/onnxruntime-static/work/.../onnx/examples/…）里会带
+    # 上游示例 .onnx；它不是仓库内容，必须和 .git/.tmp/build 一样跳过。
     stray="$(find . -path ./.git -prune -o -path ./.tmp -prune -o -path ./build -prune \
+        -o -path ./.cache -prune \
         -o -path './build-*' -prune -o -name '*.onnx' -print 2>/dev/null)"
     if [ -n "$stray" ]; then
         bad "工作树出现模型二进制（应只留在 .tmp 缓存）：$stray"
@@ -859,7 +865,7 @@ build_checks() {
         return
     fi
     ok "CMake 配置成功：${PREFIX} + 注入模型（CMake 侧大小/SHA256 校验通过）"
-    if ! cmake --build "$BUILD_DIR" -j"$(nproc 2>/dev/null || echo 2)" \
+    if ! cmake --build "$BUILD_DIR" --parallel "$(nproc 2>/dev/null || echo 2)" \
             >"${WORK}/cmake-build.log" 2>&1; then
         bad "CMake 构建失败（日志 ${WORK}/cmake-build.log）"
         return

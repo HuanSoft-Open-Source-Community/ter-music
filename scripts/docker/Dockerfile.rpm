@@ -15,6 +15,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
 # 仓库配置 + 构建工具/开发库
+# 注意（EL9/EL10）：基础镜像自带 curl-minimal（提供 /usr/bin/curl）。EL9/EL10
+# 的 dnf 会因显式安装 curl 与 curl-minimal 冲突而整批安装失败（el8 尚可自动
+# 替换）；构建期只需要能执行 curl，curl-minimal 已满足，故 EL8+ 列表不装 curl。
 RUN if [ "$EL_VERSION" = "7" ]; then \
         sed -i \
             -e 's|^mirrorlist=|#mirrorlist=|g' \
@@ -57,7 +60,7 @@ RUN if [ "$EL_VERSION" = "7" ]; then \
         { dnf install -y epel-release || \
             echo "epel-release unavailable; aria2 may be missing (curl fallback applies)"; } && \
         dnf install -y \
-            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip curl \
+            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip \
             ncurses-devel libcurl-devel libpng-devel libjpeg-turbo-devel \
             libxml2-devel dbus-devel sqlite-devel zlib-devel elfutils && \
         { dnf install -y aria2 || \
