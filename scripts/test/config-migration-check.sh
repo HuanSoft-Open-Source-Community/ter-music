@@ -14,7 +14,7 @@
 #   5. 断言 v7 → v12：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 12
 #      （经 v7→v8→v9→v10→v11→v12 迁移链）；属性 8 显式 0 的文件连续启停不回卷；
 #      JSON v1 → XML 的迁移产出同样含 stop_core_on_exit=1（该键在 JSON
-#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 10 内的普通新键，
+#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 9 内的普通新键，
 #      旧文件缺元素即按 0 加载并随首存补写，不另升版本。
 #   5b. 断言 v11 → v12：删除 preferences.karaoke_feature / karaoke_model
 #      （模型随包内置），theme/paths/keybindings/EQ/远程迁移结果/volume/
