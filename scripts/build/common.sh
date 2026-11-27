@@ -32,10 +32,13 @@ tm_is_container() {
     [ "${TER_MUSIC_IN_CONTAINER:-0}" = "1" ]
 }
 
+# 排除模式同时用于 rsync（容器内构建）和 tar（宿主机无 rsync 时兜底）。
+# 注意 rsync 的「不含 / 的模式按 basename 匹配任意层级」：构建树必须用
+# 前导 / 锚定到仓库根，否则会把 scripts/build/build-*.sh 这类源码一起排除。
 TM_SOURCE_EXCLUDES=(
     ".git"
-    "build"
-    "build-*"
+    "/build"
+    "/build-*"
     ".tmp"
     ".cache"
     ".linyaps_temp"
@@ -48,13 +51,23 @@ TM_SOURCE_EXCLUDES=(
     ".workbuddy"
     ".local"
     ".vscode"
+    ".venv"
+    ".agent-teams"
+    ".codebuddy"
+    "AGENTS.md"
     "__pycache__"
+    # Linyaps 构建缓存与生成的入口脚本（.gitignore 同款；工作树里有，
+    # 但它们不是源码，--with-source 的源码包不得带上）
+    "linglong/cache"
+    "linglong/overlay"
+    "linglong/entry.sh"
+    "linglong/buildext.sh"
     "*.log"
     "*.o"
     "*.a"
     "*.so"
-    "*.deb"
-    "*.rpm"
+    "/*.deb"
+    "/*.rpm"
     "*.AppImage"
     "*.uab"
     "*.layer"
@@ -86,15 +99,41 @@ tm_stage_source() {
         return 0
     fi
 
+    # tar 与 rsync 的排除语义不同：tar 的通配符会跨 /，且匹配串以 ./ 开头。
+    # - 未锚定字面名（.venv、__pycache__）：排根层 + 任意层级；
+    # - 未锚定通配（*.o、*.log）：./p 在 tar 里已覆盖任意层级；
+    # - 锚定字面（/build）：只排根层；
+    # - 锚定通配（/build-*、/*.rpm）：tar 无法表达"根层通配"，先复制，
+    #   再只删仓库根的匹配项（否则会误删 scripts/docker/Dockerfile.rpm 等源码）。
     local -a tar_excludes=()
-    local pattern
-    for pattern in "${TM_SOURCE_EXCLUDES[@]}"; do
-        tar_excludes+=(--exclude="./$pattern")
-    done
-    for pattern in "$@"; do
-        tar_excludes+=(--exclude="./$pattern")
+    local -a root_globs=()
+    local pattern stripped
+    for pattern in "${TM_SOURCE_EXCLUDES[@]}" "$@"; do
+        stripped="${pattern#/}"
+        if [ "$pattern" != "$stripped" ]; then
+            case "$stripped" in
+                *'*'*|*'?'*|*'['*) root_globs+=("$stripped") ;;
+                *) tar_excludes+=(--exclude="./${stripped}") ;;
+            esac
+            continue
+        fi
+        tar_excludes+=(--exclude="./${stripped}")
+        case "$stripped" in
+            *'*'*|*'?'*|*'['*) ;;
+            *) tar_excludes+=(--exclude="*/${stripped}") ;;
+        esac
     done
     tar -C "$TM_REPO_ROOT" "${tar_excludes[@]}" -cf - . | tar -C "$dest" -xf -
+
+    if [ "${#root_globs[@]}" -gt 0 ]; then
+        local glob entry
+        for glob in "${root_globs[@]}"; do
+            while IFS= read -r entry; do
+                [ -n "$entry" ] || continue
+                rm -rf -- "${dest:?}/${entry}"
+            done < <(cd "$dest" && compgen -G "$glob" || true)
+        done
+    fi
 }
 
 tm_prepare_output() {
