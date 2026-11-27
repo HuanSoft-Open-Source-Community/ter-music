@@ -66,7 +66,8 @@ SOFTWARE.
 
 ## 4. 运行期依赖说明（非本模型的一部分）
 
-ONNX Runtime（`libonnxruntime.so*`）**不是**随包分发的内容，也不在编译期
-链接：应用在运行期 `dlopen` 系统安装的 ONNX Runtime（C API 头文件以 MIT
-许可 vendored，见 `include/third_party/onnxruntime/NOTICE.md`）。系统缺少
-该运行库时消音不可用，应用照常播放原声并在状态行提示原因。
+ONNX Runtime 不是本模型的一部分：官方发布包（DEB/RPM/AppImage）把它**静态链接**
+进 `ter-music` 二进制（MIT 许可，随包携带，系统无须另装 `libonnxruntime`）；源码
+构建在没有静态库时保留兼容路径，在运行期 `dlopen` 系统安装的 ONNX Runtime（C API
+头文件以 MIT 许可 vendored，见 `include/third_party/onnxruntime/NOTICE.md`）。
+运行库不可用时消音不可用，应用照常播放原声并在状态行提示原因。

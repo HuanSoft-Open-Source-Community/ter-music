@@ -15,7 +15,7 @@
 
 **语言：** [English](../README.md) · [中文（文言）](README_zh-CN_Legacy.md)
 
-**文档：** [构建与打包](../BUILD_GUIDE.md) · [TUI 布局](../UI_LAYOUTS_en_US.md) · [D-Bus API](../API_DBUS_en_US.md) · [歌词 API](../API_LYRICS_en_US.md) · [发布流程](../RELEASE.md)
+**文档：** [构建与打包](../BUILD_GUIDE.md) · [TUI 布局](../UI_LAYOUTS_en_US.md) · [D-Bus API](../API_DBUS_en_US.md) · [歌词 API](../API_LYRICS_en_US.md) · [发布流程](../RELEASE.md) · [26.4.1.0 发布说明](../RELEASE_NOTES_26.4.1.0.md)
 
 ## 概述
 
@@ -54,13 +54,13 @@ Ter-Music 在终端中播放本地与远程音乐。FFmpeg 解码，ncursesw 绘
 
 ### Arch Linux
 
-AUR 配方已准备为 `cn.org.huansoft.ter-music`，但**尚未投递**。请从下方源码构建，或使用 [BUILD_GUIDE.md](../BUILD_GUIDE.md) 描述的本地打包产物。
+AUR 配方已准备为 `cn.org.huansoft.ter-music`，但**尚未投递**；它固定一个显式源码提交（`_commit`，当前临时钉在 `32737f0`，即 `testing` 最新提交，投递前会改成最终发布提交）。请从下方源码构建，或使用 [BUILD_GUIDE.md](../BUILD_GUIDE.md) 描述的本地打包产物。配方把 `onnxruntime-cpu` 列为卡拉 OK 的可选依赖；AUR 包由源码构建，因此卡拉 OK 用系统 ONNX Runtime，而不是二进制包里的静态副本。
 
 ### 从源码构建
 
 必需：CMake 3.10+、C99 编译器、pkg-config、ncursesw、FFmpeg 库（avcodec、avformat、avutil、avfilter、swresample、swscale）、libpng、libjpeg、libxml2、SQLite3、zlib 与 libcurl。libcurl 不是可选项：缺失时 CMake 会以明确错误终止构建。
 
-可选：PipeWire、PulseAudio、ALSA 输出；D-Bus（MPRIS/API）。SMB 远程源另外需要运行期的外部程序 `smbclient`（Samba 客户端）；缺少它仍可构建，SMB 连接会明确提示未安装。卡拉 OK 需要系统的 ONNX Runtime 共享库（`libonnxruntime`，运行期 `dlopen` 加载）；消音模型由打包构建随包内置（见[从源码构建](#从源码构建)与[卡拉 OK](#卡拉-ok)）。
+可选：PipeWire、PulseAudio、ALSA 输出；D-Bus（MPRIS/API）。SMB 远程源另外需要运行期的外部程序 `smbclient`（Samba 客户端）；缺少它仍可构建，SMB 连接会明确提示未安装。卡拉 OK 需要 ONNX Runtime：DEB、RPM 与 AppImage 包把它静态链接进二进制，源码构建（含 AUR 包）则以 `dlopen` 加载系统的共享库（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`；只用 CPU 执行后端）；消音模型由打包构建随包内置（见[从源码构建](#从源码构建)与[卡拉 OK](#卡拉-ok)）。
 
 **Fedora / RHEL**
 
@@ -110,7 +110,7 @@ make -j"$(nproc)"
 sudo make install   # 可选
 ```
 
-可执行文件为 `build/ter-music`（在构建目录内为 `./ter-music`）。本地产物：1 个 DEB（Debian 10–13 / Ubuntu 20.04–26.04）、4 个 RPM（EL7–10）、1 个 AppImage（glibc 2.28）、1 个 Linyaps UAB + layer；DEB/RPM 的源码包与调试包为可选项。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
+可执行文件为 `build/ter-music`（在构建目录内为 `./ter-music`）。本地产物：1 个 DEB（Debian 10–13 / Ubuntu 20.04–26.04）、4 个 RPM（EL7–10）、1 个 AppImage（glibc 2.28）与 1 个 AUR 包；UAB/layer 本次不发布（等上游 ll-box 修复释出后再发）；DEB/RPM 的源码包与调试包为可选项。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
 未显式传入 `-DCMAKE_INSTALL_PREFIX` 时，默认前缀是 Linyaps 布局 `/opt/apps/cn.org.huansoft.ter-music/files`，因此 `sudo make install` 会把程序装到 `/opt` 下（显式传入的前缀，例如 `/usr`，会被尊重）。发布包全部采用该布局；deb、rpm、AUR 与 AppImage 包只在 `/usr` 下添加符号链接（Linyaps 装在容器内）。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
@@ -196,7 +196,7 @@ ter-music daemon stop
 
 退出码：`0` 成功，`1` 用法错误，`3` 没有运行中的核心，`4` D-Bus 不可用，`5` 被核心拒绝。
 
-`ter-music help <command>` 与 `ter-music help all` 输出完整说明。`--lang <id>` 只影响本次运行的 CLI 语言。
+`ter-music help <command>` 与 `ter-music help all` 输出完整说明。`--lang <id>` 只影响本进程（CLI 子命令或 TUI）本次运行的语言，绝不写入 `config.xml`；优先级为 `--lang`/`TERM_MUSIC_CLI_LANG` > `ui_language` > locale。
 
 **Linyaps。** 包内的可执行文件位于容器中：
 
@@ -215,7 +215,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
 
 **ll-box 冷启动重放。** ll-box ≤ 2.3.5 的冷启动转发在终端队列被灌满时，会把已经写出的字节再重放一遍，把重复输出拼进 TUI。应用无法阻止这次写入；容器内因此逐帧度量真正写进终端的字节数（`/proc/self/io` 的 `wchar`），只有在检测到写入突发或背压证据，或发生终端缩放后，才执行一次整屏强制重绘。裸模式重置同样只在出现该证据（或终端缩放）后执行，`endwin`+`refresh` 兜底仍须显式开启（`TER_MUSIC_TTY_HARD_RESET=1`，默认关闭）。容器外不会运行这些逻辑，守卫也没有新增配置键、设置页条目或用户可见的开关。已知缺口：无证据时不再按计时器排期重绘；因此只输出小帧、终端读取又慢的会话里若出现损坏，不会被主动重绘，可能要等到下一次重绘类事件（终端缩放、切换视图，或出现新的突发/背压证据）才被覆盖。
 
-根治在上游：PR #295 已合入 linyaps-box `release/2.3`（merge commit `31ddf04`，2026-11-20），转发在 `TryAgain` 且 `k > 0` 时改为消费已写出的字节；影响 ll-box ≤ 2.3.5。目前还没有包含该修复的发行版（最新发行版仍是 2.3.5），`master` 也尚未带上它，因此安装前应确认所用 tag 是否包含，不要假定下一个版本一定包含。ter-music 的下一个 Release 计划不包含 UAB；UAB 产物计划等上游修复释出后再发布。`TER_MUSIC_TTY_REPAIR_BACKSTOP_MS` 是未文档化的调参变量，只用于调节被删除的计时兜底；它已随该兜底一并移除，现在设置它不会产生任何效果。
+根治在上游：PR #295 已合入 linyaps-box `release/2.3`（merge commit `31ddf04`，2026-11-20），转发在 `TryAgain` 且 `k > 0` 时改为消费已写出的字节；影响 ll-box ≤ 2.3.5。目前还没有包含该修复的发行版（最新发行版仍是 2.3.5），`master` 也尚未带上它，因此安装前应确认所用 tag 是否包含，不要假定下一个版本一定包含。ter-music 26.4.1.0 本次不发布 UAB 与 layer；UAB 产物计划等上游修复释出后再发布。`TER_MUSIC_TTY_REPAIR_BACKSTOP_MS` 是未文档化的调参变量，只用于调节被删除的计时兜底；它已随该兜底一并移除，现在设置它不会产生任何效果。
 
 ## 播放
 
@@ -247,7 +247,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
 
 文件在首次使用时校验（大小 29,704,436 字节 + 整文件 SHA-256；结果在进程内缓存）。缺失时提示“内置模型缺失”；损坏时（大小或 SHA-256 不符）提示“内置模型校验失败”，不会静默改用另一位置。两种情况都不影响设置档位：播放继续原声，状态栏给出原因——原因明细是技术诊断串，可能为中文。修复文件后请重启播放器，因为校验结果按进程缓存。
 
-ONNX Runtime 共享库仍是外部依赖：`libonnxruntime.so.1.21`、`.so.1` 或 `.so`，通过 `dlopen` 加载；只用 CPU 执行后端。缺少运行库时分离失败并继续播原声，不会静默改用其它算法。
+ONNX Runtime 已内置进发布包：DEB、RPM 与 AppImage 把它静态链接进二进制，系统无需安装 `libonnxruntime`。不带静态库的源码构建则以 `dlopen` 加载 `libonnxruntime.so.1.21`、`.so.1` 或 `.so`；只用 CPU 执行后端。缺少运行库时分离失败并继续播原声，不会静默改用其它算法。
 
 源码构建只有传入 `-DTER_MUSIC_BUNDLED_MODEL=<文件>` 才会包含模型；不传则不安装模型，运行期会提示缺失（见[从源码构建](#从源码构建)）。发布包始终内置该模型。
 
@@ -403,7 +403,7 @@ help/          用户快速上手文本
 | `stop_core_on_exit` | 1 退出时停止核心，0 继续播放 |
 | `core_exit_when_no_frontend` | 最后一个前端离开 10 秒后退出核心 |
 
-配置契约版本为 **12**。版本 12 **删除**了 `preferences.karaoke_feature` 与 `preferences.karaoke_model`：模型随包内置，不再有功能开关与模型选择。v10 或 v11 的 `config.xml` 会在新核心首次启动时迁移：文件以 `version="12"` 整份重写（v11 文件中的两个元素也会消失），其余键（包括 `karaoke_mode`、主题、路径、均衡器与按键绑定）原样保留；第二次启动时文件字节级不变。`config get karaoke_feature` 与 `config set karaoke_feature …` 现在按未知键失败，`Config.Set` 会整体拒绝仍含这两个键的补丁。不支持降级：v11 构建读取 v12 文件时（版本属性按整数解析，其自身的迁移块不命中）把两个键视为缺失——卡拉 OK 为不启用——并在下次保存时把版本属性写回 11。升级瞬间若新前端遇到仍在运行的 v11 核心，配置镜像会被整体拒绝；重启核心（`ter-music daemon restart`）或重新登录即可自愈。
+配置契约版本为 **12**。版本 12 **删除**了 `preferences.karaoke_feature` 与 `preferences.karaoke_model`：模型随包内置，不再有功能开关与模型选择。以仓库实际版本史为准：契约 4 = 标签 `v2.1.0`（根属性曾是字面量 `"2.2"`，因按整数解析为 2 仍可加载，并由迁移改写一次），7 = 常驻核心，8 = `stop_core_on_exit`，9 = `<keybindings>` 覆盖表**与** `karaoke_mode`（DSP 时代的档位），10 = `preferences.appearance_mode`，12 = 内置 ONNX 模型并删除 DSP 时代的卡拉 OK 键。仓库从未发布过契约 11 的构建，故已发布文件中不可能含这两个被删键。v10 或更早的 `config.xml` 会在新核心首次启动时迁移：文件以 `version="12"` 整份重写，其余键（包括 `karaoke_mode`、主题、路径、均衡器与按键绑定）原样保留；比 v10 更旧的文件还会补上更早迁移的一次性默认值（v4 以下背景 0→-1，v7 以下 `core_exit_when_no_frontend=0`，v8 以下 `stop_core_on_exit=1`，v10 以下 `appearance_mode=auto`）；第二次启动时文件字节级不变。`config get karaoke_feature` 与 `config set karaoke_feature …` 现在按未知键失败，`Config.Set` 会整体拒绝仍含这两个键的补丁。不支持降级：v12 之前的（契约 10）构建读取 v12 文件时（版本属性按整数解析，其自身的迁移块不命中）把被删键视为缺失——卡拉 OK 为不启用——并在下次保存时把版本属性写回 10。升级瞬间若新前端遇到仍在运行的 v12 之前核心，配置镜像按已知键回填（唯一的握手门是 `api_version` 7）；只有载荷仍带被删键时才会整体拒绝，而那只会来自未发布的契约 11 开发构建——重启核心（`ter-music daemon restart`）或重新登录即可自愈。
 
 只有改动过的按键会写入 `config.xml`：
 
@@ -462,7 +462,7 @@ CI 运行四道门禁：
 ## 故障排查
 
 - **没有声音：** 确认 PipeWire、PulseAudio 或 ALSA 正在运行；后端按此顺序探测。显式选择的后端在播放失败时会回退到下一个可用后端。可在“设置 → 音频”中切换。
-- **卡顿或爆音：** 在设置中调高输出延迟（20-250 ms，每次加 10 ms）。
+- **卡顿或爆音：** 在设置中调高输出延迟（20、40、60、80、100、120、150、200 或 250 ms）。
 - **中文乱码：** 使用 UTF-8 locale 和 UTF-8 终端；`locale` 应显示 `LC_CTYPE=UTF-8`。
 - **Linyaps 里 TUI 出现重复或错乱的行：** 即上文 Linyaps 一节所述 ll-box ≤ 2.3.5 冷启动重放。守卫在检测到写入突发或背压证据时会整屏重绘；没有证据时不再按计时器重绘，损坏可能要等到终端缩放、切换视图或出现新证据才被覆盖。
 - **编译时找不到头文件：** 安装上面依赖的 `-devel`/`-dev` 包。
@@ -472,13 +472,15 @@ CI 运行四道门禁：
 - **从目录历史重新打开远程 URL 时认证失败：** 入库的 URL 已脱敏（设计上不含密码）；需要密码的服务器请使用远程设备页里保存的连接。
 - **CUE 分轨不显示：** `.cue` 必须与音频文件同名；文字乱码时在设置中改 CUE 编码。
 - **曲库为空：** 按 `M` 打开曲库浏览器并扫描或重新扫描；数据库是配置目录下的 `library.db`。
-- **状态栏提示内置模型不可用：** 安装包应已把模型装到 `<前缀>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`。源码构建未传 `-DTER_MUSIC_BUNDLED_MODEL` 时不安装模型；文件损坏则大小/SHA-256 校验不通过。系统的 ONNX Runtime 库（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`）也必须已安装。状态栏会说明原因（缺失、校验失败、运行库不可用），档位仍可设置，播放继续原声。修复文件或运行库后重启播放器——校验结果按进程缓存。不会回退到任何旧的内置算法。
+- **状态栏提示内置模型不可用：** 安装包应已把模型装到 `<前缀>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`。源码构建未传 `-DTER_MUSIC_BUNDLED_MODEL` 时不安装模型；文件损坏则大小/SHA-256 校验不通过。发布包已把 ONNX Runtime 装进二进制；源码构建还需要系统库（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`）。状态栏会说明原因（缺失、校验失败、运行库不可用），档位仍可设置，播放继续原声。修复文件或运行库后重启播放器——校验结果按进程缓存。不会回退到任何旧的内置算法。
 - **首次起播会等待，或回退原声：** 档位非“不启用”且曲目没有缓存时，会先等首段伴奏就绪（约 7–10 秒，总计最多 30 秒；起播位置不为 0 时最多 8 秒），状态栏显示准备进度。等待超时或分离失败（模型/缓存不可用）则按原声播放；单声道、超过 30 分钟与 CUE 子曲目不经等待、直接播原声（CUE 命中旧版整曲缓存时仍用缓存）。
 - **卡拉 OK 分离总是失败：** 超过 30 分钟的曲目会拒绝分离，单声道曲目与 CUE 子曲目不分离，内置模型缺失或损坏、或缺少 ONNX Runtime 也会失败；状态栏会说明原因。见[卡拉 OK](#卡拉-ok)。
 
 ## 许可
 
 GPL-3.0-only，见 [LICENSE](../../LICENSE)。
+
+随包内置的 UVR-MDX-NET 3 模型以 MIT 分发（见 [models/NOTICE.md](../../resources/models/NOTICE.md)）；发布二进制静态链接以 LGPL-2.1-or-later 发布的 FFmpeg 构建（未启用 `--enable-gpl`），官方包还静态链接以 MIT 发布的 ONNX Runtime；完整声明与源码获取方式见 `debian/copyright`。
 
 Ter-Music 只是播放工具，不提供、不托管、不分发音频内容；请自行确保所播放文件的合法性。
 

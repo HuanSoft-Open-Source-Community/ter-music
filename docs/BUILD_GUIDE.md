@@ -18,6 +18,9 @@
 | Linyaps | 宿主 `ll-builder` 原生构建 | `build/linyaps/x86_64/*.uab` 与 `*.layer` |
 | AUR | Arch 容器内 `makepkg` + 安装验收 | `build/aur/x86_64/*.pkg.tar.zst` |
 
+> 26.4.1.0 发布**不包含** Linyaps UAB/layer（等上游 ll-box 修复释出后再发，见
+> [RELEASE.md](RELEASE.md) 第六节）；发布构建请显式传 `-t deb,rpm,appimage,aur`。
+
 常用选项：
 
 ```bash
@@ -173,6 +176,8 @@ chmod +x build/appimage/x86_64/ter-music-*.AppImage
 
 ## 5. Linyaps（宿主原生，UAB + layer）
 
+> 本次 26.4.1.0 发布缓发 UAB/layer；本节构建链原样保留，供上游修复释出后补发。
+
 ```bash
 ./scripts/build/build-linyaps.sh -v 26.4.1.0
 ```
@@ -325,6 +330,59 @@ TM_LAYOUT_STATIC_ONLY=1 ./scripts/test/package-layout-check.sh   # 无构建工�
 - `package-layout-check.sh`：静态断言五条链的 `/opt/apps` 前缀、`/usr` 链接、模型常量与 `-DTER_MUSIC_BUNDLED_MODEL` 接线；本机有 CMake 时再从零 configure/build、`DESTDIR` 安装、按 `debian/links` 建链、`dpkg-deb` 组装/解包断言，并验证 `tm_ensure_model` 的缓存/下载/坏文件分支。
 - `check-package-identity.sh`：应用 ID 与版本跨包一致，以及五条链前缀、链接目标、`common.sh`/`CMakeLists.txt`/NOTICE 模型常量一致、`*.onnx` 未进 git、aria2 不是运行时依赖。
 - 需要 docker / `dpkg-buildpackage`(dh) / `rpmbuild` / `makepkg` / `ll-builder` / `mksquashfs` 的**真实包构建**不在该脚本内；`TM_LAYOUT_STATIC_ONLY=1` 会明确打印“未执行本地构建/DESTDIR 安装，不代表构建通过”。
+
+## 9.5 CI 门禁（GitHub Actions）
+
+`.github/workflows/ci.yml` 是发布门禁的唯一来源。作业分工：
+
+| 作业 | 覆盖内容 |
+| --- | --- |
+| `build (ubuntu/fedora/arch)` | 三发行版编译 + `--help`/CLI 冒烟；Ubuntu 额外跑 daemon/D-Bus 与 PTY 启动冒烟 |
+| `strict-warnings` | Ubuntu 上 `-Wall -Wextra -Werror` 全量编译 |
+| `build (no D-Bus)` | 屏蔽 `dbus-1.pc` 后从零 configure/build，保证 `!HAVE_DBUS` 分支可编译 |
+| `shellcheck` | `scripts/build/*.sh`、`scripts/docker/*.sh`、`scripts/test/*.sh` |
+| `gates` | 纯度/配置归属/包身份/i18n 门禁、`TM_UNIT_STRICT=1` 单测、打包布局静态断言 |
+| `e2e` | 既有端到端 + 外观/选择器/键位/卡拉OK 主推功能端到端 |
+| `required-checks` | 汇总以上作业结果（分支保护只认它） |
+
+### 无 D-Bus 构建
+
+D-Bus 在 CMake 里由 `pkg_check_modules(DBUS dbus-1)` 探测，找不到时 `HAVE_DBUS` 不定义，portal/MPRIS 走 stub 分支。CI 的做法：
+
+1. 把系统 pkg-config 目录（`/usr/lib/x86_64-linux-gnu/pkgconfig`、`/usr/share/pkgconfig`）里除 `dbus-1.pc` 外的 `.pc` 全部软链到 `/tmp/pc-nodbus`；
+2. 用 `PKG_CONFIG_LIBDIR=/tmp/pc-nodbus`（并清空 `PKG_CONFIG_PATH`）配置构建，让 `pkg_check_modules` 找不到 `dbus-1`；
+3. 用 `compile_commands.json` 断言没有 `-DHAVE_DBUS`，再完整构建 + `--help` 冒烟。
+
+本机复现：
+
+```bash
+mkdir -p /tmp/pc-nodbus
+for d in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/share/pkgconfig; do
+    for f in "$d"/*.pc; do
+        [ "$(basename "$f")" = dbus-1.pc ] && continue
+        ln -sf "$f" /tmp/pc-nodbus/
+    done
+done
+env -u PKG_CONFIG_PATH PKG_CONFIG_LIBDIR=/tmp/pc-nodbus     cmake -B build-no-dbus -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build-no-dbus -j2
+```
+
+### CI 里的卡拉OK素材与运行库
+
+- **模型**：`UVR_MDXNET_3_9662.onnx` 不进 git；CI 从项目 README 记录的 URL 下载，并强制校验大小 `29,704,436 B` 与 SHA-256 `e02220e8…aadc`，校验失败即红。
+- **推理运行库**：官方 GitHub release 资产已 404，CI 改用 Debian trixie 的 `libonnxruntime1.21_1.21.0+dfsg-1_amd64.deb`（`soname` 为 `libonnxruntime.so.1.21`，应用的 `dlopen` 依次尝试 `.so.1.21`/`.so.1`/`.so`），并解包它动态依赖的 XNNPACK/ONNX/protobuf/RE2/absl 等到 `/usr/local/lib` 后 `ldconfig`。这些库只要求 `glibc <= 2.38`，Ubuntu 24.04 runner 满足；`ldd` 出现 `not found` 即红。
+- **曲目素材**：托管 runner 没有音乐文件，CI 用 `ffmpeg` 合成 150 秒立体声夹具（80 Hz 低音 + 440 Hz 中置占位 + 左右不同侧向音）并附 `.lrc`，作为 `karaoke-model-e2e.sh`/`karaoke-segments-e2e.sh` 的 `--track`。
+- **虚拟声卡**：托管 runner 没有 `/dev/snd`，CI 启动 PulseAudio null sink 作为输出设备（`XDG_RUNTIME_DIR` 经 `GITHUB_ENV` 传给后续步骤）；否则核心的 `audio_backend=0`（AUTO）选不到后端，播放位置不会推进。
+- **单元测试**：`gates` 作业设 `TM_UNIT_STRICT=1`，环境缺依赖导致的 `SKIP` 按失败处理；开发包缺一不可。
+- **打包布局**：`gates` 用 `TM_LAYOUT_STATIC_ONLY=1` 跑 `package-layout-check.sh`（静态只读，不构建、不装 DESTDIR）。
+
+`appearance-pty-e2e.py` 需要 stdin 是终端，CI 用 `script -qefc …` 包一层；`appearance-xdg-pty-e2e.py` 再套 `dbus-run-session`（脚本自带私有 `fake-xdg-portal.py`，不依赖系统 portal）。
+
+### 未接入 CI 的测试与原因
+
+- `audit-build-artifacts.sh`：审计 build/ 下**已构建的** DEB/RPM/AppImage/Linyaps/AUR 产物。CI 不构建软件包，五个目标只会全部 `[SKIP]`，接入不会产生门禁信号；它在发布机重建成产物后执行。
+- `alsa-backend-e2e.sh`：托管 runner 没有 `/dev/snd`，脚本按设计整体 `SKIP` 并退出 0。CI 保留该步骤以验证“无设备 → 可读 SKIP、不伪装通过”的契约；真实 ALSA 断言（暂停不写设备、位置不推进等）需在带声卡的发布机上跑。
+- `pipewire-*`/`perf-check --report` 等包含环境依赖或只记录实测值的步骤保持原策略：缺依赖时明确 SKIP，共享 runner 的抖动值不作阈值判定。
 
 ## 10. 故障排除
 

@@ -5,13 +5,51 @@ Source: https://github.com/HuanSoft-Open-Source-Community/ter-music
 
 Files: *
 Copyright: 2026 浣软科技（HuanSoft）
-License: GPL-3.0-or-later
+License: GPL-3.0-only
+Comment:
+ The binary packages of this source tree also contain or link the following
+ third-party components. They are not part of the GPL-3.0-only source files
+ above and keep their own licenses:
+ .
+  * FFmpeg 8.1.2, linked statically into the release binaries. It is built
+    with --enable-static --disable-shared and without --enable-gpl (and
+    without --enable-nonfree), so the result is LGPL-2.1-or-later. The exact
+    configure line is recorded in scripts/docker/Dockerfile.debian10 and
+    scripts/docker/Dockerfile.rpm. Upstream source:
+    https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+    (license text: https://ffmpeg.org/legal.html, LGPL v2.1 or later).
+  * ONNX Runtime 1.21, linked statically into the official DEB/RPM/AppImage
+    binaries (source builds may instead dlopen a system libonnxruntime, see
+    debian/rules and CMakeLists.txt). License: MIT (see the
+    "License: MIT" paragraph below). Source:
+    https://deb.debian.org/debian/pool/main/o/onnxruntime/ and
+    https://github.com/microsoft/onnxruntime
+  * The ONNX Runtime C API header vendored under
+    include/third_party/onnxruntime/ is MIT, Copyright (c) Microsoft
+    Corporation; see include/third_party/onnxruntime/LICENSE.
 
-License: GPL-3.0-or-later
+Files: resources/models/uvr-mdxnet-3-9662.onnx
+Copyright: Ultimate Vocal Remover GUI (UVR) contributors (Anjok07, TRvlvr and contributors)
+License: MIT
+Comment:
+ The vocal-removal model is distributed unmodified as a data asset; it is
+ injected at build time via -DTER_MUSIC_BUNDLED_MODEL and installed as
+ <prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx together with
+ models/NOTICE.md. The upstream release channel (TRvlvr/model_repo, GitHub
+ Releases "all_public_uvr_models") ships no separate LICENSE file; the MIT
+ terms below follow the UVR main project
+ (https://github.com/Anjok07/ultimatevocalremovergui), which is MIT, and the
+ model entry in its model_data.json. The file is not linked into the binary and
+ remains under these MIT terms.
+
+Files: debian/*
+Copyright: 2026 浣软科技（HuanSoft）
+License: GPL-3.0-only
+
+License: GPL-3.0-only
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
+ the Free Software Foundation, version 3 of the License only.
  .
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -20,3 +58,42 @@ License: GPL-3.0-or-later
  .
  On Debian systems, the complete text of the GNU General Public License
  version 3 can be found in /usr/share/common-licenses/GPL-3.
+
+License: MIT
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
+
+License: LGPL-2.1-or-later
+ This library is free software; you can redistribute it and/or modify it under
+ the terms of the GNU Lesser General Public License as published by the Free
+ Software Foundation, either version 2.1 of the License, or (at your option) any
+ later version.
+ .
+ This library is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+ details.
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public License
+ version 2.1 can be found in /usr/share/common-licenses/LGPL-2.1.
+ .
+ The statically linked FFmpeg copy in the release binaries corresponds to the
+ source archive https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz configured by
+ scripts/docker/Dockerfile.debian10 and scripts/docker/Dockerfile.rpm (no
+ --enable-gpl, no --enable-nonfree); that archive is the complete corresponding
+ source for the linked library.
