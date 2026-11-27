@@ -128,6 +128,11 @@ Linyaps-related runtime code path remains in the tree and builds, it is just not
   by ±1 dB while a click only selects.
 - **Configurable key bindings** (contract 9): rebind actions in Settings → Hotkeys, validate with
   `ter-music keys check`, list actions with `ter-music keys list`; only overrides are persisted.
+- **Cover art formats**: the official DEB/RPM/AppImage now decode JPEG, PNG, WebP, BMP and GIF
+  covers — embedded art plus `cover`/`folder`/`front`/`album` images (WebP as a directory cover,
+  since FFmpeg rejects `image/webp` as embedded art). Earlier 26.4.1.0 builds could not decode
+  PNG/WebP/BMP/GIF covers in the packages; that is fixed, and a damaged image still degrades to no
+  cover.
 
 ### Remote sources
 

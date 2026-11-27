@@ -347,7 +347,7 @@ ter-music -o webdav://host/music/
 - 优先读取内嵌歌词（FFmpeg/APE 标签），没有时读取同名的外部 `.lrc`。
 - LRC 带逐字、行首尾或插值时间戳时，按字高亮。
 - `Ctrl+L` 进入歌词定位模式；`Tab` 在内嵌与外部歌词之间切换。
-- 封面先取内嵌图片，再找同目录的 `cover`/`folder`/`front`/`album` 图片。
+- 封面先取内嵌图片，再找同目录的 `cover`/`folder`/`front`/`album` 图片。发布包支持 JPEG、PNG、WebP、BMP、GIF 封面：内嵌图支持 JPEG/PNG/BMP/GIF，同目录图可用 `.jpg`/`.jpeg`/`.png`/`.webp`（WebP 作内嵌附件会被 FFmpeg 拒绝，故走目录封面）。较早的 26.4.1.0 构建在官方 DEB/RPM/AppImage 里无法解码 PNG/WebP/BMP/GIF 封面，现已修复；图片损坏时仍只是“无封面”。
 - 渲染从 256 色回退到 8 色再到黑白；`ter-music cover` 与 `Info.GetCoverArt` 提供盲文、ASCII 或半块字符封面。
 
 ## 布局与主题
@@ -475,6 +475,7 @@ CI 对每次改动运行确定性门禁，包括下列各项；真实模型的�
 - **没有声音：** 确认 PipeWire、PulseAudio 或 ALSA 正在运行；后端按此顺序探测。显式选择的后端在播放失败时会回退到下一个可用后端。可在“设置 → 音频”中切换。
 - **卡顿或爆音：** 在设置中调高输出延迟（20、40、60、80、100、120、150、200 或 250 ms）。
 - **中文乱码：** 使用 UTF-8 locale 和 UTF-8 终端；`locale` 应显示 `LC_CTYPE=UTF-8`。
+- **封面不显示：** 先读内嵌图（JPEG/PNG/BMP/GIF），再读曲目旁名为 `cover`、`folder`、`front`、`album` 的 `.jpg`/`.jpeg`/`.png`/`.webp`；较早的 26.4.1.0 构建在官方包中无法解码 PNG/WebP/BMP/GIF 封面，若内嵌 PNG/BMP 或 WebP 目录封面被忽略，请使用当前构建。
 - **AppImage 里不弹文件对话框：** 打包的对话框起不来时会自动回退到手输路径；若仍看不到，检查终端日志（`GUI dialog failed` / `falling back to TTY`），在宿主机安装 `zenity` 或 `kdialog`，或用 `TERM_MUSIC_FILE_CHOOSER=zenity|kdialog|tty` 强制后端。
 - **Linyaps 里 TUI 出现重复或错乱的行：** 即上文 Linyaps 一节所述 ll-box ≤ 2.3.5 冷启动重放。守卫在检测到写入突发或背压证据时会整屏重绘；没有证据时不再按计时器重绘，损坏可能要等到终端缩放、切换视图或出现新证据才被覆盖。
 - **编译时找不到头文件：** 安装上面依赖的 `-devel`/`-dev` 包。

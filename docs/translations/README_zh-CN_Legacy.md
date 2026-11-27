@@ -347,7 +347,7 @@ ter-music -o webdav://host/music/
 - 先取内嵌歌辞（FFmpeg/APE之签），无则取同名之`.lrc`。
 - LRC有逐字、行首尾或插值之时签者，按字昭焕。
 - `Ctrl+L`入歌辞定位；`Tab`易内嵌与外之来源。
-- 封面先取内嵌之图，次取同目录之`cover`/`folder`/`front`/`album`。
+- 封面先取內嵌之圖，次取同目錄之`cover`/`folder`/`front`/`album`。發布之包支持 JPEG、PNG、WebP、BMP、GIF 之封面：內嵌之圖為 JPEG/PNG/BMP/GIF，同目錄之圖用 `.jpg`/`.jpeg`/`.png`/`.webp`（WebP 作內嵌之附件為 FFmpeg 所拒，故用目錄之封面）。較早之 26.4.1.0 構於官包不能解 PNG/WebP/BMP/GIF 之封面，今已修；圖壞則止於「無封面」。
 - 色自二百五十六而降于八、终归黑白；`ter-music cover`与`Info.GetCoverArt`出点阵、ASCII或半块之封面。
 
 ## 十、局度与色采
@@ -475,6 +475,7 @@ CI行諸定門於每易，如下所列；真型之全量汰聲e2e別為advisory�
 - **无声：** 察PipeWire、PulseAudio或ALSA之行；后端依此序探之。显择之后端播而不成，则退就次可用者。可于设置→音声易之。
 - **滞或爆音：** 于设置增高输出之迟（20、40、60、80、100、120、150、200 或 250 ms）。
 - **华文乱码：** 用UTF-8之locale与UTF-8之端闱；`locale`宜见`LC_CTYPE=UTF-8`。
+- **封面不顯：** 先讀內嵌之圖（JPEG/PNG/BMP/GIF），次讀曲旁名為 `cover`、`folder`、`front`、`album` 之 `.jpg`/`.jpeg`/`.png`/`.webp`；較早之 26.4.1.0 構於官包不能解 PNG/WebP/BMP/GIF 之封面，若內嵌 PNG/BMP 或 WebP 目錄之封面見棄，宜用今構。
 - **AppImage 之包不彈文檔之框：** 所攜之框不能起，則自退於手書其途；若猶不見，察端闈之誌（`GUI dialog failed` / `falling back to TTY`），於宿主裝 `zenity` 或 `kdialog`，或以 `TERM_MUSIC_FILE_CHOOSER=zenity|kdialog|tty` 強定其後端。
 - **Linyaps中文界出重复错乱之行：** 即上文Linyaps一节所述ll-box ≤ 2.3.5冷启之重放。守卫见骤写或背压之据则整屏重绘；无据之时不复以时计重绘，其损或俟端闱易修广、易视，或复见据而后覆。
 - **营构时无头文：** 装上所依之`-devel`/`-dev`包。

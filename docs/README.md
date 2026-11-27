@@ -347,7 +347,7 @@ and `webdavs` (`dav`/`davs` are aliases); the scheme is matched case-insensitive
 - Embedded lyrics (FFmpeg/APE tags) are preferred over an external `.lrc` with the same basename.
 - Per-character highlighting is used when the LRC carries character, line-start/end or interpolated timings.
 - `Ctrl+L` enters lyric seek mode; `Tab` switches between embedded and external lyrics.
-- Covers come from embedded art first, then `cover`/`folder`/`front`/`album` images in the same directory.
+- Covers come from embedded art first, then `cover`/`folder`/`front`/`album` images in the same directory. Release packages support JPEG, PNG, WebP, BMP and GIF covers: embedded art in JPEG/PNG/BMP/GIF, and a `.jpg`/`.jpeg`/`.png`/`.webp` directory image (WebP is supported as a directory cover because FFmpeg rejects it as embedded art). Earlier 26.4.1.0 builds could not decode PNG/WebP/BMP/GIF covers in the official DEB/RPM/AppImage — that is fixed; a damaged image still just means "no cover".
 - Rendering falls back from 256 colors to 8 colors to monochrome; `ter-music cover` and `Info.GetCoverArt` expose braille, ASCII or half-block text covers.
 
 ## Layouts and themes
@@ -475,6 +475,7 @@ CI runs deterministic gates on every change, including the following; the full r
 - **No sound:** check that PipeWire, PulseAudio or ALSA is running; the backend is probed in that order. An explicitly chosen backend falls back to the next working one at play time. Switch it in Settings → Audio.
 - **Stutter or crackle:** raise Output Latency in Settings (20, 40, 60, 80, 100, 120, 150, 200 or 250 ms).
 - **Garbled CJK:** use a UTF-8 locale and a UTF-8 terminal; `locale` should show `LC_CTYPE=UTF-8`.
+- **A cover does not show:** covers are read from embedded art (JPEG/PNG/BMP/GIF) first, then from a `.jpg`/`.jpeg`/`.png`/`.webp` file named `cover`, `folder`, `front` or `album` next to the track; earlier 26.4.1.0 builds could not decode PNG/WebP/BMP/GIF covers in the official packages, so update if an embedded PNG/BMP or a WebP directory cover is ignored.
 - **No file dialog appears in the AppImage:** the bundled dialog falls back to typed path input automatically when it cannot start; if you still see nothing, check the terminal log (`GUI dialog failed` / `falling back to TTY`), install `zenity` or `kdialog` on the host, or force the backend with `TERM_MUSIC_FILE_CHOOSER=zenity|kdialog|tty`.
 - **Duplicated or garbled TUI lines inside Linyaps:** the ll-box ≤ 2.3.5 cold-start replay described under "Linyaps" above. The guard repaints the screen when it sees burst or back-pressure evidence; with no evidence it no longer repaints on a timer, so the damage may stay until a terminal resize, a view change or new evidence.
 - **Missing headers at build time:** install the `-devel`/`-dev` variants of the dependencies above.

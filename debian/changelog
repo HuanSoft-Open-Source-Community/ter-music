@@ -141,6 +141,22 @@ cn.org.huansoft.ter-music (26.4.1.0-1) unstable; urgency=medium
     unchanged, so layouts saved with smaller panes still load and render
     unchanged.
 
+  * Cover art support in the official packages. The static FFmpeg build used
+    by the DEB, RPM and AppImage now includes the image codecs the cover
+    decoder needs - PNG, WebP, BMP and GIF decoding, MJPEG encoding, the
+    image2/png_pipe/webp_pipe/bmp_pipe/gif demuxers and zlib - so PNG, BMP,
+    GIF and WebP covers decode again instead of silently missing (WebP as a
+    directory cover; FFmpeg rejects it as embedded art); FFmpeg remains
+    LGPL-2.1-or-later. The decoder also wrote embedded cover bytes to an
+    extension-less temporary file that FFmpeg's image demuxer cannot
+    identify, so PNG, WebP, BMP and GIF covers failed even where the codecs
+    were present; the temporary file now gets the suffix implied by the
+    image magic, with av_probe_input_format as the fallback for unknown
+    data, and the JPEG fast path is unchanged. Embedded art in
+    JPEG/PNG/BMP/GIF and directory covers named cover/folder/front/album
+    with .jpg/.jpeg/.png/.webp are supported; a damaged image still degrades
+    to no cover.
+
   * Terminal light/dark adaptation (contract 10). Settings -> Appearance ->
     Default Appearance Mode selects Auto (default), Light or Dark and is
     stored as preferences.appearance_mode. In Auto the TUI probes OSC 11
