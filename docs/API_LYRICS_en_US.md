@@ -235,6 +235,10 @@ gdbus monitor --session --dest org.mpris.MediaPlayer2.ter_music
   interface: `org.yxzl.ter_music.Lyrics` became
   `cn.org.huansoft.ter_music.Lyrics`, so a pre-7 client must switch its
   hard-coded interface name (or run the pre-7 core) — no fallback applies.
+- The configuration contract is not part of this interface: contract 9
+  introduced `karaoke_mode` (the DSP-era karaoke level) and contract 12
+  replaced the DSP with the bundled ONNX model, but neither changed a lyric
+  field, a method signature or `api_version`.
 - The interface is part of the standard introspection tree, but clients may
   also use the fixed interface, method, and signal names documented above.
 - The interface name uses underscores (`cn.org.huansoft.ter_music.Lyrics`) because

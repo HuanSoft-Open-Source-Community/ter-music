@@ -15,7 +15,7 @@
 
 **他语之版：** [English](../README.md) · [中文（现代版）](README_zh-CN_Modern.md)
 
-**典册：** [营构与封装](../BUILD_GUIDE.md) · [TUI 局度](../UI_LAYOUTS_en_US.md) · [D-Bus API](../API_DBUS_en_US.md) · [歌辞 API](../API_LYRICS_en_US.md) · [发布之程](../RELEASE.md)
+**典册：** [营构与封装](../BUILD_GUIDE.md) · [TUI 局度](../UI_LAYOUTS_en_US.md) · [D-Bus API](../API_DBUS_en_US.md) · [歌辞 API](../API_LYRICS_en_US.md) · [发布之程](../RELEASE.md) · [26.4.1.0 发布之记](../RELEASE_NOTES_26.4.1.0.md)
 
 ## 一、本志叙略
 
@@ -54,13 +54,13 @@ Ter-Music者，端闱之乐部也。以斐氏FFmpeg解声，纽氏ncursesw绘界
 
 ### Arch Linux
 
-AUR之方已备为`cn.org.huansoft.ter-music`，然**尚未投递**。可由下方源码营构，或用 [BUILD_GUIDE.md](../BUILD_GUIDE.md) 所述本地封装之产。
+AUR之方已备为`cn.org.huansoft.ter-music`，然**尚未投递**；其固定一显式之源提交（`_commit`，今暂钉于`32737f0`，即`testing`之最新，投递之前当改为终发之提交）。可由下方源码营构，或用 [BUILD_GUIDE.md](../BUILD_GUIDE.md) 所述本地封装之产。其方列 `onnxruntime-cpu` 为汰聲之可择依；AUR 之包由源營構，故汰聲用系統之 ONNX Runtime，而非二進制包中之靜本。
 
 ### 由源码营构
 
 必需：CMake 3.10+、C99之译器、pkg-config、ncursesw、FFmpeg诸库（avcodec、avformat、avutil、avfilter、swresample、swscale）、libpng、libjpeg、libxml2、SQLite3、zlib与libcurl。libcurl非可择：缺之则CMake以明误止其营构。
 
-可选：PipeWire、PulseAudio、ALSA之出；D-Bus（MPRIS/API）。SMB之远源别须运行期之外器`smbclient`（Samba之用户端）；缺之仍可营构，SMB之联则明言未装。汰聲須系統之 ONNX Runtime 共庫（`libonnxruntime`，運行時以 `dlopen` 載之）；消音之型由封裝之營構隨包內置（見[由源码营构](#由源码营构)與[汰聲](#七汰聲)）。
+可选：PipeWire、PulseAudio、ALSA之出；D-Bus（MPRIS/API）。SMB之远源别须运行期之外器`smbclient`（Samba之用户端）；缺之仍可营构，SMB之联则明言未装。汰聲須 ONNX Runtime：DEB、RPM 與 AppImage 之包靜鏈之於二進制，由源營構者（含 AUR 之包）則以 `dlopen` 載系統之共庫（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`；惟用 CPU 執行之後端）；消音之型由封裝之營構隨包內置（見[由源码营构](#由源码营构)與[汰聲](#七汰聲)）。
 
 **Fedora / RHEL**
 
@@ -110,7 +110,7 @@ make -j"$(nproc)"
 sudo make install   # 可择
 ```
 
-可执行在`build/ter-music`（于营构之舍则`./ter-music`）。本地产物：DEB一（Debian 10–13 / Ubuntu 20.04–26.04）、RPM四（EL7–10）、AppImage一（glibc 2.28）、Linyaps之UAB与layer各一；DEB/RPM之源码包与调试包为可择。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
+可执行在`build/ter-music`（于营构之舍则`./ter-music`）。本地产物：DEB一（Debian 10–13 / Ubuntu 20.04–26.04）、RPM四（EL7–10）、AppImage一（glibc 2.28）、AUR一；Linyaps之UAB與layer本次不發（俟上游 ll-box 之修釋出而後發）；DEB/RPM之源码包与调试包为可择。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
 未顯傳 `-DCMAKE_INSTALL_PREFIX` 者，默之前綴為玲瓏之局 `/opt/apps/cn.org.huansoft.ter-music/files`，故 `sudo make install` 置於 `/opt` 之下（顯傳之前綴，如 `/usr`，則尊之）。發布之包皆用此局；deb、rpm、AUR 與 AppImage 惟於 `/usr` 之下置符鏈（Linyaps 裝於其容器之內）。見 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
@@ -196,7 +196,7 @@ ter-music daemon stop
 
 退出之码：`0`成，`1`用法误，`3`无运行之核心，`4`D-Bus不可用，`5`为核心所拒。
 
-`ter-music help <command>`与`ter-music help all`出全说。`--lang <id>`惟易本次CLI之语。
+`ter-music help <command>`与`ter-music help all`出全说。`--lang <id>`惟易本進程（CLI之子令或TUI）本次之語，絕不書於`config.xml`；其序為`--lang`/`TERM_MUSIC_CLI_LANG` > `ui_language` > locale。
 
 **Linyaps。** 包中之可执行在容器内：
 
@@ -215,7 +215,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
 
 **ll-box冷启之重放。** ll-box ≤ 2.3.5之冷启转发，遇端闱队列既满，则重放其已写之字节，以重出之文混入端闱之流。应用不能止其写；容器之内，故逐帧计其入端闱之字节（`/proc/self/io`之`wchar`），惟见骤写或背压之据、或端闱易其修广，乃一整屏重绘。裸模式之重置亦准此据（或易其修广），`endwin`+`refresh`之兜底仍须显启（`TER_MUSIC_TTY_HARD_RESET=1`，默闭）。容器之外不行此事，守卫亦未增节度之键、设置之目、用户可见之开关。已知之阙：无据之时，不复以时计排重绘；帧微而读者迟缓之会，若见损伤，不即重绘，或俟端闱易其修广、易其视，或复见骤写/背压之据，而后覆之。
 
-根治在上游：PR #295已合入linyaps-box之`release/2.3`（合并之提交`31ddf04`，2026-11-20），其转发于`TryAgain`且`k > 0`时改为消费已写之字节；所及为ll-box ≤ 2.3.5。今尚无含此修之发行（最新发行仍2.3.5），`master`亦未载之，故装之时宜核所用tag果含此修，勿遽谓次版必含。ter-music次一Release不拟发布UAB；UAB之产物拟俟上游之修既出而后发布。`TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`者，未载于典册之调参也，惟司已删之计兜底；已随其去，今设之无验。
+根治在上游：PR #295已合入linyaps-box之`release/2.3`（合并之提交`31ddf04`，2026-11-20），其转发于`TryAgain`且`k > 0`时改为消费已写之字节；所及为ll-box ≤ 2.3.5。今尚无含此修之发行（最新发行仍2.3.5），`master`亦未载之，故装之时宜核所用tag果含此修，勿遽谓次版必含。ter-music 26.4.1.0本次不發UAB與layer；UAB之產物擬俟上游之修既出而後發布。`TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`者，未载于典册之调参也，惟司已删之计兜底；已随其去，今设之无验。
 
 ## 六、播弄
 
@@ -245,9 +245,9 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
 一、`<前綴>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`——隨包而裝，先用之；
 二、`$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx`（默 `~/.local/share/ter-music/models/…`）——舊版手裝之型，惟讀相容；絕不錄之，絕不書之。
 
-其文於首用之時校之（大小 29,704,436 bytes 與全卷 SHA-256；其結果存於進程）。亡則示「內置模型缺失」；損則（大小或 SHA-256 不合）示「內置模型校驗失敗」，不默然他就。二者皆不礙設档：播弄仍用原聲，狀態行具言其故——其故為技術診語，或為華文。既修其文，宜重啟樂部，蓋校驗之結果按進程而存。
+其文之初啟，惟定其途、校其大小（一 `stat`，微秒而已）；全卷之 SHA-256 則於首析之前，由後臺之役計之，按途、大小、修改之時而存於進程，故開档、易档不為二十九·七 MB 之雜湊所阻。亡則示「內置模型缺失」；損則（大小或 SHA-256 不合）示「內置模型校驗失敗」，不默然他就。二者皆不礙設档：播弄仍用原聲，狀態行以界面之語具言其故。修之或易之，則大小、修改之時必變，所存者隨之而廢，新文於次用之時復校，不須重啟樂部。
 
-ONNX Runtime 之共庫仍為外須：`libonnxruntime.so.1.21`、`.so.1` 或 `.so`，以 `dlopen` 載之；惟用 CPU 之後端。缺之則析敗而仍播原聲，不默然改就他法。
+ONNX Runtime 已內置於每發布之包：DEB、四 RPM（含 EL7）與 AppImage 皆靜鏈由 Debian pool 之源自營之 ONNX Runtime 1.21，系統不須別裝 `libonnxruntime`，`readelf -d` 亦不見 `libonnxruntime`。靜庫之符，上限為 GLIBC_2.17，一庫而覆 EL7–10 與 Debian 10+。不由靜庫營構者，則以 `dlopen` 載 `libonnxruntime.so.1.21`、`.so.1` 或 `.so`；惟用 CPU 之後端。缺之則析敗而仍播原聲，不默然改就他法。
 
 由源營構者，惟傳 `-DTER_MUSIC_BUNDLED_MODEL=<文>` 乃含其型；不傳則不裝型，運行時示其缺失（見[由源码营构](#由源码营构)）。發布之包常內置之。
 
@@ -283,7 +283,7 @@ ONNX Runtime 之共庫仍為外須：`libonnxruntime.so.1.21`、`.so.1` 或 `.so
 - **會話分段之藏：** 伴奏書於 `/tmp/ter-music-karaoke-<uid>-<pid>/<型 id>/<曲之雜湊>/`（諸目之權 0700），每十五息為一段：`segNNN.inst.flac`（盡汰）與 `segNNN.soft.flac`（微汰），段末乃書 `segNNN.ready` 之徵，另有 `manifest.txt` 之目。一析而二份俱出，二等共享此一度。
 - **存亡：** 會話之目，惟存於播弄之進程未退之時。常退則先止 worker，而後盡刪其目；核心啟時則清 `/tmp/ter-music-karaoke-<uid>-*` 中進程已亡之殘目（崩潰所遺）。此段不越重啟而存，故下次會話必復析其曲（若中舊版整曲之藏則否）。
 - **其鍵：** 曲之實途、大小、改易之時，加型 id、型之 SHA-256、格式之版、stem 之版、overlap 與微汰之係數。移其文或更其編，則得新鍵。
-- **舊版整曲之藏（惟讀，優先用之）：** 舊構所書於 `$XDG_CACHE_HOME/ter-music/karaoke/<型 id>/<曲之雜湊>/`（默 `~/.cache/ter-music/karaoke/…`）之全璧 `inst.flac`、`soft.flac`、`meta.txt` 三者，今仍讀之。中則徑由其起播，不書會話之段。其鍵含今 stem 之版，故 stem 之派生有異者不復中；其目仍舊不動，而此曲改於會話之藏重析。啟時清其目下殘餘之 `.part`；2048 MB 之 LRU，惟此整曲之藏是計，會話之段未嘗入數。
+- **舊版整曲之藏（惟讀，優先用之）：** 舊構所書於 `$XDG_CACHE_HOME/ter-music/karaoke/<型 id>/<曲之雜湊>/`（默 `~/.cache/ter-music/karaoke/…`）之全璧 `inst.flac`、`soft.flac`、`meta.txt` 三者，今仍讀之。中則徑由其起播，不書會話之段。其鍵含今 stem 之版，故 stem 之派生有異者不復中；其目仍舊不動，而此曲改於會話之藏重析。啟時清其目下殘餘之 `.part`；2048 MB 之 LRU，惟此整曲之藏是計。會話之段別有預算：每會話默 512 MB（`TER_MUSIC_KARAOKE_SEGMENT_MB` 可覆，`0`（或更小）則無預算），逾則按目之 mtime 最舊者先汰；正在播、正在析之曲受護，且每書一段之前必校其餘地（留 32 MiB）。
 - **無藏之曲，等非勿汰，其首播：** 播弄先候首段伴奏既就而後起——於試器約七至十息，硬限三十息——狀態行示其準備之分。若首段不至（逾時，或型或藏不可用等 worker 之敗），則改播原聲；單聲與逾三十分不待而徑播原聲；CUE 之子曲亦不待，播原聲或所中舊版整曲之藏。若起播之位不為零（復播、易其疾），則候限八息。
 - **等在勿汰時**，播原聲，不析其曲。方播而擇其等者，即為今曲請析；俟其段既就而自易之，狀態行先示候，既易乃示「已切換至…（候 N 息）」。
 - **方播之時：** 次段未就者，於段之界至多候八息，而後自此以原聲播至曲終（惟一易，不於曲中屢遷其源）。seek 至未析之位者，先請 worker 優為其段，至多候八息；猶未就，則自 seek 之位以原聲續。worker 至曲尾，乃補 seek 所闕之段；諸段皆就，其目乃書「complete」。
@@ -299,10 +299,10 @@ ONNX Runtime 之共庫仍為外須：`libonnxruntime.so.1.21`、`.so.1` 或 `.so
 
 - UVR-MDX-NET 3 乃中低之型，非完美之析：伴奏或餘人聲，似人聲之器與和聲或為所損。`soft` 等故留四分原聲，乃折中之法，非純淨之伴奏。
 - 析者勞 CPU，成則每曲每會話一度：其遲速因型、器與曲之长短而異；於六核 Ryzen 5 4500U，三十秒之曲端末約十一秒（每約六秒之塊一·一至一·五秒），三分之曲約一分；弱器更遲。worker 之 ONNX 會使核心之峰約 0.8 GiB（實測 795 MiB），析畢則落。
-- 會話之段，約每分音聲十五·五 MB（於 44.1 kHz 立體之曲實測；三分之曲約四十六 MB）。此較舊版整曲之對（實測約每分十二 MB）多約三成，蓋每十五息之段各具 FLAC 之首與 ready/manifest 之文。播放器退時，其目即刪。
-- 單聲之曲、逾三十分鐘之曲不析，仍播原聲；CUE 之子曲不用會話分段之源。析敗不絕播弄，狀態行具言其故；其故乃析器之技術診語，未嘗本地化，英文之界面亦可見中文。
+- 會話之段，約每分音聲十五·五 MB（於 44.1 kHz 立體之曲實測；三分之曲約四十六 MB）。此較舊版整曲之對（實測約每分十二 MB）多約三成，蓋每十五息之段各具 FLAC 之首與 ready/manifest 之文。播放器退時，其目即刪；行時則上述之預算限其總量。Fedora/RHEL 默以 `/tmp` 為 tmpfs，此時預算所耗者乃內存，地不足則宜減 `TER_MUSIC_KARAOKE_SEGMENT_MB`。
+- 單聲之曲、逾三十分鐘之曲不析，仍播原聲；CUE 之子曲不用會話分段之源。析敗不絕播弄，狀態行以界面之語具言其故（ONNX Runtime 自出之文仍為英文術語）。
 - 惟驗 ONNX Runtime 1.21 之 CPU 後端；他版或可載，然不保。DNNL 諸後端刻意不用。
-- 等非勿汰時，若 ONNX Runtime 之庫或所裝之型不可用，則析敗而仍播原聲；界面不默然他就。
+- 等非勿汰時，若 ONNX Runtime 或所裝之型不可用，則析敗而仍播原聲；界面不默然他就。發布之包已以運行庫入於二進制；不由靜庫營構者，則須系統之 `libonnxruntime`。
 - 「karaoke」在本項目亦為一局度預設、為逐字歌辭之高亮，二者皆與此能無涉。
 
 ## 八、远源
@@ -385,7 +385,7 @@ help/          用户速上之文
 
 远曲之藏于`$XDG_CACHE_HOME/ter-music/remote/`（默`~/.cache/ter-music/remote/`），依联与远径而镜之；同名之`.lrc`亦随曲而藏。藏之上限与清理在设置→远程设备。封面之藏于`/tmp/ter-music-cover-*.jpg`，退时清之。
 
-汰聲之型隨包而裝於 `<前綴>/share/ter-music/models/`（`uvr-mdxnet-3-9662.onnx` 與 `NOTICE.md`），即其處而用之。`$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx`（默 `~/.local/share/ter-music/models/…`）惟舊版手裝之型之只讀退路，絕不書之。舊版整曲伴奏之藏（若有）在`$XDG_CACHE_HOME/ter-music/karaoke/<型 id>/<曲之雜湊>/`（默`~/.cache/ter-music/karaoke/`），惟讀，2048 MB 之 LRU 惟此是計。會話之分段惟書於`/tmp/ter-music-karaoke-<uid>-<pid>/`，進程退則刪；見[汰聲](#七汰聲)。
+汰聲之型隨包而裝於 `<前綴>/share/ter-music/models/`（`uvr-mdxnet-3-9662.onnx` 與 `NOTICE.md`），即其處而用之。`$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx`（默 `~/.local/share/ter-music/models/…`）惟舊版手裝之型之只讀退路，絕不書之。舊版整曲伴奏之藏（若有）在`$XDG_CACHE_HOME/ter-music/karaoke/<型 id>/<曲之雜湊>/`（默`~/.cache/ter-music/karaoke/`），惟讀，2048 MB 之 LRU 惟此是計。會話之分段惟書於`/tmp/ter-music-karaoke-<uid>-<pid>/`（默會話預算 512 MB，`TER_MUSIC_KARAOKE_SEGMENT_MB`），進程退則刪；見[汰聲](#七汰聲)。
 
 常用`config.xml`之键：
 
@@ -403,7 +403,7 @@ help/          用户速上之文
 | `stop_core_on_exit` | 1退时止核心，0续播 |
 | `core_exit_when_no_frontend` | 末前端去后十秒核心自退 |
 
-節度之契約為十二版。十二版**刪** `preferences.karaoke_feature` 與 `preferences.karaoke_model` 二鍵：型隨包內置，無復功能之開關與擇型之事。v10 或 v11 之 `config.xml`，於新核心首啟之時遷之：其文以 `version="12"` 整卷重書（v11 之文，二元素亦亡），諸餘之鍵（含 `karaoke_mode`、主題、途徑、均音與鍵綁）皆如其舊；再啟則其文字節不變。`config get karaoke_feature` 與 `config set karaoke_feature …` 今以未知之鍵而敗，`Config.Set` 遇尚含二鍵之補則舉而拒之。降版不為之支持：v11 之構讀 v12 之文（版本之屬按整數而析，其舊遷之塊皆不中），視二鍵為亡——汰聲為勿汰——而於次存之時以版本之屬書回十一。升級之際，新前端遇尚行之 v11 核心，其節度之鏡舉而見拒；重啟核心（`ter-music daemon restart`）或復登即自癒。
+節度之契約為十二版。十二版**刪** `preferences.karaoke_feature` 與 `preferences.karaoke_model` 二鍵：型隨包內置，無復功能之開關與擇型之事。以倉庫之實史為準：契約四 = 標籤 `v2.1.0`（其根屬嘗為字面 `"2.2"`，按整數析之為二，故仍可載，而由遷改書一次），七 = 常駐核心，八 = `stop_core_on_exit`，九 = `<keybindings>` 覆表**與** `karaoke_mode`（DSP 時之档），十 = `preferences.appearance_mode`，十二 = 內置 ONNX 之型並刪 DSP 時之卡拉 OK 鍵。倉庫未嘗發布契約十一之構，故已發之文必不可含此二刪鍵。v10 或更早之 `config.xml`，於新核心首啟之時遷之：其文以 `version="12"` 整卷重書，諸餘之鍵（含 `karaoke_mode`、主題、途徑、均音與鍵綁）皆如其舊；早於 v10 之文亦受前遷之一時默值（v4 以下背景 0→-1，v7 以下 `core_exit_when_no_frontend=0`，v8 以下 `stop_core_on_exit=1`，v10 以下 `appearance_mode=auto`）；再啟則其文字節不變。`config get karaoke_feature` 與 `config set karaoke_feature …` 今以未知之鍵而敗，`Config.Set` 遇尚含二鍵之補則舉而拒之。降版不為之支持：v12 之前（契約十）之構讀 v12 之文（版本之屬按整數而析，其舊遷之塊皆不中），視二刪鍵為亡——汰聲為勿汰——而於次存之時以版本之屬書回十。升級之際，新前端遇尚行之 v12 前核心，其節度之鏡按已知之鍵而填（惟一之握手門為 `api_version` 七）；惟載荷尚帶刪鍵乃舉而拒之，而此惟未發布之契約十一開發構所為——重啟核心（`ter-music daemon restart`）或復登即自癒。
 
 惟改过之键乃书于`config.xml`：
 
@@ -450,7 +450,7 @@ cd ../..
 ./scripts/test/run-unit-tests.sh
 ```
 
-CI行四门：
+CI行諸定門於每易，如下所列；真型之全量汰聲e2e別為advisory之役，不阻合并，發布之機與nightly乃終判（見 [BUILD_GUIDE.md](../BUILD_GUIDE.md) §9.5）：
 
 | 门 | 规 |
 | --- | --- |
@@ -458,11 +458,14 @@ CI行四门：
 | `scripts/test/check-ui-purity.sh` | UI惟经`player`门面而及播弄 |
 | `scripts/test/check-config-ownership.sh` | 核心为`config.xml`之独书者 |
 | `scripts/test/check-package-identity.sh` | 诸封装之应用ID与版相合 |
+| `scripts/test/check-c-strings.sh` | C文不得直書華文，皆由i18n之鍵 |
+| `scripts/test/package-layout-check.sh`（`TM_LAYOUT_STATIC_ONLY=1`） | `/opt/apps`之前綴、`/usr`之鏈、型之常量與接線，不營封裝 |
+| no-D-Bus 之構 | 可擇 D-Bus 之構可譯、可鏈、可啟 |
 
 ## 十四、祛疑
 
 - **无声：** 察PipeWire、PulseAudio或ALSA之行；后端依此序探之。显择之后端播而不成，则退就次可用者。可于设置→音声易之。
-- **滞或爆音：** 于设置增高输出之迟（20-250 ms，每次加十毫秒）。
+- **滞或爆音：** 于设置增高输出之迟（20、40、60、80、100、120、150、200 或 250 ms）。
 - **华文乱码：** 用UTF-8之locale与UTF-8之端闱；`locale`宜见`LC_CTYPE=UTF-8`。
 - **Linyaps中文界出重复错乱之行：** 即上文Linyaps一节所述ll-box ≤ 2.3.5冷启之重放。守卫见骤写或背压之据则整屏重绘；无据之时不复以时计重绘，其损或俟端闱易修广、易视，或复见据而后覆。
 - **营构时无头文：** 装上所依之`-devel`/`-dev`包。
@@ -472,13 +475,15 @@ CI行四门：
 - **自目录往迹复开远URL而认证败：** 入库之URL已脱敏（本不含密码）；须密码之伺服宜用远程设备页所存之联。
 - **CUE分轨不显：** `.cue`须与音声同名；文乱则于设置改CUE之编码。
 - **曲库空：** 按`M`开曲库而扫之或复扫；库为配置目录下之`library.db`。
-- **狀態行示內置之型不可用：** 其包宜已裝 `<前綴>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`。由源營構而未傳 `-DTER_MUSIC_BUNDLED_MODEL` 者不裝型；文損則大小/SHA-256 之校不過。系統之 ONNX Runtime 庫（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`）亦須已裝。狀態行具言其故（缺失、校驗失敗、運行庫不可用），档仍可設，播弄仍用原聲。既修其文或庫，重啟樂部——校驗之結果按進程而存。不回就舊有之內法。
+- **狀態行示內置之型不可用：** 其包宜已裝 `<前綴>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`。由源營構而未傳 `-DTER_MUSIC_BUNDLED_MODEL` 者不裝型；文損則大小/SHA-256 之校不過。發布之包已以 ONNX Runtime 入於二進制；由源營構者亦須系統之庫（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`）。狀態行以界面之語具言其故（缺失、校驗失敗、運行庫不可用），档仍可設，播弄仍用原聲。其途之初啟校其大小，全卷 SHA-256 則於後臺校之；修之或易之則所存者廢，不須重啟（用系統庫之構，須已裝其庫）。不回就舊有之內法。
 - **首播或候，或還原聲：** 等非勿汰而曲無藏者，先候首段伴奏既就（約七至十息，總計至多三十息；起播之位不為零者至多八息），狀態行示其準備之進。若候逾時或析不成（型或藏不可用），則徑播原聲；單聲、逾三十分與 CUE 之子曲不待而徑播原聲（CUE 中舊版整曲之藏者仍用之）。
 - **汰聲之析常敗：** 逾三十分鐘之曲拒析，單聲之曲與 CUE 之子曲不析，內置之型亡或損、或無 ONNX Runtime 亦敗；狀態行具言其故。見[汰聲](#七汰聲)。
 
 ## 十五、律例
 
 GPL-3.0-only，见 [LICENSE](../../LICENSE)。
+
+隨包內置之 UVR-MDX-NET 3 型以 MIT 分發（見 [models/NOTICE.md](../../resources/models/NOTICE.md)）；發布之二進制靜鏈以 LGPL-2.1-or-later 發布之 FFmpeg 構（未啟 `--enable-gpl`），官包亦靜鏈以 MIT 發布之 ONNX Runtime；全聲明與源之取法見 `debian/copyright`。
 
 Ter-Music惟播弄之器，不供、不藏、不布音声之文；所播之文，君自备之，当合律令。
 

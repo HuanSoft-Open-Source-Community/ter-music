@@ -21,6 +21,7 @@
 #include "audio/karaoke_cache.h"
 
 #include "audio/karaoke_mode.h"
+#include "i18n/i18n.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -33,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -217,7 +219,7 @@ static int mkdir_p_0700(const char *path, char *err, size_t err_cap)
     char tmp[KARAOKE_CACHE_PATH_CAP];
     int n = snprintf(tmp, sizeof(tmp), "%s", path);
     if (n < 0 || (size_t)n >= sizeof(tmp)) {
-        set_err(err, err_cap, "缓存路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     for (char *p = tmp + 1; *p; p++) {
@@ -225,18 +227,18 @@ static int mkdir_p_0700(const char *path, char *err, size_t err_cap)
             continue;
         *p = '\0';
         if (mkdir(tmp, 0700) != 0 && errno != EEXIST) {
-            set_err(err, err_cap, "创建缓存目录 %s 失败：%s", tmp, strerror(errno));
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.dir_create_fmt"), tmp, strerror(errno));
             return -1;
         }
         *p = '/';
     }
     if (mkdir(tmp, 0700) != 0 && errno != EEXIST) {
-        set_err(err, err_cap, "创建缓存目录 %s 失败：%s", tmp, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.dir_create_fmt"), tmp, strerror(errno));
         return -1;
     }
     struct stat st;
     if (stat(tmp, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        set_err(err, err_cap, "缓存目录不可用：%s", tmp);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.dir_unusable_fmt"), tmp);
         return -1;
     }
     return 0;
@@ -349,7 +351,7 @@ static int join_path(char *out, size_t cap, const char *dir, const char *name,
 {
     int n = snprintf(out, cap, "%s/%s", dir, name);
     if (n < 0 || (size_t)n >= cap) {
-        set_err(err, err_cap, "缓存路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     return 0;
@@ -359,19 +361,19 @@ int karaoke_cache_paths(const KaraokeCacheConfig *cfg, const char *track_path,
                         KaraokeCachePaths *out, char *err, size_t err_cap)
 {
     if (!cfg_valid(cfg) || !track_path || !track_path[0] || !out) {
-        set_err(err, err_cap, "缓存配置/曲目路径非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     memset(out, 0, sizeof(*out));
 
     char real[PATH_MAX];
     if (!realpath(track_path, real)) {
-        set_err(err, err_cap, "无法解析曲目真实路径 %s：%s", track_path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.realpath_fmt"), track_path, strerror(errno));
         return -1;
     }
     struct stat st;
     if (stat(real, &st) != 0 || !S_ISREG(st.st_mode)) {
-        set_err(err, err_cap, "曲目不是普通文件：%s", real);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.not_regular_fmt"), real);
         return -1;
     }
 
@@ -397,7 +399,7 @@ int karaoke_cache_paths(const KaraokeCacheConfig *cfg, const char *track_path,
                                   ? cfg->soft_inst_mix
                                   : KARAOKE_CACHE_SOFT_INST_MIX));
     if (n < 0 || (size_t)n >= sizeof(material)) {
-        set_err(err, err_cap, "缓存键材料过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.key_too_long"));
         return -1;
     }
     CacheSha256 ctx;
@@ -408,11 +410,11 @@ int karaoke_cache_paths(const KaraokeCacheConfig *cfg, const char *track_path,
     int m = snprintf(out->dir, sizeof(out->dir), "%s/%s/%s", cfg->root,
                      cfg->model_id, out->hash);
     if (m < 0 || (size_t)m >= sizeof(out->dir)) {
-        set_err(err, err_cap, "缓存目录路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     if (!path_within_root(cfg, out->dir)) {
-        set_err(err, err_cap, "缓存目录越界");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.outside_root"));
         return -1;
     }
     if (join_path(out->inst_path, sizeof(out->inst_path), out->dir, "inst.flac",
@@ -433,7 +435,7 @@ int karaoke_cache_begin(const KaraokeCacheConfig *cfg, const char *track_path,
                         char *err, size_t err_cap)
 {
     if (!inst_tmp || !soft_tmp || !meta_tmp) {
-        set_err(err, err_cap, "临时文件缓冲为空");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     if (karaoke_cache_paths(cfg, track_path, out, err, err_cap) != 0)
@@ -442,7 +444,7 @@ int karaoke_cache_begin(const KaraokeCacheConfig *cfg, const char *track_path,
     char model_dir[KARAOKE_CACHE_PATH_CAP];
     int n = snprintf(model_dir, sizeof(model_dir), "%s/%s", cfg->root, cfg->model_id);
     if (n < 0 || (size_t)n >= sizeof(model_dir)) {
-        set_err(err, err_cap, "模型缓存目录路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     if (mkdir_p_0700(cfg->root, err, err_cap) != 0 ||
@@ -461,7 +463,7 @@ int karaoke_cache_begin(const KaraokeCacheConfig *cfg, const char *track_path,
                       out->dir, (long)getpid(), seq);
     if (t1 < 0 || (size_t)t1 >= inst_cap || t2 < 0 || (size_t)t2 >= soft_cap ||
         t3 < 0 || (size_t)t3 >= meta_cap) {
-        set_err(err, err_cap, "临时文件路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     unlink(inst_tmp);
@@ -484,25 +486,25 @@ int karaoke_cache_flac_info(const char *path, int *sample_rate, int *channels,
                             char *err, size_t err_cap)
 {
     if (!path || !path[0]) {
-        set_err(err, err_cap, "FLAC 路径为空");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     FILE *f = fopen(path, "rb");
     if (!f) {
-        set_err(err, err_cap, "无法打开 FLAC %s：%s", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.flac_open_fmt"), path, strerror(errno));
         return -1;
     }
     unsigned char hdr[4];
     if (fread(hdr, 1, 4, f) != 4 || memcmp(hdr, "fLaC", 4) != 0) {
         fclose(f);
-        set_err(err, err_cap, "不是 FLAC 文件（缺 fLaC 魔数）：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.flac_magic_fmt"), path);
         return -1;
     }
     int found = 0;
     for (int i = 0; i < 128 && !found; i++) {
         unsigned char bh[4];
         if (fread(bh, 1, 4, f) != 4) {
-            set_err(err, err_cap, "FLAC 元数据块截断：%s", path);
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.flac_truncated_fmt"), path);
             fclose(f);
             return -1;
         }
@@ -512,7 +514,7 @@ int karaoke_cache_flac_info(const char *path, int *sample_rate, int *channels,
         if (type == 0 && len == 34) {
             unsigned char si[34];
             if (fread(si, 1, 34, f) != 34) {
-                set_err(err, err_cap, "FLAC STREAMINFO 截断：%s", path);
+                set_err(err, err_cap, i18n_get("karaoke.cache.err.flac_truncated_fmt"), path);
                 fclose(f);
                 return -1;
             }
@@ -535,7 +537,7 @@ int karaoke_cache_flac_info(const char *path, int *sample_rate, int *channels,
             break;
         }
         if (fseek(f, (long)len, SEEK_CUR) != 0) {
-            set_err(err, err_cap, "FLAC 元数据块越界：%s", path);
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.flac_bounds_fmt"), path);
             fclose(f);
             return -1;
         }
@@ -544,7 +546,7 @@ int karaoke_cache_flac_info(const char *path, int *sample_rate, int *channels,
     }
     fclose(f);
     if (!found) {
-        set_err(err, err_cap, "FLAC 缺少 STREAMINFO：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.flac_streaminfo_fmt"), path);
         return -1;
     }
     return 0;
@@ -571,7 +573,7 @@ static int meta_read(const char *path, CacheMeta *m, char *err, size_t err_cap)
     memset(m, 0, sizeof(*m));
     FILE *f = fopen(path, "r");
     if (!f) {
-        set_err(err, err_cap, "无法读取缓存元数据 %s：%s", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.meta_read_fmt"), path, strerror(errno));
         return -1;
     }
     char line[512];
@@ -617,7 +619,7 @@ static int meta_read(const char *path, CacheMeta *m, char *err, size_t err_cap)
     }
     fclose(f);
     if (seen < 9) {
-        set_err(err, err_cap, "缓存元数据字段不全：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.meta_incomplete_fmt"), path);
         return -1;
     }
     return 0;
@@ -629,12 +631,12 @@ int karaoke_cache_write_meta(const char *meta_tmp, const KaraokeCacheConfig *cfg
                              char *err, size_t err_cap)
 {
     if (!meta_tmp || !cfg_valid(cfg)) {
-        set_err(err, err_cap, "缓存元数据参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     FILE *f = fopen(meta_tmp, "w");
     if (!f) {
-        set_err(err, err_cap, "无法写缓存元数据 %s：%s", meta_tmp, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.meta_write_fmt"), meta_tmp, strerror(errno));
         return -1;
     }
     int rc = fprintf(f,
@@ -658,7 +660,7 @@ int karaoke_cache_write_meta(const char *meta_tmp, const KaraokeCacheConfig *cfg
     int flush_rc = fflush(f);
     int close_rc = fclose(f);
     if (rc < 0 || flush_rc != 0 || close_rc != 0) {
-        set_err(err, err_cap, "写缓存元数据失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.meta_write_failed_fmt"), strerror(errno));
         unlink(meta_tmp);
         return -1;
     }
@@ -681,36 +683,36 @@ static int check_one_flac(const char *path, const CacheMeta *m, int is_soft,
     if (karaoke_cache_flac_info(path, &sr, &ch, &bps, &frames, err, err_cap) != 0)
         return -1;
     if (sr != m->source_rate) {
-        set_err(err, err_cap, "缓存采样率不符：%s 实际 %d，元数据 %d", path, sr,
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.sample_rate_fmt"), path, sr,
                 m->source_rate);
         return -1;
     }
     if (ch != 2) {
-        set_err(err, err_cap, "缓存声道数不符：%s 实际 %d（要求 2）", path, ch);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.channels_fmt"), path, ch);
         return -1;
     }
     if (bps != 16) {
-        set_err(err, err_cap, "缓存位深不符：%s 实际 %d（要求 16）", path, bps);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.bits_fmt"), path, bps);
         return -1;
     }
     long long expect = is_soft ? m->soft_frames : m->inst_frames;
     if (expect <= 0 || frames != expect) {
-        set_err(err, err_cap, "缓存帧数与元数据不符：%s 实际 %lld，元数据 %lld",
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.frames_fmt"),
                 path, frames, expect);
         return -1;
     }
     if (frames != m->source_frames) {
-        set_err(err, err_cap, "缓存时长与原曲不符：%s 帧数 %lld，原曲 %lld", path,
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.duration_fmt"), path,
                 frames, m->source_frames);
         return -1;
     }
     struct stat st;
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
-        set_err(err, err_cap, "缓存文件不可读：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.file_unreadable_fmt"), path);
         return -1;
     }
     if (st.st_size < min_nonsilent_bytes(frames)) {
-        set_err(err, err_cap, "缓存疑似静音/损坏（%lld 字节 < 下限）：%s",
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.silent_fmt"),
                 (long long)st.st_size, path);
         return -1;
     }
@@ -726,35 +728,35 @@ static int validate_triplet(const KaraokeCacheConfig *cfg, const char *inst,
     if (meta_read(meta, &mi, err, err_cap) != 0)
         return -1;
     if (mi.format != KARAOKE_CACHE_FORMAT_VERSION) {
-        set_err(err, err_cap, "缓存格式版本不符：%d（要求 %d）", mi.format,
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.format_fmt"), mi.format,
                 KARAOKE_CACHE_FORMAT_VERSION);
         return -1;
     }
     if (strcmp(mi.model_id, cfg->model_id) != 0) {
-        set_err(err, err_cap, "缓存模型 id 不符：%s", mi.model_id);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.model_id_fmt"), mi.model_id);
         return -1;
     }
     if (strcmp(mi.model_sha256, cfg->model_sha256) != 0) {
-        set_err(err, err_cap, "缓存模型 SHA256 不符");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.model_sha_mismatch"));
         return -1;
     }
     float want_overlap = cfg->overlap > 0.0f ? cfg->overlap : KARAOKE_CACHE_OVERLAP;
     float want_soft = cfg->soft_inst_mix > 0.0f ? cfg->soft_inst_mix
                                                 : KARAOKE_CACHE_SOFT_INST_MIX;
     if (fabs(mi.overlap - (double)want_overlap) > 1e-6) {
-        set_err(err, err_cap, "缓存 overlap 不符：%.3f", mi.overlap);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.overlap_fmt"), mi.overlap);
         return -1;
     }
     if (fabs(mi.soft_inst - (double)want_soft) > 1e-6) {
-        set_err(err, err_cap, "缓存 soft 系数不符：%.3f", mi.soft_inst);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.soft_mix_fmt"), mi.soft_inst);
         return -1;
     }
     if (mi.source_rate < 8000 || mi.source_rate > 384000 || mi.source_frames <= 0) {
-        set_err(err, err_cap, "缓存元数据参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     if (mi.inst_frames != mi.soft_frames || mi.inst_frames != mi.source_frames) {
-        set_err(err, err_cap, "缓存两份文件帧数不一致");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.pair_frames_mismatch"));
         return -1;
     }
     if (check_one_flac(inst, &mi, 0, err, err_cap) != 0)
@@ -769,39 +771,42 @@ int karaoke_cache_commit(const KaraokeCacheConfig *cfg,
                          char *err, size_t err_cap)
 {
     if (!cfg_valid(cfg) || !paths || !inst_tmp || !soft_tmp || !meta_tmp) {
-        set_err(err, err_cap, "缓存提交参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     if (!path_within_root(cfg, paths->dir)) {
-        set_err(err, err_cap, "缓存提交路径越界");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.outside_root"));
         return -1;
     }
     if (validate_triplet(cfg, inst_tmp, soft_tmp, meta_tmp, err, err_cap) != 0)
         return -1;
     if (fsync_path(inst_tmp) != 0 || fsync_path(soft_tmp) != 0 ||
         fsync_path(meta_tmp) != 0) {
-        set_err(err, err_cap, "缓存 fsync 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.commit_fsync_fmt"), strerror(errno));
         return -1;
     }
     /* meta 最后 rename：三件不全时 resolve 一定判为不完整。 */
     if (rename(inst_tmp, paths->inst_path) != 0) {
-        set_err(err, err_cap, "缓存 rename(inst) 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.commit_rename_fmt"),
+                "inst", strerror(errno));
         return -1;
     }
     if (rename(soft_tmp, paths->soft_path) != 0) {
-        set_err(err, err_cap, "缓存 rename(soft) 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.commit_rename_fmt"),
+                "soft", strerror(errno));
         unlink(paths->inst_path);
         return -1;
     }
     if (rename(meta_tmp, paths->meta_path) != 0) {
-        set_err(err, err_cap, "缓存 rename(meta) 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.commit_rename_fmt"),
+                "meta", strerror(errno));
         unlink(paths->inst_path);
         unlink(paths->soft_path);
         return -1;
     }
     if (fsync_dir(paths->dir) != 0) {
         /* 目录 fsync 失败不回滚（数据已落盘）；记入 err 供诊断。 */
-        set_err(err, err_cap, "缓存目录 fsync 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.dir_fsync_fmt"), strerror(errno));
     }
     (void)karaoke_cache_evict(cfg, paths->dir, NULL, 0);
     return 0;
@@ -855,7 +860,7 @@ int karaoke_cache_resolve(const KaraokeCacheConfig *cfg, const char *track_path,
                           char *err, size_t err_cap)
 {
     if (!cfg_valid(cfg) || !track_path || !track_path[0]) {
-        set_err(err, err_cap, "缓存查询参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return 0;
     }
     if (mode == KARAOKE_MODE_OFF || mode < KARAOKE_MODE_OFF ||
@@ -895,7 +900,7 @@ int karaoke_cache_resolve(const KaraokeCacheConfig *cfg, const char *track_path,
     if (out_path && out_cap) {
         int n = snprintf(out_path, out_cap, "%s", src);
         if (n < 0 || (size_t)n >= out_cap) {
-            set_err(err, err_cap, "缓存路径缓冲过小");
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.path_buf_small"));
             return 0;
         }
     }
@@ -1153,7 +1158,7 @@ int karaoke_cache_session_ensure(char *out, size_t cap, char *err, size_t err_ca
     static int s_created = 0;   /* 本进程是否已创建（pid 复用残留只在首建时清理） */
     char root[KARAOKE_CACHE_PATH_CAP];
     if (karaoke_cache_session_root(root, sizeof(root)) != 0) {
-        set_err(err, err_cap, "会话缓存根路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.session_root_too_long"));
         return -1;
     }
     struct stat st;
@@ -1170,12 +1175,12 @@ int karaoke_cache_session_ensure(char *out, size_t cap, char *err, size_t err_ca
         }
     }
     if (mkdir(root, 0700) != 0 && errno != EEXIST) {
-        set_err(err, err_cap, "创建会话缓存目录 %s 失败：%s", root, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.session_create_fmt"), root, strerror(errno));
         return -1;
     }
     uid_t owner = 0;
     if (!lstat_is_dir_nosymlink(root, &owner) || owner != getuid()) {
-        set_err(err, err_cap, "会话缓存目录不可用（类型/属主不符）：%s", root);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.session_bad_dir_fmt"), root);
         return -1;
     }
     (void)chmod(root, 0700);
@@ -1183,7 +1188,7 @@ int karaoke_cache_session_ensure(char *out, size_t cap, char *err, size_t err_ca
     if (out && cap) {
         int n = snprintf(out, cap, "%s", root);
         if (n < 0 || (size_t)n >= cap) {
-            set_err(err, err_cap, "会话缓存根路径缓冲过小");
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.path_buf_small"));
             return -1;
         }
     }
@@ -1242,22 +1247,22 @@ int karaoke_cache_segment_paths(const KaraokeCacheConfig *cfg, const char *track
                                 KaraokeSegmentPaths *out, char *err, size_t err_cap)
 {
     if (!cfg_valid(cfg) || !track_path || !track_path[0] || !out) {
-        set_err(err, err_cap, "分段缓存配置/曲目路径非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     memset(out, 0, sizeof(*out));
     if (strlen(cfg->model_id) > 64 || strchr(cfg->model_id, '/') != NULL) {
-        set_err(err, err_cap, "模型 id 非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.model_id_invalid"));
         return -1;
     }
     char real[PATH_MAX];
     if (!realpath(track_path, real)) {
-        set_err(err, err_cap, "无法解析曲目真实路径 %s：%s", track_path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.realpath_fmt"), track_path, strerror(errno));
         return -1;
     }
     struct stat st;
     if (stat(real, &st) != 0 || !S_ISREG(st.st_mode)) {
-        set_err(err, err_cap, "曲目不是普通文件：%s", real);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.not_regular_fmt"), real);
         return -1;
     }
     char material[KARAOKE_CACHE_PATH_CAP + 256];
@@ -1286,7 +1291,7 @@ int karaoke_cache_segment_paths(const KaraokeCacheConfig *cfg, const char *track
                                   : KARAOKE_CACHE_SOFT_INST_MIX),
                      KARAOKE_SEGMENT_SAMPLE_RATE, KARAOKE_SEGMENT_SECONDS);
     if (n < 0 || (size_t)n >= sizeof(material)) {
-        set_err(err, err_cap, "分段缓存键材料过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.key_too_long"));
         return -1;
     }
     CacheSha256 ctx;
@@ -1303,7 +1308,7 @@ int karaoke_cache_segment_paths(const KaraokeCacheConfig *cfg, const char *track
         (size_t)m >= sizeof(out->dir) || q < 0 ||
         (size_t)q >= sizeof(out->manifest_path) ||
         !path_within_root(cfg, out->dir)) {
-        set_err(err, err_cap, "分段缓存目录路径过长/越界");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.outside_root"));
         return -1;
     }
     return 0;
@@ -1313,18 +1318,18 @@ int karaoke_cache_segment_mkdir(const KaraokeSegmentPaths *paths,
                                 char *err, size_t err_cap)
 {
     if (!paths || !paths->dir[0]) {
-        set_err(err, err_cap, "分段缓存目录为空");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     char model_dir[KARAOKE_CACHE_PATH_CAP];
     const char *slash = strrchr(paths->dir, '/');
     if (!slash || slash == paths->dir) {
-        set_err(err, err_cap, "分段缓存目录非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     size_t n = (size_t)(slash - paths->dir);
     if (n >= sizeof(model_dir)) {
-        set_err(err, err_cap, "分段缓存目录过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     memcpy(model_dir, paths->dir, n);
@@ -1335,7 +1340,7 @@ int karaoke_cache_segment_mkdir(const KaraokeSegmentPaths *paths,
         return -1;
     uid_t owner = 0;
     if (!lstat_is_dir_nosymlink(paths->dir, &owner) || owner != getuid()) {
-        set_err(err, err_cap, "分段缓存目录不可用：%s", paths->dir);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.dir_unusable_fmt"), paths->dir);
         return -1;
     }
     return 0;
@@ -1398,13 +1403,13 @@ int karaoke_cache_segment_manifest_read(const char *path, KaraokeSegmentManifest
                                         char *err, size_t err_cap)
 {
     if (!path || !path[0] || !out) {
-        set_err(err, err_cap, "分段清单路径为空");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     memset(out, 0, sizeof(*out));
     FILE *f = fopen(path, "r");
     if (!f) {
-        set_err(err, err_cap, "无法读取分段清单 %s：%s", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.manifest_read_fmt"), path, strerror(errno));
         return -1;
     }
     char line[512];
@@ -1453,7 +1458,7 @@ int karaoke_cache_segment_manifest_read(const char *path, KaraokeSegmentManifest
     }
     fclose(f);
     if (seen < 10) {
-        set_err(err, err_cap, "分段清单字段不全（%d/10）：%s", seen, path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.manifest_incomplete_fmt"), seen, path);
         return -1;
     }
     return 0;
@@ -1479,7 +1484,7 @@ int karaoke_cache_segment_manifest_write(const KaraokeSegmentPaths *paths,
                                          char *err, size_t err_cap)
 {
     if (!paths || !paths->dir[0] || !paths->manifest_path[0] || !m) {
-        set_err(err, err_cap, "分段清单参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     char tmp[KARAOKE_CACHE_PATH_CAP];
@@ -1488,7 +1493,7 @@ int karaoke_cache_segment_manifest_write(const KaraokeSegmentPaths *paths,
     int n = snprintf(tmp, sizeof(tmp), "%s/.manifest.txt.part.%ld.%u",
                      paths->dir, (long)getpid(), seq);
     if (n < 0 || (size_t)n >= sizeof(tmp)) {
-        set_err(err, err_cap, "分段清单临时路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     char body[1024];
@@ -1508,12 +1513,12 @@ int karaoke_cache_segment_manifest_write(const KaraokeSegmentPaths *paths,
                         m->sample_rate, m->segment_seconds, m->total_segments,
                         m->source_frames, m->complete ? 1 : 0);
     if (blen < 0 || (size_t)blen >= sizeof(body)) {
-        set_err(err, err_cap, "分段清单内容过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.content_too_long"));
         return -1;
     }
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0) {
-        set_err(err, err_cap, "创建分段清单失败 %s：%s", tmp, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.manifest_create_fmt"), tmp, strerror(errno));
         return -1;
     }
     int rc = write_all(fd, body, (size_t)blen);
@@ -1522,12 +1527,12 @@ int karaoke_cache_segment_manifest_write(const KaraokeSegmentPaths *paths,
     int save = errno;
     close(fd);
     if (rc != 0) {
-        set_err(err, err_cap, "写分段清单失败：%s", strerror(save));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.manifest_write_fmt"), strerror(save));
         unlink(tmp);
         return -1;
     }
     if (rename(tmp, paths->manifest_path) != 0) {
-        set_err(err, err_cap, "分段清单 rename 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.manifest_rename_fmt"), strerror(errno));
         unlink(tmp);
         return -1;
     }
@@ -1540,12 +1545,12 @@ int karaoke_cache_segment_mark_ready(const KaraokeSegmentPaths *paths, int seg,
 {
     if (!paths || !paths->dir[0] || seg < 0 || frames <= 0 ||
         frames > KARAOKE_SEGMENT_FRAMES) {
-        set_err(err, err_cap, "段就绪标记参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return -1;
     }
     char marker[KARAOKE_CACHE_PATH_CAP];
     if (karaoke_cache_segment_marker(paths, seg, marker, sizeof(marker)) != 0) {
-        set_err(err, err_cap, "段标记路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     char tmp[KARAOKE_CACHE_PATH_CAP];
@@ -1554,18 +1559,18 @@ int karaoke_cache_segment_mark_ready(const KaraokeSegmentPaths *paths, int seg,
     int n = snprintf(tmp, sizeof(tmp), "%s/.seg%03d.ready.part.%ld.%u", paths->dir,
                      seg, (long)getpid(), seq);
     if (n < 0 || (size_t)n >= sizeof(tmp)) {
-        set_err(err, err_cap, "段标记临时路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
         return -1;
     }
     char body[KARAOKE_SEGMENT_MARKER_CAP];
     int blen = snprintf(body, sizeof(body), "seg=%d\nframes=%lld\n", seg, frames);
     if (blen < 0 || (size_t)blen >= sizeof(body)) {
-        set_err(err, err_cap, "段标记内容过长");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.content_too_long"));
         return -1;
     }
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0) {
-        set_err(err, err_cap, "创建段标记失败 %s：%s", tmp, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_create_fmt"), tmp, strerror(errno));
         return -1;
     }
     int rc = write_all(fd, body, (size_t)blen);
@@ -1574,12 +1579,12 @@ int karaoke_cache_segment_mark_ready(const KaraokeSegmentPaths *paths, int seg,
     int save = errno;
     close(fd);
     if (rc != 0) {
-        set_err(err, err_cap, "写段标记失败：%s", strerror(save));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_write_fmt"), strerror(save));
         unlink(tmp);
         return -1;
     }
     if (rename(tmp, marker) != 0) {
-        set_err(err, err_cap, "段标记 rename 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_rename_fmt"), strerror(errno));
         unlink(tmp);
         return -1;
     }
@@ -1591,12 +1596,12 @@ static int read_marker(const char *path, int *seg, long long *frames,
                        char *err, size_t err_cap)
 {
     if (!lstat_is_regular(path)) {
-        set_err(err, err_cap, "段就绪标记缺失/非普通文件：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_missing_fmt"), path);
         return -1;
     }
     FILE *f = fopen(path, "r");
     if (!f) {
-        set_err(err, err_cap, "无法读取段标记 %s：%s", path, strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_read_fmt"), path, strerror(errno));
         return -1;
     }
     char line[KARAOKE_SEGMENT_MARKER_CAP];
@@ -1622,7 +1627,7 @@ static int read_marker(const char *path, int *seg, long long *frames,
     }
     fclose(f);
     if (!got_seg || !got_frames || seg_val < 0 || frames_val <= 0) {
-        set_err(err, err_cap, "段就绪标记内容非法：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_invalid_fmt"), path);
         return -1;
     }
     if (seg) *seg = seg_val;
@@ -1635,7 +1640,7 @@ int karaoke_cache_segment_ready(const KaraokeSegmentPaths *paths,
                                 long long *out_frames, char *err, size_t err_cap)
 {
     if (!paths || !m || seg < 0) {
-        set_err(err, err_cap, "段校验参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
         return 0;
     }
     char marker[KARAOKE_CACHE_PATH_CAP];
@@ -1646,39 +1651,39 @@ int karaoke_cache_segment_ready(const KaraokeSegmentPaths *paths,
     if (read_marker(marker, &mark_seg, &frames, err, err_cap) != 0)
         return 0;
     if (mark_seg != seg) {
-        set_err(err, err_cap, "段标记段号不符：%d != %d", mark_seg, seg);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.marker_seg_fmt"), mark_seg, seg);
         return 0;
     }
     if (frames > KARAOKE_SEGMENT_FRAMES) {
-        set_err(err, err_cap, "段帧数超过上限：%lld", frames);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_frames_over_fmt"), frames);
         return 0;
     }
     long long expected = -1;
     if (karaoke_cache_segment_expected(m, seg, &expected) == 0) {
         if (frames != expected) {
-            set_err(err, err_cap, "段帧数与清单不符：%lld != %lld", frames, expected);
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_frames_manifest_fmt"), frames, expected);
             return 0;
         }
     } else if (frames != KARAOKE_SEGMENT_FRAMES) {
         /* 清单未完整时只接受"非末段满段"：末段短帧必须在 complete=1 之后
          * 才可见（worker 的写入顺序保证这一点）。 */
-        set_err(err, err_cap, "段未完整时帧数不是满段：%lld", frames);
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_partial_fmt"), frames);
         return 0;
     }
     const char *suffix[2] = {"inst", "soft"};
     for (int i = 0; i < 2; i++) {
         char path[KARAOKE_CACHE_PATH_CAP];
         if (karaoke_cache_segment_file(paths, seg, i, path, sizeof(path)) != 0) {
-            set_err(err, err_cap, "段文件路径过长");
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.path_too_long"));
             return 0;
         }
         if (!lstat_is_regular(path)) {
-            set_err(err, err_cap, "段文件缺失/非普通文件：%s", path);
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_file_missing_fmt"), path);
             return 0;
         }
         struct stat st;
         if (lstat(path, &st) != 0 || st.st_size < SEGMENT_ROOT_MIN_BYTES) {
-            set_err(err, err_cap, "段文件疑似截断：%s", path);
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_truncated_fmt"), path);
             return 0;
         }
         int sr = 0, ch = 0, bps = 0;
@@ -1688,12 +1693,12 @@ int karaoke_cache_segment_ready(const KaraokeSegmentPaths *paths,
             return 0;
         if (sr != KARAOKE_SEGMENT_SAMPLE_RATE || ch != KARAOKE_SEGMENT_CHANNELS ||
             bps != 16) {
-            set_err(err, err_cap, "段格式不符（%d/%d/%d）：%s", sr, ch, bps,
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_format_fmt"), sr, ch, bps,
                     path);
             return 0;
         }
         if (flac_frames != frames) {
-            set_err(err, err_cap, "段 FLAC 帧数与标记不符：%lld != %lld（%s）",
+            set_err(err, err_cap, i18n_get("karaoke.cache.err.segment_flac_frames_fmt"),
                     flac_frames, frames, suffix[i]);
             return 0;
         }
@@ -1792,3 +1797,209 @@ int karaoke_cache_segment_complete(const KaraokeCacheConfig *cfg, const char *tr
     }
     return 1;
 }
+
+/* ================================================================
+ * 8. v2 会话缓存预算 / 淘汰 / 空间预检（S1）
+ *
+ * /tmp 可能是 tmpfs：单次会话内多首长曲会累计占用。这里以"跨曲目总预算 +
+ * 剩余空间预检 + 最旧优先淘汰"兜底；当前作业曲目与当前播放曲目一律保护
+ * （由调用方作为 exclude_dirs 传入），单曲段集允许超过预算。
+ * ================================================================ */
+
+static int segment_dir_excluded(const char *path,
+                                const char *const *exclude_dirs,
+                                int exclude_count)
+{
+    if (!exclude_dirs)
+        return 0;
+    for (int i = 0; i < exclude_count; i++) {
+        if (exclude_dirs[i] && exclude_dirs[i][0] &&
+            strcmp(path, exclude_dirs[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+int karaoke_cache_segment_budget_mb(const KaraokeCacheConfig *cfg)
+{
+    if (cfg && cfg->limit_mb > 0)
+        return cfg->limit_mb;
+    const char *env = getenv(KARAOKE_SEGMENT_BUDGET_ENV);
+    if (env && env[0]) {
+        char *end = NULL;
+        errno = 0;
+        long v = strtol(env, &end, 10);
+        if (end && end != env && *end == '\0' && errno == 0) {
+            if (v <= 0)
+                return 0;   /* 显式关闭总预算（仍做剩余空间预检） */
+            if (v > 1048576)   /* 1 TiB 上限，防乘法溢出 */
+                v = 1048576;
+            return (int)v;
+        }
+    }
+    return KARAOKE_SEGMENT_LIMIT_MB_DEFAULT;
+}
+
+long long karaoke_cache_segment_usage_bytes(const KaraokeCacheConfig *cfg,
+                                            int *track_count)
+{
+    if (track_count)
+        *track_count = 0;
+    if (!cfg_valid(cfg))
+        return -1;
+    CacheDirEntry *dirs = NULL;
+    int count = 0;
+    collect_dirs(cfg, &dirs, &count);
+    long long total = total_bytes(dirs, count);
+    free(dirs);
+    if (track_count)
+        *track_count = count;
+    return total;
+}
+
+/* 按 mtime 最旧优先删除非保护目录，直到 total <= limit。 */
+static long long segment_evict_until(CacheDirEntry *dirs, int count,
+                                     const KaraokeCacheConfig *cfg,
+                                     const char *const *exclude_dirs,
+                                     int exclude_count, long long total,
+                                     long long limit, int *evicted)
+{
+    qsort(dirs, (size_t)count, sizeof(*dirs), cmp_dir_mtime);
+    for (int i = 0; i < count && total > limit; i++) {
+        if (dirs[i].busy)
+            continue;
+        if (segment_dir_excluded(dirs[i].path, exclude_dirs, exclude_count))
+            continue;
+        if (!path_within_root(cfg, dirs[i].path))
+            continue;
+        remove_tree(dirs[i].path);
+        total -= dirs[i].bytes;
+        if (evicted)
+            (*evicted)++;
+    }
+    return total;
+}
+
+int karaoke_cache_segment_evict(const KaraokeCacheConfig *cfg,
+                                const char *const *exclude_dirs,
+                                int exclude_count, int *out_evicted,
+                                char *err, size_t err_cap)
+{
+    if (out_evicted)
+        *out_evicted = 0;
+    if (!cfg_valid(cfg)) {
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
+        return -1;
+    }
+    int budget_mb = karaoke_cache_segment_budget_mb(cfg);
+    if (budget_mb <= 0)
+        return 0;   /* 未设总预算：只做空间预检 */
+    CacheDirEntry *dirs = NULL;
+    int count = 0;
+    collect_dirs(cfg, &dirs, &count);
+    if (!dirs)
+        return 0;
+    long long limit = (long long)budget_mb * 1024 * 1024;
+    long long total = total_bytes(dirs, count);
+    total = segment_evict_until(dirs, count, cfg, exclude_dirs, exclude_count,
+                                total, limit, out_evicted);
+    free(dirs);
+    return 0;
+}
+
+int karaoke_cache_segment_space_check(const KaraokeCacheConfig *cfg,
+                                      long long need_bytes,
+                                      long long *out_free_bytes,
+                                      char *err, size_t err_cap)
+{
+    if (out_free_bytes)
+        *out_free_bytes = -1;
+    if (!cfg || !cfg->root || !cfg->root[0]) {
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
+        return -1;
+    }
+    struct statvfs vfs;
+    if (statvfs(cfg->root, &vfs) != 0) {
+        /* 无法判定（极少数文件系统）：不阻塞写入，只留诊断。 */
+        return 1;
+    }
+    long long avail = (long long)vfs.f_bavail * (long long)vfs.f_frsize;
+    if (out_free_bytes)
+        *out_free_bytes = avail;
+    long long need = need_bytes > 0 ? need_bytes : 0;
+    long long reserve =
+        (long long)KARAOKE_SEGMENT_SPACE_RESERVE_MB * 1024 * 1024;
+    if (avail >= need + reserve)
+        return 1;
+    set_err(err, err_cap, i18n_get("karaoke.cache.err.no_space_fmt"),
+            avail / (1024 * 1024), (need + reserve) / (1024 * 1024),
+            KARAOKE_SEGMENT_SPACE_RESERVE_MB);
+    return 0;
+}
+
+int karaoke_cache_segment_reserve(const KaraokeCacheConfig *cfg,
+                                  const char *const *exclude_dirs,
+                                  int exclude_count, long long need_bytes,
+                                  char *err, size_t err_cap)
+{
+    if (!cfg || !cfg->root || !cfg->root[0]) {
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.invalid_params"));
+        return -1;
+    }
+    if (need_bytes <= 0)
+        need_bytes = KARAOKE_SEGMENT_WRITE_BYTES;
+    /* 先按会话预算淘汰（保护当前作业/当前播放曲目）。 */
+    int evicted = 0;
+    if (karaoke_cache_segment_evict(cfg, exclude_dirs, exclude_count, &evicted,
+                                    err, err_cap) != 0)
+        return -1;
+    long long free_bytes = -1;
+    int space = karaoke_cache_segment_space_check(cfg, need_bytes, &free_bytes,
+                                                  err, err_cap);
+    if (space == 1)
+        return 0;
+    if (space < 0)
+        return -1;
+    /* 仍不足：不受预算限制地继续淘汰最旧的非保护曲目段，每次删一个后
+     * 重新读文件系统（删除量按实际释放为准）。 */
+    for (;;) {
+        CacheDirEntry *dirs = NULL;
+        int count = 0;
+        collect_dirs(cfg, &dirs, &count);
+        if (!dirs)
+            break;
+        qsort(dirs, (size_t)count, sizeof(*dirs), cmp_dir_mtime);
+        int removed = 0;
+        for (int i = 0; i < count; i++) {
+            if (dirs[i].busy)
+                continue;
+            if (segment_dir_excluded(dirs[i].path, exclude_dirs, exclude_count))
+                continue;
+            if (!path_within_root(cfg, dirs[i].path))
+                continue;
+            remove_tree(dirs[i].path);
+            removed = 1;
+            break;
+        }
+        free(dirs);
+        if (!removed)
+            break;
+        space = karaoke_cache_segment_space_check(cfg, need_bytes, &free_bytes,
+                                                  err, err_cap);
+        if (space == 1)
+            return 0;
+        if (space < 0)
+            return -1;
+    }
+    if (err && err_cap && !err[0]) {
+        long long avail = free_bytes < 0 ? 0 : free_bytes;
+        set_err(err, err_cap, i18n_get("karaoke.cache.err.no_space_fmt"),
+                avail / (1024 * 1024),
+                (need_bytes + (long long)KARAOKE_SEGMENT_SPACE_RESERVE_MB *
+                                  1024 * 1024) /
+                    (1024 * 1024),
+                KARAOKE_SEGMENT_SPACE_RESERVE_MB);
+    }
+    return -1;
+}
+

@@ -1280,7 +1280,8 @@ int get_and_clear_initial_seek_position(void)
 
 /* 内置模型不可用的用户可见提示：每进程只推一次（模型随包分发，缺失/损坏
  * 都是打包问题；重复起播不应反复刷状态行）。错误文本由
- * karaoke_model_bundled_path() 给出，明确区分"缺失"与"校验失败"。 */
+ * karaoke_model_bundled_path_fast() 给出，明确区分"缺失"与"大小不符"；
+ * SHA256 的完整校验放到 worker 线程（S2：不在 UI/播放线程读 30MiB）。 */
 static void karaoke_report_bundled_model_error(const char *err)
 {
     static int reported = 0;
@@ -1326,10 +1327,13 @@ int audio_karaoke_cache_config(KaraokeCacheConfig *cfg, char *root_buf,
             if (model_path && model_cap) {
                 char model_err[KARAOKE_MODEL_ERR_CAP];
                 model_err[0] = '\0';
-                /* 旧用户兼容路径 = $XDG_DATA_HOME/ter-music（只读，不创建）。 */
-                ok = karaoke_model_bundled_path(app_data_dir(0), model_path,
-                                                model_cap, model_err,
-                                                sizeof(model_err)) == 0;
+                /* 旧用户兼容路径 = $XDG_DATA_HOME/ter-music（只读，不创建）。
+                 * S2：热路径只做 stat + 大小校验（微秒级）；SHA256 完整校验
+                 * 由 worker 在后台分离线程里做（缓存键 路径+大小+mtime），
+                 * UI/播放线程绝不再同步读 30MiB。 */
+                ok = karaoke_model_bundled_path_fast(app_data_dir(0), model_path,
+                                                     model_cap, model_err,
+                                                     sizeof(model_err)) == 0;
                 if (!ok) {
                     pthread_mutex_unlock(&lock);
                     karaoke_report_bundled_model_error(model_err);
@@ -1375,7 +1379,7 @@ static int karaoke_request_job_for_track(const char *track_path)
     char session_root[KARAOKE_CACHE_PATH_CAP];
     if (karaoke_cache_session_root(session_root, sizeof(session_root)) == 0) {
         seg_cfg.root = session_root;
-        seg_cfg.limit_mb = 0;
+        seg_cfg.limit_mb = 0;   /* 会话预算见 karaoke_cache_segment_budget_mb() */
         if (karaoke_cache_segment_complete(&seg_cfg, track_path))
             return 1;
     }
@@ -1389,6 +1393,13 @@ static int karaoke_request_job_for_track(const char *track_path)
     job.format = KARAOKE_JOB_FORMAT_SEGMENTS_V2;   /* 生产只产出 v2 分段 */
     job.overlap = cfg.overlap;
     job.soft_inst_mix = cfg.soft_inst_mix;
+    /* S1：预取下一曲时把当前播放曲目交给 worker 保护——会话缓存预算淘汰
+     * 绝不能删掉正在播放的伴奏段。 */
+    {
+        char playing[MAX_PATH_LEN];
+        if (audio_current_track_path(playing, sizeof(playing)))
+            snprintf(job.protect_track, sizeof(job.protect_track), "%s", playing);
+    }
     if (karaoke_worker_request(&job) != 0) {
         log_debug("audio", "karaoke worker request failed for '%s'", track_path);
         return 0;
@@ -1466,7 +1477,7 @@ static int karaoke_desired_source(void)
         return KARAOKE_SOURCE_ORIGINAL;
     KaraokeCacheConfig seg_cfg = cfg;
     seg_cfg.root = session_root;
-    seg_cfg.limit_mb = 0;
+    seg_cfg.limit_mb = 0;   /* 只读查询，不触发淘汰 */
     int seg = audio_get_position_seconds() / KARAOKE_SEGMENT_SECONDS;
     if (karaoke_cache_segment_ready_for_mode(&seg_cfg, track, seg, mode))
         return mode;

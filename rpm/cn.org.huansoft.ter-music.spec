@@ -31,7 +31,7 @@ Name:           cn.org.huansoft.ter-music
 Version:        %{_version}
 Release:        1%{?dist}
 Summary:        A terminal-based music player with ncurses interface
-License:        GPL-3.0-or-later AND MIT
+License:        GPL-3.0-only AND MIT
 URL:            https://github.com/HuanSoft-Open-Source-Community/ter-music
 Source0:        %{name}-%{_version}.tar.gz
 ExclusiveArch:  x86_64

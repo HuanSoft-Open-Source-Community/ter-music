@@ -145,8 +145,9 @@ send() { printf 'key:%s\n' "$1" >> "$CTL_FILE"; sleep "${2:-0.6}"; }
 right_at() { send "<right:$1:$2>" "${3:-0.9}"; }   # $1=列 $2=行（SGR 1 基）
 
 mlog() {   # 前端调试日志（同目录里还有核心日志）
-    local f
-    for f in $(ls -t "$LOG_DIR"/*.log 2>/dev/null); do
+    local f files
+    mapfile -t files < <(ls -t "$LOG_DIR"/*.log 2>/dev/null)
+    for f in "${files[@]}"; do
         grep -q "\[layout\] Selected layout" "$f" 2>/dev/null && { printf '%s' "$f"; return; }
     done
     printf ''
@@ -519,7 +520,10 @@ send "M" 0.5
 info "R12 布局编辑器：右键锚定动作菜单 + 退出编辑器"
 send "<f2>" 0.9
 send "<right>" 0.5
-downs="$(printf '<down>%.0s' $(seq 1 20))"
+# “编辑布局”是「颜色主题」页的尾部动作项。v10/v12 在该页前部追加了
+# 外观模式/重新探测/终端覆盖等行，固定 20 次下移会落到「重新加载布局」；
+# 当前顺序下第 22 个可选项才是编辑布局（实测 21 次下移命中，22 次是新建布局）。
+downs="$(printf '<down>%.0s' $(seq 1 21))"
 send "${downs}<enter>" 1.5
 if grep -q "\[layout_editor\] Opened layout" "$LOG_FILE"; then
     ok "布局编辑器已打开"

@@ -24,8 +24,9 @@ pkgbase = cn.org.huansoft.ter-music
 	optdepends = libpipewire: PipeWire audio output
 	optdepends = dbus: MPRIS media session integration
 	optdepends = smbclient: SMB/CIFS remote music sources
+	optdepends = onnxruntime-cpu: karaoke vocal removal (ONNX Runtime; provides libonnxruntime.so.1)
 	replaces = ter-music-cn
-	source = ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#commit=675bbb4172fc5f7b26d4488953256ee401c2f9f6
+	source = ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#commit=32737f0a49a77834564d69bce3847538ae6c2e60
 	source = UVR_MDXNET_3_9662.onnx::https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx
 	sha256sums = SKIP
 	sha256sums = e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc

@@ -26,6 +26,7 @@
 #include "audio/karaoke_cache.h"
 #include "audio/karaoke_mode.h"
 #include "audio/karaoke_model.h"
+#include "i18n/i18n.h"
 #include "logger/logger.h"
 
 #include <errno.h>
@@ -91,12 +92,12 @@ static int wfft_init(WFft *p, int n_fft, char *err, size_t err_cap)
 {
     memset(p, 0, sizeof(*p));
     if (n_fft <= 0 || (n_fft % 3) != 0) {
-        set_err(err, err_cap, "不支持的 n_fft=%d（要求 N=3×2^k）", n_fft);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.fft_unsupported_fmt"), n_fft);
         return -1;
     }
     int m = n_fft / 3;
     if (m < 2 || (m & (m - 1)) != 0) {
-        set_err(err, err_cap, "不支持的 n_fft=%d（N/3 必须是 2 的幂）", n_fft);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.fft_pow2_fmt"), n_fft);
         return -1;
     }
     p->n = n_fft;
@@ -111,7 +112,7 @@ static int wfft_init(WFft *p, int n_fft, char *err, size_t err_cap)
     p->wn = calloc((size_t)m * 2, sizeof(WCplx));
     if (!p->cos_n || !p->sin_n || !p->cos_m || !p->sin_m || !p->bitrev ||
         !p->sub || !p->full || !p->wn) {
-        set_err(err, err_cap, "内存不足（FFT 表）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "FFT table");
         return -1;
     }
     for (int j = 0; j < n_fft / 2; j++) {
@@ -348,7 +349,7 @@ static int wdsp_init(Wdsp *d, const KaraokeModelSpec *spec, char *err, size_t er
     d->chunk = (int)karaoke_model_chunk_frames(spec);
     d->step = (int)((double)d->chunk * (1.0 - KARAOKE_CACHE_OVERLAP));
     if (d->chunk <= 0 || d->step <= 0 || d->step >= d->chunk) {
-        set_err(err, err_cap, "模型表项 chunk/overlap 参数非法");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.model_table_invalid"));
         return -1;
     }
     if (wfft_init(&d->fft, d->n_fft, err, err_cap) != 0)
@@ -372,7 +373,7 @@ static int wdsp_init(Wdsp *d, const KaraokeModelSpec *spec, char *err, size_t er
     if (!d->window || !d->frame || !d->bins || !d->part || !d->ola || !d->wsum ||
         !d->ring_l || !d->ring_r || !d->ring_d || !d->in_patch || !d->out_patch ||
         !d->emit_inst || !d->emit_soft) {
-        set_err(err, err_cap, "内存不足（DSP 暂存）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "DSP scratch");
         wdsp_free(d);
         return -1;
     }
@@ -478,18 +479,18 @@ static int decoder_open(WDecoder *d, const char *path, volatile int *cancelled,
 
     d->fmt = avformat_alloc_context();
     if (!d->fmt) {
-        set_err(err, err_cap, "内存不足（AVFormatContext）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "AVFormatContext");
         return -1;
     }
     d->fmt->interrupt_callback = icb;
     int rc = avformat_open_input(&d->fmt, path, NULL, NULL);
     if (rc < 0) {
-        set_err(err, err_cap, "无法打开音频文件 %s（err=%d）", path, rc);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.open_audio_fmt"), path, rc);
         decoder_close(d);
         return -1;
     }
     if (avformat_find_stream_info(d->fmt, NULL) < 0) {
-        set_err(err, err_cap, "无法读取音频流信息：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.read_stream_fmt"), path);
         decoder_close(d);
         return -1;
     }
@@ -501,21 +502,21 @@ static int decoder_open(WDecoder *d, const char *path, volatile int *cancelled,
         }
     }
     if (d->stream_index < 0) {
-        set_err(err, err_cap, "文件没有音频流：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.no_stream_fmt"), path);
         decoder_close(d);
         return -1;
     }
     AVCodecParameters *par = d->fmt->streams[d->stream_index]->codecpar;
     const AVCodec *codec = avcodec_find_decoder(par->codec_id);
     if (!codec) {
-        set_err(err, err_cap, "不支持的音频编码（codec_id=%d）", par->codec_id);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.codec_unsupported_fmt"), par->codec_id);
         decoder_close(d);
         return -1;
     }
     d->codec = avcodec_alloc_context3(codec);
     if (!d->codec || avcodec_parameters_to_context(d->codec, par) < 0 ||
         avcodec_open2(d->codec, codec, NULL) < 0) {
-        set_err(err, err_cap, "解码器初始化失败：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.codec_init_fmt"), path);
         decoder_close(d);
         return -1;
     }
@@ -525,18 +526,18 @@ static int decoder_open(WDecoder *d, const char *path, volatile int *cancelled,
                           ? d->codec->ch_layout.nb_channels
                           : par->ch_layout.nb_channels;
     if (d->src_rate <= 0) {
-        set_err(err, err_cap, "采样率未知：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.sample_rate_unknown_fmt"), path);
         decoder_close(d);
         return -1;
     }
     if (d->src_channels != 2) {
-        set_err(err, err_cap, "仅支持立体声（实际 %d 声道）：%s", d->src_channels, path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.stereo_only_fmt"), d->src_channels, path);
         decoder_close(d);
         return -1;
     }
     d->swr = swr_alloc();
     if (!d->swr) {
-        set_err(err, err_cap, "内存不足（swresample）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "swresample");
         decoder_close(d);
         return -1;
     }
@@ -553,14 +554,14 @@ static int decoder_open(WDecoder *d, const char *path, volatile int *cancelled,
     av_opt_set_sample_fmt(d->swr, "in_sample_fmt", d->codec->sample_fmt, 0);
     av_opt_set_sample_fmt(d->swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     if (swr_init(d->swr) < 0) {
-        set_err(err, err_cap, "重采样器初始化失败：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.resampler_init_fmt"), path);
         decoder_close(d);
         return -1;
     }
     d->pkt = av_packet_alloc();
     d->frame = av_frame_alloc();
     if (!d->pkt || !d->frame) {
-        set_err(err, err_cap, "内存不足（解码缓冲）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "decode buffer");
         decoder_close(d);
         return -1;
     }
@@ -583,7 +584,7 @@ static int decoder_append_frame(WDecoder *d, AVFrame *frame, char *err, size_t e
                 d->pcm.start = q;
                 if (q > d->expect_src + 8192) {
                     /* 落点比请求点晚太多：宁可报错也不静默错位。 */
-                    set_err(err, err_cap, "seek 落点异常（%lld > %lld）", q, d->expect_src);
+                    set_err(err, err_cap, i18n_get("karaoke.worker.err.seek_position_fmt"), q, d->expect_src);
                     return -1;
                 }
             }
@@ -602,7 +603,7 @@ static int decoder_append_frame(WDecoder *d, AVFrame *frame, char *err, size_t e
             cap *= 2;
         float *n = realloc(d->pcm.data, cap * 2 * sizeof(float));
         if (!n) {
-            set_err(err, err_cap, "内存不足（PCM 缓冲）");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "PCM buffer");
             return -1;
         }
         d->pcm.data = n;
@@ -615,7 +616,7 @@ static int decoder_append_frame(WDecoder *d, AVFrame *frame, char *err, size_t e
                                (const uint8_t **)frame->extended_data,
                                frame->nb_samples);
     if (produced < 0) {
-        set_err(err, err_cap, "重采样失败（%d）", produced);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.resample_failed_fmt"), produced);
         return -1;
     }
     d->pcm.frames += (size_t)produced;
@@ -637,7 +638,7 @@ static int decoder_flush_swr(WDecoder *d, char *err, size_t err_cap)
                 cap *= 2;
             float *n = realloc(d->pcm.data, cap * 2 * sizeof(float));
             if (!n) {
-                set_err(err, err_cap, "内存不足（PCM 缓冲）");
+                set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "PCM buffer");
                 return -1;
             }
             d->pcm.data = n;
@@ -669,7 +670,7 @@ static int decoder_step(WDecoder *d, char *err, size_t err_cap)
             d->eof = 1;
             return decoder_flush_swr(d, err, err_cap) == 0 ? 0 : -1;
         }
-        set_err(err, err_cap, "解码失败（%d）", r);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.decode_failed_fmt"), r);
         return -1;
     }
     while (!d->sent_null) {
@@ -681,10 +682,10 @@ static int decoder_step(WDecoder *d, char *err, size_t err_cap)
         }
         if (r < 0) {
             if (r == AVERROR(EINTR) || r == AVERROR_EXIT) {
-                set_err(err, err_cap, "解码被取消/中断");
+                set_err(err, err_cap, i18n_get("karaoke.worker.err.decode_interrupted"));
                 return -1;
             }
-            set_err(err, err_cap, "读包失败（%d）", r);
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.read_packet_fmt"), r);
             return -1;
         }
         if (d->pkt->stream_index != d->stream_index) {
@@ -694,7 +695,7 @@ static int decoder_step(WDecoder *d, char *err, size_t err_cap)
         r = avcodec_send_packet(d->codec, d->pkt);
         av_packet_unref(d->pkt);
         if (r < 0 && r != AVERROR(EAGAIN)) {
-            set_err(err, err_cap, "送包解码失败（%d）", r);
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.send_packet_fmt"), r);
             return -1;
         }
         return 1;
@@ -708,7 +709,7 @@ static int decoder_fill_to(WDecoder *d, long long target, volatile int *cancelle
 {
     while (d->pcm.start + (long long)d->pcm.frames < target) {
         if (cancelled && *cancelled) {
-            set_err(err, err_cap, "已取消");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.cancelled"));
             return -1;
         }
         int rc = decoder_step(d, err, err_cap);
@@ -717,7 +718,8 @@ static int decoder_fill_to(WDecoder *d, long long target, volatile int *cancelle
         if (rc == 0)
             break;
         if (d->src_frames > (long long)KARAOKE_WORKER_MAX_SECONDS * d->src_rate) {
-            set_err(err, err_cap, "曲目超过 %d 分钟，拒绝分离", KARAOKE_WORKER_MAX_SECONDS / 60);
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.too_long_limit_fmt"),
+                    KARAOKE_WORKER_MAX_SECONDS);
             return -1;
         }
     }
@@ -747,17 +749,17 @@ static int flac_writer_open(WFlacWriter *w, const char *path, int sample_rate,
 {
     memset(w, 0, sizeof(*w));
     if (avformat_alloc_output_context2(&w->oc, NULL, "flac", path) < 0 || !w->oc) {
-        set_err(err, err_cap, "创建 FLAC 输出失败：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_create_fmt"), path);
         return -1;
     }
     const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_FLAC);
     if (!codec) {
-        set_err(err, err_cap, "FFmpeg 缺少 FLAC 编码器");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_no_encoder"));
         return -1;
     }
     w->cc = avcodec_alloc_context3(codec);
     if (!w->cc) {
-        set_err(err, err_cap, "内存不足（FLAC 编码器）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "FLAC encoder");
         return -1;
     }
     w->cc->sample_rate = sample_rate;
@@ -765,27 +767,27 @@ static int flac_writer_open(WFlacWriter *w, const char *path, int sample_rate,
     av_channel_layout_default(&w->cc->ch_layout, 2);
     w->cc->time_base = (AVRational){1, sample_rate};
     if (avcodec_open2(w->cc, codec, NULL) < 0) {
-        set_err(err, err_cap, "FLAC 编码器打开失败");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_encoder_open"));
         return -1;
     }
     w->st = avformat_new_stream(w->oc, NULL);
     if (!w->st || avcodec_parameters_from_context(w->st->codecpar, w->cc) < 0) {
-        set_err(err, err_cap, "创建 FLAC 流失败");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_stream_create"));
         return -1;
     }
     w->st->time_base = w->cc->time_base;
     if (avio_open(&w->oc->pb, path, AVIO_FLAG_WRITE) < 0) {
-        set_err(err, err_cap, "无法写 FLAC 文件：%s", path);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_write_file_fmt"), path);
         return -1;
     }
     if (avformat_write_header(w->oc, NULL) < 0) {
-        set_err(err, err_cap, "写 FLAC 头失败");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_header"));
         return -1;
     }
     w->frame = av_frame_alloc();
     w->pkt = av_packet_alloc();
     if (!w->frame || !w->pkt) {
-        set_err(err, err_cap, "内存不足（FLAC 帧）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "FLAC frame");
         return -1;
     }
     w->frame->format = AV_SAMPLE_FMT_S16;
@@ -795,7 +797,7 @@ static int flac_writer_open(WFlacWriter *w, const char *path, int sample_rate,
     w->frame->nb_samples = w->frame_size;
     w->pending = calloc((size_t)w->frame_size * 2, sizeof(int16_t));
     if (!w->pending || av_frame_get_buffer(w->frame, 0) < 0) {
-        set_err(err, err_cap, "FLAC 帧缓冲分配失败");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_frame_alloc"));
         return -1;
     }
     w->open = 1;
@@ -809,7 +811,7 @@ static int flac_writer_drain(WFlacWriter *w, char *err, size_t err_cap)
         if (r == AVERROR(EAGAIN) || r == AVERROR_EOF)
             return 0;
         if (r < 0) {
-            set_err(err, err_cap, "FLAC 编码失败（%d）", r);
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_encode_fmt"), r);
             return -1;
         }
         av_packet_rescale_ts(w->pkt, w->cc->time_base, w->st->time_base);
@@ -817,7 +819,7 @@ static int flac_writer_drain(WFlacWriter *w, char *err, size_t err_cap)
         int wr = av_interleaved_write_frame(w->oc, w->pkt);
         av_packet_unref(w->pkt);
         if (wr < 0) {
-            set_err(err, err_cap, "写 FLAC 帧失败（%d）", wr);
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_write_frame_fmt"), wr);
             return -1;
         }
     }
@@ -828,7 +830,7 @@ static int flac_writer_send_frame(WFlacWriter *w, const int16_t *data, int frame
                                   char *err, size_t err_cap)
 {
     if (av_frame_make_writable(w->frame) < 0) {
-        set_err(err, err_cap, "FLAC 帧不可写");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_frame_unwritable"));
         return -1;
     }
     w->frame->nb_samples = frames;
@@ -836,7 +838,7 @@ static int flac_writer_send_frame(WFlacWriter *w, const int16_t *data, int frame
     memcpy(w->frame->data[0], data, (size_t)frames * 2 * sizeof(int16_t));
     int r = avcodec_send_frame(w->cc, w->frame);
     if (r < 0) {
-        set_err(err, err_cap, "FLAC 送帧失败（%d）", r);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_send_frame_fmt"), r);
         return -1;
     }
     w->pts += frames;
@@ -903,13 +905,13 @@ static int flac_writer_finish(WFlacWriter *w, char *err, size_t err_cap)
     }
     int r = avcodec_send_frame(w->cc, NULL);
     if (r < 0 && r != AVERROR_EOF) {
-        set_err(err, err_cap, "FLAC flush 失败（%d）", r);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_flush_fmt"), r);
         return -1;
     }
     if (flac_writer_drain(w, err, err_cap) != 0)
         return -1;
     if (av_write_trailer(w->oc) < 0) {
-        set_err(err, err_cap, "写 FLAC 尾失败");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.flac_trailer"));
         return -1;
     }
     w->open = 0;
@@ -953,7 +955,7 @@ static int resampler_open(WResampler *r, int dst_rate, char *err, size_t err_cap
         return 0;   /* 直通 */
     r->swr = swr_alloc();
     if (!r->swr) {
-        set_err(err, err_cap, "内存不足（输出重采样）");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "output resampler");
         return -1;
     }
     AVChannelLayout in_layout, out_layout;
@@ -966,7 +968,7 @@ static int resampler_open(WResampler *r, int dst_rate, char *err, size_t err_cap
     av_opt_set_sample_fmt(r->swr, "in_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     av_opt_set_sample_fmt(r->swr, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
     if (swr_init(r->swr) < 0) {
-        set_err(err, err_cap, "输出重采样器初始化失败");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.out_resampler_init"));
         return -1;
     }
     return 0;
@@ -998,7 +1000,7 @@ static int resampler_feed(WResampler *r, WFlacWriter *w, const float *in,
     if (out_max > r->buf_frames) {
         int16_t *n = realloc(r->buf, (size_t)out_max * 2 * sizeof(int16_t));
         if (!n) {
-            set_err(err, err_cap, "内存不足（输出重采样缓冲）");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "output resampler buffer");
             return -1;
         }
         r->buf = n;
@@ -1008,7 +1010,7 @@ static int resampler_feed(WResampler *r, WFlacWriter *w, const float *in,
     int produced = swr_convert(r->swr, out_planes, out_max,
                                (const uint8_t **)&in, frames);
     if (produced < 0) {
-        set_err(err, err_cap, "输出重采样失败（%d）", produced);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.out_resample_fmt"), produced);
         return -1;
     }
     if (produced == 0)
@@ -1025,7 +1027,7 @@ static int resampler_flush(WResampler *r, WFlacWriter *w, char *err, size_t err_
         if (out_max > r->buf_frames) {
             int16_t *n = realloc(r->buf, (size_t)out_max * 2 * sizeof(int16_t));
             if (!n) {
-                set_err(err, err_cap, "内存不足（输出重采样缓冲）");
+                set_err(err, err_cap, i18n_get("karaoke.worker.err.oom_fmt"), "output resampler buffer");
                 return -1;
             }
             r->buf = n;
@@ -1216,7 +1218,7 @@ static int job_emit_until(WJob *j, long long *flushed, long long end,
     const float orig_mix = 1.0f - inst_mix;
     while (*flushed < end) {
         if (cancelled && *cancelled) {
-            set_err(err, err_cap, "已取消");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.cancelled"));
             return -1;
         }
         long long p = *flushed;
@@ -1224,7 +1226,7 @@ static int job_emit_until(WJob *j, long long *flushed, long long end,
         if (p >= d->trim) {
             long long idx = q - j->dec.pcm.start;
             if (idx < 0 || idx >= (long long)j->dec.pcm.frames) {
-                set_err(err, err_cap, "内部错误：输出位置超出 PCM 缓冲");
+                set_err(err, err_cap, i18n_get("karaoke.worker.err.internal_output_pos"));
                 return -1;
             }
             float vl, vr;
@@ -1271,7 +1273,7 @@ static int job_check_cancel(WJob *j, char *err, size_t err_cap)
 {
     if (j->cancelled || j->generation != worker_cancel_generation()) {
         j->cancelled = 1;
-        set_err(err, err_cap, "已取消");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.cancelled"));
         return -1;
     }
     return 0;
@@ -1304,11 +1306,11 @@ static int job_run_v1(WJob *j, char *err, size_t err_cap)
     const KaraokeWorkerJob *req = &j->req;
     const KaraokeModelSpec *spec = karaoke_model_by_id(req->model_id);
     if (!spec) {
-        set_err(err, err_cap, "不支持的模型 id：%s", req->model_id);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.unsupported_model_fmt"), req->model_id);
         return -1;
     }
     if (req->model_sha256[0] == '\0') {
-        set_err(err, err_cap, "模型 SHA256 为空");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.model_sha_empty"));
         return -1;
     }
     memset(&j->cache_cfg, 0, sizeof(j->cache_cfg));
@@ -1321,9 +1323,13 @@ static int job_run_v1(WJob *j, char *err, size_t err_cap)
     j->cache_cfg.limit_mb = KARAOKE_CACHE_LIMIT_MB;
 
     if (req->model_sha256[0] && strcmp(req->model_sha256, spec->sha256) != 0) {
-        set_err(err, err_cap, "模型 SHA256 与受支持表项不一致");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.model_sha_mismatch"));
         return -1;
     }
+    /* S2：模型文件的完整 SHA256 校验在 worker 线程做（结果按 路径+大小+
+     * mtime 缓存，重复 job 不重读 30MiB）；UI/播放线程只做 stat 级定位。 */
+    if (karaoke_model_verify_file_cached(spec, req->model_path, err, err_cap) != 0)
+        return -1;
 
     if (decoder_open(&j->dec, req->track_path, &j->cancelled, err, err_cap) != 0)
         return -1;
@@ -1337,7 +1343,7 @@ static int job_run_v1(WJob *j, char *err, size_t err_cap)
         else if (j->dec.fmt->duration > 0)
             dur = j->dec.fmt->duration / AV_TIME_BASE;
         if (dur > KARAOKE_WORKER_MAX_SECONDS) {
-            set_err(err, err_cap, "曲目时长 %llds 超过上限 %ds，拒绝分离",
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.too_long_fmt"),
                     (long long)dur, KARAOKE_WORKER_MAX_SECONDS);
             return -1;
         }
@@ -1423,13 +1429,13 @@ static int job_run_v1(WJob *j, char *err, size_t err_cap)
         flac_writer_finish(&j->w_soft, err, err_cap) != 0)
         return -1;
     if (j->w_inst.written != j->w_soft.written) {
-        set_err(err, err_cap, "内部错误：inst/soft 帧数不一致（%lld/%lld）",
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.internal_frames_mismatch_fmt"),
                 j->w_inst.written, j->w_soft.written);
         return -1;
     }
     long long frames = j->w_inst.written;
     if (frames <= 0) {
-        set_err(err, err_cap, "分离结果为空");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.empty_result"));
         return -1;
     }
     if (karaoke_cache_write_meta(j->meta_tmp, &j->cache_cfg, frames,
@@ -1462,6 +1468,9 @@ typedef struct {
     long long total_frames;   /* EOF 后已知的模型输出总帧数 */
     int total_segments;       /* EOF 后已知的总段数；0 = 未知 */
     int produced;             /* 本次 job 新产出的段数 */
+    /* 会话缓存预算淘汰的保护目录：本次 job 曲目 + 当前播放曲目（预取场景）。 */
+    const char *exclude_dirs[2];
+    int exclude_count;
 } WSegCtx;
 
 /* 前向声明（实现在第 8 节；worker 线程内调用）。 */
@@ -1488,7 +1497,7 @@ static void seg_clear_dsp_ring(Wdsp *d)
 static int seg_open_writer(WSegCtx *c, int seg, char *err, size_t err_cap)
 {
     if (seg < 0 || seg >= KARAOKE_SEGMENT_MAX_COUNT) {
-        set_err(err, err_cap, "段号越界：%d", seg);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.segment_range_fmt"), seg);
         return -1;
     }
     char inst_path[KARAOKE_CACHE_PATH_CAP];
@@ -1497,9 +1506,14 @@ static int seg_open_writer(WSegCtx *c, int seg, char *err, size_t err_cap)
                                    sizeof(inst_path)) != 0 ||
         karaoke_cache_segment_file(&c->paths, seg, 1, soft_path,
                                    sizeof(soft_path)) != 0) {
-        set_err(err, err_cap, "段文件路径过长");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.path_too_long"));
         return -1;
     }
+    /* S1：每段写入前做空间/预算闸门（/tmp 可能是 tmpfs）。先淘汰最旧的
+     * 非保护曲目段，仍不足则失败回退原声，绝不写到 ENOSPC 才报错。 */
+    if (karaoke_cache_segment_reserve(&c->cfg, c->exclude_dirs,
+                                      c->exclude_count, 0, err, err_cap) != 0)
+        return -1;
     /* 直接写最终文件：ready 标记最后写，未完成段永远不可见。 */
     if (flac_writer_open(&c->w_inst, inst_path, KARAOKE_SEGMENT_SAMPLE_RATE, err,
                          err_cap) != 0) {
@@ -1540,7 +1554,7 @@ static int seg_finish_writer(WSegCtx *c, long long frames, char *err, size_t err
         rc = -1;
     if (rc == 0 &&
         (c->w_inst.written != frames || c->w_soft.written != frames)) {
-        set_err(err, err_cap, "段写入帧数不一致（%lld/%lld/%lld）", frames,
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.segment_frames_mismatch_fmt"), frames,
                 c->w_inst.written, c->w_soft.written);
         rc = -1;
     }
@@ -1560,7 +1574,7 @@ static int seg_finish_writer(WSegCtx *c, long long frames, char *err, size_t err
         return 0;
     }
     if (fsync_file_path(inst_path) != 0 || fsync_file_path(soft_path) != 0) {
-        set_err(err, err_cap, "段文件 fsync 失败：%s", strerror(errno));
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.segment_fsync_fmt"), strerror(errno));
         unlink(inst_path);
         unlink(soft_path);
         return -1;
@@ -1571,6 +1585,10 @@ static int seg_finish_writer(WSegCtx *c, long long frames, char *err, size_t err
         return -1;
     }
     c->produced++;
+    /* S1：本段已可见后再按会话预算淘汰最旧的非保护曲目段（当前曲目与
+     * 正在播放曲目受保护，manifest/段布局语义不变）。 */
+    (void)karaoke_cache_segment_evict(&c->cfg, c->exclude_dirs,
+                                      c->exclude_count, NULL, NULL, 0);
     return 0;
 }
 
@@ -1613,7 +1631,7 @@ static int seg_emit_until(WSegCtx *c, long long end, long long output_from,
     const float orig_mix = 1.0f - inst_mix;
     while (c->flushed < end) {
         if (j->cancelled) {
-            set_err(err, err_cap, "已取消");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.cancelled"));
             return -1;
         }
         long long p = c->flushed;
@@ -1626,7 +1644,7 @@ static int seg_emit_until(WSegCtx *c, long long end, long long output_from,
         long long q = p - (long long)d->trim;
         long long idx = q - j->dec.pcm.start;
         if (idx < 0 || idx >= (long long)j->dec.pcm.frames) {
-            set_err(err, err_cap, "内部错误：段输出位置超出 PCM 缓冲");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.internal_output_pos"));
             return -1;
         }
         float vl, vr;
@@ -1688,7 +1706,7 @@ static int seg_reposition(WSegCtx *c, int seg, long long *out_output_from,
                                   st->time_base);
         if (av_seek_frame(j->dec.fmt, j->dec.stream_index, ts,
                           AVSEEK_FLAG_BACKWARD) < 0) {
-            set_err(err, err_cap, "段定位 seek 失败（段 %d）", seg);
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.segment_seek_fmt"), seg);
             return -1;
         }
         avcodec_flush_buffers(j->dec.codec);
@@ -1760,7 +1778,7 @@ static int seg_produce_from(WSegCtx *c, int start_seg, int *out_reason,
                 return -1;
             int next = finished_seg + 1;
             if (next >= KARAOKE_SEGMENT_MAX_COUNT) {
-                set_err(err, err_cap, "段数超过上限");
+                set_err(err, err_cap, i18n_get("karaoke.worker.err.segment_limit"));
                 return -1;
             }
             if (seg_ready(c, next)) {
@@ -1793,7 +1811,7 @@ static int seg_produce_from(WSegCtx *c, int start_seg, int *out_reason,
                          KARAOKE_SEGMENT_FRAMES) - 1;
     int total_segments = last_frames > 0 ? last_seg + 1 : last_seg;
     if (total_segments <= 0) {
-        set_err(err, err_cap, "分离结果为空");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.empty_result"));
         return -1;
     }
     c->total_segments = total_segments;
@@ -1849,14 +1867,17 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
     const KaraokeWorkerJob *req = &j->req;
     const KaraokeModelSpec *spec = karaoke_model_by_id(req->model_id);
     if (!spec) {
-        set_err(err, err_cap, "不支持的模型 id：%s", req->model_id);
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.unsupported_model_fmt"), req->model_id);
         return -1;
     }
     if (req->model_sha256[0] == '\0' ||
         strcmp(req->model_sha256, spec->sha256) != 0) {
-        set_err(err, err_cap, "模型 SHA256 缺失或与受支持表项不一致");
+        set_err(err, err_cap, i18n_get("karaoke.worker.err.model_sha_mismatch"));
         return -1;
     }
+    /* S2：同 v1，完整 SHA256 校验放后台 worker；缓存命中后每次 job 仅 stat。 */
+    if (karaoke_model_verify_file_cached(spec, req->model_path, err, err_cap) != 0)
+        return -1;
     char session_root[KARAOKE_CACHE_PATH_CAP];
     if (karaoke_cache_session_ensure(session_root, sizeof(session_root), err,
                                      err_cap) != 0)
@@ -1874,6 +1895,7 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
     if (decoder_open(&j->dec, req->track_path, &j->cancelled, err, err_cap) != 0)
         return -1;
     /* 时长上限 + 进度估算（与 v1 相同口径）。 */
+    int64_t track_dur = 0;
     {
         int64_t dur = 0;
         AVStream *st = j->dec.fmt->streams[j->dec.stream_index];
@@ -1882,10 +1904,11 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
         else if (j->dec.fmt->duration > 0)
             dur = j->dec.fmt->duration / AV_TIME_BASE;
         if (dur > KARAOKE_WORKER_MAX_SECONDS) {
-            set_err(err, err_cap, "曲目时长 %llds 超过上限 %ds，拒绝分离",
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.too_long_fmt"),
                     (long long)dur, KARAOKE_WORKER_MAX_SECONDS);
             return -1;
         }
+        track_dur = dur;
         j->chunks_total_est = 0;
         if (dur > 0) {
             long long n44_est = (long long)((double)dur * KARAOKE_MODEL_SAMPLE_RATE);
@@ -1917,6 +1940,31 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
         return -1;
     if (karaoke_cache_segment_mkdir(&c.paths, err, err_cap) != 0)
         return -1;
+
+    /* S1：预算淘汰的保护集合 = 本次 job 曲目 + 请求方指定的当前播放曲目
+     * （预取下一曲时 audio.c 会填 protect_track，避免删掉正在播放的段）。 */
+    c.exclude_dirs[0] = c.paths.dir;
+    c.exclude_count = 1;
+    char protect_dir[KARAOKE_CACHE_PATH_CAP] = {0};
+    if (req->protect_track[0] &&
+        strcmp(req->protect_track, req->track_path) != 0) {
+        KaraokeSegmentPaths protect_paths;
+        if (karaoke_cache_segment_paths(&c.cfg, req->protect_track,
+                                        &protect_paths, NULL, 0) == 0) {
+            snprintf(protect_dir, sizeof(protect_dir), "%s", protect_paths.dir);
+            c.exclude_dirs[1] = protect_dir;
+            c.exclude_count = 2;
+        }
+    }
+    /* 整曲空间预检：/tmp 可能是小 tmpfs；按保守下界一次确认容得下，
+     * 不足时先淘汰其它曲目段，仍不足则提前失败（回退原声，不白跑模型）。 */
+    if (track_dur > 0) {
+        long long est = (long long)track_dur * KARAOKE_SEGMENT_EST_BYTES_PER_SEC;
+        if (karaoke_cache_segment_reserve(&c.cfg, c.exclude_dirs,
+                                          c.exclude_count, est, err,
+                                          err_cap) != 0)
+            return -1;
+    }
 
     /* manifest：能读到旧的就保留已完成的 total/source（上次 job 到过 EOF）。 */
     memset(&c.manifest, 0, sizeof(c.manifest));
@@ -1971,7 +2019,7 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
             while (cursor < KARAOKE_SEGMENT_MAX_COUNT && seg_ready(&c, cursor))
                 cursor++;
             if (cursor >= KARAOKE_SEGMENT_MAX_COUNT) {
-                set_err(err, err_cap, "段数超过上限");
+                set_err(err, err_cap, i18n_get("karaoke.worker.err.segment_limit"));
                 return -1;
             }
         }
@@ -2013,7 +2061,7 @@ static int job_run_v2(WJob *j, char *err, size_t err_cap)
         }
         if (!all) {
             c.manifest.complete = 0;
-            set_err(err, err_cap, "段集不完整（内部错误）");
+            set_err(err, err_cap, i18n_get("karaoke.worker.err.internal_segment_set"));
             return -1;
         }
     }
@@ -2219,10 +2267,10 @@ static void *worker_main(void *arg)
                 rc = job_run_v1(j, err, sizeof(err));
             } else {
                 /* R2：未指定/未知 format 不允许静默落到某条写路径。 */
-                set_err(err, sizeof(err), "job format 非法（%d）", job.format);
+                set_err(err, sizeof(err), i18n_get("karaoke.worker.err.job_format_fmt"), job.format);
                 rc = -1;
             }
-            int cancelled_flag = j->cancelled;
+            cancelled_flag = j->cancelled;
             /* 必须在释放 j 之前摘掉取消旗标指针：request/cancel 可能在
              * 清理窗口里写 *g_running_cancel（否则 use-after-free）。 */
             pthread_mutex_lock(&g_lock);
@@ -2244,13 +2292,14 @@ static void *worker_main(void *arg)
             j = NULL;
             (void)cancelled_flag;
         } else {
-            set_err(err, sizeof(err), "内存不足（worker job）");
+            set_err(err, sizeof(err), i18n_get("karaoke.worker.err.oom_fmt"), "worker job");
         }
 
         pthread_mutex_lock(&g_lock);
+        /* 取消判定只认显式旗标/世代：绝不能靠匹配错误文案（i18n 后
+         * 文案随语言变化，英文界面下会漏判）。 */
         int was_cancelled = cancelled_flag ||
-                            gen != worker_cancel_generation() ||
-                            strstr(err, "已取消") != NULL;
+                            gen != worker_cancel_generation();
         if (rc == 0) {
             g_status.state = KARAOKE_JOB_READY;
             g_status.percent = 100;

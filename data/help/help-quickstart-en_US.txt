@@ -561,7 +561,11 @@ ter-music Quick Start Guide
             0700, removed on exit); a complete legacy whole-track pair under
             $XDG_CACHE_HOME/ter-music/karaoke/ (~/.cache/ter-music/karaoke/),
             if present, is read-only and takes priority, and the 2048 MB LRU
-            limit covers those whole-track caches only. See section 20.
+            limit covers those whole-track caches only. Session segments have
+            their own 512 MiB session budget (TER_MUSIC_KARAOKE_SEGMENT_MB
+            overrides it; <=0 disables it); when /tmp runs low the oldest
+            non-current track segments are evicted first, and if space is still
+            insufficient playback falls back to the original audio. See section 20.
   Content:  ~/.config/ter-music/library.db, the front-end SQLite library: track
             metadata, scan roots, play history, favorites, playlists and their
             tracks, folder history and the temporary playlist.
@@ -773,7 +777,11 @@ ter-music Quick Start Guide
     $XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/ (default
     ~/.cache/ter-music/karaoke/) is read-only, takes priority and is used
     immediately; the 2048 MB LRU limit covers those caches only, never the
-    session segments.
+    session segments. Session segments are bounded by their own 512 MiB session
+    budget (TER_MUSIC_KARAOKE_SEGMENT_MB overrides it; <=0 disables it). Before
+    each segment is written the free space of /tmp (often a small tmpfs) is
+    checked; the oldest segments of other tracks are evicted first, and if
+    space is still insufficient separation fails over to the original audio.
   · When the next segment is not ready, playback waits at most 8 s at the
     segment boundary and then continues as the original for the rest of the
     track. A seek to an unprocessed position asks the worker to prioritise the

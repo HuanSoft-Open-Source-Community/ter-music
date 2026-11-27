@@ -1,58 +1,226 @@
 cn.org.huansoft.ter-music (26.4.1.0-1) unstable; urgency=medium
 
-  * Karaoke mode (centre-vocal removal) with three levels: off, "weak vocals"
-    and "no vocals". The new audio module subtracts the band-limited mono
-    component from both channels: m=(L+R)/2 is split by two 4th-order
-    Butterworth crossovers (180 Hz low pass, 6 kHz high pass), the shared band
-    m-lo-hi is scaled by alpha (0 / 0.60 / 1.00) and removed from m, while
-    d=(L-R)/2 is passed through untouched, so the side information, the bass
-    and the stereo image survive. Level switching ramps over 30 ms to avoid a
-    step, filters are re-primed on activation and re-designed when the output
-    sample rate changes, mono streams and the off level are bit-exact
-    passthroughs, and the stage runs before the equaliser in the playback
-    thread (measured 16.7 ns per frame at 44.1 kHz stereo, under 0.1% of one
-    core). It is reachable from four places, all through player_set_karaoke_
-    mode(): the new eighth button in the main control pane with its own popup
-    (mouse, wheel and Enter/Esc), a popup-only row at the end of the playback
-    settings page, the new "ter-music karaoke [off|soft|full|0-2|cycle]"
-    command, and Control.SetKaraoke/GetKaraoke. The level is stored as the new
-    integer key preferences.karaoke_mode (0-2, out-of-range input is clamped
-    by Config.Set and reset to 0 by the XML loader); the configuration
-    contract stays at version 9 because an absent element already defaults
-    to 0.
+  * Karaoke is now model based and always available. The old built-in
+    centre-cancellation DSP and its alpha levels (0 / 0.60 / 1.00) are gone:
+    vocal removal runs the bundled UVR-MDX-NET 3 ONNX model (29,704,436
+    bytes, SHA-256
+    e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc) in
+    a low-priority background thread (nice 10), never on the UI or playback
+    thread. The three levels are the switch, so there is no
+    feature toggle and no model picker: Off plays the original, Faint vocals
+    plays 0.4 x the original mix plus 0.6 x the model accompaniment, and No
+    vocals plays the model accompaniment only. One model run produces both
+    stems. The accompaniment is written to a per-process session cache under
+    /tmp/ter-music-karaoke-<uid>-<pid>/<model-id>/<track-hash>/ (mode 0700) as
+    15-second segments - segNNN.inst.flac, segNNN.soft.flac and a
+    segNNN.ready marker written last, indexed by manifest.txt. A complete
+    legacy whole-track cache under $XDG_CACHE_HOME/ter-music/karaoke/ is
+    still read, takes priority and remains covered by the 2048 MB LRU
+    setting; session segments are not counted against it.
 
-  * Organization migration: the Debian source and binary package, the
-    src/include directory trees, the Linyaps application id, the systemd user
-    unit, the build scripts and every document move from org.yxzl to
-    cn.org.huansoft.ter-music, and the D-Bus interface and error namespace
-    moves with them to cn.org.huansoft.ter_music.*. That namespace is part of
-    the wire protocol, so api_version 7 is a breaking change rather than an
-    increment: a pre-7 front end calling the new core gets UnknownInterface
-    and a new front end cannot reach an old core at all, therefore
-    TER_MUSIC_API_MIN_VERSION rises from 4 to 7 and core and front ends must
-    be upgraded as a pair. Unchanged on purpose: the standard MPRIS bus name
-    org.mpris.MediaPlayer2.ter_music (and its .instance<pid> fallback), the
-    executable name ter-music, /usr/share/ter-music data files, the
-    ~/.config/ter-music directory and the configuration contract version.
-    The renamed package replaces the previous ter-music package in place, so
-    upgrading does not require removing the old one first.
+  * Segmented playback rules. At a level other than Off the first play of a
+    track without a cache waits for the first accompaniment segment (about
+    7-10 s on the test machine, hard cap 30 s, 8 s when playback starts at a
+    non-zero position) and shows a preparation percentage; a segment that is
+    late at a segment boundary or after a seek is waited for up to 8 s before
+    the original takes over from that point. Changing the level while a track
+    plays requests separation for the current track and switches the source
+    at the current position once the target segment is ready (about 9-15 s
+    for the first switch; Soft and Full switch immediately on ready
+    segments); after a fallback the core re-acquires the accompaniment at
+    most three times per level change and never reports a switch that did not
+    happen. Seek-priority backfill, prefetch of the next queue entry with
+    seamless_preload=1, and a CUE sub-track guard are included. Mono tracks,
+    tracks longer than 30 minutes and CUE sub-tracks are not separated into
+    session segments; any failure (missing or damaged model, unavailable
+    runtime, timeout) keeps the original playing and names the reason on the
+    status line. There is no lyric dependency and no older algorithm to fall
+    back to.
 
-  * Rolling release versioning: the version scheme is now <yy>.<q>.x.y (two
-    digits of the year, the quarter, the line, the fix), so this release is
-    26.4.1.0. It is written once in types.h APP_VERSION and mirrored in the
-    CMake project VERSION, the PKGBUILD pkgver and this changelog. The
-    packaging scripts' detect_version now reads APP_VERSION first and only
-    then falls back to a git tag, because the newest tag in the repository
-    (v2.1.0) is older than the code and used to decide the package version;
-    all six builders also accept four-component versions - with the old
-    three-component pattern 26.4.1.0 was silently truncated to 26.4.1.
+  * The vocal-separation model now ships inside every package, so the
+    feature needs no download and no configuration key: the build downloads
+    and verifies the file, CMake checks size and whole-file SHA-256 again and
+    installs it as <prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx
+    together with models/NOTICE.md (its MIT notice). Without the file a
+    source build still starts, reports the model as missing and plays the
+    original. <prefix>/share is authoritative; the old
+    $XDG_DATA_HOME/ter-music/models/ location is read-only compatibility
+    only.
 
-  * Cover lookup fix: in the directory cover scan, a directory and entry name
-    that overflow the path buffer are now discarded as a candidate instead of
-    being stat'ed after snprintf truncated them, which could pick up an
-    unrelated image whose prefix matched.
+  * ONNX Runtime is now linked statically into the official packages, so
+    built-in vocal removal works without a system libonnxruntime in every
+    official binary package: one DEB (Debian 10-13, Ubuntu 20.04-26.04),
+    four RPMs (EL7-10) and the AppImage. The static library is built once
+    from the Debian pool onnxruntime 1.21.0+dfsg source with a GLIBC_2.17
+    symbol ceiling (centos:7 + devtoolset-11), so the same copy serves EL7
+    and the AppImage's Debian 10 baseline (glibc 2.28); readelf -d lists no
+    libonnxruntime in any package. Source builds without the static library
+    keep the runtime dlopen path (libonnxruntime.so.1.21, .so.1 or .so), and
+    the AUR recipe lists onnxruntime-cpu as an optional dependency. The
+    build images also enable FFmpeg's FLAC encoder and muxer, which the
+    internal segment cache needs; without them the segments cannot be
+    written at all (build-time fix, no user action required).
 
- -- HuanSoft Open Source Community - yxzl <yxzl666xx@outlook.com>  Thu, 05 Nov 2026 15:12:28 +0800
+  * The session segment cache now has a budget: 512 MB per session by
+    default (TER_MUSIC_KARAOKE_SEGMENT_MB overrides it; 0 or less disables
+    it), oldest track directories are evicted first, the track being played
+    or separated is protected, and every segment write is preceded by a
+    free-space check with a 32 MiB reserve. Model verification no longer
+    runs on the UI or playback thread: the hot path only resolves the model
+    path and checks its size (a stat), while the whole-file SHA-256 is
+    computed by the background worker before the first separation and cached
+    per process by path, size and modification time. Karaoke model, worker
+    and cache error messages are now i18n keys in all three built-in
+    languages, so the English UI no longer mixes Chinese (the ONNX Runtime's
+    own messages remain English technical text).
+
+  * Configuration contract 12 (breaking). Version 12 removes
+    preferences.karaoke_feature and preferences.karaoke_model - the model is
+    bundled, so the level alone selects the feature. Every config.xml below
+    12 is migrated on the first start of the new core and rewritten with the
+    numeric version="12"; every other key (karaoke_mode, theme, paths,
+    equalizer, key bindings) keeps its value (older files also receive the
+    one-shot defaults of the earlier migrations: background 0 to -1 below v4,
+    core_exit_when_no_frontend=0 below v7, stop_core_on_exit=1 below v8,
+    appearance_mode=auto below v10) and a second start leaves the file
+    byte-identical. config get/set karaoke_feature now fails as an
+    unknown key and Config.Set rejects a patch that still contains either
+    removed key. Downgrades are not supported: a pre-v12 build reads the file
+    (the version attribute parses as an integer and its migrations stay
+    inactive), sees the removed keys as absent and writes the attribute back
+    as 10 on its next save. Contract history: 4 was tag v2.1.0 (root attribute
+    literal "2.2"), 7 introduced the resident core, 8 added
+    stop_core_on_exit, 9 added the keybinding overrides table together with
+    karaoke_mode, 10 added appearance_mode and 12 replaced the DSP karaoke
+    with the bundled ONNX model. No contract-11 build was ever released, so
+    no released file can contain the two removed elements; a hand-edited file
+    that does loses them on the next save.
+
+  * D-Bus api_version 7 (breaking) with the organization migration. The
+    package, application id, source and header trees, Linyaps id, systemd
+    unit and D-Bus interfaces all move to cn.org.huansoft.ter-music /
+    cn.org.huansoft.ter_music.*, and the interface namespace is part of the
+    wire protocol: a pre-7 front end calling the new core gets
+    UnknownInterface, a new front end cannot reach an old core, and
+    TER_MUSIC_API_MIN_VERSION rises from 4 to 7, so core and front ends must
+    be upgraded as a pair. Unchanged on purpose: the MPRIS bus name
+    org.mpris.MediaPlayer2.ter_music, the executable name, the data directory
+    name and the config file location. The renamed package Replaces/Breaks
+    the old ter-music package in place, so no manual removal is needed.
+
+  * JSON layouts and a layout editor. The main area is a binary split tree of
+    six panes (playlist, info, controls, spectrum, lyrics, vinyl), always
+    force-tiled and resized by per-mille ratios, with seven presets (classic,
+    vinyl, karaoke, visualizer, focus, stage, neon) in the shipped
+    layouts.json. The layout editor edits the tree, saves user layouts to
+    ~/.config/ter-music/layouts.json and materialises colours when a built-in
+    preset is saved; TER_MUSIC_LAYOUTS overrides the file for development.
+    Each pane can carry its own foreground and background colour in addition
+    to the 24 theme palettes.
+
+  * Terminal light/dark adaptation (contract 10). Settings -> Appearance ->
+    Default Appearance Mode selects Auto (default), Light or Dark and is
+    stored as preferences.appearance_mode. In Auto the TUI probes OSC 11
+    before the first frame and then falls back to the deepin-terminal theme
+    adapter, the XDG desktop portal color-scheme (followed live through
+    SettingChanged), COLORFGBG, a TERM hint and finally the legacy dark look;
+    the osc probe and the portal read are capped (about 200 ms and 120 ms)
+    and only run in Auto, replies are stripped from the key stream, and
+    factory colours and all seven presets switch to a light-safe palette
+    while values changed by the user stay verbatim. The detected variant is
+    per front-end process and is never written to config.xml; an optional
+    per-terminal override lives in
+    ~/.config/ter-music/appearance-terminals.json.
+
+  * One file/folder chooser for every path entry point. Open folder, Append
+    folder, language-pack install and the default music directory all use the
+    same picker: zenity or kdialog (XDG portal as the preferred desktop
+    route) when a graphical session is available, otherwise a typed path in a
+    pure TTY without leaving the alternate screen.
+    TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty forces a backend and an
+    unknown value falls back to auto; empty input cancels and ~/ expands.
+
+  * Mouse and menus. Left click selects and activates, the wheel scrolls and
+    right click opens a context menu (middle click opens the same menu on
+    terminals that intercept right click). On the Equalizer page a left click
+    only selects a band and changes no gain while the wheel changes the
+    selected band's gain by 1 dB (pre-amp the same, the enable row does not
+    respond). Menu entrance and exit animations compose one frame per
+    movement, degrade or switch off on slow terminals and in Aurora Flow,
+    never delay input, and can be forced with
+    TERM_MUSIC_MENU_ANIM=full|reduced|off.
+
+  * Configurable key bindings (contract 9). Any action can be rebound in
+    Settings -> Hotkeys and only modified bindings are written into the
+    <keybindings> override table; ter-music keys list prints the action IDs
+    and ter-music keys check validates the file, including cross-context
+    shadowing and system-reserved keys (F1-F9, q/Q, Tab/Shift+Tab). Invalid
+    entries are reported and ignored at run time instead of breaking the TUI.
+
+  * Remote source hardening and UX. SMB, SFTP, FTP, WebDAV and HTTP all list
+    in the front end and hand downloaded local paths to the core; per
+    connection TLS (including ftps and webdavs), an explicit "trust
+    self-signed certificate" switch, certificate verification by default and
+    no HTTPS-to-HTTP downgrade. SFTP verifies known_hosts and fails closed
+    with no silent trust-on-first-use; SMB uses the external smbclient with a
+    mode-0600 auth file (the password never enters argv) and refuses file
+    names that smbclient -c would split. Logs, last_opened_path and folder
+    history store a redacted URL. The remote page shows download progress,
+    supports cancel and retry of failed tracks, applies caps (1 GiB per file,
+    32 MiB per listing, 200 tracks per open, 10/120/600 s timeouts) and keeps
+    a 2048 MB LRU cache with protected playing/queued/favourited/history
+    files.
+
+  * Per-character lyrics and D-Bus API additions. LRC character,
+    line-start/end and interpolated timings are used for per-character
+    highlighting, and api_version 5 added the additive lyric timing fields
+    (end, timing, char_total, chars, char_sung) plus the Lyrics.GetDocument
+    paging used by the TUI. The three built-in language packs are zh_CN,
+    en_US and the new zh-PQ (classical Chinese); CLI help, error and hint
+    strings are localized as well, and --lang selects the language for this
+    process (CLI or TUI) without persisting it.
+
+  * Cross-distro packaging from one source tree. DEB built in Debian 10
+    (glibc 2.28) covers Debian 10-13 and Ubuntu 20.04-26.04; four RPMs are
+    built in EL7/8/9/10 containers because the ncursesw and libpng sonames
+    differ, with libcurl < 7.32 and ncurses 5.x compatibility for EL7; one
+    AppImage (glibc 2.28) and one AUR package (makepkg in an Arch container)
+    complete the matrix. Every package installs real files under
+    /opt/apps/cn.org.huansoft.ter-music/files and only six relative symlinks
+    under /usr. FFmpeg is linked statically (audio-only build, no GPL
+    components); libxml2 is not linked at all and util/xml_compat.c dlopens
+    libxml2.so.2 or libxml2.so.16 at run time, so one binary runs on old and
+    new distributions. Libcurl remains a hard build dependency and SMB needs
+    the smbclient runtime program.
+
+  * Build and release tooling cleanup. Packaging is now five packaging
+    scripts (build-deb.sh, build-rpm.sh, build-appimage.sh, build-aur.sh,
+    build-linyaps.sh) plus launch-auto-build.sh; the portable builder, the
+    RPM-conversion path and the old six-builder set are gone, and the
+    ONNX Runtime static-library helper (build-onnxruntime-static.sh) is a
+    build dependency, not a package type. Every packaging script requires an
+    explicit -v/--version: there is no detect_version fallback reading
+    APP_VERSION or a git tag, and four-component versions such as 26.4.1.0
+    are accepted instead of being truncated to 26.4.1. The
+    source package, if requested with --with-source, carries the model so it
+    rebuilds offline; DEB/RPM source and debuginfo packages stay optional.
+
+  * Rolling release versioning. The version scheme is <yy>.<q>.<x>.<y> (year,
+    quarter, line, fix), so this release is 26.4.1.0 and the Debian version
+    is 26.4.1.0-1. It is written once in types.h APP_VERSION ("v26.4.1.0")
+    and mirrored in the CMake project VERSION, the PKGBUILD pkgver, this
+    changelog and the RPM spec default; packaging injects it with
+    -DTER_MUSIC_VERSION and takes -v as the authority, and no step depends on
+    a git tag.
+
+  * TUI robustness and smaller fixes: the Linyaps ll-box <= 2.3.5 cold-start
+    replay is bounded by measuring per-frame terminal writes and repainting
+    only on burst, back-pressure or resize evidence (no timer repaint, and
+    TERM_MUSIC_TTY_HARD_RESET=1 remains the opt-in endwin fallback); the
+    cover scan now discards truncated path candidates instead of stat'ing
+    them and picking up an unrelated image.
+
+ -- HuanSoft Open Source Community - yxzl <yxzl666xx@outlook.com>  Fri, 27 Nov 2026 18:00:00 +0800
 
 ter-music (2.4.0-1) unstable; urgency=medium
 

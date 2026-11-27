@@ -61,7 +61,6 @@
 
   <!-- ===== Settings view ===== -->
   <string key="settings.playback.language">语言可用 ENTER 切换，时延会在下次播放时生效</string>
-  <string key="settings.playback.press_enter_toggle">Press Enter to toggle language; latency applies on next playback</string>
   <string key="settings.color.select_hint">颜色：↑/↓ 选择，ENTER 打开调色板；←/TAB 返回菜单</string>
   <string key="settings.color.auto_avoid_same">前景色和背景色会自动避免使用相同颜色</string>
   <string key="settings.color.layer_hint">[布局]=改当前布局的窗格配色并保存，[主题]=改全局主题</string>
@@ -1452,7 +1451,6 @@
   <string key="layout.editor.no_axis_split">该方向没有可分栏（选中窗格没这个方向的分栏祖先）</string>
   <string key="layout.editor.ratio_at_limit">比例已到极限，无法再朝这个方向调整</string>
   <string key="layout.editor.too_small_pane">窗格太小，无法继续调整（至少保留 1% 轴长）</string>
-  <string key="layout.editor.internal_error">内部错误：布局不是强制平铺，未保存</string>
 
   <!-- ===== Layout presets ===== -->
   <string key="layout.preset.classic">经典</string>
@@ -1481,4 +1479,210 @@
   <string key="context.info.rainbow_on">启动科乐美流光模式</string>
   <string key="context.info.rainbow_off">关闭科乐美流光模式</string>
   <string key="context.stale">列表已变化，请重试</string>
+
+  <!-- ===== Karaoke runtime errors (S1/S3, 2026-11-27) ===== -->
+  <string key="karaoke.worker.err.fft_unsupported_fmt">不支持的 n_fft=%d（要求 N=3×2^k）</string>
+  <string key="karaoke.worker.err.fft_pow2_fmt">不支持的 n_fft=%d（N/3 必须是 2 的幂）</string>
+  <string key="karaoke.worker.err.oom_fmt">内存不足（%s）</string>
+  <string key="karaoke.worker.err.model_table_invalid">模型表项 chunk/overlap 参数非法</string>
+  <string key="karaoke.worker.err.open_audio_fmt">无法打开音频文件 %s（err=%d）</string>
+  <string key="karaoke.worker.err.read_stream_fmt">无法读取音频流信息：%s</string>
+  <string key="karaoke.worker.err.no_stream_fmt">文件没有音频流：%s</string>
+  <string key="karaoke.worker.err.codec_unsupported_fmt">不支持的音频编码（codec_id=%d）</string>
+  <string key="karaoke.worker.err.codec_init_fmt">解码器初始化失败：%s</string>
+  <string key="karaoke.worker.err.sample_rate_unknown_fmt">采样率未知：%s</string>
+  <string key="karaoke.worker.err.stereo_only_fmt">仅支持立体声（实际 %d 声道）：%s</string>
+  <string key="karaoke.worker.err.resampler_init_fmt">重采样器初始化失败：%s</string>
+  <string key="karaoke.worker.err.seek_position_fmt">seek 落点异常（%lld &gt; %lld）</string>
+  <string key="karaoke.worker.err.resample_failed_fmt">重采样失败（%d）</string>
+  <string key="karaoke.worker.err.decode_failed_fmt">解码失败（%d）</string>
+  <string key="karaoke.worker.err.decode_interrupted">解码被取消/中断</string>
+  <string key="karaoke.worker.err.read_packet_fmt">读包失败（%d）</string>
+  <string key="karaoke.worker.err.send_packet_fmt">送包解码失败（%d）</string>
+  <string key="karaoke.worker.err.cancelled">已取消</string>
+  <string key="karaoke.worker.err.too_long_limit_fmt">曲目超过 %d 秒上限，拒绝分离</string>
+  <string key="karaoke.worker.err.too_long_fmt">曲目时长 %llds 超过上限 %ds，拒绝分离</string>
+  <string key="karaoke.worker.err.flac_create_fmt">创建 FLAC 输出失败：%s</string>
+  <string key="karaoke.worker.err.flac_no_encoder">FFmpeg 缺少 FLAC 编码器</string>
+  <string key="karaoke.worker.err.flac_encoder_open">FLAC 编码器打开失败</string>
+  <string key="karaoke.worker.err.flac_stream_create">创建 FLAC 流失败</string>
+  <string key="karaoke.worker.err.flac_write_file_fmt">无法写 FLAC 文件：%s</string>
+  <string key="karaoke.worker.err.flac_header">写 FLAC 头失败</string>
+  <string key="karaoke.worker.err.flac_frame_alloc">FLAC 帧缓冲分配失败</string>
+  <string key="karaoke.worker.err.flac_encode_fmt">FLAC 编码失败（%d）</string>
+  <string key="karaoke.worker.err.flac_write_frame_fmt">写 FLAC 帧失败（%d）</string>
+  <string key="karaoke.worker.err.flac_frame_unwritable">FLAC 帧不可写</string>
+  <string key="karaoke.worker.err.flac_send_frame_fmt">FLAC 送帧失败（%d）</string>
+  <string key="karaoke.worker.err.flac_flush_fmt">FLAC flush 失败（%d）</string>
+  <string key="karaoke.worker.err.flac_trailer">写 FLAC 尾失败</string>
+  <string key="karaoke.worker.err.out_resampler_init">输出重采样器初始化失败</string>
+  <string key="karaoke.worker.err.out_resample_fmt">输出重采样失败（%d）</string>
+  <string key="karaoke.worker.err.internal_output_pos">内部错误：输出位置超出 PCM 缓冲</string>
+  <string key="karaoke.worker.err.unsupported_model_fmt">不支持的模型 id：%s</string>
+  <string key="karaoke.worker.err.model_sha_empty">模型 SHA256 为空</string>
+  <string key="karaoke.worker.err.model_sha_mismatch">模型 SHA256 缺失或与受支持表项不一致</string>
+  <string key="karaoke.worker.err.internal_frames_mismatch_fmt">内部错误：inst/soft 帧数不一致（%lld/%lld）</string>
+  <string key="karaoke.worker.err.empty_result">分离结果为空</string>
+  <string key="karaoke.worker.err.segment_range_fmt">段号越界：%d</string>
+  <string key="karaoke.worker.err.path_too_long">路径过长</string>
+  <string key="karaoke.worker.err.segment_frames_mismatch_fmt">段写入帧数不一致（%lld/%lld/%lld）</string>
+  <string key="karaoke.worker.err.segment_fsync_fmt">段文件 fsync 失败：%s</string>
+  <string key="karaoke.worker.err.segment_seek_fmt">段定位 seek 失败（段 %d）</string>
+  <string key="karaoke.worker.err.segment_limit">段数超过上限</string>
+  <string key="karaoke.worker.err.internal_segment_set">段集不完整（内部错误）</string>
+  <string key="karaoke.worker.err.job_format_fmt">job format 非法（%d）</string>
+  <string key="karaoke.cache.err.path_too_long">缓存路径过长</string>
+  <string key="karaoke.cache.err.dir_create_fmt">创建缓存目录 %s 失败：%s</string>
+  <string key="karaoke.cache.err.dir_unusable_fmt">缓存目录不可用：%s</string>
+  <string key="karaoke.cache.err.invalid_params">缓存参数非法</string>
+  <string key="karaoke.cache.err.realpath_fmt">无法解析曲目真实路径 %s：%s</string>
+  <string key="karaoke.cache.err.not_regular_fmt">曲目不是普通文件：%s</string>
+  <string key="karaoke.cache.err.key_too_long">缓存键材料过长</string>
+  <string key="karaoke.cache.err.outside_root">缓存路径越界</string>
+  <string key="karaoke.cache.err.flac_open_fmt">无法打开 FLAC %s：%s</string>
+  <string key="karaoke.cache.err.flac_magic_fmt">不是 FLAC 文件（缺 fLaC 魔数）：%s</string>
+  <string key="karaoke.cache.err.flac_truncated_fmt">FLAC 元数据块截断：%s</string>
+  <string key="karaoke.cache.err.flac_bounds_fmt">FLAC 元数据块越界：%s</string>
+  <string key="karaoke.cache.err.flac_streaminfo_fmt">FLAC 缺少 STREAMINFO：%s</string>
+  <string key="karaoke.cache.err.meta_read_fmt">无法读取缓存元数据 %s：%s</string>
+  <string key="karaoke.cache.err.meta_incomplete_fmt">缓存元数据字段不全：%s</string>
+  <string key="karaoke.cache.err.meta_write_fmt">无法写缓存元数据 %s：%s</string>
+  <string key="karaoke.cache.err.meta_write_failed_fmt">写缓存元数据失败：%s</string>
+  <string key="karaoke.cache.err.sample_rate_fmt">缓存采样率不符：%s 实际 %d，元数据 %d</string>
+  <string key="karaoke.cache.err.channels_fmt">缓存声道数不符：%s 实际 %d（要求 2）</string>
+  <string key="karaoke.cache.err.bits_fmt">缓存位深不符：%s 实际 %d（要求 16）</string>
+  <string key="karaoke.cache.err.frames_fmt">缓存帧数与元数据不符：%s 实际 %lld，元数据 %lld</string>
+  <string key="karaoke.cache.err.duration_fmt">缓存时长与原曲不符：%s 帧数 %lld，原曲 %lld</string>
+  <string key="karaoke.cache.err.file_unreadable_fmt">缓存文件不可读：%s</string>
+  <string key="karaoke.cache.err.silent_fmt">缓存疑似静音/损坏（%lld 字节 &lt; 下限）：%s</string>
+  <string key="karaoke.cache.err.format_fmt">缓存格式版本不符：%d（要求 %d）</string>
+  <string key="karaoke.cache.err.model_id_fmt">缓存模型 id 不符：%s</string>
+  <string key="karaoke.cache.err.model_sha_mismatch">缓存模型 SHA256 不符</string>
+  <string key="karaoke.cache.err.overlap_fmt">缓存 overlap 不符：%.3f</string>
+  <string key="karaoke.cache.err.soft_mix_fmt">缓存 soft 系数不符：%.3f</string>
+  <string key="karaoke.cache.err.pair_frames_mismatch">缓存两份文件帧数不一致</string>
+  <string key="karaoke.cache.err.commit_fsync_fmt">缓存 fsync 失败：%s</string>
+  <string key="karaoke.cache.err.commit_rename_fmt">缓存 rename(%s) 失败：%s</string>
+  <string key="karaoke.cache.err.dir_fsync_fmt">缓存目录 fsync 失败：%s</string>
+  <string key="karaoke.cache.err.path_buf_small">缓存路径缓冲过小</string>
+  <string key="karaoke.cache.err.session_root_too_long">会话缓存根路径过长</string>
+  <string key="karaoke.cache.err.session_create_fmt">创建会话缓存目录 %s 失败：%s</string>
+  <string key="karaoke.cache.err.session_bad_dir_fmt">会话缓存目录不可用（类型/属主不符）：%s</string>
+  <string key="karaoke.cache.err.model_id_invalid">模型 id 非法</string>
+  <string key="karaoke.cache.err.manifest_read_fmt">无法读取分段清单 %s：%s</string>
+  <string key="karaoke.cache.err.manifest_incomplete_fmt">分段清单字段不全（%d/10）：%s</string>
+  <string key="karaoke.cache.err.content_too_long">分段元数据内容过长</string>
+  <string key="karaoke.cache.err.manifest_create_fmt">创建分段清单失败 %s：%s</string>
+  <string key="karaoke.cache.err.manifest_write_fmt">写分段清单失败：%s</string>
+  <string key="karaoke.cache.err.manifest_rename_fmt">分段清单 rename 失败：%s</string>
+  <string key="karaoke.cache.err.marker_create_fmt">创建段标记失败 %s：%s</string>
+  <string key="karaoke.cache.err.marker_write_fmt">写段标记失败：%s</string>
+  <string key="karaoke.cache.err.marker_rename_fmt">段标记 rename 失败：%s</string>
+  <string key="karaoke.cache.err.marker_missing_fmt">段就绪标记缺失/非普通文件：%s</string>
+  <string key="karaoke.cache.err.marker_read_fmt">无法读取段标记 %s：%s</string>
+  <string key="karaoke.cache.err.marker_invalid_fmt">段就绪标记内容非法：%s</string>
+  <string key="karaoke.cache.err.marker_seg_fmt">段标记段号不符：%d != %d</string>
+  <string key="karaoke.cache.err.segment_frames_over_fmt">段帧数超过上限：%lld</string>
+  <string key="karaoke.cache.err.segment_frames_manifest_fmt">段帧数与清单不符：%lld != %lld</string>
+  <string key="karaoke.cache.err.segment_partial_fmt">段未完整时帧数不是满段：%lld</string>
+  <string key="karaoke.cache.err.segment_file_missing_fmt">段文件缺失/非普通文件：%s</string>
+  <string key="karaoke.cache.err.segment_truncated_fmt">段文件疑似截断：%s</string>
+  <string key="karaoke.cache.err.segment_format_fmt">段格式不符（%d/%d/%d）：%s</string>
+  <string key="karaoke.cache.err.segment_flac_frames_fmt">段 FLAC 帧数与标记不符：%lld != %lld（%s）</string>
+  <string key="karaoke.cache.err.no_space_fmt">缓存空间不足：可用 %lld MB，需 %lld MB（含 %d MB 余量）；/tmp 可能是小幅 tmpfs</string>
+  <string key="layout.editor.invalid_tree">编辑后的布局校验失败，未保存（详见日志）</string>
+
+  <!-- ===== Karaoke model errors (S2/S3, 2026-11-27) ===== -->
+  <string key="karaoke.model.err.bundled_bad_sha_fmt">内置模型校验失败：%s SHA256 %s，期望 %s（%s，官方 %s）</string>
+  <string key="karaoke.model.err.bundled_bad_size_fmt">内置模型校验失败：%s 大小 %lld 字节，期望 %lld 字节（%s）</string>
+  <string key="karaoke.model.err.bundled_dir_path_too_long_fmt">%s路径过长：%s</string>
+  <string key="karaoke.model.err.bundled_empty_fmt">内置模型是空文件：%s</string>
+  <string key="karaoke.model.err.bundled_missing_fmt">内置模型缺失：未找到 %s（模型应随包安装到 &lt;前缀&gt;/share/ter-music/models/，运行期不复制到 XDG）</string>
+  <string key="karaoke.model.err.bundled_missing_no_dir">内置模型缺失：没有可查的数据目录（编译期数据目录与旧用户数据目录均为空）</string>
+  <string key="karaoke.model.err.bundled_not_regular_fmt">内置模型不是普通文件：%s</string>
+  <string key="karaoke.model.err.bundled_path_buf_empty">内置模型路径缓冲为空</string>
+  <string key="karaoke.model.err.bundled_spec_invalid">内置模型表项无效（id 为空）</string>
+  <string key="karaoke.model.err.bundled_spec_missing_fmt">内置模型表缺失：受支持模型表里没有 '%s'</string>
+  <string key="karaoke.model.err.bundled_unreadable_fmt">内置模型不可访问：%s（%s）</string>
+  <string key="karaoke.model.err.cannot_access_model_fmt">无法访问模型文件 %s：%s</string>
+  <string key="karaoke.model.err.copy_close_fmt">关闭模型副本失败：%s</string>
+  <string key="karaoke.model.err.copy_fsync_fmt">fsync 模型副本失败：%s</string>
+  <string key="karaoke.model.err.copy_verify_fmt">复制后校验失败（源文件在校验后被改动？）：大小 %lld/%lld，SHA256 %s</string>
+  <string key="karaoke.model.err.data_dir_empty">数据目录为空（调用方应传 $XDG_DATA_HOME/ter-music）</string>
+  <string key="karaoke.model.err.data_dir_too_long_fmt">数据目录路径过长（上限 %zu 字节）</string>
+  <string key="karaoke.model.err.dir_unusable_fmt">模型目录不可用：%s</string>
+  <string key="karaoke.model.err.dlopen_no_detail">dlopen 失败且无错误信息</string>
+  <string key="karaoke.model.err.fft_n_pow2_fmt">不支持的 n_fft=%d（N/3 必须是 2 的幂）</string>
+  <string key="karaoke.model.err.fft_n_unsupported_fmt">不支持的 n_fft=%d（本实现要求 N=3×2^k）</string>
+  <string key="karaoke.model.err.file_size_abnormal_fmt">文件大小异常：%s</string>
+  <string key="karaoke.model.err.frames_too_large_fmt">帧数过大（%zu）</string>
+  <string key="karaoke.model.err.frames_zero">帧数为 0</string>
+  <string key="karaoke.model.err.install_path_too_long_fmt">安装路径过长（数据目录 %s）</string>
+  <string key="karaoke.model.err.install_rename_fmt">安装模型失败（rename）：%s</string>
+  <string key="karaoke.model.err.io_buffer_null">输入/输出缓冲为空</string>
+  <string key="karaoke.model.err.list_separator_or">，或 </string>
+  <string key="karaoke.model.err.mkdir_failed_fmt">无法创建模型目录 %s：%s</string>
+  <string key="karaoke.model.err.model_path_empty">模型文件路径为空</string>
+  <string key="karaoke.model.err.not_regular_model_fmt">不是普通文件：%s</string>
+  <string key="karaoke.model.err.onnx_elem_type_fmt">ONNX %s元素类型不是 float32（实际 %d）</string>
+  <string key="karaoke.model.err.onnx_io_count_fmt">ONNX 模型应有 1 个输入/1 个输出，实际 %zu/%zu</string>
+  <string key="karaoke.model.err.onnx_name_mismatch_fmt">ONNX %s名不符：期望 "%s"，实际 "%s"</string>
+  <string key="karaoke.model.err.onnx_not_tensor_fmt">ONNX %s类型不是张量</string>
+  <string key="karaoke.model.err.onnx_rank_mismatch_fmt">ONNX %s秩不符：期望 %d，实际 %zu</string>
+  <string key="karaoke.model.err.onnx_rank_too_large_fmt">ONNX %s秩过大（%zu）</string>
+  <string key="karaoke.model.err.onnx_shape_mismatch_fmt">ONNX %s形状不符：期望 [%s,%d,%d,%d]，实际 [%lld,%lld,%lld,%lld]</string>
+  <string key="karaoke.model.err.oom_buffer_mib_fmt">内存不足（分离结果缓冲：%.1f MiB）</string>
+  <string key="karaoke.model.err.oom_fmt">内存不足（%s）</string>
+  <string key="karaoke.model.err.oom_model_io_fmt">内存不足（模型输入/输出缓冲 %zu 个 float）</string>
+  <string key="karaoke.model.err.open_model_fmt">无法打开模型文件 %s：%s</string>
+  <string key="karaoke.model.err.open_source_fmt">无法打开源模型文件 %s：%s</string>
+  <string key="karaoke.model.err.ort_allocator">取默认分配器失败</string>
+  <string key="karaoke.model.err.ort_create_env">创建 ONNX 环境失败</string>
+  <string key="karaoke.model.err.ort_create_meminfo">创建 CPU 内存信息失败</string>
+  <string key="karaoke.model.err.ort_create_options">创建 ONNX 会话选项失败</string>
+  <string key="karaoke.model.err.ort_create_session">创建 ONNX 会话失败（模型损坏或运行库不兼容）</string>
+  <string key="karaoke.model.err.ort_create_tensor">包装 ONNX 输入张量失败</string>
+  <string key="karaoke.model.err.ort_disable_mem_arena">关闭 CPU 内存 arena 失败</string>
+  <string key="karaoke.model.err.ort_infer_failed">ONNX 推理失败</string>
+  <string key="karaoke.model.err.ort_op_fmt">%s：%s</string>
+  <string key="karaoke.model.err.ort_read_dims">读取 ONNX 维度失败</string>
+  <string key="karaoke.model.err.ort_read_elem_type">读取 ONNX 元素类型失败</string>
+  <string key="karaoke.model.err.ort_read_input_count">读取 ONNX 输入数量失败</string>
+  <string key="karaoke.model.err.ort_read_io_names">读取 ONNX 输入/输出名失败</string>
+  <string key="karaoke.model.err.ort_read_io_type">读取 ONNX 输入/输出类型失败</string>
+  <string key="karaoke.model.err.ort_read_output">读取 ONNX 输出数据失败</string>
+  <string key="karaoke.model.err.ort_read_output_count">读取 ONNX 输出数量失败</string>
+  <string key="karaoke.model.err.ort_read_shape">读取 ONNX 形状失败</string>
+  <string key="karaoke.model.err.ort_set_graph_opt">设置图优化级别失败</string>
+  <string key="karaoke.model.err.ort_set_inter_threads">设置算子间线程数失败</string>
+  <string key="karaoke.model.err.ort_set_intra_threads">设置推理线程数失败</string>
+  <string key="karaoke.model.err.ort_set_log_level">设置会话日志级别失败</string>
+  <string key="karaoke.model.err.ort_status_not_tensor">ONNX 类型不是张量</string>
+  <string key="karaoke.model.err.output_buffer_empty">输出缓冲为空</string>
+  <string key="karaoke.model.err.patch_null">模型表项参数非法（patch 为空）</string>
+  <string key="karaoke.model.err.read_model_failed_fmt">读取模型文件失败 %s：%s</string>
+  <string key="karaoke.model.err.read_source_fmt">读取源模型失败：%s</string>
+  <string key="karaoke.model.err.runtime_unavailable_fmt">ONNX Runtime 运行库不可用（尝试 libonnxruntime.so.1.21 / .so.1 / .so）：%s</string>
+  <string key="karaoke.model.err.runtime_unavailable_short_fmt">ONNX Runtime 不可用：%s</string>
+  <string key="karaoke.model.err.selftest_failed_fmt">STFT/iSTFT 自检失败：相对 RMS 误差 %.3e（阈值 1e-3），峰值 %.3e</string>
+  <string key="karaoke.model.err.session_null">会话为空</string>
+  <string key="karaoke.model.err.spec_chunk_invalid">模型表项 chunk/FFT 参数非法</string>
+  <string key="karaoke.model.err.spec_dsp_invalid">模型表项 DSP 参数非法</string>
+  <string key="karaoke.model.err.spec_empty">模型表项为空</string>
+  <string key="karaoke.model.err.spec_fft_invalid">模型表项 FFT 参数非法</string>
+  <string key="karaoke.model.err.static_bad_api">内置 ONNX Runtime 静态库异常：OrtGetApiBase() 返回的 API 表无效（二进制可能链接到了不完整的 libonnxruntime.a）</string>
+  <string key="karaoke.model.err.static_version_fmt">内置 ONNX Runtime 静态库版本不兼容：GetApi(%d..16) 全部不可用</string>
+  <string key="karaoke.model.err.stem_unknown_fmt">未知的 stem 选择 %d</string>
+  <string key="karaoke.model.err.target_path_too_long">目标路径过长</string>
+  <string key="karaoke.model.err.temp_create_fmt">无法创建临时文件 %s：%s</string>
+  <string key="karaoke.model.err.temp_path_too_long">临时文件路径过长</string>
+  <string key="karaoke.model.err.temp_retry_failed">无法创建临时文件（重试 16 次仍冲突）</string>
+  <string key="karaoke.model.err.unsupported_load_fmt">模型可读但无法作为受支持模型加载：%s</string>
+  <string key="karaoke.model.err.unsupported_sha_fmt">不支持的模型（SHA256 不匹配）：实际 %s，期望 %s（%s，%s）</string>
+  <string key="karaoke.model.err.unsupported_size_fmt">不支持的模型（大小 %lld 字节，不在受支持表内；受支持项：%s）</string>
+  <string key="karaoke.model.err.write_copy_fmt">写入模型副本失败：%s</string>
+  <string key="karaoke.model.label.bundled_dir">随包数据目录</string>
+  <string key="karaoke.model.label.input">输入</string>
+  <string key="karaoke.model.label.legacy_dir">旧用户数据目录</string>
+  <string key="karaoke.model.label.output">输出</string>
 </lang>

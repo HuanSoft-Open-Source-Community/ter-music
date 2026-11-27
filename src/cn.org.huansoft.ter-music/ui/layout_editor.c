@@ -536,19 +536,19 @@ static void editor_save(void)
               g_ed.spec.id, layout_spec_pane_count(&g_ed.spec));
     char err[192] = "";
     if (layout_spec_validate(&g_ed.spec, err, sizeof(err)) != 0) {
-        /* 正常编辑不可能触发；保留错误而不是静默保存坏树。 */
+        /* 正常编辑不可能触发；保留错误而不是静默保存坏树。
+         * 底层 err 是英文诊断（layout_spec.c 不依赖 i18n），只进日志；
+         * 状态栏一律走翻译键，避免英文错误直接混进中文界面。 */
         log_warn("layout_editor", "Refusing to save invalid layout: %s",
                  err[0] ? err : "unknown");
-        editor_status_text(err[0] ? err
-                                  : i18n_get("layout.editor.internal_error"), 1);
+        editor_status_text(i18n_get("layout.editor.invalid_tree"), 1);
         return;
     }
     char save_err[256] = "";
     if (layout_user_save_layout(&g_ed.spec, save_err, sizeof(save_err)) != 0) {
         log_warn("layout_editor", "Save failed: %s",
                  save_err[0] ? save_err : "unknown");
-        editor_status_text(save_err[0] ? save_err
-                                       : i18n_get("layout.editor.save_failed"), 1);
+        editor_status_text(i18n_get("layout.editor.save_failed"), 1);
         return;
     }
     ui_layout_reload();

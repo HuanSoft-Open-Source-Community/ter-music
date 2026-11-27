@@ -14,11 +14,15 @@ license=('GPL-3.0-only' 'MIT')
 arch=('x86_64')
 url="https://github.com/HuanSoft-Open-Source-Community/ter-music"
 depends=('ffmpeg' 'ncurses' 'libxml2' 'libpng' 'libjpeg-turbo' 'curl' 'sqlite' 'zlib')
+# 卡拉OK消音运行时：运行期 dlopen libonnxruntime.so.{1.21,1}，不是硬链接依赖。
+# Arch 官方 onnxruntime-cpu 提供 usr/lib/libonnxruntime.so.1（Provides: onnxruntime）；
+# onnxruntime-cuda/-rocm 等变体同样提供该 soname，用户可任选，故只列 CPU 版作提示。
 optdepends=('pulseaudio: PulseAudio audio output'
             'alsa-lib: ALSA audio output'
             'libpipewire: PipeWire audio output'
             'dbus: MPRIS media session integration'
-            'smbclient: SMB/CIFS remote music sources')
+            'smbclient: SMB/CIFS remote music sources'
+            'onnxruntime-cpu: karaoke vocal removal (ONNX Runtime; provides libonnxruntime.so.1)')
 makedepends=('cmake' 'make' 'gcc' 'git' 'pkgconf')
 
 # 安装布局（与 deb/rpm/appimage/linyaps 统一，遵循 Linyaps 目录规范）：
@@ -28,11 +32,15 @@ _appid=cn.org.huansoft.ter-music
 _prefix=/opt/apps/$_appid/files
 
 # 不依赖 git tag：固定 commit，发布时人工更新 _commit。
-_commit=675bbb4172fc5f7b26d4488953256ee401c2f9f6
+# 当前值 = origin/testing 最新提交（git rev-parse origin/testing，2026-11-27）。
+_commit=32737f0a49a77834564d69bce3847538ae6c2e60
 # 内置消音模型（UVR-MDX-NET 3 / 9662）：构建时由 makepkg 下载并按 sha256sums
-# 校验；本地构建（scripts/build/build-aur.sh）会把缓存文件预置到 $srcdir 复用。
+# 校验；本地验收（scripts/build/build-aur.sh）会把校验过的缓存文件预置到
+# makepkg 的 SRCDEST 复用（makepkg 仍会再做一次 sha256 校验）。
 _model=UVR_MDXNET_3_9662.onnx
 _model_url=https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx
+# CMake 安装后的文件名（install(FILES ... RENAME uvr-mdxnet-3-9662.onnx)）。
+_model_installed=uvr-mdxnet-3-9662.onnx
 
 source=("ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#commit=$_commit" "$_model::$_model_url")
 sha256sums=('SKIP' 'e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc')
@@ -64,6 +72,15 @@ check() {
 package() {
   cd "$srcdir/ter-music"
   DESTDIR="$pkgdir" cmake --install build
+
+  # makepkg 会把非压缩 source（内置模型）以符号链接放进 $srcdir，而 CMake 的
+  # install(FILES ...) 默认保留符号链接：直接打包会得到指向构建目录的悬空链接。
+  # 这里用真实 source 文件替换，保证包内自带完整模型（真实 source 构建的验收项）。
+  local model_installed="$pkgdir$_prefix/share/ter-music/models/$_model_installed"
+  if [ -L "$model_installed" ] || [ ! -f "$model_installed" ]; then
+    rm -f "$model_installed"
+    install -Dm644 "$srcdir/$_model" "$model_installed"
+  fi
 
   # /usr 只放指向 /opt 实体的相对符号链接；pacman 卸载时逐条安全移除。
   install -d "$pkgdir/usr/bin" \

@@ -1334,4 +1334,22 @@ const char *media_session_bus_name(void) {
     return "";
 }
 
+/* rpc_common.c 的 Info 快照与 daemon 看门狗在无 D-Bus 构建里仍会调用这些
+ * 访问器：没有会话总线时统一按“无会话/无前端接入”处理。 */
+int rpc_session_has_primary_name(void) {
+    return 0;
+}
+
+const char *rpc_session_bus_name(void) {
+    return "";
+}
+
+int rpc_frontend_count(void) {
+    return 0;
+}
+
+int rpc_frontend_ever_attached(void) {
+    return 0;
+}
+
 #endif

@@ -105,6 +105,25 @@ MODEL_SHA="$(sha256sum "$MODEL" | cut -d' ' -f1)"
     exit 0
 }
 have_runtime() {
+    # 静态链接构建：ORT 编进二进制（nm/readelf 命中 OrtGetApiBase），无需系统
+    # .so；不要用 strings（GCC 合并重叠字符串，结果不可靠）。
+    if [ -n "${TM_BIN:-}" ] && [ -x "$TM_BIN" ]; then
+        local syms
+        if command -v nm >/dev/null 2>&1; then
+            # 本脚本 set -o pipefail：`nm | grep -q` 会因 grep 提前退出让 nm
+            # 收到 SIGPIPE（141）而误判失败；先落成变量再匹配。
+            syms="$(nm -C "$TM_BIN" 2>/dev/null || true)"
+            case "$syms" in
+                *OrtGetApiBase*) return 0 ;;
+            esac
+        fi
+        if command -v readelf >/dev/null 2>&1; then
+            syms="$(readelf -sW "$TM_BIN" 2>/dev/null || true)"
+            case "$syms" in
+                *OrtGetApiBase*) return 0 ;;
+            esac
+        fi
+    fi
     command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q 'libonnxruntime\.so' && return 0
     local d
     for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib/x86_64-linux-gnu; do
@@ -112,7 +131,7 @@ have_runtime() {
     done
     return 1
 }
-have_runtime || { echo "SKIP karaoke-segments-e2e：未找到 libonnxruntime"; exit 0; }
+have_runtime || { echo "SKIP karaoke-segments-e2e：未找到 libonnxruntime（且二进制非静态链接 ORT）"; exit 0; }
 have_ffmpeg=0
 command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 && have_ffmpeg=1
 

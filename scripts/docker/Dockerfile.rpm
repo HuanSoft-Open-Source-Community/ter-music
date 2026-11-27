@@ -15,6 +15,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
 # 仓库配置 + 构建工具/开发库
+# 注意（EL9/EL10）：基础镜像自带 curl-minimal（提供 /usr/bin/curl）。EL9/EL10
+# 的 dnf 会因显式安装 curl 与 curl-minimal 冲突而整批安装失败（el8 尚可自动
+# 替换）；构建期只需要能执行 curl，curl-minimal 已满足，故 EL8+ 列表不装 curl。
 RUN if [ "$EL_VERSION" = "7" ]; then \
         sed -i \
             -e 's|^mirrorlist=|#mirrorlist=|g' \
@@ -57,7 +60,7 @@ RUN if [ "$EL_VERSION" = "7" ]; then \
         { dnf install -y epel-release || \
             echo "epel-release unavailable; aria2 may be missing (curl fallback applies)"; } && \
         dnf install -y \
-            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip curl \
+            gcc make cmake pkgconfig rpm-build rsync ca-certificates tar gzip \
             ncurses-devel libcurl-devel libpng-devel libjpeg-turbo-devel \
             libxml2-devel dbus-devel sqlite-devel zlib-devel elfutils && \
         { dnf install -y aria2 || \
@@ -70,6 +73,12 @@ RUN if [ "$EL_VERSION" = "7" ]; then \
 # 只下载一次；这里不再 curl 远端。
 COPY ffmpeg-${FFMPEG_VERSION}.tar.gz /tmp/ffmpeg.tar.gz
 
+# 编码器：卡拉OK分段缓存要写 segNNN.inst/soft.flac（karaoke_worker.c 用
+# avcodec_find_encoder(AV_CODEC_ID_FLAC) + "flac" muxer），--disable-everything
+# 会连编码器/封装器一起关掉，只开解码器的话"内置消音"会在写段时失败
+# （Requested output format 'flac' is not known / 缺少 FLAC 编码器）。
+# 这里按最小面开启：flac 编码器 + flac 封装器（另留 pcm_s16le/wav 作回退路径）。
+
 # FFmpeg 静态库；EL7 用 devtoolset-11 以获得足够新的 C 工具链。
 RUN if [ "$EL_VERSION" = "7" ]; then . /opt/rh/devtoolset-11/enable; fi; \
     tar -xzf /tmp/ffmpeg.tar.gz -C /tmp && \
@@ -81,6 +90,8 @@ RUN if [ "$EL_VERSION" = "7" ]; then . /opt/rh/devtoolset-11/enable; fi; \
         --disable-everything \
         --enable-decoder="mp3*,aac*,flac,vorbis*,opus,wavpack*,wmav*,ape,alac,pcm*,libopus" \
         --enable-demuxer="mp3,aac,flac,ogg,opus,wav,wv,wma*,ape,alac,mov,m4a,rm,aiff" \
+        --enable-encoder="flac,pcm_s16le" \
+        --enable-muxer="flac,wav" \
         --enable-parser="mpegaudio,aac,flac,vorbis,opus" \
         --enable-protocol="file" \
         --enable-filter="aresample" \
@@ -93,5 +104,17 @@ RUN if [ "$EL_VERSION" = "7" ]; then . /opt/rh/devtoolset-11/enable; fi; \
     make -j"$(nproc)" && \
     make install && \
     rm -rf /tmp/ffmpeg-${FFMPEG_VERSION} /tmp/ffmpeg.tar.gz
+
+# 内置消音运行库：ONNX Runtime 静态库（含合并的第三方依赖）。
+# EL7–10 都没有 libonnxruntime 包，所以官方 rpm 把 ORT 静态链接进 ter-music。
+# 静态库由宿主 scripts/build/build-onnxruntime-static.sh 构建（默认 centos:7 +
+# devtoolset-11，产物只引用 glibc 2.17 及更早符号，EL7–10 全矩阵可用），
+# docker-build.sh 检测到本 Dockerfile 的 COPY 后复制进构建上下文。
+# 链接期还需要 cxx/libstdc++.a（ORT 是 C++，用 GCC 11 编译，EL7 系统
+# libstdc++ 太旧；静态链接后不进 DT_NEEDED）。
+COPY onnxruntime-static/libonnxruntime.a /usr/local/lib/onnxruntime-static/libonnxruntime.a
+COPY onnxruntime-static/cxx/libstdc++.a /usr/local/lib/onnxruntime-static/cxx/libstdc++.a
+RUN test -s /usr/local/lib/onnxruntime-static/libonnxruntime.a && \
+    test -s /usr/local/lib/onnxruntime-static/cxx/libstdc++.a
 
 WORKDIR /workspace

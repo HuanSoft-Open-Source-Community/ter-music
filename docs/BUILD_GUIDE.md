@@ -18,6 +18,9 @@
 | Linyaps | 宿主 `ll-builder` 原生构建 | `build/linyaps/x86_64/*.uab` 与 `*.layer` |
 | AUR | Arch 容器内 `makepkg` + 安装验收 | `build/aur/x86_64/*.pkg.tar.zst` |
 
+> 26.4.1.0 发布**不包含** Linyaps UAB/layer（等上游 ll-box 修复释出后再发，见
+> [RELEASE.md](RELEASE.md) 第六节）；发布构建请显式传 `-t deb,rpm,appimage,aur`。
+
 常用选项：
 
 ```bash
@@ -69,6 +72,17 @@
 - 未注入时 CMake 只 WARNING、不装占位模型：源码构建的 `make install` 产物不含模型，运行期提示“内置模型缺失”并播原声。
 - `*.onnx` 与 `/.tmp/models/` 均在 `.gitignore`；`aria2` 只在构建镜像里，不新增运行时依赖。
 - deb/rpm 的源码包会包含 staging 里的 `.tm-bundled-model/`（体积约 +28 MB），无外部缓存也能重建。
+
+### ONNX Runtime 静态库（官方包内置消音）
+
+模型虽随包内置，但 Debian 10/11/12 与 EL7–10 都没有 `libonnxruntime`，不静态化就会“装得上、卖点用不了”。因此官方包（DEB、EL7–10 RPM、AppImage）把 ONNX Runtime **静态链接**进 `ter-music`：
+
+- 构建（宿主执行一次）：`./scripts/build/build-onnxruntime-static.sh`（幂等；`--force` 重建、`--clean` 清理、`--flavor debian10` 降级）。源码取 Debian pool 的 `onnxruntime 1.21.0+dfsg`，在 `centos:7` + `devtoolset-11`（gcc 11.2.1）里构建 PIC 静态库，符号上限 **GLIBC_2.17**。
+- 产物缓存：`.cache/tools/onnxruntime-static/` 下的 `libonnxruntime.a`、`cxx/libstdc++.a`、`PROVENANCE.txt`、`deps-manifest.txt`、`build.log`（不进 git）。ORT 是 C++，`cxx/libstdc++.a` 只参与链接、不进 `DT_NEEDED`。
+- 镜像接入：`Dockerfile.debian10` 与 `Dockerfile.rpm` 把两份归档 `COPY` 到 `/usr/local/lib/onnxruntime-static/`；`docker-build.sh` 检测到镜像需要但缓存缺失时，会自动先跑上面的脚本。
+- CMake：`-DTER_MUSIC_ONNXRUNTIME_STATIC=AUTO|ON|OFF`（默认 AUTO：静态库存在就静态链接，否则与旧行为完全一致），静态时向源码注入 `-DTER_MUSIC_ONNXRUNTIME_STATIC=1`。源码构建/开发机没有静态库时保持运行期 `dlopen` 路径。
+- 验收断言：官方包内 `readelf -d ter-music` 无 `libonnxruntime`、`readelf -V` 最高符号不超过 `GLIBC_2.17`，并在无系统运行库的容器里跑一次真实分离。
+- FFmpeg：构建镜像同时启用 FLAC encoder/muxer（`--enable-encoder="flac,pcm_s16le" --enable-muxer="flac,wav"`）。内置消音需要把 `segNNN.inst/soft.flac` 写入会话缓存，缺这两项会在写段时失败。
 
 ## 2. DEB（Debian 10 容器）
 
@@ -173,6 +187,8 @@ chmod +x build/appimage/x86_64/ter-music-*.AppImage
 
 ## 5. Linyaps（宿主原生，UAB + layer）
 
+> 本次 26.4.1.0 发布缓发 UAB/layer；本节构建链原样保留，供上游修复释出后补发。
+
 ```bash
 ./scripts/build/build-linyaps.sh -v 26.4.1.0
 ```
@@ -243,6 +259,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 | `.cache/tools/appimagetool-x86_64.AppImage` | AppImage 打包工具 | GitHub `AppImage/appimagetool` latest |
 | `.cache/sources/squashfs-tools-4.7.5.tar.gz` | 镜像内编译 `mksquashfs`（Debian 10 自带的 4.3 不支持 `-mkfs-time`） | GitHub `plougher/squashfs-tools` |
 | `.cache/tools/runtime-x86_64` | AppImage type2 runtime | GitHub `AppImage/type2-runtime` latest |
+| `.cache/tools/onnxruntime-static/` | 官方包静态链接的 ONNX Runtime（内置消音） | Debian pool `onnxruntime 1.21.0+dfsg` 源码，`build-onnxruntime-static.sh` 构建 |
 
 镜像构建只 `COPY` 上述已校验文件，容器内不再联网下载；只有 `--rebuild-image` 才会重建镜像层。AppImage 固定用 `--comp zstd`：新版 type2 runtime 只内建 zlib/zstd 解压支持，用 xz 打包会解包失败。
 
@@ -252,8 +269,8 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 
 Docker 类构建只要求宿主机有可用的 Docker：
 
-- DEB：Debian 10 / glibc 2.28，FFmpeg 8.1.2 静态；
-- RPM：EL7 使用 cmake3 + devtoolset-11，EL8/9/10 使用发行版 cmake；
+- DEB：Debian 10 / glibc 2.28，FFmpeg 8.1.2 静态 + ONNX Runtime 1.21 静态（GLIBC_2.17 上限）；
+- RPM：EL7 使用 cmake3 + devtoolset-11，EL8/9/10 使用发行版 cmake；ONNX Runtime 静态库与 DEB 同源；
 - AppImage：复用 Debian 10 镜像，镜像内已带 appimagetool、squashfs-tools 4.7.5 与 type2 runtime；
 - AUR：Arch 镜像内带 base-devel、ffmpeg、ncurses、libxml2 等。
 
@@ -325,6 +342,76 @@ TM_LAYOUT_STATIC_ONLY=1 ./scripts/test/package-layout-check.sh   # 无构建工�
 - `package-layout-check.sh`：静态断言五条链的 `/opt/apps` 前缀、`/usr` 链接、模型常量与 `-DTER_MUSIC_BUNDLED_MODEL` 接线；本机有 CMake 时再从零 configure/build、`DESTDIR` 安装、按 `debian/links` 建链、`dpkg-deb` 组装/解包断言，并验证 `tm_ensure_model` 的缓存/下载/坏文件分支。
 - `check-package-identity.sh`：应用 ID 与版本跨包一致，以及五条链前缀、链接目标、`common.sh`/`CMakeLists.txt`/NOTICE 模型常量一致、`*.onnx` 未进 git、aria2 不是运行时依赖。
 - 需要 docker / `dpkg-buildpackage`(dh) / `rpmbuild` / `makepkg` / `ll-builder` / `mksquashfs` 的**真实包构建**不在该脚本内；`TM_LAYOUT_STATIC_ONLY=1` 会明确打印“未执行本地构建/DESTDIR 安装，不代表构建通过”。
+
+## 9.5 CI 门禁（GitHub Actions）
+
+`.github/workflows/ci.yml` 是发布门禁的唯一来源。作业分工：
+
+| 作业 | 覆盖内容 |
+| --- | --- |
+| `build (ubuntu/fedora/arch)` | 三发行版编译 + `--help`/CLI 冒烟；Ubuntu 额外跑 daemon/D-Bus 与 PTY 启动冒烟 |
+| `strict-warnings` | Ubuntu 上 `-Wall -Wextra -Werror` 全量编译 |
+| `build (no D-Bus)` | 屏蔽 `dbus-1.pc` 后从零 configure/build，保证 `!HAVE_DBUS` 分支可编译 |
+| `shellcheck` | `scripts/build/*.sh`、`scripts/docker/*.sh`、`scripts/test/*.sh`（`-S warning`；SC1111 是全角引号排版误报） |
+| `gates` | 纯度/配置归属/包身份/i18n/C 字符串字面量门禁、`TM_UNIT_STRICT=1` 单测、打包布局静态断言 |
+| `e2e` | 既有端到端 + 外观/选择器/键位 + 卡拉OK 控制面（CLI/D-Bus/config，确定性） |
+| `karaoke`（advisory） | 真实模型的全量 karaoke e2e（换源/分段/模型），push 与手动触发运行，**不进 required** |
+| `required-checks` | 汇总以上 required 作业结果（分支保护只认它；karaoke 不在其中） |
+
+### 无 D-Bus 构建
+
+D-Bus 在 CMake 里由 `pkg_check_modules(DBUS dbus-1)` 探测，找不到时 `HAVE_DBUS` 不定义，portal/MPRIS 走 stub 分支。CI 的做法：
+
+1. 把系统 pkg-config 目录（`/usr/lib/x86_64-linux-gnu/pkgconfig`、`/usr/share/pkgconfig`）里除 `dbus-1.pc` 外的 `.pc` 全部软链到 `/tmp/pc-nodbus`；
+2. 用 `PKG_CONFIG_LIBDIR=/tmp/pc-nodbus`（并清空 `PKG_CONFIG_PATH`）配置构建，让 `pkg_check_modules` 找不到 `dbus-1`；
+3. 用 `compile_commands.json` 断言没有 `-DHAVE_DBUS`，再完整构建 + `--help` 冒烟；
+   configure 额外加 `-DCMAKE_C_FLAGS="-Werror=implicit-function-declaration"`，
+   这样 GCC 13（Ubuntu 24.04）也会和 GCC 14（Debian 13）一样，把“原型落在
+   `HAVE_DBUS` guard 内、无 D-Bus 分支却在调用”的隐式声明直接判红。
+
+本机复现：
+
+```bash
+mkdir -p /tmp/pc-nodbus
+for d in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/share/pkgconfig; do
+    for f in "$d"/*.pc; do
+        [ "$(basename "$f")" = dbus-1.pc ] && continue
+        ln -sf "$f" /tmp/pc-nodbus/
+    done
+done
+env -u PKG_CONFIG_PATH PKG_CONFIG_LIBDIR=/tmp/pc-nodbus \
+    cmake -B build-no-dbus -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          -DCMAKE_C_FLAGS="-Werror=implicit-function-declaration"
+cmake --build build-no-dbus -j2
+```
+
+### CI 里的卡拉OK素材与运行库
+
+- **模型**：`UVR_MDXNET_3_9662.onnx` 不进 git；CI 从项目 README 记录的 URL 下载，并强制校验大小 `29,704,436 B` 与 SHA-256 `e02220e8…aadc`，校验失败即红。
+- **推理运行库**：官方 GitHub release 资产已 404，CI 改用 Debian trixie 的 `libonnxruntime1.21_1.21.0+dfsg-1_amd64.deb`（`soname` 为 `libonnxruntime.so.1.21`，应用的 `dlopen` 依次尝试 `.so.1.21`/`.so.1`/`.so`），并解包它动态依赖的 `libonnx1t64`、`libprotobuf32t64`、`libpthreadpool0`、`libcpuinfo0`、`libre2-11`、`libxnnpack0.20241108`、`libabsl20240722` 到 `/usr/local/lib` 后 `ldconfig`。这些库只要求 `glibc <= 2.38`，Ubuntu 24.04 runner 满足；`ldd` 出现 `not found` 即红。
+- **曲目素材**：托管 runner 没有音乐文件，CI 用 `ffmpeg` 合成 150 秒立体声夹具（80 Hz 低音 + 440 Hz 中置占位 + 左右不同侧向音）并附 `.lrc`，作为 `karaoke-model-e2e.sh`/`karaoke-segments-e2e.sh` 的 `--track`。夹具必须 `-sample_fmt s16`（16-bit FLAC）：v1 整曲缓存校验要求 16-bit，24-bit 夹具会把“v1 命中”断言假红。内置模型先于 configure 下载并 `-DTER_MUSIC_BUNDLED_MODEL` 注入，`karaoke-model-e2e.sh` 用 `TERMUSIC_BUNDLE_BUILD=build` 真跑“cmake --install 树里模型大小+SHA256 命中”的断言。
+- **虚拟声卡**：托管 runner 没有 `/dev/snd`，CI 启动 PulseAudio null sink 作为输出设备（`XDG_RUNTIME_DIR` 经 `GITHUB_ENV` 传给后续步骤）；否则核心的 `audio_backend=0`（AUTO）选不到后端，播放位置不会推进。
+- **单元测试**：`gates` 作业设 `TM_UNIT_STRICT=1`，环境缺依赖导致的 `SKIP` 按失败处理；开发包缺一不可。
+- **打包布局**：`gates` 用 `TM_LAYOUT_STATIC_ONLY=1` 跑 `package-layout-check.sh`（静态只读，不构建、不装 DESTDIR）。
+
+`appearance-pty-e2e.py` 需要 stdin 是终端，CI 用 `script -qefc …` 包一层；`appearance-xdg-pty-e2e.py` 再套 `dbus-run-session`（脚本自带私有 `fake-xdg-portal.py`，不依赖系统 portal）。该脚本里“适配器失效回退不冻结输入”的 pty 时延断言（<0.10s 增量）对调度敏感：CI 用 `TERMUSIC_E2E_STRICT_LATENCY=0` 显式 SKIP 该条、其余 portal 行为断言照常执行，本机不设该变量时仍会跑时延断言。
+
+### 未接入 CI 的测试与原因
+
+- `audit-build-artifacts.sh`：审计 build/ 下**已构建的** DEB/RPM/AppImage/Linyaps/AUR 产物。CI 不构建软件包，五个目标只会全部 `[SKIP]`，接入不会产生门禁信号；它在发布机重建成产物后执行。
+- `alsa-backend-e2e.sh`：托管 runner 没有 `/dev/snd`，脚本按设计整体 `SKIP` 并退出 0。CI 保留该步骤以验证“无设备 → 可读 SKIP、不伪装通过”的契约；真实 ALSA 断言（暂停不写设备、位置不推进等）需在带声卡的发布机上跑。
+- `pipewire-*`/`perf-check --report` 等包含环境依赖或只记录实测值的步骤保持原策略：缺依赖时明确 SKIP，共享 runner 的抖动值不作阈值判定。
+### CI 门禁分层（必红测试不进硬门禁）
+
+- **required（合并阻断）**：`karaoke-e2e.sh --control-plane-only`（CLI/D-Bus/config/播放不崩）、
+  外观、选择器、键位、包门禁、单测等确定性断言。
+- **advisory（不阻断合并）**：独立 `karaoke` 作业跑 `karaoke-e2e.sh` 全量、
+  `karaoke-segments-e2e.sh`、`karaoke-model-e2e.sh`。这些用例依赖“真实模型分段速度
+  明显快于实时”，在共享/高负载 runner 上的时延断言会抖动；作业仍会在 push 与手动
+  触发时运行并保留日志，但**不进 required-checks**。
+- **Nightly / 发布机**：真实模型换源/分段、ALSA 真机、真机矩阵的门禁在这里收口；
+  若 advisory 作业红，先看该步骤日志判断是“环境慢于实时”还是产品回归。
 
 ## 10. 故障排除
 

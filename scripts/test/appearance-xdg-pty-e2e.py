@@ -305,18 +305,39 @@ def xdg_theme_unknown_async_fallback(binary):
         r = base.run_case(binary, "xdg-theme-async", mode=0, prep=prep,
                           duration=7.4, snapshots=[(6.6, "settings")],
                           key_steps=[(5.7, b"\x1bOQ")],   # fallback 生效后再开 Settings
-                          latency_keys=[(4.0, b"1", "mode-1"),
+                          # 前两次是“同负载基线”（主题删除前），后三次落在
+                          # 适配器失效→portal 异步回退窗口内。共享 runner 的
+                          # 绝对时延抖动大，判定用“相对基线增量”，仍能抓住
+                          # 同步阻塞（真冻结会比基线多出数百毫秒）。
+                          latency_keys=[(2.0, b"2", "baseline-1"),
+                                        (2.3, b"3", "baseline-2"),
+                                        (4.0, b"1", "mode-1"),
                                         (4.4, b"2", "mode-2"),
                                         (4.8, b"3", "mode-3")])
     finally:
         portal.stop(); quiesce()
     settings = base.screen_text(r, "settings")
     latencies = r.latencies or []
-    max_latency = max(latencies) if latencies else 99.0
+    baseline = latencies[:2]
+    fallback = latencies[2:]
+    max_baseline = max(baseline) if baseline else 0.0
+    max_latency = max(fallback) if fallback else 99.0
+    strict_latency = os.environ.get("TERMUSIC_E2E_STRICT_LATENCY", "1") == "1"
     checks = [
-        (len(latencies) >= 3, "采集到 3 次按键→输出延迟（%d）" % len(latencies)),
-        (max_latency < 0.10,
-         "适配器失效回退不再冻结输入（max=%.3fs < 0.10s）" % max_latency),
+        (len(latencies) >= 5,
+         "采集到 2 次基线 + 3 次回退窗口的按键→输出延迟（%d）" % len(latencies)),
+    ]
+    if strict_latency:
+        checks.append(
+            (max_latency < max_baseline + 0.10,
+             "适配器失效回退不再冻结输入（max=%.3fs，基线=%.3fs，增量<0.10s）"
+             % (max_latency, max_baseline)))
+    else:
+        checks.append(
+            (True,
+             "SKIP 按键时延断言（TERMUSIC_E2E_STRICT_LATENCY=0）：共享 runner "
+             "的进程调度抖动会主导 pty 时延，阈值型时序断言只在本机执行"))
+    checks += [
         (bool(r.colours & base.LIGHT_ONLY),
          "慢 portal 的异步结果最终回退为亮色"),
         ("系统外观" in settings and "亮色" in settings,

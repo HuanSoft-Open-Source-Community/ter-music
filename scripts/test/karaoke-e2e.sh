@@ -21,6 +21,9 @@
 # 覆盖。
 #
 # 用法：scripts/test/karaoke-e2e.sh [--bin <ter-music>] [--model <onnx>] [--keep]
+#                                [--control-plane-only]
+#   --control-plane-only  跳过第 10 段真实模型换源（对时延敏感），
+#                         供 CI 确定性门禁使用；全量在 karaoke 作业/发布机跑。
 # 环境：需要会话总线（未设置时用 dbus-run-session）；ffmpeg 造素材；
 #       第 10 段需要真实 9662 模型（--model / TERMUSIC_KARAOKE_TEST_MODEL /
 #       .tmp/models/ 或 .tmp/karaoke-research/model/ 下的 UVR_MDXNET_3_9662.onnx）。
@@ -42,6 +45,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TM_BIN="${TM_BIN:-$REPO_ROOT/build/ter-music}"
 MODEL_ARG=""
 KEEP=0
+CONTROL_ONLY=0
 ORIG_ARGS=("$@")
 
 while [ $# -gt 0 ]; do
@@ -49,7 +53,10 @@ while [ $# -gt 0 ]; do
         --bin) TM_BIN="$2"; shift 2 ;;
         --model) MODEL_ARG="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
-        -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # 只跑控制面（CLI/D-Bus/config/播放不崩），跳过真实模型换源用例：
+        # CI 的确定性门禁用它；真实模型换源在独立的 karaoke 作业/Nightly 跑全量。
+        --control-plane-only) CONTROL_ONLY=1; shift ;;
+        -h|--help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "未知参数: $1" >&2; exit 2 ;;
     esac
 done
@@ -334,7 +341,9 @@ sleep 2
 #   · 模型缺失的失败路径：原声继续、错误可见（三语键）、可再次切档重试、不崩。
 info "播放中切档（真实模型）：Off→Full/Soft、Soft↔Full、暂停、Off 回退、失败路径"
 SWITCH_MODEL="$(find_model)"
-if [ -z "$SWITCH_MODEL" ]; then
+if [ "$CONTROL_ONLY" = "1" ]; then
+    printf '  SKIP --control-plane-only：跳过真实模型换源用例（在 karaoke 作业/发布机跑全量）\n'
+elif [ -z "$SWITCH_MODEL" ]; then
     printf '  SKIP 未找到受支持模型（%s B）：新增的播放中切档用例跳过\n' "$MODEL_SIZE"
 else
     # 真实模型放旧用户 XDG 只读兼容路径，然后重启核心：模型探测结果按进程
@@ -400,7 +409,9 @@ except Exception:
 print((doc.get("playback") or {}).get("state") or "")'
     }
     status_msg() {
-        timeout 10 gdbus call --session \
+        # gdbus 是 GLib 程序：C/POSIX locale 下它会把非 ASCII 输出成 '?'。
+        # 固定 UTF-8 locale，避免把中文状态行误判成“没有可读错误”。
+        timeout 10 env LC_ALL=C.UTF-8 gdbus call --session \
             --dest org.mpris.MediaPlayer2.ter_music \
             --object-path /org/mpris/MediaPlayer2 \
             --method cn.org.huansoft.ter_music.Info.GetStatus 2>/dev/null |

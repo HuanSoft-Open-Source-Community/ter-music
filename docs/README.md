@@ -15,7 +15,7 @@
 
 **Languages:** [简体中文（现代）](translations/README_zh-CN_Modern.md) · [中文（文言）](translations/README_zh-CN_Legacy.md)
 
-**Docs:** [Build & packaging (中文)](BUILD_GUIDE.md) · [TUI layouts](UI_LAYOUTS_en_US.md) · [D-Bus API](API_DBUS_en_US.md) · [Lyrics API](API_LYRICS_en_US.md) · [Release process (中文)](RELEASE.md)
+**Docs:** [Build & packaging (中文)](BUILD_GUIDE.md) · [TUI layouts](UI_LAYOUTS_en_US.md) · [D-Bus API](API_DBUS_en_US.md) · [Lyrics API](API_LYRICS_en_US.md) · [Release process (中文)](RELEASE.md) · [26.4.1.0 release notes](RELEASE_NOTES_26.4.1.0.md)
 
 ## Overview
 
@@ -54,13 +54,13 @@ The player has two planes: a **core** that owns the audio device, transport and 
 
 ### Arch Linux
 
-The AUR recipe is prepared as `cn.org.huansoft.ter-music` but is **not published yet**. Build from source below, or use the locally built packages described in [BUILD_GUIDE.md](BUILD_GUIDE.md).
+The AUR recipe is prepared as `cn.org.huansoft.ter-music` but is **not submitted yet**; it pins an explicit source commit (`_commit`, temporarily `32737f0`, the current `testing` tip, bumped to the release commit before submission). Build from source below, or use the locally built packages described in [BUILD_GUIDE.md](BUILD_GUIDE.md). The recipe lists `onnxruntime-cpu` as an optional dependency for karaoke; it builds from source, so karaoke uses the system ONNX Runtime instead of the static copy in the binary packages.
 
 ### Build from source
 
 Required: CMake 3.10+, a C99 compiler, pkg-config, ncursesw, FFmpeg libraries (avcodec, avformat, avutil, avfilter, swresample, swscale), libpng, libjpeg, libxml2, SQLite3, zlib and libcurl. libcurl is not optional: the build stops with a clear error when it is missing.
 
-Optional: PipeWire, PulseAudio and ALSA output; D-Bus (MPRIS/API). SMB sources additionally need the external `smbclient` program (Samba client) at run time; without it the build still works and SMB connections report that it is missing. Karaoke needs the system ONNX Runtime shared library (`libonnxruntime`, loaded with `dlopen` at run time); the vocal-separation model is bundled by the package builds (see [Build from source](#build-from-source) and [Karaoke](#karaoke)).
+Optional: PipeWire, PulseAudio and ALSA output; D-Bus (MPRIS/API). SMB sources additionally need the external `smbclient` program (Samba client) at run time; without it the build still works and SMB connections report that it is missing. Karaoke needs ONNX Runtime: the DEB, RPM and AppImage packages link it into the binary, while a source build (including the AUR package) loads a system shared library with `dlopen` (`libonnxruntime.so.1.21`, `.so.1` or `.so`; CPU execution provider only). The vocal-separation model is bundled by the package builds (see [Build from source](#build-from-source) and [Karaoke](#karaoke)).
 
 **Fedora / RHEL**
 
@@ -110,7 +110,7 @@ make -j"$(nproc)"
 sudo make install   # optional
 ```
 
-The binary is `build/ter-music` (or `./ter-music` from the build directory). Locally built packages: one DEB (Debian 10–13 / Ubuntu 20.04–26.04), four RPMs (EL7–10), one AppImage (glibc 2.28), and one Linyaps UAB + layer; DEB/RPM source and debug packages are optional. See [BUILD_GUIDE.md](BUILD_GUIDE.md).
+The binary is `build/ter-music` (or `./ter-music` from the build directory). Locally built packages: one DEB (Debian 10–13 / Ubuntu 20.04–26.04), four RPMs (EL7–10), one AppImage (glibc 2.28) and one AUR package; UAB/layer are not published with this release (deferred until the upstream ll-box fix is released); DEB/RPM source and debug packages are optional. See [BUILD_GUIDE.md](BUILD_GUIDE.md).
 
 When `-DCMAKE_INSTALL_PREFIX` is not given, the default prefix is the Linyaps layout `/opt/apps/cn.org.huansoft.ter-music/files`, so `sudo make install` installs the application under `/opt` (an explicit prefix, such as `/usr`, is respected). The release packages all use that layout; the deb, rpm, AUR and AppImage packages add only symbolic links under `/usr` (Linyaps installs inside its container). See [BUILD_GUIDE.md](BUILD_GUIDE.md).
 
@@ -196,7 +196,7 @@ ter-music daemon stop
 
 Exit codes: `0` success, `1` usage error, `3` no running core, `4` D-Bus unavailable, `5` rejected by the core.
 
-`ter-music help <command>` and `ter-music help all` print full details. `--lang <id>` selects the CLI language for one run.
+`ter-music help <command>` and `ter-music help all` print full details. `--lang <id>` selects the language for this process (the CLI subcommand or the TUI) for one run and is never written to `config.xml`; precedence is `--lang`/`TERM_MUSIC_CLI_LANG`, then `ui_language`, then the locale.
 
 **Linyaps.** Inside the package the binary lives in the container:
 
@@ -215,7 +215,7 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
 
 **ll-box cold-start replay.** ll-box ≤ 2.3.5 can replay bytes it has already written when its cold-start forwarder hits a full terminal queue, splicing duplicated output into the TUI. ter-music cannot stop that write; inside the container it measures each frame's terminal writes (`wchar` in `/proc/self/io`) and forces one full-screen repaint only on burst or back-pressure evidence or after a terminal resize. A bare-mode reset likewise needs that evidence (or a terminal resize), and the `endwin`+`refresh` fallback stays opt-in (`TER_MUSIC_TTY_HARD_RESET=1`, off by default). None of this runs outside the container, and the guard adds no configuration key, setting-page entry or user-visible switch. Known limitation: a repaint is no longer scheduled by a timer when there is no evidence, so damage that appears in a session with only small frames and a slow reader is not repainted proactively; it may remain until the next repaint-class event (a terminal resize, a view change or new burst/back-pressure evidence).
 
-The root fix is upstream: PR #295 is merged into linyaps-box `release/2.3` (merge commit `31ddf04`, 2026-11-20) and makes the forwarder consume the bytes it already wrote when `TryAgain` is returned with `k > 0`; it covers ll-box ≤ 2.3.5. No release contains it yet (the latest release is still 2.3.5) and `master` does not carry it, so check that the tag you install contains it and do not assume the next release will. There is no plan to publish a UAB with the next ter-music Release; UAB artefacts are planned to be published after the upstream fix is released. `TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`, an undocumented tuning variable, was removed with the timer fallback; it only configured that fallback, so setting it now has no effect.
+The root fix is upstream: PR #295 is merged into linyaps-box `release/2.3` (merge commit `31ddf04`, 2026-11-20) and makes the forwarder consume the bytes it already wrote when `TryAgain` is returned with `k > 0`; it covers ll-box ≤ 2.3.5. No release contains it yet (the latest release is still 2.3.5) and `master` does not carry it, so check that the tag you install contains it and do not assume the next release will. No UAB or layer is published with ter-music 26.4.1.0; UAB artefacts are planned to be published after the upstream fix is released. `TER_MUSIC_TTY_REPAIR_BACKSTOP_MS`, an undocumented tuning variable, was removed with the timer fallback; it only configured that fallback, so setting it now has no effect.
 
 ## Playback
 
@@ -245,9 +245,9 @@ Resolution order at run time:
 1. `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx` — installed with the package, used first;
 2. `$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx` (default `~/.local/share/ter-music/models/…`) — read-only compatibility with models installed by earlier builds; it is never copied or written.
 
-The file is verified on first use (size 29,704,436 bytes and whole-file SHA-256; the result is cached for the process). A missing file reports "built-in model missing"; a damaged file (wrong size or SHA-256) reports "built-in model verification failed" and does not silently fall back to the other location. In both cases the level can still be set and changed, playback continues as the original, and the status line names the reason — the detailed reason is a technical diagnostic and can be in Chinese. Restart the player after fixing the file, because the check result is cached per process.
+The path is resolved and its size checked on the UI/playback thread (a `stat` — microseconds); the whole-file SHA-256 runs in the background worker before the first separation and is cached per process by path, size and modification time, so opening or switching a track never waits for the 29,704,436-byte hash. A missing file reports "built-in model missing"; a damaged file (wrong size or SHA-256) reports "built-in model verification failed" and does not silently fall back to the other location. In both cases the level can still be set and changed, playback continues as the original, and the status line names the reason in the UI language. Repairing or replacing the file changes its size or modification time, which invalidates the cache, so the new file is verified on its next use; no restart is needed.
 
-The ONNX Runtime shared library is still external: `libonnxruntime.so.1.21`, `.so.1` or `.so`, loaded with `dlopen`; only the CPU execution provider is used. Without the library separation fails and the original keeps playing; nothing switches to an older algorithm.
+ONNX Runtime is built into every release package: the DEB, all four RPMs (including EL7) and the AppImage link a static ONNX Runtime 1.21 built from the Debian pool source, so no system `libonnxruntime` is needed and `readelf -d` lists no `libonnxruntime`. Static linking is capped at GLIBC_2.17, so the same library serves EL7–10 and Debian 10+. A source build without the static library loads `libonnxruntime.so.1.21`, `.so.1` or `.so` with `dlopen`; only the CPU execution provider is used. Without the runtime separation fails and the original keeps playing; nothing switches to an older algorithm.
 
 A source build contains the model only when it is built with `-DTER_MUSIC_BUNDLED_MODEL=<file>`; without that option no model is installed and the runtime reports it as missing (see [Build from source](#build-from-source)). The release packages always include it.
 
@@ -283,7 +283,7 @@ Separation runs on the player core in a low-priority background thread (nice 10)
 - **Session segment cache:** the accompaniment is written under `/tmp/ter-music-karaoke-<uid>-<pid>/<model-id>/<track-hash>/` (directories mode 0700) as 15-second segments — `segNNN.inst.flac` (full) and `segNNN.soft.flac` (soft), each with a `segNNN.ready` marker written last — plus a `manifest.txt` index. One separation produces both stems, so the two levels share a single model run.
 - **Lifetime:** the session directory exists only while the player process runs. A normal exit stops the worker and then deletes the whole directory; when a player core starts it removes leftover `/tmp/ter-music-karaoke-<uid>-*` directories whose process no longer exists (crash leftovers). Nothing there survives a restart, so a later session separates the track again unless a legacy whole-track cache is present.
 - **Key:** the track's real path, size and modification time plus the model id, model SHA-256, format version, stem version, overlap and soft mix. Moving or re-encoding a file gives it a new key.
-- **Legacy whole-track cache (read-only, takes priority):** a complete `inst.flac` + `soft.flac` + `meta.txt` pair written by an earlier build under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` (default `~/.cache/ter-music/karaoke/…`) is still read. When it matches, the track starts from it immediately and no session segments are written. The key includes the current stem version, so whole-track caches written by a build with a different stem derivation do not match; they are left untouched and the track is separated into the session cache instead. Stale `.part` leftovers under that directory are cleaned at startup, and the 2048 MB LRU setting covers those whole-track caches only — session segments are never counted against it.
+- **Legacy whole-track cache (read-only, takes priority):** a complete `inst.flac` + `soft.flac` + `meta.txt` pair written by an earlier build under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` (default `~/.cache/ter-music/karaoke/…`) is still read. When it matches, the track starts from it immediately and no session segments are written. The key includes the current stem version, so whole-track caches written by a build with a different stem derivation do not match; they are left untouched and the track is separated into the session cache instead. Stale `.part` leftovers under that directory are cleaned at startup, and the 2048 MB LRU setting covers those whole-track caches only. Session segments have a separate budget: 512 MB per session by default (`TER_MUSIC_KARAOKE_SEGMENT_MB` overrides it; `0` or less disables the budget), with the oldest track directories evicted first; the track being played or separated is protected, and each segment write is preceded by a free-space check that keeps a 32 MiB reserve.
 - **First play of an uncached track at a level other than Off:** playback waits for the first accompaniment segment before it starts — about 7–10 s on the test machine, with a hard cap of 30 s — and the status line shows a preparation percentage. If the segment does not arrive (timeout or a worker failure such as an unavailable model or cache), the original starts instead; mono tracks and tracks over 30 minutes skip the wait and start as the original immediately, and CUE sub-tracks skip the wait too (original or a matching legacy cache). When playback starts at a non-zero position (resume or speed change), the wait is limited to 8 s.
 - **At Off** the original plays and nothing is separated. Choosing a level while a track plays starts separation for the current track and switches automatically when the current segment is ready; the status line first shows a waiting hint and then the switch with the wait time.
 - **During playback:** when the next segment is not ready, playback waits up to 8 s at the segment boundary and then continues as the original from that point for the rest of the track (a single switch, not a mid-track hop). A seek to an unprocessed position asks the worker to prioritise that segment and waits up to 8 s; if it is still not ready, playback continues as the original from the seek position. After reaching the end of the track the worker backfills segments skipped by a seek, and the manifest reports completion only when every segment is ready.
@@ -299,10 +299,10 @@ There is no lyric dependency and no lyric gate: tracks with timed LRC, plain-tex
 
 - UVR-MDX-NET 3 is a mid/low-size model, not perfect separation: vocals can remain in the accompaniment, and instruments or backing vocals that resemble them can be attenuated. `soft` deliberately keeps 40 % of the original, so it is a compromise, not a clean instrumental.
 - Separation is CPU-heavy and, when it succeeds, runs once per track per session; the cost depends on the model, the machine and the track length. On a 6-core Ryzen 5 4500U a 30-second track took about 11 seconds end to end (roughly 1.1–1.5 s per 6-second block) and a 3-minute track roughly a minute; weaker machines are slower. Driven by the worker's ONNX session, the core peaks around 0.8 GiB of RSS (795 MiB measured) and drops back after separation.
-- The session segments cost about 15.5 MB per minute of audio (measured on a 44.1 kHz stereo track; a 3-minute track is about 46 MB). That is roughly 30 % more than a legacy whole-track pair (about 12 MB/min measured), because every 15-second segment carries its own FLAC headers plus ready and manifest files. The directory is deleted when the player exits.
-- Mono tracks and tracks longer than 30 minutes are not separated and play as the original; CUE sub-tracks never use the session segment source. A separation failure never stops playback and the status line reports the reason. That reason text is a technical diagnostic from the separator and is not localized, so in the English UI it can appear in Chinese.
+- The session segments cost about 15.5 MB per minute of audio (measured on a 44.1 kHz stereo track; a 3-minute track is about 46 MB). That is roughly 30 % more than a legacy whole-track pair (about 12 MB/min measured), because every 15-second segment carries its own FLAC headers plus ready and manifest files. The directory is deleted when the player exits, and while the player runs the session budget above bounds its total size; on systems where `/tmp` is a tmpfs (Fedora/RHEL default) that budget counts against RAM, so lower `TER_MUSIC_KARAOKE_SEGMENT_MB` if space is tight.
+- Mono tracks and tracks longer than 30 minutes are not separated and play as the original; CUE sub-tracks never use the session segment source. A separation failure never stops playback and the status line reports the reason in the UI language (messages printed by the ONNX Runtime itself stay English technical text).
 - Only ONNX Runtime 1.21 with the CPU execution provider was verified; other versions may load but are not guaranteed. DNNL and other execution providers are deliberately not used.
-- If the ONNX Runtime library or the installed model becomes unavailable while the level is not Off, separation fails and the original keeps playing; nothing silently switches back to an older algorithm.
+- If ONNX Runtime or the installed model becomes unavailable while the level is not Off, separation fails and the original keeps playing; nothing silently switches back to an older algorithm. The release packages carry the runtime inside the binary; a source build without the static library needs the system `libonnxruntime`.
 - "karaoke" is also the name of a layout preset and of per-character lyric highlighting; neither is related to this feature.
 
 ## Remote music sources
@@ -385,7 +385,7 @@ help/          user quick-start text
 
 Downloaded remote tracks are cached under `$XDG_CACHE_HOME/ter-music/remote/` (default `~/.cache/ter-music/remote/`), mirroring the connection and remote path; a sibling `.lrc` is cached with the track. The cache limit and the clean action are in Settings → Remote Devices. Extracted covers are temporary files under `/tmp/ter-music-cover-*.jpg`.
 
-The karaoke model ships with the package under `<prefix>/share/ter-music/models/` (`uvr-mdxnet-3-9662.onnx` plus `NOTICE.md`) and is used in place. `$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx` (default `~/.local/share/ter-music/models/…`) is only a read-only fallback for models installed by earlier builds and is never written. Legacy whole-track accompaniment caches, when present, live under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` (default `~/.cache/ter-music/karaoke/`) and are read-only; the 2048 MB LRU setting covers them only. Session segments are written only to `/tmp/ter-music-karaoke-<uid>-<pid>/` and are deleted when the process exits; see [Karaoke](#karaoke).
+The karaoke model ships with the package under `<prefix>/share/ter-music/models/` (`uvr-mdxnet-3-9662.onnx` plus `NOTICE.md`) and is used in place. `$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx` (default `~/.local/share/ter-music/models/…`) is only a read-only fallback for models installed by earlier builds and is never written. Legacy whole-track accompaniment caches, when present, live under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` (default `~/.cache/ter-music/karaoke/`) and are read-only; the 2048 MB LRU setting covers them only. Session segments are written only to `/tmp/ter-music-karaoke-<uid>-<pid>/` (session budget 512 MB by default, `TER_MUSIC_KARAOKE_SEGMENT_MB`) and are deleted when the process exits; see [Karaoke](#karaoke).
 
 Common `config.xml` keys:
 
@@ -403,7 +403,7 @@ Common `config.xml` keys:
 | `stop_core_on_exit` | 1 stop the core on exit, 0 keep playing |
 | `core_exit_when_no_frontend` | exit 10 s after the last front end leaves |
 
-The configuration contract is version **12**. Version 12 **removed** `preferences.karaoke_feature` and `preferences.karaoke_model`: the model is bundled and there is no feature switch or model selection. A v10 or v11 `config.xml` is migrated on the first start of the new core: the file is rewritten with `version="12"` (a v11 file also loses the two elements), and every other key (including `karaoke_mode`, theme, paths, equalizer and key bindings) is kept; a second start leaves the file byte-identical. `config get karaoke_feature` and `config set karaoke_feature …` now fail as unknown keys, and `Config.Set` rejects a patch that still contains them. A downgrade is not supported: a v11 build reads a v12 file (the version attribute parses as an integer and its own migrations stay inactive), sees the two keys as absent — karaoke off — and writes the attribute back to 11 on its next save. During an upgrade, a new front end that meets a still-running v11 core has its configuration mirror rejected as a whole; restart the core (`ter-music daemon restart`) or log in again and it heals.
+The configuration contract is version **12**. Version 12 **removed** `preferences.karaoke_feature` and `preferences.karaoke_model`: the model is bundled and there is no feature switch or model selection. The version history, as the repository has it: contract 4 = tag `v2.1.0` (its root attribute was the literal `"2.2"`, which still loads because it parses as 2 and is rewritten once), 7 = resident core, 8 = `stop_core_on_exit`, 9 = the `<keybindings>` overrides **and** `karaoke_mode` (the DSP-era level), 10 = `preferences.appearance_mode`, 12 = bundled ONNX model and removal of the DSP-era karaoke keys. No contract-11 build was ever released, so no released file can contain the two removed elements. A v10 or earlier `config.xml` is migrated on the first start of the new core: the file is rewritten with `version="12"`, and every other key (including `karaoke_mode`, theme, paths, equalizer and key bindings) is kept; files older than v10 also receive the one-shot defaults of the earlier migrations (background 0→-1 below v4, `core_exit_when_no_frontend=0` below v7, `stop_core_on_exit=1` below v8, `appearance_mode=auto` below v10); a second start leaves the file byte-identical. `config get karaoke_feature` and `config set karaoke_feature …` now fail as unknown keys, and `Config.Set` rejects a patch that still contains them. A downgrade is not supported: a pre-v12 (contract 10) build reads a v12 file (the version attribute parses as an integer and its own migrations stay inactive), sees the removed keys as absent — karaoke off — and writes the attribute back to 10 on its next save. During an upgrade, a new front end that meets a still-running pre-v12 core applies the core's payload by key (`api_version` 7 is the only handshake gate); the mirror is rejected as a whole only if the payload carries the deleted keys, which only an unreleased contract-11 development build would send — restart the core (`ter-music daemon restart`) or log in again and it heals.
 
 Only changed key bindings are written to `config.xml`:
 
@@ -450,7 +450,7 @@ cd ../..
 ./scripts/test/run-unit-tests.sh
 ```
 
-Four gates run in CI:
+CI runs deterministic gates on every change, including the following; the full real-model karaoke suite runs in a separate advisory job that does not block merges, so the release machine and the nightly run are the final quality gate (see [BUILD_GUIDE.md](BUILD_GUIDE.md) §9.5):
 
 | Gate | Rule |
 | --- | --- |
@@ -458,11 +458,14 @@ Four gates run in CI:
 | `scripts/test/check-ui-purity.sh` | UI reaches playback only through the `player` facade |
 | `scripts/test/check-config-ownership.sh` | Core is the only writer of `config.xml` |
 | `scripts/test/check-package-identity.sh` | App id and version agree across packages |
+| `scripts/test/check-c-strings.sh` | No hard-coded Chinese literals in C code; strings go through i18n keys |
+| `scripts/test/package-layout-check.sh` (`TM_LAYOUT_STATIC_ONLY=1`) | `/opt/apps` prefix, `/usr` links, model constants and wiring, without building packages |
+| no-D-Bus build | The optional D-Bus build compiles, links and starts |
 
 ## Troubleshooting
 
 - **No sound:** check that PipeWire, PulseAudio or ALSA is running; the backend is probed in that order. An explicitly chosen backend falls back to the next working one at play time. Switch it in Settings → Audio.
-- **Stutter or crackle:** raise Output Latency in Settings (20-250 ms, in 10 ms steps).
+- **Stutter or crackle:** raise Output Latency in Settings (20, 40, 60, 80, 100, 120, 150, 200 or 250 ms).
 - **Garbled CJK:** use a UTF-8 locale and a UTF-8 terminal; `locale` should show `LC_CTYPE=UTF-8`.
 - **Duplicated or garbled TUI lines inside Linyaps:** the ll-box ≤ 2.3.5 cold-start replay described under "Linyaps" above. The guard repaints the screen when it sees burst or back-pressure evidence; with no evidence it no longer repaints on a timer, so the damage may stay until a terminal resize, a view change or new evidence.
 - **Missing headers at build time:** install the `-devel`/`-dev` variants of the dependencies above.
@@ -472,13 +475,15 @@ Four gates run in CI:
 - **A remote URL pasted from the folder history fails to authenticate:** stored URLs are redacted (no password by design); open the saved connection in Remote Devices instead.
 - **CUE tracks missing:** the `.cue` file must share the audio file basename; change CUE Encoding in Settings if the text is garbled.
 - **Library is empty:** open the library browser (`M`) and scan or rescan; the database is `library.db` in the config directory.
-- **The status line says the built-in model is unavailable:** the package should have installed `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`. A source build without `-DTER_MUSIC_BUNDLED_MODEL` installs no model; a damaged file fails the size/SHA-256 check. The ONNX Runtime library (`libonnxruntime.so.1.21`, `.so.1` or `.so`) must also be installed. The status line names the reason (missing, verification failed, runtime unavailable), the level can still be set, and playback continues as the original. Fix the file or the library and restart the player — the check result is cached per process. There is no fallback to an older built-in algorithm.
+- **The status line says the built-in model is unavailable:** the package should have installed `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`. A source build without `-DTER_MUSIC_BUNDLED_MODEL` installs no model; a damaged file fails the size/SHA-256 check. The release packages carry ONNX Runtime inside the binary; a source build also needs the system library (`libonnxruntime.so.1.21`, `.so.1` or `.so`). The status line names the reason in the UI language (missing, verification failed, runtime unavailable), the level can still be set, and playback continues as the original. The size is checked when the path is opened and the whole-file SHA-256 is verified in the background; repairing or replacing the file invalidates the cached result, so no restart is needed (a source build that needs the system library must have it installed). There is no fallback to an older built-in algorithm.
 - **The first play waits, or falls back to the original:** at a level other than Off a track without a cache waits for the first accompaniment segment (about 7–10 s, at most 30 s in total; 8 s when playback starts at a non-zero position) while the status line shows preparation progress. If the wait times out or the separation fails because the model or cache is unavailable, the track plays as the original; mono tracks, tracks over 30 minutes and CUE sub-tracks skip the wait and start as the original immediately (a matching legacy whole-track cache is still used).
 - **Karaoke separation always fails:** tracks longer than 30 minutes are refused, mono tracks and CUE sub-tracks are not separated, and a missing or damaged bundled model or a missing ONNX Runtime fails; the status line names the reason. See [Karaoke](#karaoke).
 
 ## License
 
 GPL-3.0-only. See [LICENSE](../LICENSE).
+
+The bundled UVR-MDX-NET 3 model is distributed under MIT (see [models/NOTICE.md](../resources/models/NOTICE.md)); the release binaries link a static FFmpeg build under LGPL-2.1-or-later (configured without `--enable-gpl`) and, in the official packages, ONNX Runtime under MIT; `debian/copyright` carries the full notices and the source locations.
 
 Ter-Music is a playback tool only: it does not provide, host or distribute audio content. You are responsible for the files you play.
 

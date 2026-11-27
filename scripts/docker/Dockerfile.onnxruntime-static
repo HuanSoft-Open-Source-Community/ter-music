@@ -1,0 +1,100 @@
+# ONNX Runtime 静态库构建镜像（只用来产出 libonnxruntime.a，不进入发布产物）。
+#
+# 默认 centos:7 + devtoolset-11：编译出来的目标文件只引用 glibc 2.17 及更早的
+# 符号，因此同一份静态库可以同时给 Debian 10（glibc 2.28）、EL7（2.17）和
+# EL8/9/10 的 ter-music 构建使用 —— 这是"内置消音"能覆盖整个矩阵的前提。
+# ORT_BUILD_FLAVOR=debian10 是降级备份（glibc 2.28，EL7 不可用）。
+#
+# 上游 microsoft/onnxruntime 与 download.onnxruntime.ai 自 2026-11 起 404，
+# 源码取自 Debian pool 的 1.21.0+dfsg orig.tar.xz（校验见
+# scripts/build/build-onnxruntime-static.sh），本镜像只提供工具链。
+#
+# 依赖不在这里下载：third-party（protobuf/onnx/eigen/flatbuffers/...）由 ORT
+# 自己的 cmake/deps.txt 在构建容器里联网抓取（指向 github/gitlab，非 microsoft
+# 仓库）。cmake 官方二进制由构建脚本预先缓存后 COPY 进来，避免每次联网。
+
+ARG BASE_IMAGE=centos:7
+FROM ${BASE_IMAGE}
+
+ARG ORT_BUILD_FLAVOR=centos7
+ARG CMAKE_VERSION=3.31.6
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
+# 工具链：centos7 走 devtoolset-11（gcc 11 + libstdc++.a + ld 2.36），
+# debian10 用发行版 gcc 8（glibc 2.28）。
+RUN if [ "$ORT_BUILD_FLAVOR" = "centos7" ]; then \
+        sed -i \
+            -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=https://mirrors.aliyun.com/centos-vault/7.9.2009|g' \
+            /etc/yum.repos.d/CentOS-*.repo; \
+        printf '%s\n' \
+            '[epel]' \
+            'name=EPEL 7' \
+            'baseurl=https://mirrors.aliyun.com/epel/7/$basearch/' \
+            'enabled=1' \
+            'gpgcheck=0' \
+            > /etc/yum.repos.d/epel.repo; \
+        printf '%s\n' \
+            '[centos-sclo-rh]' \
+            'name=CentOS-7 - SCLo rh' \
+            'baseurl=https://mirrors.aliyun.com/centos-vault/7.9.2009/sclo/$basearch/rh/' \
+            'enabled=1' \
+            'gpgcheck=0' \
+            > /etc/yum.repos.d/centos-sclo.repo; \
+        yum install -y \
+            devtoolset-11-gcc \
+            devtoolset-11-gcc-c++ \
+            devtoolset-11-binutils \
+            devtoolset-11-make \
+            rh-python38-python \
+            make tar gzip xz bzip2 which patch file git \
+            ca-certificates curl && \
+        yum clean all && \
+        . /opt/rh/devtoolset-11/enable && \
+        gcc --version | head -1 && \
+        g++ --version | head -1 && \
+        ld --version | head -1 && \
+        test -f /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11/libstdc++.a && \
+        ln -sf /opt/rh/rh-python38/root/usr/bin/python3 /usr/local/bin/python3 && \
+        python3 --version && \
+        python3 -c 'from __future__ import annotations; print("python3 annotations ok")'; \
+    else \
+        echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until && \
+        printf '%s\n' \
+            'deb http://mirrors.aliyun.com/debian-archive/debian buster main contrib non-free' \
+            'deb http://mirrors.aliyun.com/debian-archive/debian-security buster/updates main contrib non-free' \
+            > /etc/apt/sources.list && \
+        apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            binutils \
+            make \
+            tar \
+            gzip \
+            xz-utils \
+            bzip2 \
+            patch \
+            file \
+            git \
+            python3 \
+            ca-certificates \
+            curl \
+        && rm -rf /var/lib/apt/lists/* && \
+        gcc --version | head -1 && \
+        g++ --version | head -1 && \
+        test -f /usr/lib/gcc/x86_64-linux-gnu/8/libstdc++.a && \
+        python3 --version; \
+    fi
+
+# CMake 官方 linux-x86_64 二进制（glibc 2.17+ 可运行）：Debian 10 自带 3.13、
+# EL7 的 cmake3 是 3.17，都低于 ORT 1.21 要求的 3.28。
+COPY cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz /tmp/cmake.tar.gz
+RUN mkdir -p /opt/cmake && \
+    tar -xzf /tmp/cmake.tar.gz -C /opt/cmake --strip-components=1 && \
+    rm -f /tmp/cmake.tar.gz && \
+    ln -sf /opt/cmake/bin/cmake /usr/local/bin/cmake && \
+    ln -sf /opt/cmake/bin/ctest /usr/local/bin/ctest && \
+    ln -sf /opt/cmake/bin/cpack /usr/local/bin/cpack && \
+    cmake --version | head -1
+
+WORKDIR /work

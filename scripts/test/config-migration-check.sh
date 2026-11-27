@@ -14,7 +14,7 @@
 #   5. 断言 v7 → v12：属性 7 文件首启补写 stop_core_on_exit=1 且版本升 12
 #      （经 v7→v8→v9→v10→v11→v12 迁移链）；属性 8 显式 0 的文件连续启停不回卷；
 #      JSON v1 → XML 的迁移产出同样含 stop_core_on_exit=1（该键在 JSON
-#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 10 内的普通新键，
+#      时代不存在显式值，按缺省补写）；karaoke_mode 属契约 9 内的普通新键，
 #      旧文件缺元素即按 0 加载并随首存补写，不另升版本。
 #   5b. 断言 v11 → v12：删除 preferences.karaoke_feature / karaoke_model
 #      （模型随包内置），theme/paths/keybindings/EQ/远程迁移结果/volume/
@@ -109,7 +109,7 @@ daemon_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
 # 拒绝 fork 脱离进程（沙箱判定/权限），此时回退为前台核心 + 后台作业。
 # 迁移语义与进程归属无关，两条路径等价。
 start_core() {
-    "$TM_BIN" daemon start "$@" >/dev/null 2>&1
+    "$TM_BIN" daemon start >/dev/null 2>&1
     for _ in $(seq 1 40); do daemon_up && return 0; sleep 0.25; done
     "$TM_BIN" daemon foreground >"$WORK_DIR/core-foreground.log" 2>&1 &
     CORE_FG_PID=$!

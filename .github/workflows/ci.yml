@@ -170,6 +170,59 @@ jobs:
       - name: Smoke test
         run: ./build/ter-music --help >/dev/null
 
+  # D-Bus 在 CMake 里是可选项（pkg_check_modules 探测 dbus-1）。屏蔽 dbus-1.pc
+  # 后整个 portal/MPRIS 走 stub 分支；该作业保证“无 D-Bus”永远可编译。
+  no-dbus:
+    name: build (no D-Bus)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libavcodec-dev libavformat-dev libswresample-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
+            libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+            libsqlite3-dev libpipewire-0.3-dev libasound2-dev \
+            zlib1g-dev
+
+      - name: Configure without dbus-1
+        run: |
+          set -euo pipefail
+          # 构造一个不含 dbus-1.pc 的 pkg-config 目录，并用 PKG_CONFIG_LIBDIR
+          # 覆盖默认搜索路径：pkg_check_modules(DBUS dbus-1) 失败 → HAVE_DBUS 未定义。
+          mkdir -p /tmp/pc-nodbus
+          for d in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/share/pkgconfig; do
+            for f in "$d"/*.pc; do
+              [ -e "$f" ] || continue
+              [ "$(basename "$f")" = "dbus-1.pc" ] && continue
+              ln -sf "$f" "/tmp/pc-nodbus/$(basename "$f")"
+            done
+          done
+          # -Werror=implicit-function-declaration：GCC 14（debian:13 等）默认已
+          # 把它当 error，GCC 13 只是警告；显式提为 error 让所有 runner 一致地
+          # 抓住“声明在 HAVE_DBUS guard 内、无 D-Bus 分支调用”这类缺陷。
+          env -u PKG_CONFIG_PATH PKG_CONFIG_LIBDIR=/tmp/pc-nodbus \
+            cmake -B build-no-dbus -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                  -DCMAKE_C_FLAGS="-Werror=implicit-function-declaration"
+          if grep -q -- '-DHAVE_DBUS' build-no-dbus/compile_commands.json; then
+            echo "::error::dbus-1 was still found; this build does not cover !HAVE_DBUS"
+            exit 1
+          fi
+
+      - name: Build (no D-Bus)
+        run: cmake --build build-no-dbus -j2
+
+      - name: Smoke test (no D-Bus build)
+        run: |
+          ./build-no-dbus/ter-music --help >/dev/null
+          ./build-no-dbus/ter-music version
+
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
@@ -182,8 +235,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck
 
-      - name: Shellcheck
-        run: shellcheck scripts/build/*.sh scripts/docker/*.sh
+      # -S warning：SC2317（间接调用的 trap/cleanup 函数）等 info 级误报不计入。
+      # -e SC1111：中文全角引号在双引号字符串里是字面量，不是 shell 引号；
+      # scripts/test 的中文断言文案会大量命中，属排版误报。
+      - name: Shellcheck (build, docker and test scripts)
+        env:
+          LC_ALL: C.UTF-8
+        run: shellcheck -S warning -e SC1111 \
+          scripts/build/*.sh scripts/docker/*.sh scripts/test/*.sh
 
       - name: Syntax check
         run: bash -n scripts/build/*.sh scripts/docker/*.sh scripts/test/*.sh
@@ -191,16 +250,24 @@ jobs:
   gates:
     name: gates
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
+      # 单元测试要真跑而不是被环境 SKIP：补齐所有开发包（含 ncursesw、libxml2、
+      # sqlite、curl、dbus、pulse、pipewire、alsa、FFmpeg）并设 TM_UNIT_STRICT=1。
+      # 注意：libncursesw5-dev 在 Ubuntu 24.04+ 由 libncurses-dev 提供（Provides），
+      # 两个名字都写可同时兼容新老 runner。
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libxml2-dev \
-            libavcodec-dev libavformat-dev libavutil-dev
+            build-essential cmake pkg-config \
+            libncurses-dev libncursesw5-dev libpng-dev libjpeg-dev \
+            libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libdbus-1-dev \
+            libpulse-dev libpipewire-0.3-dev libasound2-dev \
+            libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev \
+            libswresample-dev libavutil-dev libxml2-dev ffmpeg
 
       - name: Backend purity (core serves playback, not content)
         run: scripts/test/check-core-purity.sh
@@ -211,19 +278,34 @@ jobs:
       - name: Config ownership (the front end must not write the core config)
         run: scripts/test/check-config-ownership.sh
 
+      - name: C string literals (user-visible text must go through i18n)
+        run: scripts/test/check-c-strings.sh
+
       - name: Package identity (name, version, namespace across packaging files)
         run: scripts/test/check-package-identity.sh
 
       - name: i18n keys (zh_CN/en_US stay complete and aligned)
         run: python3 scripts/test/check-i18n-keys.py
 
-      - name: Unit tests
+      - name: "Package layout (static: /opt prefix, /usr links, model wiring)"
+        env:
+          TM_LAYOUT_STATIC_ONLY: "1"
+        run: scripts/test/package-layout-check.sh
+
+      - name: "Unit tests (strict: environment SKIP counts as failure)"
+        env:
+          TM_UNIT_STRICT: "1"
         run: scripts/test/run-unit-tests.sh
 
   e2e:
     name: e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 120
+    env:
+      # 中文断言/状态行需要 UTF-8 locale（GLib 的 gdbus 在 C locale 下会把
+      # 非 ASCII 打印成 '?'，导致可读错误断言假红）。
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     steps:
       - uses: actions/checkout@v7
 
@@ -236,13 +318,29 @@ jobs:
             libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
             libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
             libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev \
-            zlib1g-dev ffmpeg dbus python3-gi gir1.2-glib-2.0
+            zlib1g-dev ffmpeg dbus python3-gi gir1.2-glib-2.0 python3-dbus \
+            python3-pyftpdlib pulseaudio pulseaudio-utils
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j2
+
+      # 托管 runner 没有声卡：起一个 PulseAudio null sink 作为虚拟输出，核心的
+      # audio_backend=0(AUTO) 才有可用后端，播放位置才会推进（keybindings /
+      # karaoke e2e 依赖这一点）。XDG_RUNTIME_DIR 通过 GITHUB_ENV 传给后续步骤。
+      - name: Start virtual audio backend (PulseAudio null sink)
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR=/tmp/tm-ci-runtime
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          pulseaudio --start --exit-idle-time=-1 --disallow-exit
+          pactl load-module module-null-sink sink_name=tm-ci
+          pactl set-default-sink tm-ci
+          pactl list short sinks
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
 
       - name: PipeWire ABI consistency
         run: scripts/test/pipewire-abi-check.sh
@@ -304,16 +402,185 @@ jobs:
       - name: Config across restart and play-mode regrouping
         run: scripts/test/config-restart-e2e.sh --bin ./build/ter-music
 
+      # ── 主推功能的 e2e（B4）：外观适配 / 统一选择器 / 可配置键位 / 卡拉OK ──
+      - name: Appearance (OSC 11, COLORFGBG, terminal adaption; PTY)
+        run: TERM=xterm-256color script -qefc \
+          "python3 scripts/test/appearance-pty-e2e.py --bin ./build/ter-music" /dev/null
+
+      - name: Appearance (XDG desktop portal color-scheme; private session bus)
+        env:
+          # 该脚本的“按键→输出时延 <0.10s”断言依赖本机调度；托管 runner 上
+          # 进程调度抖动会主导 pty 时延（实测零 portal 延迟也会到 0.2–1.3s），
+          # 故 CI 里显式 SKIP 该时序断言（其余 portal 行为断言照常执行）。
+          TERMUSIC_E2E_STRICT_LATENCY: "0"
+        run: dbus-run-session -- script -qefc \
+          "python3 scripts/test/appearance-xdg-pty-e2e.py --bin ./build/ter-music" /dev/null
+
+      - name: Unified file/folder pickers (zenity / kdialog / portal / TTY fallback)
+        run: scripts/test/folder-picker-e2e.sh --bin ./build/ter-music
+
+      - name: Configurable keybindings (persist / lock / restore, TERM compatibility)
+        run: scripts/test/keybindings-e2e.sh --bin ./build/ter-music
+
+      - name: Keybinding audit CLI (keys list|check, JSON contract)
+        run: scripts/test/test_keybinding_audit.sh --bin ./build/ter-music
+
+      # 控制面/CLI/D-Bus/config 断言是确定性的，留在 required 的 e2e 硬门禁；
+      # 真实模型换源/分段对分离速度敏感，放在独立的 advisory karaoke 作业。
+      - name: Karaoke control plane (CLI / D-Bus / config)
+        run: scripts/test/karaoke-e2e.sh --bin ./build/ter-music --control-plane-only
+
+      # 托管 runner 没有 /dev/snd：脚本按设计整体 SKIP 并退出 0（不伪装通过）。
+      # 保留该步骤以验证“无设备 → 可读 SKIP”的契约；真实 ALSA 断言需在带声卡
+      # 的发布机上跑。若将来 runner 提供声卡，该步骤会自动转为真实断言。
+      - name: ALSA backend (self-SKIPs when the runner has no sound card)
+        run: scripts/test/alsa-backend-e2e.sh --bin ./build/ter-music
+
       # A6 的实测值记录下来（--report 不判定）：共享 runner 的时延/CPU 抖动大，
       # 拿它当门禁只会制造假红；本机（scripts/test/perf-check.sh 不带 --report）
       # 才是阈值判定的地方。
       - name: Performance (latency and idle CPU, report only)
         run: scripts/test/perf-check.sh --bin ./build/ter-music --report
 
+  # 真实模型/实时推理的 karaoke e2e：对 CPU 分离速度敏感，**不作为 required**
+  # 门禁（避免把必红/必抖的时序断言变成合并阻断）。在 push / 手动触发时单独
+  # 起一个作业跑全量；Nightly/发布机是它的主判定场。
+  karaoke:
+    name: karaoke (real model, advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libavcodec-dev libavformat-dev libswresample-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libpng-dev libjpeg-dev \
+            libpulse-dev libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+            libsqlite3-dev libpipewire-0.3-dev libasound2-dev libdbus-1-dev \
+            zlib1g-dev ffmpeg dbus pulseaudio pulseaudio-utils
+
+      # 内置模型不进 git：先按发布常量下载并校验，再让构建安装规则把它打进
+      # share/ter-music/models（-DTER_MUSIC_BUNDLED_MODEL），这样 karaoke-model
+      # e2e 的“构建期安装模型”断言在 CI 里也是真跑而不是 SKIP。
+      - name: Download the bundled karaoke model (size + SHA256 pinned)
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp/models
+          curl -fsSL --retry 3 --retry-delay 2 \
+            -o .tmp/models/UVR_MDXNET_3_9662.onnx \
+            https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx
+          echo "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc  .tmp/models/UVR_MDXNET_3_9662.onnx" \
+            | sha256sum -c -
+          test "$(stat -c %s .tmp/models/UVR_MDXNET_3_9662.onnx)" = "29704436"
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          -DTER_MUSIC_BUNDLED_MODEL=.tmp/models/UVR_MDXNET_3_9662.onnx
+
+      - name: Build
+        run: cmake --build build -j2
+
+      - name: Start virtual audio backend (PulseAudio null sink)
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR=/tmp/tm-ci-runtime
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          pulseaudio --start --exit-idle-time=-1 --disallow-exit
+          pactl load-module module-null-sink sink_name=tm-ci
+          pactl set-default-sink tm-ci
+          pactl list short sinks
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+
+      # 卡拉 OK 的推理运行库是 dlopen 的可选依赖；官方 GitHub release 资产已 404，
+      # 改用 Debian trixie 的 libonnxruntime1.21（soname .so.1.21，应用依次尝试
+      # .so.1.21/.so.1/.so）。该包动态依赖 Debian 的 XNNPACK/ONNX/protobuf/
+      # RE2/absl 等（均只要求 glibc <= 2.38），一并解包到 /usr/local/lib + ldconfig。
+      - name: Prepare ONNX Runtime 1.21 runtime (dlopen for karaoke)
+        run: |
+          set -euo pipefail
+          base=https://deb.debian.org/debian/pool/main
+          fetch() {
+            curl -fsSL --retry 3 --retry-delay 2 -o "/tmp/ort-debs/$2" "$base/$1"
+          }
+          mkdir -p /tmp/ort-debs /tmp/ort-root
+          fetch 'o/onnxruntime/libonnxruntime1.21_1.21.0%2bdfsg-1_amd64.deb' \
+            'libonnxruntime1.21_1.21.0+dfsg-1_amd64.deb'
+          fetch 'o/onnx/libonnx1t64_1.17.0-3%2bb1_amd64.deb' \
+            'libonnx1t64_1.17.0-3+b1_amd64.deb'
+          fetch 'p/protobuf/libprotobuf32t64_3.21.12-11%2bdeb13u1_amd64.deb' \
+            'libprotobuf32t64_3.21.12-11+deb13u1_amd64.deb'
+          fetch 'p/pthreadpool/libpthreadpool0_0.0%7egit20240616.560c60d-1_amd64.deb' \
+            'libpthreadpool0_0.0~git20240616.560c60d-1_amd64.deb'
+          fetch 'c/cpuinfo/libcpuinfo0_0.0%7egit20250327.39ea79a-1_amd64.deb' \
+            'libcpuinfo0_0.0~git20250327.39ea79a-1_amd64.deb'
+          fetch 'r/re2/libre2-11_20240702-3%2bb1_amd64.deb' \
+            'libre2-11_20240702-3+b1_amd64.deb'
+          fetch 'x/xnnpack/libxnnpack0.20241108_0.0%7egit20241108.4ea82e5-2_amd64.deb' \
+            'libxnnpack0.20241108_0.0~git20241108.4ea82e5-2_amd64.deb'
+          fetch 'a/abseil/libabsl20240722_20240722.0-4_amd64.deb' \
+            'libabsl20240722_20240722.0-4_amd64.deb'
+          for deb in /tmp/ort-debs/*.deb; do dpkg-deb -x "$deb" /tmp/ort-root; done
+          sudo cp -a /tmp/ort-root/usr/lib/x86_64-linux-gnu/*.so* /usr/local/lib/
+          sudo ldconfig
+          if ldd /usr/local/lib/libonnxruntime.so.1.21.0 | grep -q 'not found'; then
+            echo "::error::libonnxruntime has unresolved shared libraries:"
+            ldd /usr/local/lib/libonnxruntime.so.1.21.0 >&2
+            exit 1
+          fi
+          # dlopen("libonnxruntime.so.1.21") 必须命中：包里是 .so.1.21 → .so.1.21.0。
+          test -e /usr/local/lib/libonnxruntime.so.1.21
+
+      # runner 上没有真实曲目素材：用 ffmpeg 合成 150s 立体声夹具（80Hz 低音 +
+      # 440Hz 中置“人声”占位 + 左右不同侧向音），供 karaoke-model/segments e2e 使用。
+      - name: Synthesize karaoke e2e track fixture
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp/ci-fixtures
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i "aevalsrc=0.4*sin(2*PI*80*t)+0.25*sin(2*PI*440*t)+0.35*sin(2*PI*1200*t)|0.4*sin(2*PI*80*t)+0.25*sin(2*PI*440*t)+0.35*sin(2*PI*1800*t):s=44100:d=150" \
+            -sample_fmt s16 -c:a flac .tmp/ci-fixtures/karaoke-track.flac
+          printf '[00:01.00]第一句\n[00:05.00]第二句\n[00:20.00]第三句\n' \
+            > .tmp/ci-fixtures/karaoke-track.lrc
+          ffprobe -v error -show_entries stream=channels,sample_rate \
+            -of csv=p=0 .tmp/ci-fixtures/karaoke-track.flac
+
+      # karaoke-e2e 全量（含真实模型 Off→Full/Soft 换源、暂停/回退/失败路径）
+      - name: Karaoke end-to-end (control plane + real-model source switching)
+        run: scripts/test/karaoke-e2e.sh --bin ./build/ter-music \
+          --model .tmp/models/UVR_MDXNET_3_9662.onnx
+
+      - name: Karaoke segmented cache and source switching (real model)
+        run: scripts/test/karaoke-segments-e2e.sh --bin ./build/ter-music \
+          --model .tmp/models/UVR_MDXNET_3_9662.onnx \
+          --track .tmp/ci-fixtures/karaoke-track.flac
+
+      - name: Karaoke model end-to-end (bundled model, stems, fallbacks)
+        env:
+          # 复用 e2e 构建目录做 cmake --install 断言（构建已带内置模型）。
+          TERMUSIC_BUNDLE_BUILD: build
+          # 合成夹具没有真实人声：MDX 会把整段当伴奏原样输出，stem 质量判据
+          # 只会在真实曲目上成立。CI 跳过该条，发布机/Nightly 用真实曲目跑。
+          TERMUSIC_E2E_SKIP_STEM_QUALITY: "1"
+        run: scripts/test/karaoke-model-e2e.sh --bin ./build/ter-music \
+          --model .tmp/models/UVR_MDXNET_3_9662.onnx \
+          --track .tmp/ci-fixtures/karaoke-track.flac
+
+
   required-checks:
     name: required-checks
+    # karaoke（真实模型/时序敏感）是 advisory，不进 required；它仍会在 push 上
+    # 单独运行，红/绿不阻断合并，由 Nightly/发布机收口。
     if: always()
-    needs: [build, strict, shellcheck, gates, e2e]
+    needs: [build, strict, no-dbus, shellcheck, gates, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -321,12 +588,14 @@ jobs:
         env:
           BUILD: ${{ needs.build.result }}
           STRICT: ${{ needs.strict.result }}
+          NO_DBUS: ${{ needs.no-dbus.result }}
           SHELLCHECK: ${{ needs.shellcheck.result }}
           GATES: ${{ needs.gates.result }}
           E2E: ${{ needs.e2e.result }}
         run: |
           [ "$BUILD" = "success" ] || { echo "build: $BUILD" >&2; exit 1; }
           [ "$STRICT" = "success" ] || { echo "strict: $STRICT" >&2; exit 1; }
+          [ "$NO_DBUS" = "success" ] || { echo "no-dbus: $NO_DBUS" >&2; exit 1; }
           [ "$SHELLCHECK" = "success" ] || { echo "shellcheck: $SHELLCHECK" >&2; exit 1; }
           [ "$GATES" = "success" ] || { echo "gates: $GATES" >&2; exit 1; }
           [ "$E2E" = "success" ] || { echo "e2e: $E2E" >&2; exit 1; }

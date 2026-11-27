@@ -124,6 +124,9 @@ oadoc/
 /.agent-teams/
 /.codebuddy/
 
+# Local Python virtualenv (tooling only; never part of the source tree)
+/.venv/
+
 .lingma/*
 .trae
 .reasonix/

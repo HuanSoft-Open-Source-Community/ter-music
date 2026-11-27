@@ -484,6 +484,246 @@ static void test_remove_skips_inflight(const char *cache_root, const char *track
     CHECK(access(paths.dir, F_OK) != 0, "无在写文件时损坏目录被清理");
 }
 
+/* ── 8. 会话分段缓存预算 / 淘汰 / 空间预检（S1）─────────────────── */
+
+static int mkdir_simple(const char *path)
+{
+    char tmp[KARAOKE_CACHE_PATH_CAP];
+    int n = snprintf(tmp, sizeof(tmp), "%s", path);
+    if (n < 0 || (size_t)n >= sizeof(tmp))
+        return -1;
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p != '/')
+            continue;
+        *p = '\0';
+        if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
+            return -1;
+        *p = '/';
+    }
+    if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
+        return -1;
+    return 0;
+}
+
+static int write_blob(const char *path, size_t size)
+{
+    unsigned char *buf = malloc(size);
+    if (!buf)
+        return -1;
+    memset(buf, 0x6b, size);
+    int rc = write_file(path, buf, size);
+    free(buf);
+    return rc;
+}
+
+static void set_mtime_ago(const char *path, long seconds_ago)
+{
+    struct timespec ts[2];
+    clock_gettime(CLOCK_REALTIME, &ts[0]);
+    ts[0].tv_sec -= seconds_ago;
+    ts[1] = ts[0];
+    (void)utimensat(AT_FDCWD, path, ts, 0);
+}
+
+/* 一段缓存目录：<root>/<model>/<hash>/{seg000.inst.flac,seg000.soft.flac}；
+ * 每份 1 MiB（evict/usage 只统计普通文件字节，不解析 FLAC 内容）。 */
+static int make_seg_track_dir(const char *seg_root, const char *hash,
+                              const char *part_name)
+{
+    char dir[KARAOKE_CACHE_PATH_CAP];
+    snprintf(dir, sizeof(dir), "%s/%s/%s", seg_root, MODEL_ID, hash);
+    if (mkdir_simple(dir) != 0)
+        return -1;
+    char inst[KARAOKE_CACHE_PATH_CAP], soft[KARAOKE_CACHE_PATH_CAP];
+    snprintf(inst, sizeof(inst), "%s/seg000.inst.flac", dir);
+    snprintf(soft, sizeof(soft), "%s/seg000.soft.flac", dir);
+    if (write_blob(inst, 1024 * 1024) != 0 || write_blob(soft, 1024 * 1024) != 0)
+        return -1;
+    if (part_name && part_name[0]) {
+        char part[KARAOKE_CACHE_PATH_CAP];
+        snprintf(part, sizeof(part), "%s/%s", dir, part_name);
+        if (write_blob(part, 16) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static void test_segment_budget_config(void)
+{
+    KaraokeCacheConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    unsetenv(KARAOKE_SEGMENT_BUDGET_ENV);
+    CHECK(karaoke_cache_segment_budget_mb(&cfg) ==
+              KARAOKE_SEGMENT_LIMIT_MB_DEFAULT,
+          "会话预算默认 512MiB");
+    CHECK(setenv(KARAOKE_SEGMENT_BUDGET_ENV, "3", 1) == 0 &&
+              karaoke_cache_segment_budget_mb(&cfg) == 3,
+          "环境变量覆盖会话预算");
+    cfg.limit_mb = 7;
+    CHECK(karaoke_cache_segment_budget_mb(&cfg) == 7,
+          "cfg->limit_mb 优先于环境变量");
+    cfg.limit_mb = -1;
+    CHECK(setenv(KARAOKE_SEGMENT_BUDGET_ENV, "0", 1) == 0 &&
+              karaoke_cache_segment_budget_mb(&cfg) == 0,
+          "环境变量 0 = 关闭总预算");
+    CHECK(setenv(KARAOKE_SEGMENT_BUDGET_ENV, "12x", 1) == 0 &&
+              karaoke_cache_segment_budget_mb(&cfg) ==
+                  KARAOKE_SEGMENT_LIMIT_MB_DEFAULT,
+          "非法环境变量回退默认预算");
+    unsetenv(KARAOKE_SEGMENT_BUDGET_ENV);
+}
+
+static void test_segment_usage_and_evict(const char *root)
+{
+    char seg_root[KARAOKE_CACHE_PATH_CAP];
+    snprintf(seg_root, sizeof(seg_root), "%s/seg-session", root);
+    CHECK(mkdir_simple(seg_root) == 0, "创建会话缓存根");
+    KaraokeCacheConfig cfg = make_cfg(seg_root);
+    unsetenv(KARAOKE_SEGMENT_BUDGET_ENV);
+
+    const char *hash_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const char *hash_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const char *hash_c = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const char *hash_d = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    CHECK(make_seg_track_dir(seg_root, hash_a, NULL) == 0, "造旧曲目段 A");
+    CHECK(make_seg_track_dir(seg_root, hash_b, NULL) == 0, "造次旧曲目段 B");
+    CHECK(make_seg_track_dir(seg_root, hash_c, NULL) == 0, "造当前曲目段 C");
+    CHECK(make_seg_track_dir(seg_root, hash_d, ".seg000.ready.part.123.1") == 0,
+          "造在写曲目段 D（含 .part）");
+    char dir_a[KARAOKE_CACHE_PATH_CAP], dir_b[KARAOKE_CACHE_PATH_CAP];
+    char dir_c[KARAOKE_CACHE_PATH_CAP], dir_d[KARAOKE_CACHE_PATH_CAP];
+    snprintf(dir_a, sizeof(dir_a), "%s/%s/%s", seg_root, MODEL_ID, hash_a);
+    snprintf(dir_b, sizeof(dir_b), "%s/%s/%s", seg_root, MODEL_ID, hash_b);
+    snprintf(dir_c, sizeof(dir_c), "%s/%s/%s", seg_root, MODEL_ID, hash_c);
+    snprintf(dir_d, sizeof(dir_d), "%s/%s/%s", seg_root, MODEL_ID, hash_d);
+    set_mtime_ago(dir_a, 1000);
+    set_mtime_ago(dir_b, 500);
+    set_mtime_ago(dir_c, 30);
+    set_mtime_ago(dir_d, 1500);
+
+    int tracks = 0;
+    long long used = karaoke_cache_segment_usage_bytes(&cfg, &tracks);
+    CHECK(used >= 8 * 1024 * 1024, "usage 统计多曲目段字节");
+    CHECK(tracks == 4, "usage 统计曲目目录数");
+
+    /* 预算 4MiB：最旧的 A、B 依次淘汰；在写 D 与当前 C 受保护。 */
+    cfg.limit_mb = 4;
+    const char *excludes[1] = {dir_c};
+    int evicted = 0;
+    char err[KARAOKE_CACHE_ERR_CAP] = {0};
+    CHECK(karaoke_cache_segment_evict(&cfg, excludes, 1, &evicted, err,
+                                      sizeof(err)) == 0,
+          "会话预算淘汰执行");
+    CHECK(evicted == 2, "预算淘汰删除 2 个最旧曲目段");
+    CHECK(access(dir_a, F_OK) != 0 && access(dir_b, F_OK) != 0,
+          "最旧两个曲目段被淘汰");
+    CHECK(access(dir_c, F_OK) == 0, "当前曲目段不被淘汰");
+    CHECK(access(dir_d, F_OK) == 0, "含 .part 的在写曲目段不被淘汰");
+    long long after = karaoke_cache_segment_usage_bytes(&cfg, NULL);
+    CHECK(after <= 4LL * 1024 * 1024 + 4096,
+          "淘汰后占用回到预算内（在写 .part 的少量余量免除）");
+
+    /* 预算 1MiB：C 受保护、D 在写 → 无可淘汰，保持原样（软上限）。 */
+    cfg.limit_mb = 1;
+    evicted = 0;
+    CHECK(karaoke_cache_segment_evict(&cfg, excludes, 1, &evicted, NULL, 0) == 0,
+          "无候选时淘汰安全返回");
+    CHECK(evicted == 0, "受保护/在写目录不被删除");
+    CHECK(access(dir_c, F_OK) == 0 && access(dir_d, F_OK) == 0,
+          "保护目录保持存在");
+
+    /* D 写完（去掉 .part）并变旧 → 可被淘汰。 */
+    char part[KARAOKE_CACHE_PATH_CAP];
+    snprintf(part, sizeof(part), "%s/.seg000.ready.part.123.1", dir_d);
+    unlink(part);
+    set_mtime_ago(dir_d, 2000);
+    evicted = 0;
+    CHECK(karaoke_cache_segment_evict(&cfg, excludes, 1, &evicted, NULL, 0) == 0 &&
+              evicted == 1,
+          "无在写 .part 的旧曲目段被淘汰");
+    CHECK(access(dir_d, F_OK) != 0, "D 已淘汰");
+    CHECK(access(dir_c, F_OK) == 0, "C 仍受保护");
+
+    /* 参数非法：无效 cfg 返回 -1。 */
+    KaraokeCacheConfig bad;
+    memset(&bad, 0, sizeof(bad));
+    CHECK(karaoke_cache_segment_evict(&bad, NULL, 0, NULL, NULL, 0) == -1,
+          "非法 cfg 的淘汰拒绝");
+}
+
+static void test_segment_space_check(const char *root)
+{
+    char seg_root[KARAOKE_CACHE_PATH_CAP];
+    snprintf(seg_root, sizeof(seg_root), "%s/seg-space", root);
+    CHECK(mkdir_simple(seg_root) == 0, "创建空间预检目录");
+    KaraokeCacheConfig cfg = make_cfg(seg_root);
+    char err[KARAOKE_CACHE_ERR_CAP] = {0};
+    long long free_bytes = -1;
+    CHECK(karaoke_cache_segment_space_check(&cfg, 1024 * 1024, &free_bytes, err,
+                                            sizeof(err)) == 1,
+          "1MiB 需求通过空间预检");
+    CHECK(free_bytes > 0, "空间预检上报可用字节");
+
+    memset(err, 0, sizeof(err));
+    free_bytes = -1;
+    long long huge = (long long)1 << 60;   /* 1 EiB：任何测试 FS 都放不下 */
+    CHECK(karaoke_cache_segment_space_check(&cfg, huge, &free_bytes, err,
+                                            sizeof(err)) == 0,
+          "超大需求判定空间不足");
+    CHECK(err[0] != '\0', "空间不足给出可读错误");
+    CHECK(strstr(err, "karaoke.cache.err.no_space_fmt") != NULL,
+          "空间不足错误走 i18n key（单测桩返回键名）");
+    CHECK(free_bytes > 0, "空间不足时仍上报可用字节");
+
+    KaraokeCacheConfig bad;
+    memset(&bad, 0, sizeof(bad));
+    CHECK(karaoke_cache_segment_space_check(&bad, 1, NULL, NULL, 0) == -1,
+          "非法 cfg 的空间预检拒绝");
+}
+
+static void test_segment_reserve(const char *root)
+{
+    char seg_root[KARAOKE_CACHE_PATH_CAP];
+    snprintf(seg_root, sizeof(seg_root), "%s/seg-reserve", root);
+    CHECK(mkdir_simple(seg_root) == 0, "创建预检闸门目录");
+    KaraokeCacheConfig cfg = make_cfg(seg_root);
+    unsetenv(KARAOKE_SEGMENT_BUDGET_ENV);
+
+    const char *hash_a = "1111111111111111111111111111111111111111111111111111111111111111";
+    const char *hash_c = "2222222222222222222222222222222222222222222222222222222222222222";
+    CHECK(make_seg_track_dir(seg_root, hash_a, NULL) == 0, "造旧曲目段（可汰）");
+    CHECK(make_seg_track_dir(seg_root, hash_c, NULL) == 0, "造当前曲目段（保护）");
+    char dir_a[KARAOKE_CACHE_PATH_CAP], dir_c[KARAOKE_CACHE_PATH_CAP];
+    snprintf(dir_a, sizeof(dir_a), "%s/%s/%s", seg_root, MODEL_ID, hash_a);
+    snprintf(dir_c, sizeof(dir_c), "%s/%s/%s", seg_root, MODEL_ID, hash_c);
+    set_mtime_ago(dir_a, 1000);
+    set_mtime_ago(dir_c, 30);
+
+    cfg.limit_mb = 1;   /* 当前 2MiB 已超预算：预检应淘汰 A 而不是失败 */
+    const char *excludes[1] = {dir_c};
+    char err[KARAOKE_CACHE_ERR_CAP] = {0};
+    CHECK(karaoke_cache_segment_reserve(&cfg, excludes, 1, 1024 * 1024, err,
+                                        sizeof(err)) == 0,
+          "预算淘汰后预留成功");
+    CHECK(access(dir_a, F_OK) != 0, "预检淘汰了最旧的非保护段");
+    CHECK(access(dir_c, F_OK) == 0, "预检不删保护段");
+
+    memset(err, 0, sizeof(err));
+    long long huge = (long long)1 << 60;
+    CHECK(karaoke_cache_segment_reserve(&cfg, excludes, 1, huge, err,
+                                        sizeof(err)) == -1,
+          "不可满足的空间需求拒绝写入");
+    CHECK(err[0] != '\0' &&
+              strstr(err, "karaoke.cache.err.no_space_fmt") != NULL,
+          "拒绝时给出可读 i18n 空间错误");
+    CHECK(access(dir_c, F_OK) == 0, "空间不足也不删保护段");
+
+    KaraokeCacheConfig bad;
+    memset(&bad, 0, sizeof(bad));
+    CHECK(karaoke_cache_segment_reserve(&bad, NULL, 0, 1, NULL, 0) == -1,
+          "非法 cfg 的预检拒绝");
+}
+
 int main(void)
 {
     char root[] = "/tmp/tm-karaoke-cache-XXXXXX";
@@ -503,6 +743,10 @@ int main(void)
     test_partial_pair(cache_root, tdir);
     test_lru_and_cleanup(cache_root, tdir);
     test_remove_skips_inflight(cache_root, tdir);
+    test_segment_budget_config();
+    test_segment_usage_and_evict(cache_root);
+    test_segment_space_check(cache_root);
+    test_segment_reserve(cache_root);
 
     char cmd[KARAOKE_CACHE_PATH_CAP * 2 + 32];
     snprintf(cmd, sizeof(cmd), "rm -rf %s %s", root_dir, tdir);

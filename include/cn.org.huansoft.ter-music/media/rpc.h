@@ -132,6 +132,15 @@ const char *rpc_method_at(int index);
 const char *rpc_methods_json(void);
 const char *rpc_core_json(void);   /* Info.GetInfo 的 core 字段 */
 
+/* 会话状态查询（定义于 session.c；无 D-Bus 构建返回 0/""）。
+ * rpc_common.c 的 Info 快照与 cli/daemon.c 的看门狗在两种构建里都会调用，
+ * 所以原型必须放在 HAVE_DBUS guard 之外：否则无 D-Bus 构建只有隐式声明，
+ * GCC 14（debian:13 等）会直接报错，GCC 13 也会把 const char* 当 int 截断。 */
+int rpc_session_has_primary_name(void);
+const char *rpc_session_bus_name(void);
+int rpc_frontend_count(void);            /* 当前在线前端数 */
+int rpc_frontend_ever_attached(void);    /* 是否曾有前端接入（看门狗用） */
+
 #ifdef HAVE_DBUS
 
 /* ── 核心侧播放快照 ─────────────────────────────────────────────────
@@ -159,8 +168,6 @@ typedef struct {
 /* ── 会话访问器（定义于 session.c） ─────────────────────────────── */
 DBusConnection *rpc_session_connection(void);  /* 未激活时为 NULL */
 int rpc_session_active(void);
-int rpc_session_has_primary_name(void);
-const char *rpc_session_bus_name(void);
 
 /* ── 共享发送 / 错误 / 回复（定义于 rpc_common.c） ───────────────── */
 void rpc_send(DBusMessage *message);           /* 发送并 unref；未激活时仅 unref */
@@ -215,8 +222,6 @@ const char *rpc_control_introspection(void);
 
 /* 前端可见的状态/错误广播（Control.StatusMessage / Control.Error） */
 void rpc_control_tick(void);       /* 清理超时未心跳的前端登记 */
-int rpc_frontend_count(void);      /* 当前在线前端数 */
-int rpc_frontend_ever_attached(void);   /* 是否曾有前端接入（看门狗用） */
 void rpc_frontend_reset_registry(void); /* 关闭 D-Bus 时清空注册表 */
 void rpc_control_emit_status(unsigned long long seq, const char *message);
 void rpc_control_emit_error(const char *source, const char *name, const char *message);
