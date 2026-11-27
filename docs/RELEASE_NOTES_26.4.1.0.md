@@ -25,8 +25,10 @@ DEB/RPM source packages and debuginfo packages are optional and are only produce
 `--with-source` / `--with-debuginfo`.
 
 All packages install real files under `/opt/apps/cn.org.huansoft.ter-music/files` and only six
-relative symlinks under `/usr` (`/usr/bin/ter-music`, the desktop file and four icons); the
-AppImage uses the same layout inside its `AppDir`.
+symlinks under `/usr` (`/usr/bin/ter-music`, the desktop file and four icons). The DEB package
+uses absolute targets because `dh_link` links across `/opt` and `/usr` as Debian policy
+requires, while the RPMs, the AUR package and the AppImage use relative links; the AppImage
+uses the same layout inside its `AppDir`.
 
 ### Linyaps UAB is deferred
 
