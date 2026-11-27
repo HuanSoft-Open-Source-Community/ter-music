@@ -43,6 +43,33 @@
 - 构建使用工作树（包含未提交修改），不依赖 `git archive` 或 tag。
 - 所有脚本只支持 `amd64`/`x86_64`。
 
+### 安装布局（/opt/apps）
+
+五种包（deb/rpm/aur/appimage/linyaps）统一把实体文件装到 `/opt/apps/cn.org.huansoft.ter-music/files/{bin,share,...}`，`/usr` 下只放 6 条符号链接：
+
+| 包内 `/usr` 路径 | 指向（相对） |
+| --- | --- |
+| `usr/bin/ter-music` | `../../opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music` |
+| `usr/share/applications/ter-music.desktop` | `../../../opt/apps/cn.org.huansoft.ter-music/files/share/applications/ter-music.desktop` |
+| `usr/share/icons/hicolor/{32x32,48x48,128x128}/apps/ter-music.png` | `../../../../../../opt/apps/cn.org.huansoft.ter-music/files/share/icons/hicolor/<size>/apps/ter-music.png` |
+| `usr/share/icons/hicolor/scalable/apps/ter-music.svg` | `../../../../../../opt/apps/cn.org.huansoft.ter-music/files/share/icons/hicolor/scalable/apps/ter-music.svg` |
+
+- CMake 在**未显式**传 `-DCMAKE_INSTALL_PREFIX` 时默认使用该前缀（Linyaps 规范）；显式传入（如 `/usr`）一律尊重。
+- deb：`debian/links` 交给 `dh_link`（绝对源 → 相对链接，卸载只删链接）；rpm：`%install` 用 `ln -sfn`，`%files` 同时拥有实体与 `/usr` 链接；AUR：`package()` 用 `cmake --install` + `ln -sfn`；AppImage：AppDir 内同布局，`AppDir/usr` 全为相对链接；linyaps：原 `${PREFIX}` 即 files/ 布局。
+- `scripts/test/package-layout-check.sh` 与 `scripts/test/check-package-identity.sh` 校验五条链的前缀、链接目标、模型常量与“`/usr` 无实体文件”一致性。
+
+### 内置消音模型（构建期下载 / 校验 / 注入）
+
+消音模型是构建期注入的数据文件，不从源码编译：
+
+- 缓存：`.tmp/models/UVR_MDXNET_3_9662.onnx`（`TER_MUSIC_MODEL_CACHE_DIR` / `TER_MUSIC_MODEL_URL` 可覆盖，供离线镜像或测试）；命中且大小 `29704436` B、SHA-256 `e02220e8…aadc` 才复用。
+- 下载：`aria2c` 优先（构建镜像内已装），失败或缺失回退 `curl`/`wget`；写 `${cache}.part.$$`，校验通过后原子改名；坏缓存先丢弃，下载内容错误（大小或 SHA-256 不符）拒绝且不留 `.part`；网络失败给出可读错误并返回非 0；`flock` 串行化并发构建。
+- 注入：`cmake -DTER_MUSIC_BUNDLED_MODEL=<onnx>`；CMake 再次校验存在性、大小与整文件 SHA-256，不符直接 `FATAL_ERROR`，通过后安装为 `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`（重命名为小写），并安装 `resources/models/NOTICE.md`。
+- 五条链：`scripts/build/build-{deb,rpm,aur,appimage,linyaps}.sh` 均先 `tm_ensure_model`；`debian/rules`（env 优先，源码树 `.tm-bundled-model/` 回退，缺模型 `$(error)`）、rpm spec、`PKGBUILD`（`source` + `sha256sums`）、`build-appimage.sh`、`linglong/linglong.yaml.in` 各自传参。
+- 未注入时 CMake 只 WARNING、不装占位模型：源码构建的 `make install` 产物不含模型，运行期提示“内置模型缺失”并播原声。
+- `*.onnx` 与 `/.tmp/models/` 均在 `.gitignore`；`aria2` 只在构建镜像里，不新增运行时依赖。
+- deb/rpm 的源码包会包含 staging 里的 `.tm-bundled-model/`（体积约 +28 MB），无外部缓存也能重建。
+
 ## 2. DEB（Debian 10 容器）
 
 ```bash
@@ -66,6 +93,8 @@
 - 二进制：`build/deb/amd64/cn.org.huansoft.ter-music_<V>-1_amd64.deb`
 - 源码：`build/deb/source/`（仅 `--with-source`）
 - 调试：`build/deb/amd64/*-dbgsym_*.deb`（仅 `--with-debuginfo`）
+
+安装布局：实体在 `/opt/apps/cn.org.huansoft.ter-music/files`，`/usr` 仅 `debian/links` 的 6 条相对链接；模型由 `debian/rules` 经 `TER_MUSIC_BUNDLED_MODEL`（源码树 `.tm-bundled-model/` 回退）注入并装入 `share/ter-music/models/`，缺模型直接 `$(error)` 拒绝出坏包。`build-deb.sh` 在 `dpkg-buildpackage` 后额外用 `dpkg-deb -c` 与解包断言校验 opt 实体、`/usr` 全链接、模型大小/SHA-256、NOTICE/lang/help/layouts。
 
 ### 跨发行版兼容
 
@@ -118,6 +147,8 @@ TER_MUSIC_XML_DEBUG=1 ter-music help 2>&1 | grep libxml2
 - 源码：`build/rpm/el<N>/source/*.src.rpm`（仅 `--with-source`）
 - 调试：`build/rpm/el<N>/x86_64/*-debuginfo-*.rpm`、`*-debugsource-*.rpm`（仅 `--with-debuginfo`）
 
+安装布局：同 §1，`%install` 建 6 条相对链接，`%files` 同时收录 `/opt/apps/.../files` 实体与 `/usr` 链接；模型随源 tarball 进 `rpmbuild`，`%build` 传 `-DTER_MUSIC_BUNDLED_MODEL`（缺文件失败）。`build-rpm.sh` 产出后用 `rpm -qpl` / `rpm -qp --queryformat` 断言 opt 实体、6 个 `/usr` 路径、模型大小与 `/usr/bin/ter-music` 必须是符号链接。
+
 spec 位于 `rpm/cn.org.huansoft.ter-music.spec`。libxml2 同样由运行期 `dlopen` 加载，因此 spec 显式声明 `Requires: libxml2`。
 
 ## 4. AppImage（Debian 10 容器）
@@ -127,8 +158,9 @@ spec 位于 `rpm/cn.org.huansoft.ter-music.spec`。libxml2 同样由运行期 `d
 ```
 
 - 在 Debian 10（glibc 2.28）中构建，产物为 `build/appimage/x86_64/ter-music-<V>-x86_64.AppImage`。
-- 仅 FFmpeg 静态；其余动态库（包括 `libxml2.so.2` 及其依赖）复制进 `AppDir/usr/lib`。
-- `AppRun` 设置 `LD_LIBRARY_PATH`，因此运行期 `dlopen("libxml2.so.2")` 优先命中包内副本。
+- 内部布局与安装包一致：`AppDir/opt/apps/cn.org.huansoft.ter-music/files/...` 为实体，`AppDir/usr/{bin,share/applications,share/icons}` 全部是相对链接（`AppDir/usr` 无实体文件）；`AppRun` 从 `${HERE}/opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music` 启动。
+- 仅 FFmpeg 静态；其余动态库（包括 `libxml2.so.2` 及其依赖）复制进 `files/lib`，二进制以 `$ORIGIN/../lib` 的 RPATH 查找，`AppRun` 同时设置 `LD_LIBRARY_PATH`，因此运行期 `dlopen("libxml2.so.2")` 优先命中包内副本。
+- `AppRun` 另设 `XDG_DATA_HOME="${FILES}/share"`，使内置消音模型经只读回退命中包内 `files/share/ter-music/models/`；同时把用户原来的 `XDG_DATA_HOME`（或 `$HOME/.local/share`）追加进 `XDG_DATA_DIRS`，保持既有的数据目录查找行为。AppImage 场景下 `$XDG_DATA_HOME/ter-music` 里的旧用户模型不再被读取（包内模型优先）。
 - 镜像内工具链固定为：`/opt/appimagetool/squashfs-root/usr/bin/appimagetool` 与 `/opt/appimagetool/runtime-x86_64`；两者都由 `docker-build.sh` 从宿主缓存 `COPY` 进镜像，容器内不再联网下载。
 - 不再支持从 RPM 转换；portable 包已移除。
 
@@ -166,7 +198,7 @@ chmod +x build/appimage/x86_64/ter-music-*.AppImage
 - `build/linyaps/x86_64/cn.org.huansoft.ter-music_<V>_x86_64.uab`
 - `build/linyaps/x86_64/*_binary.layer`
 
-`linglong/linglong.yaml.in` 是模板；脚本会复制到 `.tmp` 工作目录、替换 `@VERSION@`/`@ARCH@` 后再调用 `ll-builder`。UAB 导出后会校验 `.note.uab.sig`。
+`linglong/linglong.yaml.in` 是模板；脚本会复制到 `.tmp` 工作目录、替换 `@VERSION@`/`@ARCH@` 后再调用 `ll-builder`。UAB 导出后会校验 `.note.uab.sig`。模型经 staging 源码树的 `bundled-model/` 注入（`ll-builder` 只拷贝源码目录，宿主绝对路径在构建容器内不可见）；`linglong.yaml.in` 在 `make install` 后自检 `share/ter-music/models/` 的模型、NOTICE、大小与 SHA-256，`build-linyaps.sh` 断言日志出现该自检通过标记。
 
 安装/验证：
 
@@ -185,7 +217,8 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 ```
 
 - 在 Arch 容器内以 `builder` 用户执行 `makepkg`，再用 root 执行 `pacman -U` 安装验收。
-- 本地验收使用 `--noextract` 直接使用暂存源码，不依赖网络或 git tag。
+- `PKGBUILD` 的 `source` 含模型官方 URL 与 `sha256sums`（正式 `makepkg` 会下载并校验），`build()` 传 `-DTER_MUSIC_BUNDLED_MODEL="$srcdir/$_model"`；`package()` 装 opt 实体 + 6 条相对链接。
+- 本地验收使用 `--noextract` 直接使用暂存源码，模型复用 `.tmp/models` 缓存，不依赖网络或 git tag。
 - `PKGBUILD` 的源码是固定 commit（`_commit=...`），不是 tag。
 - 构建后会检查仓库里的 `.SRCINFO` 是否与 `makepkg --printsrcinfo` 一致；不一致即失败。
 - 本轮**不投递 AUR、不创建 git tag**。
@@ -213,6 +246,8 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 
 镜像构建只 `COPY` 上述已校验文件，容器内不再联网下载；只有 `--rebuild-image` 才会重建镜像层。AppImage 固定用 `--comp zstd`：新版 type2 runtime 只内建 zlib/zstd 解压支持，用 xz 打包会解包失败。
 
+三个 Docker 镜像（`Dockerfile.debian10`/`.rpm`/`.aur`）都安装 `aria2` 作为构建期模型下载器；EL8+ 的 aria2 位于 EPEL，先装 `epel-release` 再装 aria2，失败仅告警并由 `tm_ensure_model` 回退 `curl`（镜像里已显式安装 curl）。`aria2` 不是运行时依赖。
+
 ## 8. 构建依赖
 
 Docker 类构建只要求宿主机有可用的 Docker：
@@ -223,6 +258,8 @@ Docker 类构建只要求宿主机有可用的 Docker：
 - AUR：Arch 镜像内带 base-devel、ffmpeg、ncurses、libxml2 等。
 
 Linyaps 不使用 Docker，要求宿主玲珑工具链。
+
+构建期模型下载另需 `aria2` 或 `curl`/`wget`（宿主直跑打包脚本时）；Docker 类构建已在镜像内备好，缺失时 `tm_ensure_model` 自动回退。
 
 构建依赖里有两点与远程音乐源直接相关：
 
@@ -277,6 +314,18 @@ dbus-run-session -- script -qefc \
 - `appearance-xdg-pty-e2e.py` 需在 `dbus-run-session` 内运行；脚本自己启动私有 dbus-daemon 与 `fake-xdg-portal.py` 提供 `org.freedesktop.portal.Settings`，不需要系统 portal。如果宿主当前的 D-Bus 会话里有真实 XDG portal 干扰回退场景，可在运行非 XDG 用例前 `env -u DBUS_SESSION_BUS_ADDRESS`。
 - 前置工具：`python3`（仅标准库）、`dbus-daemon`/`dbus-run-session`、util-linux 的 `script`。
 
+### 9.4 打包布局与模型检查
+
+```bash
+./scripts/test/package-layout-check.sh
+TM_LAYOUT_STATIC_ONLY=1 ./scripts/test/package-layout-check.sh   # 无构建工具时仅静态
+./scripts/test/check-package-identity.sh
+```
+
+- `package-layout-check.sh`：静态断言五条链的 `/opt/apps` 前缀、`/usr` 链接、模型常量与 `-DTER_MUSIC_BUNDLED_MODEL` 接线；本机有 CMake 时再从零 configure/build、`DESTDIR` 安装、按 `debian/links` 建链、`dpkg-deb` 组装/解包断言，并验证 `tm_ensure_model` 的缓存/下载/坏文件分支。
+- `check-package-identity.sh`：应用 ID 与版本跨包一致，以及五条链前缀、链接目标、`common.sh`/`CMakeLists.txt`/NOTICE 模型常量一致、`*.onnx` 未进 git、aria2 不是运行时依赖。
+- 需要 docker / `dpkg-buildpackage`(dh) / `rpmbuild` / `makepkg` / `ll-builder` / `mksquashfs` 的**真实包构建**不在该脚本内；`TM_LAYOUT_STATIC_ONLY=1` 会明确打印“未执行本地构建/DESTDIR 安装，不代表构建通过”。
+
 ## 10. 故障排除
 
 - **`libxml2 runtime not found`**：运行期既没有 `libxml2.so.2` 也没有 `libxml2.so.16`。安装对应发行版的 `libxml2`/`libxml2-16`。
@@ -287,4 +336,5 @@ dbus-run-session -- script -qefc \
 - **镜像源超时/404**：构建会打印具体 URL；归档镜像（Debian 10、EL7）使用阿里归档源属预期。
 - **AppImage 工具下载失败（`curl: (56)` / `Failed to download runtime file`）**：GitHub 不通或宿主缓存缺失。可手工把 `runtime-x86_64` 放进 `.cache/tools/`、把 `squashfs-tools-4.7.5.tar.gz` 放进 `.cache/sources/` 后重试。
 - **AppImage 解包失败（`--appimage-extract` 返回 1）**：runtime 不认该压缩算法；构建脚本已固定 `--comp zstd`，不要改回 xz。
+- **模型下载失败 / 校验失败**：`tm_ensure_model` 会打印 URL 与期望的大小/SHA-256；网络不通可手工把 `UVR_MDXNET_3_9662.onnx` 放进 `.tmp/models/` 后重试，坏文件会先被丢弃。`-DTER_MUSIC_BUNDLED_MODEL` 指向的文件不符时 CMake 直接 `FATAL_ERROR`，不会产出缺模型或带坏模型的包。
 - **EL7 报 `CURLOPT_XFERINFOFUNCTION` 未声明 / ncurses 字段缺失**：源码已按 libcurl < 7.32、ncurses 5.x 做条件编译兼容；报错说明构建用的不是最新源码。

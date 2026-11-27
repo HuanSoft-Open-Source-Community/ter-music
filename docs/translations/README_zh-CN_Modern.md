@@ -29,7 +29,7 @@ Ter-Music 在终端中播放本地与远程音乐。FFmpeg 解码，ncursesw 绘
 - MP3、WAV、FLAC、OGG、M4A、AAC、WMA、APE、OPUS、WavPack；FLAC/APE/WV 支持 CUE 分轨，自动识别 GBK、BIG5、Shift-JIS 编码。
 - 17 种播放模式（顺序、循环、随机，以及文件夹/专辑/艺术家范围），6 档倍速（0.75x–3x），1.0x 下预载下一曲以实现无缝衔接。
 - 10 段 ISO 均衡器（31 Hz–16 kHz，±12 dB），带预设和软限幅。
-- 卡拉 OK（消人声）：关、弱、全三档，在 200 Hz–5 kHz 内逐频点做中置抵消；仅立体声，启用时约 9 ms 算法延迟。
+- 卡拉 OK（消人声）：使用随包内置的 ONNX 模型（UVR-MDX-NET 3），分不启用 / 人声较弱 / 消除人声三档；`[卡拉OK]` 按钮与三档始终可用——没有功能开关，也没有模型选择；档位非“不启用”时，无缓存曲目的首次起播会等待首段伴奏（见[卡拉 OK](#卡拉-ok)）。
 - 内嵌或外部 LRC 歌词；时间戳允许时逐字高亮。
 
 **内容**
@@ -43,6 +43,7 @@ Ter-Music 在终端中播放本地与远程音乐。FFmpeg 解码，ncursesw 绘
 - 终端亮/暗自适应：自动探测终端背景（OSC 11、deepin-terminal 主题、XDG portal、COLORFGBG、TERM 提示），出厂配色与 7 个布局预设随亮/暗切换；在 设置 → 界面外观 中选择自动、亮色或暗色。
 - 专辑封面以彩色半块渲染；黑胶窗格显示旋转的封面圆标。
 - 键盘与鼠标操作；内置 `zh_CN`、`en_US`、`zh-PQ` 三种语言。
+- 统一文件/目录选择器：有图形会话时用桌面对话框（`zenity`/`kdialog`，优先经 XDG 桌面 portal），纯 TTY 则手输路径；打开文件夹、追加文件夹、语言包安装与默认音乐目录四处入口共用它。
 
 **集成**
 - CLI 与脱离终端的后台播放守护进程，可从任意终端控制。
@@ -59,7 +60,7 @@ AUR 配方已准备为 `cn.org.huansoft.ter-music`，但**尚未投递**。请�
 
 必需：CMake 3.10+、C99 编译器、pkg-config、ncursesw、FFmpeg 库（avcodec、avformat、avutil、avfilter、swresample、swscale）、libpng、libjpeg、libxml2、SQLite3、zlib 与 libcurl。libcurl 不是可选项：缺失时 CMake 会以明确错误终止构建。
 
-可选：PipeWire、PulseAudio、ALSA 输出；D-Bus（MPRIS/API）。SMB 远程源另外需要运行期的外部程序 `smbclient`（Samba 客户端）；缺少它仍可构建，SMB 连接会明确提示未安装。
+可选：PipeWire、PulseAudio、ALSA 输出；D-Bus（MPRIS/API）。SMB 远程源另外需要运行期的外部程序 `smbclient`（Samba 客户端）；缺少它仍可构建，SMB 连接会明确提示未安装。卡拉 OK 需要系统的 ONNX Runtime 共享库（`libonnxruntime`，运行期 `dlopen` 加载）；消音模型由打包构建随包内置（见[从源码构建](#从源码构建)与[卡拉 OK](#卡拉-ok)）。
 
 **Fedora / RHEL**
 
@@ -111,6 +112,17 @@ sudo make install   # 可选
 
 可执行文件为 `build/ter-music`（在构建目录内为 `./ter-music`）。本地产物：1 个 DEB（Debian 10–13 / Ubuntu 20.04–26.04）、4 个 RPM（EL7–10）、1 个 AppImage（glibc 2.28）、1 个 Linyaps UAB + layer；DEB/RPM 的源码包与调试包为可选项。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
 
+未显式传入 `-DCMAKE_INSTALL_PREFIX` 时，默认前缀是 Linyaps 布局 `/opt/apps/cn.org.huansoft.ter-music/files`，因此 `sudo make install` 会把程序装到 `/opt` 下（显式传入的前缀，例如 `/usr`，会被尊重）。发布包全部采用该布局；deb、rpm、AUR 与 AppImage 包只在 `/usr` 下添加符号链接（Linyaps 装在容器内）。见 [BUILD_GUIDE.md](../BUILD_GUIDE.md)。
+
+消音模型不从源码编译，而是构建期注入的数据文件。打包脚本会把它下载到 `.tmp/models/`（优先 `aria2c`，失败回退 `curl`/`wget`），校验大小与 SHA-256，坏文件直接拒绝。普通源码构建请显式传入已下载的文件：
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release \
+  -DTER_MUSIC_BUNDLED_MODEL=/path/to/UVR_MDXNET_3_9662.onnx ..
+```
+
+CMake 会校验该文件（29,704,436 字节，SHA-256 `e02220e8…aadc`），并安装为 `<前缀>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`，同时安装 `models/NOTICE.md`。不传该选项则不安装模型：播放器仍可启动，档位非“不启用”时会提示“内置模型缺失”并播放原声。模型从不在运行期下载，也绝不写入用户数据目录。
+
 ## 快速开始
 
 ```bash
@@ -120,6 +132,8 @@ ter-music -o ftp://host/music/   # 在 TUI 中打开远程目录
 ```
 
 TUI 需要真实终端，不要把输出重定向到管道。按 `O` 打开目录，`↑`/`↓` 选择，`Enter` 或 `Space` 播放，`q` 退出。
+
+打开文件夹（`O`）、追加文件夹（`I`）、在 `F7` 中添加语言包，以及“设置 → 默认路径”里的默认音乐目录，都走同一个选择器。有图形会话时打开 `zenity` 或 `kdialog`（`portal` 是“优先使用桌面对话框”的偏好；ter-music 没有自己实现 D-Bus `FileChooser` 客户端）；纯 TTY 下改为手输路径——空行取消，`~/` 会展开。`TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty` 可强制后端（未知值回退自动），auto 在没有 `DISPLAY`/`WAYLAND_DISPLAY` 时回退手输。取消，或选中的不是已存在的目录，都不会改动队列与配置。
 
 这样打开的远程 URL 只使用 URL 里携带的凭据。需要密码的服务器，请在 `F2` → 远程设备 里保存连接再打开目录，不要把 `user:password@` 写进 URL：URL 会留在 shell 历史和进程列表里。`ter-music play` 与 `ter-music daemon start --open` 会拒绝远程 URL，因为核心只播放本地路径。
 
@@ -163,7 +177,7 @@ TUI 需要真实终端，不要把输出重定向到管道。按 `O` 打开目�
 | `volume` | 查询或设置音量（0-100、+N、-N） |
 | `speed` | 查询或设置倍速（0.5-3.0） |
 | `mode` | 查询或设置播放模式（名称或 0-16） |
-| `karaoke` | 消人声档位（off、soft、full、0-2、cycle） |
+| `karaoke` | 卡拉 OK 档位（off、soft、full、0-2、cycle）；档位即开关，任何档位都会被接受 |
 | `queue` | 编辑队列（list、clear、shuffle、remove、append、insert） |
 | `config` | 读取或修改配置（get、set、reload、reset） |
 | `show` | 输出信息块 |
@@ -216,7 +230,80 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music daemon foreground
 
 倍速：0.75x、1.0x、1.25x、1.5x、2x、3x，保持音高（FFmpeg atempo）。均衡器：31 Hz–16 kHz 共 10 段，预设见“设置 → 均衡器”。
 
-消人声：关、弱、全三档，仅立体声生效。它在 200 Hz–5 kHz 内逐频点判断 side/mid 幅度比，抵消居中的相干内容——弱档残留约 -8 dB，全档彻底消除；声场展开的伴奏与声像硬偏一侧的瞬态保留，因此硬偏一侧的镲或军鼓不会再把居中的人声抵消放掉。单声道曲目原样直通。启用后处理流延迟为窗长减 1 个样本（44.1 kHz 下 383 个样本，约 8.7 ms；所有支持采样率均不超过 10 ms）；关档时抵消约 0.35 s 淡出后才恢复逐位直通。可从控制栏弹层、“设置 → 播放”、`ter-music karaoke` 或 `Control.SetKaraoke` 修改。
+卡拉 OK 基于内置模型：分不启用 / 人声较弱 / 消除人声三档，模型在后台线程里运行。没有功能开关，也没有模型选择；见[卡拉 OK](#卡拉-ok)了解内置模型、会话分段缓存与限制。
+
+## 卡拉 OK
+
+卡拉 OK（消人声）使用每个安装包都会装入的 ONNX 模型。没有功能开关，没有“启用卡拉 OK”步骤，也没有模型选择：控制窗格始终有 `[卡拉OK]` 按钮，设置 → 播放设置 只有三档（不启用、人声较弱、消除人声）。旧的逐频点中置抵消 DSP 已彻底删除——ONNX 模型是唯一的消人声路径。
+
+### 随包内置的模型
+
+每个安装包都会把模型装为 `<前缀>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`，并同时安装 `<前缀>/share/ter-music/models/NOTICE.md`（完整 MIT 声明）。核心就地使用它：运行期不下载、不复制到用户数据目录，也没有任何配置键用于选择模型。
+
+运行期定位顺序：
+
+1. `<前缀>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`——随包安装，优先使用；
+2. `$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx`（默认 `~/.local/share/ter-music/models/…`）——对早期版本手工安装模型的只读兼容；绝不复制、绝不写入。
+
+文件在首次使用时校验（大小 29,704,436 字节 + 整文件 SHA-256；结果在进程内缓存）。缺失时提示“内置模型缺失”；损坏时（大小或 SHA-256 不符）提示“内置模型校验失败”，不会静默改用另一位置。两种情况都不影响设置档位：播放继续原声，状态栏给出原因——原因明细是技术诊断串，可能为中文。修复文件后请重启播放器，因为校验结果按进程缓存。
+
+ONNX Runtime 共享库仍是外部依赖：`libonnxruntime.so.1.21`、`.so.1` 或 `.so`，通过 `dlopen` 加载；只用 CPU 执行后端。缺少运行库时分离失败并继续播原声，不会静默改用其它算法。
+
+源码构建只有传入 `-DTER_MUSIC_BUNDLED_MODEL=<文件>` 才会包含模型；不传则不安装模型，运行期会提示缺失（见[从源码构建](#从源码构建)）。发布包始终内置该模型。
+
+### 支持的模型
+
+只支持一个模型：**UVR-MDX-NET 3**。
+
+| | |
+| --- | --- |
+| 显示名 | UVR-MDX-NET 3 |
+| 安装文件名 | `uvr-mdxnet-3-9662.onnx`（上游文件名 `UVR_MDXNET_3_9662.onnx`） |
+| 官方 URL | <https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx> |
+| 大小 | 29,704,436 字节 |
+| SHA-256 | `e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc` |
+| 许可依据 | MIT，依据 Ultimate Vocal Remover GUI（UVR）项目 README：第三方使用其模型须署名 UVR 及其开发者；`TRvlvr/model_repo` 仓库本身没有独立的 LICENSE 文件 |
+
+模型要求的署名为：“Vocal separation model: UVR-MDX-NET 3, from Ultimate Vocal Remover GUI (UVR) by Anjok07, TRvlvr and contributors — MIT, used with credit.” ter-music 把未经改动的模型作为数据文件与本 GPL 应用一同分发，完整声明见 `models/NOTICE.md`；文件本身仍受 UVR 项目声明的 MIT 条款约束。
+
+### 三档与播放来源
+
+| 档位 | 播放来源 |
+| --- | --- |
+| 不启用 | 原曲 |
+| 人声较弱（soft） | 0.4 × 原曲混音 + 0.6 × 模型伴奏 |
+| 消除人声（full） | 仅模型伴奏 |
+
+单声道曲目不分离，继续按原声播放。档位保存在 `karaoke_mode`，可经控制栏弹层、设置 → 播放设置、`ter-music karaoke` 或 `Control.SetKaraoke` 修改；D-Bus 与 CLI 没有“功能未启用”的前置条件——0–2 一律接受（越界回 `false`），`GetKaraoke` 恒回当前档位。
+
+### 缓存与后台分离
+
+分离在播放核心的低优先级后台线程（nice 10）中进行，绝不在 UI 或播放线程里跑模型。档位非“不启用”时，30 分钟以内的立体声曲目若没有完整旧版缓存，会在当前会话里分离；全部段就绪后，同一会话内重播直接复用结果，不再跑模型；分离失败则下次起播重试。档位为“不启用”时不分离——档位即开关。播放中切到其它档位会立即为当前曲目请求分离，并在目标段就绪后自动按当前位置切换音源；位置保持连续，切换瞬间允许短暂停顿。
+
+- **会话分段缓存：** 伴奏写在 `/tmp/ter-music-karaoke-<uid>-<pid>/<模型 id>/<曲目哈希>/`（目录权限 0700）下，按 15 秒一段保存为 `segNNN.inst.flac`（full 档）与 `segNNN.soft.flac`（soft 档），每段最后写入 `segNNN.ready` 就绪标记，另有 `manifest.txt` 清单。一次分离同时产出两份 stem，两个档位共用这一次推理。
+- **生命周期：** 会话目录只在播放进程存活期间存在。正常退出时先停 worker，再删除整个目录；播放核心启动时会清理 `/tmp/ter-music-karaoke-<uid>-*` 中进程已不存在的残留目录（崩溃遗留）。这些分段不会跨重启保留，因此下次会话会重新分离该曲（除非命中旧版整曲缓存）。
+- **键：** 曲目真实路径、大小与修改时间，加上模型 id、模型 SHA-256、格式版本、stem 版本、overlap 与 soft 混合系数。移动文件或重新编码会得到新的键。
+- **旧版整曲缓存（只读，优先使用）：** 早期版本写在 `$XDG_CACHE_HOME/ter-music/karaoke/<模型 id>/<曲目哈希>/`（默认 `~/.cache/ter-music/karaoke/…`）下的完整 `inst.flac` + `soft.flac` + `meta.txt` 三元组仍会被读取。命中时直接从它起播，不写任何会话分段。缓存键包含当前 stem 版本，因此 stem 派生算法不同的早期构建所写缓存不会命中；这些目录原样保留，该曲改为在会话缓存里重新分离。启动时会清理该目录下残留的 `.part` 半成品；2048 MB 的 LRU 设置只针对这些整曲缓存，会话分段从不计入。
+- **未缓存曲目在非“不启用”档位的首次起播：** 播放会先等待首段伴奏就绪再起播——测试机上约 7–10 秒，硬上限 30 秒——状态栏显示准备进度。若首段没有等到（超时，或模型/缓存不可用等 worker 失败），则改为播放原声；单声道与超过 30 分钟不经等待、直接播原声；CUE 子曲目也不经等待，播原声或命中的旧版整曲缓存。若起播位置不为 0（恢复播放、改倍速），等待上限为 8 秒。
+- **档位为“不启用”时**播原声，不做任何分离。播放中选择档位会为当前曲目开始分离，并在当前段就绪后自动切换；状态栏先显示等待提示，切换完成后显示“已切换到…（等待 N 秒）”。
+- **播放过程中：** 下一段未就绪时，在段边界最多等待 8 秒，然后从该处起以原声播到曲终（只切换一次，不会曲中反复跳源）。seek 到未处理位置时会先请 worker 优先处理目标段并最多等待 8 秒；仍未就绪则从 seek 位置起以原声继续。worker 到达曲尾后会回填被 seek 跳过的段，只有全部段就绪才把清单标为完成。
+- **切换档位**时，会为当前曲目请求分离，并在目标段就绪后自动按当前位置切换音源——测试机上首次切换约 9–15 秒；在晚位置（例如播放到 120 秒）启用约 9 秒，因为 worker 会被要求优先处理当前段。已就绪段上的 Soft ↔ Full 互切是即时的（不到 1 秒），不会重跑模型。切换瞬间允许短暂停顿，位置保持连续；暂停中切档同样生效（在暂停位置换源，仍保持暂停）。若分离失败，或 30 秒内没有任何段就绪，则继续播原声，状态栏给出原因，可再次切档重试。恢复有界：段边界回退原声后，每次切档最多重新排队恢复 3 次；因此极端慢机可能一直保持原声——此时状态栏会说明仍在原声、可再次切档重试，绝不会谎报已经切换。
+- **预取：** 仅在 `seamless_preload=1` 时，当前曲目伴奏就绪后（且档位不是“不启用”），才会在后台分离队列下一曲；`seamless_preload=0` 不预取。CUE 子曲目从不预取。
+- 分离固定使用 0.25 的 overlap；超过 30 分钟的曲目拒绝分离（状态栏提示失败并继续原声）。CUE 子曲目从不使用会话分段源：播放原声，或命中同一物理文件的旧版整曲缓存；因此在 CUE 子曲目上切档时，若没有匹配的旧版整曲对，会保持原声且不重启播放；命中旧版整曲对时仍立即换源；两种情况都不会谎报切换。内置模型文件属于安装内容；早期版本留下的整曲缓存会保留，要回收空间可在退出播放器后删除 `~/.cache/ter-music/karaoke/`（或某个模型的子目录）——`/tmp` 会话目录在退出时已删除。
+
+### 与歌词无关
+
+不依赖歌词，也没有歌词门控：带时间轴 LRC、纯文本歌词、内嵌歌词或完全没有歌词的曲目走完全相同的模型路径。
+
+### 限制
+
+- UVR-MDX-NET 3 是中低尺寸模型，不是完美分离：伴奏里可能残留人声，与人声相近的乐器或和声也可能被削弱。`soft` 档刻意保留 40% 原曲，是折中方案，不是干净的纯伴奏。
+- 分离吃 CPU，成功时每曲每会话只跑一次模型：耗时取决于模型、机器与曲目长度；在 6 核 Ryzen 5 4500U 上，30 秒曲目端到端约 11 秒（每个约 6 秒的块约 1.1–1.5 秒），3 分钟曲目约 1 分钟；更弱的机器更慢。worker 的 ONNX 会话使核心峰值内存约 0.8 GiB（实测 795 MiB），分离结束后回落。
+- 会话分段约占每分钟音频 15.5 MB（在 44.1 kHz 立体声曲目上实测；3 分钟曲目约 46 MB）。这比旧版整曲对（实测约 12 MB/分钟）高约 30%，因为每个 15 秒段都带独立的 FLAC 帧头与 ready/manifest 文件。播放器退出时该目录即被删除。
+- 单声道曲目、超过 30 分钟的曲目不分离、按原声播放；CUE 子曲目不使用会话分段源。分离失败不会中断播放，状态栏会给出原因；该原因文本是分离器的技术诊断串，未做本地化，英文界面里也可能出现中文。
+- 只验证了 ONNX Runtime 1.21 的 CPU 执行后端；其它版本可能能加载，但不保证。DNNL 等其它执行后端刻意不启用。
+- 档位非“不启用”时若 ONNX Runtime 库或已安装模型变得不可用，分离会失败并继续播原声；界面不会静默改用其它算法。
+- “karaoke”在本项目里还指一个布局预设和逐字歌词高亮，二者都与本功能无关。
 
 ## 远程音乐源
 
@@ -298,6 +385,8 @@ help/          用户快速上手文本
 
 远程曲目缓存在 `$XDG_CACHE_HOME/ter-music/remote/`（默认 `~/.cache/ter-music/remote/`），按连接与远端路径镜像存放；同名 `.lrc` 会随曲目缓存。缓存上限与清理入口在“设置 → 远程设备”。封面缓存在 `/tmp/ter-music-cover-*.jpg`，退出时清理。
 
+卡拉 OK 模型随安装包装在 `<前缀>/share/ter-music/models/`（`uvr-mdxnet-3-9662.onnx` 与 `NOTICE.md`），就地使用。`$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx`（默认 `~/.local/share/ter-music/models/…`）只是对早期版本手工安装模型的只读回退，绝不写入。旧版整曲伴奏缓存（若存在）位于 `$XDG_CACHE_HOME/ter-music/karaoke/<模型 id>/<曲目哈希>/`（默认 `~/.cache/ter-music/karaoke/`），只读，2048 MB 的 LRU 设置只覆盖它们。会话分段只写 `/tmp/ter-music-karaoke-<uid>-<pid>/`，进程退出即删除；见[卡拉 OK](#卡拉-ok)。
+
 常用 `config.xml` 键：
 
 | 键 | 取值 |
@@ -308,11 +397,13 @@ help/          用户快速上手文本
 | `default_playback_speed` | 0.75-3.0 |
 | `default_play_mode` | 0-16 |
 | `ui_language` | `zh_CN`、`en_US`、`zh-PQ` 或已安装的语言包 ID |
-| `karaoke_mode` | 0 关，1 弱，2 全 |
+| `karaoke_mode` | 0 不启用，1 人声较弱，2 消除人声；默认 0；档位即开关 |
 | `appearance_mode` | 0 自动（跟随终端），1 亮色，2 暗色 |
 | `resume_last_playback` | 恢复上次曲目与位置 |
 | `stop_core_on_exit` | 1 退出时停止核心，0 继续播放 |
 | `core_exit_when_no_frontend` | 最后一个前端离开 10 秒后退出核心 |
+
+配置契约版本为 **12**。版本 12 **删除**了 `preferences.karaoke_feature` 与 `preferences.karaoke_model`：模型随包内置，不再有功能开关与模型选择。v10 或 v11 的 `config.xml` 会在新核心首次启动时迁移：文件以 `version="12"` 整份重写（v11 文件中的两个元素也会消失），其余键（包括 `karaoke_mode`、主题、路径、均衡器与按键绑定）原样保留；第二次启动时文件字节级不变。`config get karaoke_feature` 与 `config set karaoke_feature …` 现在按未知键失败，`Config.Set` 会整体拒绝仍含这两个键的补丁。不支持降级：v11 构建读取 v12 文件时（版本属性按整数解析，其自身的迁移块不命中）把两个键视为缺失——卡拉 OK 为不启用——并在下次保存时把版本属性写回 11。升级瞬间若新前端遇到仍在运行的 v11 核心，配置镜像会被整体拒绝；重启核心（`ter-music daemon restart`）或重新登录即可自愈。
 
 只有改动过的按键会写入 `config.xml`：
 
@@ -339,7 +430,7 @@ help/          用户快速上手文本
 | `cn.org.huansoft.ter_music.Config` | 配置读写 |
 | `cn.org.huansoft.ter_music.Lyrics` | 歌词行与逐字时间 |
 
-`Info.GetInfo` 返回 `core.api_version`（当前 7）。详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md) 与 [API_LYRICS_en_US.md](../API_LYRICS_en_US.md)。
+`Info.GetInfo` 返回 `core.api_version`（当前 7）。详见 [API_DBUS_en_US.md](../API_DBUS_en_US.md) 与 [API_LYRICS_en_US.md](../API_LYRICS_en_US.md)。`Control.SetKaraoke` 无条件接受 0–2 档（档位即开关，越界回 `false`），`Control.GetKaraoke` 恒回当前档位，`ter-music karaoke` 读取或修改它——见[卡拉 OK](#卡拉-ok)。
 
 ## 开发
 
@@ -381,6 +472,9 @@ CI 运行四道门禁：
 - **从目录历史重新打开远程 URL 时认证失败：** 入库的 URL 已脱敏（设计上不含密码）；需要密码的服务器请使用远程设备页里保存的连接。
 - **CUE 分轨不显示：** `.cue` 必须与音频文件同名；文字乱码时在设置中改 CUE 编码。
 - **曲库为空：** 按 `M` 打开曲库浏览器并扫描或重新扫描；数据库是配置目录下的 `library.db`。
+- **状态栏提示内置模型不可用：** 安装包应已把模型装到 `<前缀>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`。源码构建未传 `-DTER_MUSIC_BUNDLED_MODEL` 时不安装模型；文件损坏则大小/SHA-256 校验不通过。系统的 ONNX Runtime 库（`libonnxruntime.so.1.21`、`.so.1` 或 `.so`）也必须已安装。状态栏会说明原因（缺失、校验失败、运行库不可用），档位仍可设置，播放继续原声。修复文件或运行库后重启播放器——校验结果按进程缓存。不会回退到任何旧的内置算法。
+- **首次起播会等待，或回退原声：** 档位非“不启用”且曲目没有缓存时，会先等首段伴奏就绪（约 7–10 秒，总计最多 30 秒；起播位置不为 0 时最多 8 秒），状态栏显示准备进度。等待超时或分离失败（模型/缓存不可用）则按原声播放；单声道、超过 30 分钟与 CUE 子曲目不经等待、直接播原声（CUE 命中旧版整曲缓存时仍用缓存）。
+- **卡拉 OK 分离总是失败：** 超过 30 分钟的曲目会拒绝分离，单声道曲目与 CUE 子曲目不分离，内置模型缺失或损坏、或缺少 ONNX Runtime 也会失败；状态栏会说明原因。见[卡拉 OK](#卡拉-ok)。
 
 ## 许可
 
@@ -396,3 +490,4 @@ Ter-Music 只是播放工具，不提供、不托管、不分发音频内容；�
 
 - **@guanzi008**：Debian 打包、MPRIS、UTF-8 输入、鼠标与界面修复。
 - **@Zeta**：Arch Linux 打包。
+- **Ultimate Vocal Remover GUI（UVR）** 及其作者 Anjok07、TRvlvr 与贡献者：ter-music 把未经改动的 UVR-MDX-NET 3 人声分离模型作为数据文件随包分发，按[卡拉 OK](#卡拉-ok)所述的 MIT 条款署名使用。

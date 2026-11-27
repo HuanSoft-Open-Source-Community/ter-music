@@ -79,13 +79,19 @@ talks to it. CLI subcommands are thin clients of exactly these interfaces.
   Version 5 added the lyric timing fields listed under
   `cn.org.huansoft.ter_music.Lyrics` (`end`, `timing`, `char_total`, `chars`,
   `char_sung`); they were additive, so version 4 clients kept working unchanged.
-  Version 6 added karaoke (centre-vocal removal): `Control.SetKaraoke` /
-  `Control.GetKaraoke` and the `preferences.karaoke_mode` config key. This is
-  additive as well — a version 5 client never calls those methods, and a version
-  6 front end talking to a version 5 core gets `UnknownMethod`, logs it and shows
-  the level as *Off* (the older core has no such key, so *Off* is also what it
-  actually does). Neither `Config.Set` patches nor the required-method list
-  changed, so attaching to an older core still succeeds.
+  Version 6 added karaoke control: `Control.SetKaraoke` / `Control.GetKaraoke`
+  and the `preferences.karaoke_mode` config key. This is additive as well — a
+  version 5 client never calls those methods, and a version 6 front end talking
+  to a version 5 core gets `UnknownMethod`, logs it and shows the level as
+  *Off* (the older core has no such key, so *Off* is also what it actually
+  does). Since configuration contract version 11 the same methods and key
+  select an **ONNX-model** feature; contract version 12 makes the model bundled
+  and removes the feature switch: `preferences.karaoke_feature` and
+  `preferences.karaoke_model` no longer exist, `SetKaraoke` accepts every level
+  0–2 with no precondition, and `GetKaraoke` always returns the current level
+  (see the Control table and the Config notes). Interface names, signatures
+  and `api_version` 7 are unchanged. Neither `Config.Set` patches nor the
+  required-method list changed, so attaching to an older core still succeeds.
   Version 4 handed **all content** to the front end: the `Playlist`, `Library`,
   `Favorites`, `History` and `DirHistory` interfaces, the background scan job and
   `Control.OpenPath`/`Control.PlayIndex`/`Control.GetPlaylist`/`Queue.Rebuild`
@@ -301,7 +307,7 @@ Transport methods return a boolean (`true` when the request was accepted).
 | `SetVolume` / `GetVolume` | `(i percent) -> b` / `() -> i` | Volume (0-100) |
 | `SetSpeed` / `GetSpeed` | `(d rate) -> b` / `() -> d` | Playback speed (0.5-3.0) |
 | `SetPlayMode` / `GetPlayMode` / `GetPlayModeName` | `(i mode) -> b` / `() -> i` / `() -> s` | Play mode (0-16, stable name, localized name) |
-| `SetKaraoke` / `GetKaraoke` | `(i mode) -> b` / `() -> i` | Karaoke centre-vocal removal level (0 off, 1 soft, 2 full); since `api_version` 6. Out-of-range `mode` replies `false`, it is not an error. `SetKaraoke` returns after publishing the request to the playback thread, and `GetKaraoke` reports that **requested** level immediately — the DSP consumes it at the head of the next write batch and rides a 30 ms time constant. Only stereo input is processed (mono passes through). The gate works per frequency bin inside 200 Hz–5 kHz: soft leaves centred coherent content about 8 dB down, full removes it, pan-spread accompaniment and hard-panned transients are kept, and a hard-panned transient does not release the cancellation of the centred vocal. Switching soft↔full only changes the target level and does not restart the stream. Turning the level off fades the cancellation out for about 350 ms, then a cross-fade of the window length minus one sample (383 samples at 44.1/48 kHz, ≈8.7 ms at 44.1 kHz) returns the output to bit-exact passthrough; while enabled, the processed stream is delayed by that same amount (at most 10 ms at every supported rate). The effect reaches the output after the bounded PipeWire backlog (about 0.4–1.2 s worst case at the default quantum); the fades above run on top of that. The value is also mirrored into `preferences.karaoke_mode` |
+| `SetKaraoke` / `GetKaraoke` | `(i mode) -> b` / `() -> i` | Karaoke level (0 off, 1 soft, 2 full); since `api_version` 6. Since configuration contract 12 the level is the switch: the model is bundled with the package, there is no feature switch and no model selection, `SetKaraoke` accepts every mode in 0–2 with no precondition, `GetKaraoke` always returns the current level, and an out-of-range `mode` replies `false` (an ordinary `false`, not an error). `off` plays the original, `soft` plays 0.4×original + 0.6×model accompaniment and `full` plays the model accompaniment only; mono tracks, tracks over 30 minutes and CUE sub-tracks are not separated into session segments; mono tracks and tracks over 30 minutes play the original, and CUE sub-tracks use the original or a legacy whole-track cache. The value is mirrored into `preferences.karaoke_mode` and persisted. Playback uses a per-process session segment cache under `/tmp/ter-music-karaoke-<uid>-<pid>/` (mode 0700), removed when the process exits; a complete legacy whole-track pair under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` is read-only and takes priority. At a level other than `off`, the first play of a track with neither cache waits for the first accompaniment segment (about 7–10 s, hard cap 30 s; 8 s when playback starts at a non-zero position) and falls back to the original on timeout or failure. At `off` nothing is separated; choosing a level while a track plays requests separation for that track and switches the source automatically at the current position once the target segment is ready (about 9–15 s for the first switch; about 9 s when enabling at a late position such as 120 s, because the worker is told to prioritise the current segment; a brief pause at the switch is expected and the position is continuous; this also completes while playback is paused, keeping the paused position and state). Soft ↔ Full on already-ready segments switches immediately without running the model again. If separation fails or nothing becomes ready within 30 s, the original keeps playing and the status line (`Control.StatusMessage`) carries a readable reason (switching again retries); after a fallback the core re-acquires the accompaniment at most 3 times per level change, and when it stays on the original the status line says so instead of claiming a switch. CUE sub-tracks never use the session segments: without a matching legacy cache a level change there keeps the original and does not restart playback, while a matching legacy whole-track pair switches immediately; neither case reports a switch. A segment that is not ready is waited for at most 8 s at a segment boundary; a seek asks the worker to prioritise the target segment and waits up to 8 s before falling back to the original from the seek position; after the end of the track the worker backfills segments skipped by seeks and marks the manifest complete only when every segment is ready. With `seamless_preload=1` the next queue entry is separated in the background once the current track is ready and the level is not `off`; `0` disables that prefetch. Separation uses a fixed 0.25 overlap and is refused for tracks over 30 minutes. The API surface is unchanged from version 6; the model is installed by the package as `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx` (`$XDG_DATA_HOME/ter-music/models/<model-id>.onnx` is a read-only fallback for models installed by earlier builds), and a missing or damaged model does not reject a level — separation fails, the original keeps playing and the status line names the reason. The ONNX Runtime remains an external dependency (`libonnxruntime` loaded with `dlopen`, CPU execution provider only) |
 | `ReloadConfig` | `() -> b` | Re-read `config.xml` (same as `SIGHUP`); `Config.Reload` is the newer equivalent |
 | `Quit` | `() -> b` | Gracefully stop this instance (persists the playback session) |
 | `Attach` | `(s role) -> s` | Register this front end. `role` is `tui`, `cli` or `app`. Returns `{"token":"…","role":"…","api_version":7,"ping_interval_ms":2000,"frontends":n}` |
@@ -430,11 +436,12 @@ one of them.
 `GetAll` mirrors `config.xml`, using the same section and key names:
 
 ```json
-{ "version": 10,
+{ "version": 12,
   "paths": { "default_startup_path": "…", "last_opened_path": "…" },
   "theme": { "playlist_fg": 7, "playlist_bg": -1, "…": 0 },
   "preferences": { "volume_percent": 100, "default_playback_speed": 1.00,
                    "stop_core_on_exit": 1, "appearance_mode": 0,
+                   "karaoke_mode": 0,
                    "info_preset": 0, "info_fields": 2047, "…": 0 },
   "equalizer": { "enabled": 0, "preamp": 0, "bands": [0,0,0,0,0,0,0,0,0,0] },
   "keybindings": { "track.next": "]" } }
@@ -445,8 +452,8 @@ Notes:
 - Numeric values outside their range are clamped, not rejected
   (`volume_percent: 999` becomes `100`).
 - `GetAll`'s `version` is the configuration contract version
-  (`CONFIG_CURRENT_VERSION`, currently `10`). The `version` attribute of
-  `config.xml` is now written with that same number (`"10"`); it used to read
+  (`CONFIG_CURRENT_VERSION`, currently `12`). The `version` attribute of
+  `config.xml` is now written with that same number (`"12"`); it used to read
   `2.2`. Historical `2.2` files still load — the attribute parses as `2`, which
   is above the minimum supported version — and the first run after an upgrade
   migrates them and rewrites the attribute to the number. Sending `version`
@@ -476,26 +483,48 @@ Notes:
   controller cannot assume that setting the global mode changes a specific TUI.
   Migrating a v9 file only adds the key (default `0`) and bumps the version —
   theme values are never rewritten.
+- `preferences.karaoke_mode` (integer `0` off, `1` soft, `2` full; default `0`)
+  was added by contract version 11. Contract version **12 removed**
+  `preferences.karaoke_feature` and `preferences.karaoke_model`: the model is
+  bundled with the package, so the level alone selects the feature and no key
+  gates or names the model. `Config.Set` only stores and validates
+  `karaoke_mode`; it does **not** check that the model file or the ONNX Runtime
+  library exists — a missing or damaged model leaves the level valid and only
+  makes separation fail (the original keeps playing and the status line names
+  the reason). Migrating a v10 or v11 file bumps the version and rewrites the
+  file once: any occurrence of both elements disappears (v10 never had them),
+  `karaoke_mode` and every other key keep their values, and a second start
+  leaves the file byte-identical. A patch that
+  still contains `karaoke_feature` or `karaoke_model` is rejected as a whole
+  (`Error.Unsupported`, nothing changes), and `config get karaoke_feature`
+  fails as an unknown key.
 - The `info_fields` mask also drives the TUI info pane, but only for the bits
   it can display (state/mode/title/artist/album/queue/format);
   `index`/`path`/`volume`/`speed` remain CLI/D-Bus-only. `info_show_cover`
   toggles both the info-pane cover and the CLI text cover; the TUI pane also
   requires the playback `show_album_cover` master switch.
   `info_cover_cols/rows/charset` only affect CLI/D-Bus text covers.
-  **Downgrade:** two cases must be kept apart. A build from **just before
-  contract v10** (the latest v9 build) reads the attribute with the same integer
-  parse, so `version="10"` loads without error and its own migration blocks
-  (`file_version < 4`, `< 7`, `< 8`, `< 9`) correctly stay inactive. That build
-  still understands `<keybindings>` and keeps explicit overrides; it only lacks
-  `<appearance_mode>`, which it ignores and drops on its next save (the file is
-  rewritten with attribute `9`). Theme values and layouts are never touched.
+- **Downgrade:** the version attribute is parsed as an integer and each build
+  only runs its own `file_version < N` migration blocks. A build from just
+  before contract v12 (the latest v11 build) therefore reads a `version="12"`
+  file without error: its blocks (`< 4`, `< 7`, `< 8`, `< 9`, `< 10`, `< 11`)
+  stay inactive, the two keys it still knows are simply absent (so karaoke
+  reads as *off*), and its next save rewrites the attribute as `11`. A build
+  from just before v11 (the latest v10 build) similarly reads the file, lacks
+  `karaoke_feature`/`karaoke_model` entirely, and rewrites the attribute as
+  `10`. Theme values,
+  layouts and key bindings are never rewritten by these reads. Moving back to
+  the current build re-applies the one-shot defaults (`stop_core_on_exit` = `1`,
+  `appearance_mode` = `0`); a previously selected appearance mode has to be
+  chosen again, and karaoke returns at *Off* because the deleted keys are gone.
   A **pre-v9** build additionally lacks `<keybindings>`: it ignores the
   overrides and its next save drops them; builds from before v8 also lack
   `stop_core_on_exit` (they ignore it, exit by detaching, and write `2.2` back).
-  After moving back to the current build, the one-shot migrations re-apply the
-  defaults (`stop_core_on_exit` = `1`, `appearance_mode` = `0`); a previously
-  selected appearance mode has to be chosen again, while keybindings dropped by
-  a pre-v9 build stay at their built-in defaults.
+  During an upgrade the mixed-version window also matters in the other
+  direction: a new front end that meets a still-running v11 core has its
+  configuration mirror rejected as a whole (the old core returns the two
+  deleted keys), so restart the core (`ter-music daemon restart`) or log in
+  again to heal it.
 - `preferences.stop_core_on_exit` is a boolean that defaults to `1`. Contract
   version 8 added it: existing files below v8 are migrated once and receive the
   default `1`, flipping the upgrade-time behaviour from "the core keeps playing
@@ -662,11 +691,17 @@ scripts/test/rpc_client.py monitor 3                    # list signals seen
   `chars`, `char_sung`) additively, and version 6 added
   `Control.SetKaraoke`/`Control.GetKaraoke` plus `preferences.karaoke_mode`, also
   additively — a version 5 core answered those two methods with `UnknownMethod`
-  and never had the config key, so the level read as off. Version 7 then moved
-  the entire namespace to `cn.org.huansoft.ter_music.*`, which is breaking
-  rather than additive (see **Handshake** above). Version 3 had removed
-  `cn.org.huansoft.ter_music.Remote` and the `track.is_remote` field and made every
-  path argument local-only; version 2 added the `core` object and the
+  and never had the config key, so the level read as off. Config contract 11
+  later made karaoke an ONNX-model feature without changing signatures or
+  `api_version`; contract 12 then made the model bundled and removed the
+  `preferences.karaoke_feature`/`karaoke_model` gate, so `SetKaraoke` has no
+  precondition (out-of-range values still reply `false`) and `GetKaraoke`
+  always returns the current level — a relaxation, not a protocol change.
+  Version 7 then moved the entire namespace to `cn.org.huansoft.ter_music.*`,
+  which is breaking rather than additive (see **Handshake** above). Version 3
+  had removed `cn.org.huansoft.ter_music.Remote` and the `track.is_remote`
+  field and made every path argument local-only; version 2 added the `core`
+  object and the
   Playlist/Queue/Library/Favorites/History/DirHistory/Config interfaces.
 - The API shares the MPRIS lifecycle: it exists while the process owns the bus
   name and is torn down on shutdown.
