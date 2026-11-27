@@ -836,11 +836,23 @@ require_status_ok '正在 ?准 ?备 ?伴 ?奏|正在 ?后 ?台 ?分 ?离|Prepari
     "分离状态已提示（正在准备伴奏 N% / 后台分离）" \
     "未捕获到分离状态（RUNNING/进度均未出现）"
 # 分离期间：seek + 音量 + 倍速不应影响播放与 job
+# 说明（t12）：seek 的生效是异步的（core 收到 seek 后要等播放线程处理）。
+# 原断言固定 sleep 0.8s，在静态/高负载构建上会因“seek 已受理但位置尚未更新”
+# 假红；这里改为在 3s 窗口内轮询，既容忍调度延迟，又要求最终位置正确到区间
+# （10.5–18s），不会掩盖“seek 完全没生效”的真实回归。
 "$TM_BIN" seek 12 >/dev/null 2>&1
-sleep 0.8
-ps_="$(pos_ms)"
-[ "${ps_:-0}" -ge 10500 ] && [ "${ps_:-0}" -le 18000 ] && ok "分离期间 seek 生效（位置 ${ps_} ms）" \
-    || bad "分离期间 seek 异常（位置 $ps_）"
+ps_=""
+seek_ok=0
+for _ in $(seq 1 30); do
+    sleep 0.1
+    ps_="$(pos_ms)"
+    if [ "${ps_:-0}" -ge 10500 ] && [ "${ps_:-0}" -le 18000 ]; then
+        seek_ok=1
+        break
+    fi
+done
+[ "$seek_ok" = "1" ] && ok "分离期间 seek 生效（位置 ${ps_} ms，≤3s 内到位）" \
+    || bad "分离期间 seek 异常（3s 内位置 $ps_）"
 "$TM_BIN" volume 77 >/dev/null 2>&1
 [ "$(volume_pct)" = "77" ] && ok "分离期间音量可调（77%）" || bad "分离期间音量异常（$(volume_pct)）"
 dur_before="$(duration_ms)"
