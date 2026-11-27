@@ -2293,12 +2293,52 @@ static int write_jpeg_file(const char *path, const unsigned char *rgb_data,
     return 0;
 }
 
+/* 内嵌封面的图片格式判定：FFmpeg 的 image2/png_pipe/webp_pipe/bmp_pipe/gif
+ * demuxer 依赖文件名扩展名选格式；无扩展名临时文件会让 avformat_open_input
+ * 直接返回 AVERROR_INVALIDDATA（PNG/WebP/BMP/GIF 封面因此永远解不出）。
+ * 这里只根据固定 magic 选择临时文件后缀，绝不把用户输入拼进路径。
+ * 判定不出时返回 NULL，调用方保留无扩展名并用 av_probe_input_format 兜底。 */
+static const char *image_suffix_for_magic(const unsigned char *data, int size)
+{
+    if (!data || size <= 0) {
+        return NULL;
+    }
+    static const unsigned char png_magic[8] = {
+        0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a
+    };
+    if (size >= (int)sizeof(png_magic) &&
+        memcmp(data, png_magic, sizeof(png_magic)) == 0) {
+        return ".png";
+    }
+    if (size >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) {
+        return ".jpg";
+    }
+    if (size >= 6 &&
+        (memcmp(data, "GIF87a", 6) == 0 || memcmp(data, "GIF89a", 6) == 0)) {
+        return ".gif";
+    }
+    if (size >= 2 && data[0] == 'B' && data[1] == 'M') {
+        return ".bmp";
+    }
+    if (size >= 12 && memcmp(data, "RIFF", 4) == 0 &&
+        memcmp(data + 8, "WEBP", 4) == 0) {
+        return ".webp";
+    }
+    return NULL;
+}
+
 static int decode_image_to_jpeg(const unsigned char *data, int size,
                                 const char *output_path) {
+    if (!data || size <= 0 || !output_path) {
+        return -1;
+    }
     // 将原始数据写入临时文件，让 ffmpeg 自动探测真实格式（WebP/PNG/BMP/JPEG等）
+    const char *suffix = image_suffix_for_magic(data, size);
     char tmp_img[MAX_PATH_LEN];
-    snprintf(tmp_img, sizeof(tmp_img), "%sXXXXXX", ALBUM_COVER_TEMP_PREFIX);
-    int tmp_fd = mkstemp(tmp_img);
+    snprintf(tmp_img, sizeof(tmp_img), "%sXXXXXX%s", ALBUM_COVER_TEMP_PREFIX,
+             suffix ? suffix : "");
+    int tmp_fd = suffix ? mkstemps(tmp_img, (int)strlen(suffix))
+                        : mkstemp(tmp_img);
     if (tmp_fd < 0) return -1;
 
     int wrote = 0;
@@ -2311,10 +2351,31 @@ static int decode_image_to_jpeg(const unsigned char *data, int size,
 
     AVFormatContext *img_ctx = NULL;
     int ret = -1;
-    if (avformat_open_input(&img_ctx, tmp_img, NULL, NULL) != 0) {
+    const AVInputFormat *forced_format = NULL;
+    unsigned char *probe_buf = NULL;
+    if (!suffix) {
+        /* 无 magic：不猜扩展名，交给 libavformat 的 probe 决定格式。
+         * AVProbeData 的 buf 需要 AVPROBE_PADDING_SIZE 个零字节的尾部，
+         * 不能直接把 AVPacket 的 data 交出去（可能越界读）。 */
+        size_t probe_size = (size_t)size + AVPROBE_PADDING_SIZE;
+        probe_buf = malloc(probe_size);
+        if (probe_buf) {
+            memcpy(probe_buf, data, (size_t)size);
+            memset(probe_buf + size, 0, AVPROBE_PADDING_SIZE);
+            AVProbeData probe;
+            memset(&probe, 0, sizeof(probe));
+            probe.filename = tmp_img;
+            probe.buf = probe_buf;
+            probe.buf_size = size;
+            forced_format = av_probe_input_format(&probe, 1);
+        }
+    }
+    if (avformat_open_input(&img_ctx, tmp_img, forced_format, NULL) != 0) {
+        free(probe_buf);
         unlink(tmp_img);
         return -1;
     }
+    free(probe_buf);
     if (avformat_find_stream_info(img_ctx, NULL) < 0) {
         avformat_close_input(&img_ctx);
         unlink(tmp_img);

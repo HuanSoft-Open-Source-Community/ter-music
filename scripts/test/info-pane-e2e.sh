@@ -104,6 +104,39 @@ ffmpeg -hide_banner -loglevel error -f lavfi \
     echo "错误：ffmpeg 造封面音轨失败" >&2
     exit 2
 }
+# BMP 内嵌封面：验证无扩展名临时文件不再让 image2 系 demuxer 选错格式。
+BMP_COVER_MUSIC="$WORK_DIR/bmp-cover-music"
+mkdir -p "$BMP_COVER_MUSIC"
+ffmpeg -hide_banner -loglevel error -f lavfi \
+    -i "color=c=blue:s=96x96:d=1" -frames:v 1 -c:v bmp -y "$WORK_DIR/cover.bmp" 2>/dev/null || {
+    echo "错误：ffmpeg 造 BMP 封面素材失败" >&2
+    exit 2
+}
+ffmpeg -hide_banner -loglevel error -f lavfi \
+    -i "sine=frequency=440:duration=8" -i "$WORK_DIR/cover.bmp" \
+    -map 0:a -map 1:v -c:a flac -c:v copy -disposition:v attached_pic \
+    -metadata title="BMP Cover Track" -metadata artist="Cover Artist" \
+    -y "$BMP_COVER_MUSIC/cover.flac" 2>/dev/null || {
+    echo "错误：ffmpeg 造 BMP 内嵌封面音轨失败" >&2
+    exit 2
+}
+
+# WebP 目录封面：FLAC 的 attached_pic 不认 image/webp MIME，因此用目录封面
+# cover.webp 走 find_directory_cover -> cache_cover_source_file 的同一解码路径。
+WEBP_COVER_MUSIC="$WORK_DIR/webp-cover-music"
+mkdir -p "$WEBP_COVER_MUSIC"
+ffmpeg -hide_banner -loglevel error -f lavfi \
+    -i "color=c=green:s=96x96:d=1" -frames:v 1 -c:v libwebp -y "$WORK_DIR/cover.webp" 2>/dev/null || {
+    echo "错误：ffmpeg 造 WebP 封面素材失败" >&2
+    exit 2
+}
+ffmpeg -hide_banner -loglevel error -f lavfi \
+    -i "sine=frequency=440:duration=8" -c:a flac -y "$WEBP_COVER_MUSIC/track.flac" 2>/dev/null || {
+    echo "错误：ffmpeg 造 WebP 目录封面音轨失败" >&2
+    exit 2
+}
+cp "$WORK_DIR/cover.webp" "$WEBP_COVER_MUSIC/cover.webp"
+
 # 短标签封面素材：宽而矮/优先级用例只用“行数/封面”判定，避免长文本改变
 # 两块的 desired width（长标签会把音频块挤成单子列，掩盖 5+4 全可见的验证）。
 SHORT_COVER_MUSIC="$WORK_DIR/short-cover-music"
@@ -372,6 +405,24 @@ if has_text '采样率：' "$T8" && has_text '位深：' "$T8" && has_text '比�
 else
     bad "音频块裁剪顺序不符"
 fi
+
+# ── T9：BMP 内嵌封面 / WebP 目录封面 ─────────────────────────────
+info "T9 BMP 内嵌 / WebP 目录封面解码为 JPEG"
+write_config 2047 1 1 2
+run_case t9bmp 100 30 1 "$BMP_COVER_MUSIC" >/dev/null
+line="$(last_info_log t9bmp)"
+case "$line" in
+    *"cover_drawn=1"*)
+        ok "BMP 内嵌封面：cover_drawn=1" ;;
+    *) bad "BMP 内嵌封面未解码：${line:-<none>}" ;;
+esac
+run_case t9webp 100 30 1 "$WEBP_COVER_MUSIC" >/dev/null
+line="$(last_info_log t9webp)"
+case "$line" in
+    *"cover_drawn=1"*)
+        ok "WebP 目录封面：cover_drawn=1" ;;
+    *) bad "WebP 目录封面未解码：${line:-<none>}" ;;
+esac
 
 info "结果"
 printf '%d 通过, %d 失败\n' "$PASS" "$FAIL"
