@@ -16,6 +16,8 @@
 #   R10b 主视图信息窗格：右键被吞掉，不弹菜单（流光菜单只属于 F6 信息页）；
 #   R11 曲库浏览器右键：菜单目标是 BROWSER；
 #   R12 布局编辑器：右键在指针处打开"窗格操作"菜单并钳制，执行"退出编辑器"；
+#   R12b 布局编辑器最小可读尺寸护栏：压到下限吸附并提示，不退出编辑器；
+#   R22 旧小窗格布局仍可加载/打开编辑器（只提示不拒绝，非破坏性）；
 #   R13 搜索输入框（模态）中的右键被吞掉，不弹菜单；
 #   R14 竞态：菜单打开后外部 queue append 改队列版本，再点"从队列移除" →
 #       提示 stale 且队列数不变；
@@ -197,6 +199,19 @@ item_idx() {   # $1 = level, $2 = grep 片段
 }
 
 log_count() { grep -c "$1" "$LOG_FILE" 2>/dev/null || true; }
+
+wait_log() {   # $1=正则 [$2=超时秒]：等日志落盘（块缓冲/新会话首帧会滞后）
+    local i
+    for i in $(seq 1 $(( ${2:-8} * 4 ))); do
+        grep -q "$1" "$LOG_FILE" 2>/dev/null && return 0
+        sleep 0.25
+    done
+    return 1
+}
+
+screen_has() {   # $1=正则；把 pty 字节流还原成 100x30 网格后搜索
+    python3 "$SCRIPT_DIR/vt_grid.py" --cols 100 --rows 30 --has "$1" "$TUI_LOG" >/dev/null 2>&1
+}
 
 # 只数"普通左键点击"（[mouse] ... click wheel=...），不含 right-click。
 # 新备选触发用例用它证明一次修饰键/中键事件没有被降级成普通左键（播放）。
@@ -551,6 +566,38 @@ if grep -q "\[layout_editor\] closed" "$LOG_FILE"; then
     ok "通过菜单退出了布局编辑器"
 else
     bad "菜单没有退出布局编辑器"
+fi
+
+# ── R12b 布局编辑器最小可读尺寸护栏（t23）──────────────────────
+info "R12b 布局编辑器：压到下限会吸附并提示最小可读尺寸"
+send "<f2>" 0.9
+send "<right>" 0.5
+editor_downs="$(printf '<down>%.0s' $(seq 1 21))"
+send "${editor_downs}<enter>" 1.5
+if screen_has '布局编辑器'; then
+    ok "布局编辑器重新打开"
+else
+    bad "布局编辑器没有重新打开"
+fi
+# 选中第一个窗格（playlist，位于左列）；PgDn 把左列宽度从 68% 一路压到下限。
+pgdns="$(printf '<pgdn>%.0s' $(seq 1 16))"
+send "${pgdns}" 1.4
+if screen_has '最小可读尺寸|minimum readable|最小可讀'; then
+    ok "压到下限时出现最小可读尺寸提示（三语之一）"
+else
+    bad "压到下限没有出现最小可读尺寸提示"
+fi
+if screen_has '布局编辑器'; then
+    ok "护栏只吸附、不退出编辑器"
+else
+    bad "护栏把编辑器退出了"
+fi
+# 改过比例后 Esc 需要确认一次；两次 Esc 退出并丢弃改动。
+send "<esc><esc>" 1.2
+if grep -q "\[layout_editor\] closed" "$LOG_FILE"; then
+    ok "退出编辑器（未保存的比例改动被丢弃）"
+else
+    bad "没能退出布局编辑器"
 fi
 
 # ── R13 模态输入吞掉右键 ────────────────────────────────────────
@@ -944,6 +991,54 @@ else
     bad "前端在用例中退出（rc=$(cat "$WORK_DIR/tui.rc" 2>/dev/null)）"
 fi
 
+send "q" 1.0
+wait "$DRIVER_PID" 2>/dev/null || true
+DRIVER_PID=""
+
+# ── R22 旧小窗格布局非破坏性（t23）──────────────────────────────
+info "R22 旧小窗格布局仍可加载、编辑器只提示不拒绝"
+cat > "$WORK_DIR/legacy-layouts.json" <<'JSON'
+{"version":1,"default":"legacy_small","layouts":[{"id":"legacy_small","name":"Legacy Small","tree":{"split":"row","ratio":680,"children":[{"split":"col","ratio":520,"children":[{"pane":"playlist"},{"split":"col","ratio":144,"children":[{"pane":"info"},{"pane":"controls"}]}]},{"split":"col","ratio":200,"children":[{"pane":"spectrum"},{"pane":"lyrics"}]}]}}]}
+JSON
+printf 'legacy_small
+' > "$CONFIG_DIR/ui-layout"
+CTL_FILE="$WORK_DIR/keys2.cmd"; : > "$CTL_FILE"
+TUI_LOG="$WORK_DIR/tui2.bin"
+TER_MUSIC_LAYOUTS="$WORK_DIR/legacy-layouts.json" python3 "$DRIVER" drive "$TM_BIN" "$MUSIC" "$TUI_LOG" \
+    --ctl "$CTL_FILE" --rc-file "$WORK_DIR/tui2.rc" --pid-file "$WORK_DIR/tui2.pid" \
+    --cols 100 --rows 30 --max-runtime 90 -- --debug >/dev/null 2>&1 &
+DRIVER_PID=$!
+LOG_FILE=""
+for _ in $(seq 1 60); do
+    LOG_FILE="$(grep -l "Selected layout 'legacy_small'" "$LOG_DIR"/*.log 2>/dev/null | head -1)"
+    [ -n "$LOG_FILE" ] && break
+    sleep 0.25
+done
+sleep 1.5
+if [ -n "$LOG_FILE" ] && grep -q "Selected layout 'legacy_small'" "$LOG_FILE"; then
+    ok "旧布局（info 仅 2 行）被选中加载，未因新下限被拒"
+else
+    bad "旧布局没有被加载（LOG_FILE=${LOG_FILE:-<none>}）"
+fi
+send "<f2>" 0.9
+send "<right>" 0.5
+editor_downs="$(printf '<down>%.0s' $(seq 1 21))"
+send "${editor_downs}<enter>" 1.2
+if wait_log "Opened layout 'legacy_small'" 8; then
+    ok "旧布局仍能打开布局编辑器"
+else
+    bad "旧布局打不开布局编辑器（被新限制拒绝）"
+fi
+if wait_log "below editor readable minimum" 4; then
+    ok "低于编辑期下限只记录提示（runtime degradation），不改布局"
+else
+    bad "缺少旧布局低于下限的提示日志"
+fi
+if screen_has '信息|Info'; then
+    ok "旧布局的 info 窗格仍在画（标题可见）"
+else
+    bad "旧布局的 info 窗格没有渲染"
+fi
 send "q" 1.0
 wait "$DRIVER_PID" 2>/dev/null || true
 DRIVER_PID=""
