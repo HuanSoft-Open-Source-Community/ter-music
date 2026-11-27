@@ -28,7 +28,21 @@
 #define LAYOUT_AREA_UNITS    1000
 #define LAYOUT_AREA_TOTAL    (LAYOUT_AREA_UNITS * LAYOUT_AREA_UNITS)
 #define LAYOUT_COLOR_INHERIT (-2)
-#define LAYOUT_MIN_PANE_UNITS 10   /* 编辑器允许的最小窗格轴长（1%） */
+#define LAYOUT_MIN_PANE_UNITS 10   /* 编辑器允许的最小窗格轴长（1%）；加载/校验仍沿用此值 */
+
+/* ── 布局编辑器“最小可读尺寸”护栏（t23）──────────────────────────────
+ * 只作用于编辑交互（拖拽/调整/新建/预设编辑）：按当前终端实际单元格换算
+ * 后吸附，不参与 JSON schema、不参与加载/校验，绝不拒绝或改写旧布局。
+ * 内容区最小 12 列 × 3 行是通用下限；纯视觉窗格可略小（频谱/黑胶/歌词），
+ * 这样用户仍能把视觉窗格压窄，而列表/信息/控制区保持可读。 */
+#define LAYOUT_EDITOR_MIN_PANE_COLS        12
+#define LAYOUT_EDITOR_MIN_PANE_ROWS        3
+#define LAYOUT_EDITOR_MIN_SPECTRUM_COLS    8
+#define LAYOUT_EDITOR_MIN_SPECTRUM_ROWS    2
+#define LAYOUT_EDITOR_MIN_VINYL_COLS       8
+#define LAYOUT_EDITOR_MIN_VINYL_ROWS       3
+#define LAYOUT_EDITOR_MIN_LYRICS_COLS      12
+#define LAYOUT_EDITOR_MIN_LYRICS_ROWS      2
 
 /* 窗格颜色字段编号：0 = 前景，1 = 背景（与边框字段区分开）。 */
 #define LAYOUT_COLOUR_FG 0
@@ -69,6 +83,106 @@ typedef enum {
     LAYOUT_SPLIT_ROW = 0,
     LAYOUT_SPLIT_COL
 } LayoutSplitDir;
+
+/* ── 编辑期最小可读尺寸的纯逻辑（无 ncurses，单测与编辑器共用）───────── */
+
+/**
+ * @brief 某个类型的窗格在编辑期至少需要的单元格数（列/行）。
+ *
+ * 列表/信息/控制区：12x3；歌词 12x2；频谱 8x2；黑胶 8x3。
+ * 仅编辑器参考；加载/校验不调用。
+ */
+static inline void layout_editor_min_cells_for_kind(LayoutPaneKind kind,
+                                                    int *min_cols,
+                                                    int *min_rows)
+{
+    int cols = LAYOUT_EDITOR_MIN_PANE_COLS;
+    int rows = LAYOUT_EDITOR_MIN_PANE_ROWS;
+    switch (kind) {
+        case LAYOUT_PANE_SPECTRUM:
+            cols = LAYOUT_EDITOR_MIN_SPECTRUM_COLS;
+            rows = LAYOUT_EDITOR_MIN_SPECTRUM_ROWS;
+            break;
+        case LAYOUT_PANE_VINYL:
+            cols = LAYOUT_EDITOR_MIN_VINYL_COLS;
+            rows = LAYOUT_EDITOR_MIN_VINYL_ROWS;
+            break;
+        case LAYOUT_PANE_LYRICS:
+            cols = LAYOUT_EDITOR_MIN_LYRICS_COLS;
+            rows = LAYOUT_EDITOR_MIN_LYRICS_ROWS;
+            break;
+        default:
+            break;
+    }
+    if (min_cols) *min_cols = cols;
+    if (min_rows) *min_rows = rows;
+}
+
+/**
+ * @brief 千分比轴长 → 当前终端轴上的实际单元格数（与 layout_geometry 的
+ *        floor 共享边界公式一致）。extent <= 0 或 units <= 0 返回 0。
+ */
+static inline int layout_editor_cells_for_units(int units, int extent)
+{
+    if (units <= 0 || extent <= 0) {
+        return 0;
+    }
+    long long scaled = (long long)units * (long long)extent;
+    return (int)(scaled / LAYOUT_AREA_UNITS);
+}
+
+/**
+ * @brief 当前终端轴上至少 min_cells 个单元格所需的千分比轴长。
+ *
+ * 取 ceil(min_cells*1000/extent)，且不低于 LAYOUT_MIN_PANE_UNITS；
+ * extent/cells 非法时返回 LAYOUT_AREA_UNITS（无法满足，由调用方拒绝）。
+ */
+static inline int layout_editor_units_for_cells(int min_cells, int extent)
+{
+    if (min_cells <= 0 || extent <= 0) {
+        return LAYOUT_AREA_UNITS;
+    }
+    long long scaled = (long long)min_cells * LAYOUT_AREA_UNITS;
+    int units = (int)((scaled + extent - 1) / extent);
+    if (units < LAYOUT_MIN_PANE_UNITS) {
+        units = LAYOUT_MIN_PANE_UNITS;
+    }
+    if (units > LAYOUT_AREA_UNITS) {
+        units = LAYOUT_AREA_UNITS;
+    }
+    return units;
+}
+
+/**
+ * @brief 把分栏比例吸附到“两侧都满足最小轴长”的合法区间。
+ *
+ * @param ratio       期望比例（第一个子节点，1..999）
+ * @param min_first   第一个子节点最小轴长（千分比）
+ * @param min_second  第二个子节点最小轴长（千分比）
+ * @return 吸附后的比例；区间为空（终端放不下）时原样返回 ratio。
+ */
+static inline int layout_editor_snap_ratio(int ratio, int min_first,
+                                           int min_second)
+{
+    int lo = min_first;
+    int hi = LAYOUT_AREA_UNITS - min_second;
+    if (lo < LAYOUT_MIN_PANE_UNITS) {
+        lo = LAYOUT_MIN_PANE_UNITS;
+    }
+    if (hi > LAYOUT_AREA_UNITS - LAYOUT_MIN_PANE_UNITS) {
+        hi = LAYOUT_AREA_UNITS - LAYOUT_MIN_PANE_UNITS;
+    }
+    if (hi < lo) {
+        return ratio;
+    }
+    if (ratio < lo) {
+        return lo;
+    }
+    if (ratio > hi) {
+        return hi;
+    }
+    return ratio;
+}
 
 /**
  * 窗格配置，按 LayoutPaneKind 下标存放。

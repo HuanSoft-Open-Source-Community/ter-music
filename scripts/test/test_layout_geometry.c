@@ -199,12 +199,131 @@ static void test_rescue(void)
     }
 }
 
+
+/* t23：编辑期最小可读尺寸（units ↔ cells 换算 + 吸附），与加载/校验无关。 */
+static void test_editor_min_readable(void)
+{
+    const int main_cols = 80;
+    const int main_rows = 23;   /* 80x24 终端去掉底部菜单行 */
+
+    struct KindCase {
+        LayoutPaneKind kind;
+        int cols;
+        int rows;
+    } cases[] = {
+        { LAYOUT_PANE_PLAYLIST, LAYOUT_EDITOR_MIN_PANE_COLS,
+          LAYOUT_EDITOR_MIN_PANE_ROWS },
+        { LAYOUT_PANE_INFO, LAYOUT_EDITOR_MIN_PANE_COLS,
+          LAYOUT_EDITOR_MIN_PANE_ROWS },
+        { LAYOUT_PANE_CONTROLS, LAYOUT_EDITOR_MIN_PANE_COLS,
+          LAYOUT_EDITOR_MIN_PANE_ROWS },
+        { LAYOUT_PANE_SPECTRUM, LAYOUT_EDITOR_MIN_SPECTRUM_COLS,
+          LAYOUT_EDITOR_MIN_SPECTRUM_ROWS },
+        { LAYOUT_PANE_LYRICS, LAYOUT_EDITOR_MIN_LYRICS_COLS,
+          LAYOUT_EDITOR_MIN_LYRICS_ROWS },
+        { LAYOUT_PANE_VINYL, LAYOUT_EDITOR_MIN_VINYL_COLS,
+          LAYOUT_EDITOR_MIN_VINYL_ROWS },
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        int min_cols = 0;
+        int min_rows = 0;
+        layout_editor_min_cells_for_kind(cases[i].kind, &min_cols, &min_rows);
+        CHECK(min_cols == cases[i].cols && min_rows == cases[i].rows,
+              "per-kind minimum cells unchanged");
+
+        int units_cols = layout_editor_units_for_cells(min_cols, main_cols);
+        int units_rows = layout_editor_units_for_cells(min_rows, main_rows);
+        CHECK(layout_editor_cells_for_units(units_cols, main_cols) == min_cols,
+              "80x24: min columns round-trip to exactly min cells");
+        CHECK(layout_editor_cells_for_units(units_cols - 1, main_cols) < min_cols,
+              "80x24: one unit less is below min columns");
+        CHECK(layout_editor_cells_for_units(units_rows, main_rows) == min_rows,
+              "80x24: min rows round-trip to exactly min cells");
+        CHECK(layout_editor_cells_for_units(units_rows - 1, main_rows) < min_rows,
+              "80x24: one unit less is below min rows");
+        CHECK(units_cols >= LAYOUT_MIN_PANE_UNITS &&
+              units_rows >= LAYOUT_MIN_PANE_UNITS,
+              "editor minimum never lowers the global 10-unit floor");
+    }
+
+    /* 80x24 的具体数值：列表 12 列 = 150 units，3 行 = 131 units；少一格被吸附。 */
+    CHECK(layout_editor_units_for_cells(12, 80) == 150,
+          "80x24: 12 cols needs 150 units");
+    CHECK(layout_editor_cells_for_units(149, 80) == 11,
+          "80x24: 149 units is only 11 cols");
+    CHECK(layout_editor_units_for_cells(3, 23) == 131,
+          "80x24: 3 rows needs 131 units");
+    CHECK(layout_editor_cells_for_units(130, 23) == 2,
+          "80x24: 130 units is only 2 rows");
+
+    /* 分栏比例吸附：150/850 是合法边界；再缩一格吸附回边界。 */
+    CHECK(layout_editor_snap_ratio(500, 150, 150) == 500,
+          "snap: 50/50 stays");
+    CHECK(layout_editor_snap_ratio(149, 150, 150) == 150,
+          "snap: below left minimum absorbs to 150");
+    CHECK(layout_editor_snap_ratio(860, 150, 150) == 850,
+          "snap: above right minimum absorbs to 850");
+    CHECK(layout_editor_snap_ratio(500, 600, 600) == 500,
+          "snap: impossible interval leaves ratio unchanged");
+
+    /* 终端异常/过小：纯换算不崩溃，返回“无法满足”的默认值。 */
+    CHECK(layout_editor_units_for_cells(0, 80) == LAYOUT_AREA_UNITS &&
+          layout_editor_units_for_cells(12, 0) == LAYOUT_AREA_UNITS,
+          "degenerate extents return the whole axis");
+    CHECK(layout_editor_cells_for_units(0, 80) == 0 &&
+          layout_editor_cells_for_units(150, 0) == 0,
+          "degenerate units/extent return zero cells");
+}
+
+/* 旧布局（20 units = 1 列，远小于编辑期 12 列，但 ≥ 全局 10 units）必须
+ * 仍可解析/valid；新限制只在编辑器交互里生效。 */
+static void test_old_layout_still_loads(void)
+{
+    static const char *old_small =
+        "{\"layouts\":[{\"id\":\"old_small\",\"tree\":{"
+        "\"split\":\"row\",\"ratio\":20,\"children\":["
+        "{\"pane\":\"playlist\"},{\"pane\":\"info\"}]}}]}";
+    LayoutCatalog catalog;
+    char err[256] = "";
+    CHECK(layout_spec_parse(old_small, strlen(old_small), &catalog,
+                            err, sizeof(err)) == 0,
+          "old 20-unit layout still parses");
+    CHECK(catalog.count == 1, "old layout count");
+    CHECK(layout_spec_validate(&catalog.layouts[0], err, sizeof(err)) == 0,
+          "old 20-unit layout still validates (not rejected by editor minimum)");
+
+    LayoutResolved resolved;
+    CHECK(layout_spec_resolve(&catalog.layouts[0], &resolved) == 0,
+          "old layout resolves");
+    const LayoutResolvedPane *playlist = NULL;
+    for (int i = 0; i < resolved.pane_count; i++) {
+        if (resolved.panes[i].kind == LAYOUT_PANE_PLAYLIST) {
+            playlist = &resolved.panes[i];
+            break;
+        }
+    }
+    CHECK(playlist && playlist->w == 20 && playlist->h == 1000,
+          "old layout keeps its 20-unit geometry");
+    CHECK(layout_editor_cells_for_units(playlist ? playlist->w : 0, 80) == 1,
+          "old layout maps to 1 column (below editor 12)");
+    CHECK(layout_spec_resolve(&catalog.layouts[0], &resolved) == 0 &&
+          layout_editor_snap_ratio(playlist ? playlist->w : 0, 150, 150) == 150,
+          "editor would absorb the old 20-unit split to 150 only during edit");
+
+    LayoutGeometry geometry;
+    layout_geometry_compute(&resolved, 1, 1, &geometry);
+    CHECK(!geometry.valid, "tiny terminal has no main area and does not crash");
+}
+
 int main(void)
 {
     test_main_area();
     test_classic_exact();
     test_preset_tilings();
     test_rescue();
+    test_editor_min_readable();
+    test_old_layout_still_loads();
 
     if (g_failures == 0) {
         printf("PASS layout_geometry (%d checks)\n", g_checks);

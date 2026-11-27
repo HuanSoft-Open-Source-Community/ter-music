@@ -1441,6 +1441,7 @@
   <string key="layout.editor.color_terminal">终端默认</string>
   <string key="layout.editor.no_kind">没有可用的窗格类型（六种都已在此布局中）</string>
   <string key="layout.editor.min_pane">至少要保留一个窗格</string>
+  <string key="layout.editor.min_readable_pane">窗格已到最小可读尺寸（约 12×3 内容区）</string>
   <string key="layout.editor.rename_prompt">布局名称：</string>
   <string key="layout.editor.custom_name">自定义布局 %d</string>
   <string key="layout.editor.saved">布局已保存</string>

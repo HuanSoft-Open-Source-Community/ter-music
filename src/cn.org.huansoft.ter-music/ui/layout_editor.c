@@ -20,6 +20,7 @@
 #include "ui/context_menu.h"
 #include "ui/context_menu_layout.h"
 #include "ui/layout.h"
+#include "ui/layout_geometry.h"
 #include "ui/menu_anim.h"
 #include "ui/menu_internal.h"
 #include "ui/ui.h"
@@ -142,13 +143,14 @@ static int editor_kind_index(LayoutPaneKind kind)
     return -1;
 }
 
-static int editor_find_parent(int target, int *parent_out, int *slot_out)
+static int editor_find_parent_in(const LayoutSpec *spec, int target,
+                                 int *parent_out, int *slot_out)
 {
-    if (target == g_ed.spec.root) {
+    if (!spec || target == spec->root) {
         return 0;
     }
-    for (int i = 0; i < g_ed.spec.node_count; i++) {
-        const LayoutNode *node = &g_ed.spec.nodes[i];
+    for (int i = 0; i < spec->node_count; i++) {
+        const LayoutNode *node = &spec->nodes[i];
         if (node->is_leaf) {
             continue;
         }
@@ -161,6 +163,62 @@ static int editor_find_parent(int target, int *parent_out, int *slot_out)
         }
     }
     return -1;
+}
+
+static int editor_find_parent(int target, int *parent_out, int *slot_out)
+{
+    return editor_find_parent_in(&g_ed.spec, target, parent_out, slot_out);
+}
+
+/* 编辑期最小可读性：把当前 spec 映射到当前终端实际单元格，逐窗格检查。
+ * 只用于编辑器交互，绝不用于加载/校验——旧布局即使小于新下限也照常加载。
+ * 返回 1 可读；0 不可读并写 bad_kind/why（why 可为 NULL）。 */
+static int editor_spec_readable(const LayoutSpec *spec, int rows, int cols,
+                                LayoutPaneKind *bad_kind,
+                                char *why, size_t why_size)
+{
+    if (bad_kind) {
+        *bad_kind = LAYOUT_PANE_PLAYLIST;
+    }
+    LayoutResolved resolved;
+    if (!spec || layout_spec_resolve(spec, &resolved) != 0) {
+        if (why && why_size) {
+            snprintf(why, why_size, "unresolved layout");
+        }
+        return 0;
+    }
+
+    LayoutGeometry geometry;
+    layout_geometry_compute(&resolved, rows, cols, &geometry);
+    if (!geometry.valid) {
+        if (why && why_size) {
+            snprintf(why, why_size, "terminal %dx%d has no main area", cols, rows);
+        }
+        return 0;
+    }
+
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        const LayoutPaneRect *rect = &geometry.panes[i];
+        if (!rect->visible) {
+            continue;
+        }
+        int min_cols = 0;
+        int min_rows = 0;
+        layout_editor_min_cells_for_kind((LayoutPaneKind)i, &min_cols, &min_rows);
+        if (!rect->has_cells || rect->w < min_cols || rect->h < min_rows) {
+            if (bad_kind) {
+                *bad_kind = (LayoutPaneKind)i;
+            }
+            if (why && why_size) {
+                snprintf(why, why_size,
+                         "pane %s is %dx%d cells, need at least %dx%d",
+                         layout_pane_id_name((LayoutPaneKind)i),
+                         rect->w, rect->h, min_cols, min_rows);
+            }
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int color_cycle_index(int value)
@@ -392,27 +450,91 @@ static void editor_after_change(const char *status_key)
     editor_status_key(status_key);
 }
 
+/* 当前终端尺寸（编辑器已用自己的 ED_MIN_* 保证足够大；这里只取实际值）。 */
+static void editor_terminal_size(int *rows, int *cols)
+{
+    int r = 0;
+    int c = 0;
+    getmaxyx(stdscr, r, c);
+    if (rows) *rows = r;
+    if (cols) *cols = c;
+}
+
+/* 是否已有窗格贴着编辑期最小尺寸（用于状态行提示“已到下限”）。 */
+static int editor_spec_at_min(const LayoutSpec *spec, int rows, int cols)
+{
+    LayoutResolved resolved;
+    if (!spec || layout_spec_resolve(spec, &resolved) != 0) {
+        return 0;
+    }
+    LayoutGeometry geometry;
+    layout_geometry_compute(&resolved, rows, cols, &geometry);
+    for (int i = 0; i < LAYOUT_PANE_COUNT; i++) {
+        const LayoutPaneRect *rect = &geometry.panes[i];
+        if (!rect->visible) {
+            continue;
+        }
+        int min_cols = 0;
+        int min_rows = 0;
+        layout_editor_min_cells_for_kind((LayoutPaneKind)i, &min_cols, &min_rows);
+        if (rect->w <= min_cols || rect->h <= min_rows) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 比例调整：先从请求步长开始，逐单位减小到 1，取“仍整体可读”的最大步长。
+ * 这正是吸附语义：用户想再缩小一格时，停在最后一个合法边界并提示。 */
 static void editor_adjust_ratio(LayoutSplitDir dir, int delta)
 {
     int kind = editor_selected_kind();
     if (kind < 0) {
         return;
     }
-    int rc = layout_spec_adjust_ratio(&g_ed.spec, (LayoutPaneKind)kind,
-                                      dir, delta);
-    if (rc == -2) {
-        editor_status_error_key("layout.editor.no_axis_split");
+    int rows = 0;
+    int cols = 0;
+    editor_terminal_size(&rows, &cols);
+
+    LayoutSpec before = g_ed.spec;
+    int magnitude = delta < 0 ? -delta : delta;
+    int sign = delta < 0 ? -1 : 1;
+    int chosen_mag = 0;
+    LayoutSpec chosen = before;
+
+    for (int mag = magnitude; mag >= 1; mag--) {
+        LayoutSpec candidate = before;
+        int rc = layout_spec_adjust_ratio(&candidate, (LayoutPaneKind)kind,
+                                          dir, sign * mag);
+        if (rc == -2) {
+            editor_status_error_key("layout.editor.no_axis_split");
+            return;
+        }
+        if (rc != 0) {
+            continue;
+        }
+        if (editor_spec_readable(&candidate, rows, cols, NULL, NULL, 0)) {
+            chosen = candidate;
+            chosen_mag = mag;
+            break;
+        }
+    }
+
+    if (chosen_mag == 0) {
+        editor_status_error_key("layout.editor.min_readable_pane");
         return;
     }
-    if (rc == -3) {
-        editor_status_error_key("layout.editor.ratio_at_limit");
-        return;
+
+    g_ed.spec = chosen;
+    g_ed.dirty = 1;
+    g_ed.esc_confirm = 0;
+    editor_refresh_sel();
+    if (chosen_mag < magnitude ||
+        editor_spec_at_min(&g_ed.spec, rows, cols)) {
+        editor_status_key("layout.editor.min_readable_pane");
+    } else {
+        editor_status_key("layout.editor.status_ratio");
     }
-    if (rc != 0) {
-        editor_status_error_key("layout.editor.too_small_pane");
-        return;
-    }
-    editor_after_change("layout.editor.status_ratio");
 }
 
 static void editor_equalize(void)
@@ -421,11 +543,85 @@ static void editor_equalize(void)
     if (kind < 0) {
         return;
     }
-    if (layout_spec_equalize_pane(&g_ed.spec, (LayoutPaneKind)kind) != 0) {
+    int index = layout_spec_find_pane(&g_ed.spec, (LayoutPaneKind)kind);
+    int parent = -1;
+    int slot = 0;
+    if (index < 0 || editor_find_parent(index, &parent, &slot) != 1) {
         editor_status_error_key("layout.editor.no_parent_split");
         return;
     }
-    editor_after_change("layout.editor.status_equalized");
+    int rows = 0;
+    int cols = 0;
+    editor_terminal_size(&rows, &cols);
+
+    LayoutSpec before = g_ed.spec;
+    int original = before.nodes[parent].ratio;
+    int step = original < 500 ? 1 : -1;
+    int chosen_ratio = -1;
+    LayoutSpec chosen = before;
+
+    /* 从 500 开始向当前比例方向找最近的可读值；找不到就保持原布局。 */
+    for (int ratio = 500;; ratio += step) {
+        if (ratio < 1 || ratio > 999) {
+            break;
+        }
+        LayoutSpec candidate = before;
+        candidate.nodes[parent].ratio = ratio;
+        if (editor_spec_readable(&candidate, rows, cols, NULL, NULL, 0)) {
+            chosen = candidate;
+            chosen_ratio = ratio;
+            break;
+        }
+        if (ratio == original) {
+            break;
+        }
+    }
+
+    if (chosen_ratio < 0) {
+        editor_status_error_key("layout.editor.min_readable_pane");
+        return;
+    }
+
+    g_ed.spec = chosen;
+    g_ed.dirty = 1;
+    g_ed.esc_confirm = 0;
+    editor_refresh_sel();
+    editor_status_key(chosen_ratio == 500
+                          ? "layout.editor.status_equalized"
+                          : "layout.editor.min_readable_pane");
+}
+
+/* 在候选 spec 里找一个仍整体可读、且尽量接近 50/50 的分栏比例。
+ * 用于新建窗格/换类型后几何不满足新类型最小尺寸时的吸附。 */
+static int editor_find_readable_ratio(const LayoutSpec *candidate, int parent,
+                                      int rows, int cols, LayoutSpec *out)
+{
+    if (!candidate || !out || parent < 0 ||
+        parent >= candidate->node_count ||
+        candidate->nodes[parent].is_leaf) {
+        return -1;
+    }
+    int best_ratio = -1;
+    int best_distance = 10000;
+    LayoutSpec best = *candidate;
+    for (int ratio = 1; ratio <= 999; ratio++) {
+        LayoutSpec trial = *candidate;
+        trial.nodes[parent].ratio = ratio;
+        if (!editor_spec_readable(&trial, rows, cols, NULL, NULL, 0)) {
+            continue;
+        }
+        int distance = ratio > 500 ? ratio - 500 : 500 - ratio;
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_ratio = ratio;
+            best = trial;
+        }
+    }
+    if (best_ratio < 0) {
+        return -1;
+    }
+    *out = best;
+    return best_ratio;
 }
 
 static void editor_remove(void)
@@ -451,12 +647,24 @@ static void editor_swap(void)
     int a = layout_spec_pane_at(&g_ed.spec, g_ed.sel);
     int next = (g_ed.sel + 1) % count;
     int b = layout_spec_pane_at(&g_ed.spec, next);
-    if (a < 0 || b < 0 ||
-        layout_spec_swap_panes(&g_ed.spec, (LayoutPaneKind)a,
-                               (LayoutPaneKind)b) != 0) {
+    if (a < 0 || b < 0) {
         editor_status_error_key("layout.editor.status_swap_none");
         return;
     }
+
+    /* 交换只移动几何、不移动叶子大小；但交换后某窗格可能不满足新类型的
+     * 最小可读尺寸，此时保持原布局并提示（旧布局本身不受影响）。 */
+    LayoutSpec candidate = g_ed.spec;
+    int rows = 0;
+    int cols = 0;
+    editor_terminal_size(&rows, &cols);
+    if (layout_spec_swap_panes(&candidate, (LayoutPaneKind)a,
+                               (LayoutPaneKind)b) != 0 ||
+        !editor_spec_readable(&candidate, rows, cols, NULL, NULL, 0)) {
+        editor_status_error_key("layout.editor.min_readable_pane");
+        return;
+    }
+    g_ed.spec = candidate;
     editor_after_change("layout.editor.status_swapped");
 }
 
@@ -475,26 +683,61 @@ static void editor_apply_kind_pick(LayoutPaneKind new_kind)
     if (selected < 0) {
         return;
     }
+    int rows = 0;
+    int cols = 0;
+    editor_terminal_size(&rows, &cols);
+
+    LayoutSpec candidate = g_ed.spec;
     int rc;
     if (g_ed.pending == ED_PENDING_SPLIT) {
-        rc = layout_spec_split_pane(&g_ed.spec, (LayoutPaneKind)selected,
+        rc = layout_spec_split_pane(&candidate, (LayoutPaneKind)selected,
                                     g_ed.pending_dir, new_kind);
     } else {
-        rc = layout_spec_change_pane_kind(&g_ed.spec, (LayoutPaneKind)selected,
+        rc = layout_spec_change_pane_kind(&candidate, (LayoutPaneKind)selected,
                                           new_kind);
     }
     if (rc != 0) {
         editor_status_error_key("layout.editor.too_small_pane");
         return;
     }
+
+    int snapped = 0;
+    if (!editor_spec_readable(&candidate, rows, cols, NULL, NULL, 0)) {
+        /* 先尝试把新窗格所在分栏比例吸附到最近的可读值。 */
+        int new_index = layout_spec_find_pane(&candidate, new_kind);
+        int parent = -1;
+        int slot = 0;
+        LayoutSpec adjusted;
+        int readable_ratio = -1;
+        if (new_index >= 0 &&
+            editor_find_parent_in(&candidate, new_index, &parent, &slot) == 1) {
+            readable_ratio = editor_find_readable_ratio(&candidate, parent,
+                                                        rows, cols, &adjusted);
+        }
+        if (readable_ratio < 0) {
+            editor_status_error_key("layout.editor.min_readable_pane");
+            return;   /* 保持编辑前布局，不写坏旧/当前 spec */
+        }
+        candidate = adjusted;
+        snapped = 1;
+    }
+
+    g_ed.spec = candidate;
     g_ed.mode = ED_MODE_MAIN;
     int index = editor_kind_index(new_kind);
     if (index >= 0) {
         g_ed.sel = index;
     }
-    editor_after_change(g_ed.pending == ED_PENDING_SPLIT
-                            ? "layout.editor.status_added"
-                            : "layout.editor.status_kind");
+    g_ed.dirty = 1;
+    g_ed.esc_confirm = 0;
+    editor_refresh_sel();
+    if (snapped) {
+        editor_status_key("layout.editor.min_readable_pane");
+    } else {
+        editor_status_key(g_ed.pending == ED_PENDING_SPLIT
+                              ? "layout.editor.status_added"
+                              : "layout.editor.status_kind");
+    }
 }
 
 static void editor_open_colors(void)
@@ -1666,9 +1909,25 @@ void layout_editor_open(const LayoutSpec *base, int is_new)
     g_ed.sel = 0;
     g_ed.mode = ED_MODE_MAIN;
     g_ed.active = 1;
+    int open_rows = 0;
+    int open_cols = 0;
+    getmaxyx(stdscr, open_rows, open_cols);
+    LayoutPaneKind small_kind = LAYOUT_PANE_PLAYLIST;
+    char small_why[160];
+    int readable_now = editor_spec_readable(&g_ed.spec, open_rows, open_cols,
+                                            &small_kind, small_why,
+                                            sizeof(small_why));
     log_debug("layout_editor", "Opened layout '%s' (%d panes, new=%d, normalized=%d)",
               g_ed.spec.id, layout_spec_pane_count(&g_ed.spec), g_ed.is_new,
               was_normalized);
+    if (!readable_now) {
+        /* 非破坏性：旧/预设布局即使小于编辑期可读下限也照常打开，交给运行时
+         * 现有降级渲染；这里只记录一次日志，不弹错、不改存盘。 */
+        log_debug("layout_editor",
+                  "Loaded layout has pane below editor readable minimum on this "
+                  "terminal; keeping layout for runtime degradation: %s",
+                  small_why);
+    }
     if (was_normalized && !g_ed.is_new) {
         editor_status_key("layout.editor.normalized_notice");
     }

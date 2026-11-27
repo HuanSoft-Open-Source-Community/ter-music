@@ -1377,6 +1377,7 @@ offset 從 0 始；count 爲 0 時用中樞默頁大小 200，最大 1000。</st
   <string key="layout.editor.color_terminal">端闈默</string>
   <string key="layout.editor.no_kind">無可用的格類型（六種都已在此局度中）</string>
   <string key="layout.editor.min_pane">至少要保留一格</string>
+  <string key="layout.editor.min_readable_pane">窗格已至最小可讀之度（約 12×3）</string>
   <string key="layout.editor.rename_prompt">局度名：</string>
   <string key="layout.editor.custom_name">自定局度 %d</string>
   <string key="layout.editor.saved">局度已存</string>

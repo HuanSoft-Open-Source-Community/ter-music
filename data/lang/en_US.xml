@@ -1442,6 +1442,7 @@
   <string key="layout.editor.color_terminal">terminal</string>
   <string key="layout.editor.no_kind">No pane type is available (all six are already in this layout)</string>
   <string key="layout.editor.min_pane">At least one pane is required</string>
+  <string key="layout.editor.min_readable_pane">Reached the minimum readable pane size (about 12x3 content)</string>
   <string key="layout.editor.rename_prompt">Layout name: </string>
   <string key="layout.editor.custom_name">Custom Layout %d</string>
   <string key="layout.editor.saved">Layout saved</string>
