@@ -17,6 +17,7 @@
 #include "ui/menu_internal.h"
 #include "ui/scrollbar.h"
 #include "ui/info_bar_layout.h"
+#include "util/utf8.h"
 #include "ui/cover_art.h"
 #include "ui/layout.h"
 #include "playlist/playlist.h"
@@ -121,33 +122,82 @@ static void info_bar_sanitize_controls(char *text)
     }
 }
 
-/* 在信息栏的一个分区矩形内输出一行文本：
- *   - 先按矩形宽度裁剪，再走 ui_pane_clip_print() 做窗口级兜底，
- *     任何情况下不触碰右边框；
- *   - line 是分区内相对行号，必须落在 [0, region->h)；
- *   - 分区矩形由 info_bar_layout_compute_rows() 给出，已通过 validate。 */
-static void info_draw_line(const InfoBarRect *region, int line,
-                           const char *text)
+/* 信息栏的单行省略：普通文本尾部省略（…），路径类中间省略（…）。
+ * 宽度按字形列计，UTF-8/ASCII 回退模式都遵守；宽度不足省略号本身时退回
+ * format_display_text 的保守截断，绝不写穿边框。 */
+static void info_format_ellipsis(char *dest, size_t dest_size,
+                                 const char *src, int width, int middle)
 {
-    if (!win_info || !region || region->w <= 0 ||
-        line < 0 || line >= region->h) {
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    dest[0] = '\0';
+    if (width <= 0) {
         return;
     }
 
-    int row = region->y + line;
-    int x = region->x;
-    int width = region->w;
+    const char *input = src ? src : "";
+    char ascii_buf[INFO_BAR_LINE_MAX];
+    if (g_ascii_fallback_ui) {
+        sanitize_ascii_text(ascii_buf, sizeof(ascii_buf), input);
+        input = ascii_buf;
+    }
+
+    int total = utf8_str_width(input);
+    if (total <= width) {
+        snprintf(dest, dest_size, "%s", input);
+        return;
+    }
+
+    const char *ellipsis = g_ascii_fallback_ui ? "..." : "…";
+    int ellipsis_w = (int)strlen(ellipsis);
+    if (width <= ellipsis_w) {
+        format_display_text(dest, dest_size, input, width, 0);
+        return;
+    }
+
+    int keep = width - ellipsis_w;
+    char left[INFO_BAR_LINE_MAX];
+    char right[INFO_BAR_LINE_MAX];
+    left[0] = '\0';
+    right[0] = '\0';
+    if (!middle) {
+        utf8_str_substring(left, input, 0, keep);
+        snprintf(dest, dest_size, "%s%s", left, ellipsis);
+        return;
+    }
+
+    int left_w = (keep + 1) / 2;
+    int right_w = keep - left_w;
+    utf8_str_substring(left, input, 0, left_w);
+    utf8_str_substring(right, input, total - right_w, right_w);
+    snprintf(dest, dest_size, "%s%s%s", left, ellipsis, right);
+}
+
+/* 在信息栏的一个文本单元内输出一行：按单元宽度裁剪/省略后走窗口级兜底，
+ * 任何情况下不触碰边框。line 由 info_bar_layout_text_cell() 给出坐标。 */
+static void info_draw_line(int x, int y, int width, const char *text)
+{
+    if (!win_info || width <= 0) {
+        return;
+    }
 
     int h, w;
     getmaxyx(win_info, h, w);
-    if (row < 1 || row >= h - 1) return;
-    if (x < 1 || x >= w - 1) return;
+    if (y < 1 || y >= h - 1) {
+        return;
+    }
+    if (x < 1 || x >= w - 1) {
+        return;
+    }
 
     /* 最后一个可写列是 w-2；把区间右端严格限制在 w-1 之前。 */
     if (x + width > w - 1) {
         width = w - 1 - x;
     }
-    if (width <= 0) return;
+    if (width <= 0) {
+        return;
+    }
 
     /* utf8_str_truncate 的列宽参数以字形列计，最坏每列 4 字节。 */
     int max_columns = (int)((INFO_BAR_LINE_MAX - 8) / 4);
@@ -159,9 +209,16 @@ static void info_draw_line(const InfoBarRect *region, int line,
     snprintf(line_text, sizeof(line_text), "%s", text ? text : "");
     info_bar_sanitize_controls(line_text);
 
+    int path_like = 0;
+    const char *path_label = i18n_get("info.field.path");
+    if (path_label && path_label[0] &&
+        strncmp(line_text, path_label, strlen(path_label)) == 0) {
+        path_like = 1;
+    }
+
     char clipped[INFO_BAR_LINE_MAX];
-    format_display_text(clipped, sizeof(clipped), line_text, width, 0);
-    ui_pane_clip_print(win_info, row, x, clipped);
+    info_format_ellipsis(clipped, sizeof(clipped), line_text, width, path_like);
+    ui_pane_clip_print(win_info, y, x, clipped);
 }
 
 static const char *get_playlist_source_label(void)
@@ -317,48 +374,57 @@ static void info_pane_playback_snapshot(InfoPlayback *out)
 }
 
 /* 信息窗格元数据行：只使用 info_fields 中窗格可显示的字段。
+ * 行按既有显示顺序输出（状态、模式、标题、艺术家、专辑/队列），同时输出
+ * 每行的裁剪优先级：状态(0) > 标题(1) > 艺术家(2) > 模式(3) > 专辑/队列(4)。
+ * 高度不足时由 info_bar_layout 按 priority 选保留行，显示顺序不变。
  * 队列页且队列字段可用时，最后一行显示队列位置；否则回退专辑。 */
 static int info_pane_fill_metadata(const InfoTrack *track,
                                    const InfoPlayback *playback,
-                                   char rows[][INFO_BAR_LINE_MAX], int max_rows)
+                                   char rows[][INFO_BAR_LINE_MAX],
+                                   int priorities[], int max_rows)
 {
     const int mask = g_app_config.info_fields_mask;
     int count = 0;
 
-#define ADD_PANE_FIELD(bit)                                                   \
+#define ADD_PANE_FIELD(bit, prio)                                             \
     do {                                                                      \
         if (count < max_rows && (mask & (bit)) &&                             \
             info_render_field_line((bit), track, playback, rows[count],       \
                                    INFO_BAR_LINE_MAX)) {                      \
+            priorities[count] = (prio);                                       \
             count++;                                                          \
         }                                                                     \
     } while (0)
 
-    ADD_PANE_FIELD(INFO_FIELD_STATE);
-    ADD_PANE_FIELD(INFO_FIELD_MODE);
-    ADD_PANE_FIELD(INFO_FIELD_TITLE);
-    ADD_PANE_FIELD(INFO_FIELD_ARTIST);
+    ADD_PANE_FIELD(INFO_FIELD_STATE, 0);
+    ADD_PANE_FIELD(INFO_FIELD_MODE, 3);
+    ADD_PANE_FIELD(INFO_FIELD_TITLE, 1);
+    ADD_PANE_FIELD(INFO_FIELD_ARTIST, 2);
 
     int tail_filled = 0;
     if (g_playlist_tab_mode == PLAYLIST_MODE_PLAY_QUEUE &&
         (mask & INFO_FIELD_QUEUE) && count < max_rows) {
         if (info_render_field_line(INFO_FIELD_QUEUE, track, playback,
                                    rows[count], INFO_BAR_LINE_MAX)) {
+            priorities[count] = 4;
             count++;
             tail_filled = 1;
         }
     }
     if (!tail_filled) {
-        ADD_PANE_FIELD(INFO_FIELD_ALBUM);
+        ADD_PANE_FIELD(INFO_FIELD_ALBUM, 4);
     }
 
 #undef ADD_PANE_FIELD
     return count;
 }
 
-/* 信息窗格音频行：format 字段控制整块 4 行（采样率/位深/比特率/编码）。 */
+/* 信息窗格音频行：format 字段控制整块 4 行（采样率/位深/比特率/编码）。
+ * 高度不足时由布局按 0..3 优先级裁剪，渲染层只画保留行，因此这里始终
+ * 产出 4 行（不再要求“必须一次放得下 4 行”）。 */
 static int info_pane_fill_audio(const InfoTrack *track,
-                                char rows[][INFO_BAR_LINE_MAX], int max_rows)
+                                char rows[][INFO_BAR_LINE_MAX],
+                                int priorities[], int max_rows)
 {
     if (!(g_app_config.info_fields_mask & INFO_FIELD_FORMAT) || max_rows < 4) {
         return 0;
@@ -381,7 +447,47 @@ static int info_pane_fill_audio(const InfoTrack *track,
              i18n_get("player.bitrate"), bitrate);
     snprintf(rows[3], INFO_BAR_LINE_MAX, "%s%s",
              i18n_get("player.codec"), codec);
+    for (int i = 0; i < 4; i++) {
+        priorities[i] = i;
+    }
     return 4;
+}
+
+static int info_line_max_width(char rows[][INFO_BAR_LINE_MAX], int count)
+{
+    int max_width = 0;
+    for (int i = 0; i < count; i++) {
+        int width = utf8_str_width(rows[i]);
+        if (width > max_width) {
+            max_width = width;
+        }
+    }
+    return max_width;
+}
+
+/* 按布局保留掩码绘制文本块：保留行按原显示顺序紧凑排列，块内多列时
+ * 由布局给出的 text_cell 定位。 */
+static void info_draw_text_block(const InfoBarRect *region, int cols,
+                                 int keep_mask, int line_count,
+                                 int kept_count,
+                                 char rows[][INFO_BAR_LINE_MAX])
+{
+    if (!region || region->w <= 0 || region->h <= 0 || cols < 1) {
+        return;
+    }
+    int drawn = 0;
+    for (int i = 0; i < line_count; i++) {
+        if (!(keep_mask & (1u << i))) {
+            continue;
+        }
+        int x = 0, y = 0, w = 0;
+        if (!info_bar_layout_text_cell(region, cols, drawn, kept_count,
+                                       &x, &y, &w)) {
+            break;
+        }
+        info_draw_line(x, y, w, rows[i]);
+        drawn++;
+    }
 }
 
 void render_info_bar(void)
@@ -435,11 +541,23 @@ void render_info_bar(void)
 
     char metadata_lines[INFO_BAR_METADATA_LINES][INFO_BAR_LINE_MAX];
     char audio_lines[INFO_BAR_AUDIO_LINES][INFO_BAR_LINE_MAX];
+    int metadata_priority[INFO_BAR_METADATA_LINES];
+    int audio_priority[INFO_BAR_AUDIO_LINES];
     int metadata_count = info_pane_fill_metadata(&track, &playback,
                                                  metadata_lines,
+                                                 metadata_priority,
                                                  INFO_BAR_METADATA_LINES);
     int audio_count = info_pane_fill_audio(&track, audio_lines,
+                                           audio_priority,
                                            INFO_BAR_AUDIO_LINES);
+    int metadata_desired_w = info_line_max_width(metadata_lines,
+                                                 metadata_count);
+    int audio_desired_w = info_line_max_width(audio_lines, audio_count);
+    int cover_priority = g_app_config.info_cover_priority;
+    if (cover_priority < INFO_COVER_PRIORITY_AUTO ||
+        cover_priority >= INFO_COVER_PRIORITY_COUNT) {
+        cover_priority = INFO_COVER_PRIORITY_AUTO;
+    }
 
     /* 封面：播放设置的总开关 + 信息显示的分开关同时开启才请求。
      * 字符封面的尺寸/字符集仍由 CLI/D-Bus 路径使用，TUI 用彩色半块。 */
@@ -455,8 +573,11 @@ void render_info_bar(void)
     /* 自适应分区：横向（元数据 | 音频 | 封面）或纵向（封面在上、元数据/
      * 音频在下）。窗口太小时模型 valid=0，只保留边框/标题。 */
     InfoBarLayout layout;
-    info_bar_layout_compute_rows(w, h, want_cover, metadata_count, audio_count,
-                                 &layout);
+    info_bar_layout_compute_adaptive(w, h, want_cover, cover_priority,
+                                     metadata_count, audio_count,
+                                     metadata_priority, audio_priority,
+                                     metadata_desired_w, audio_desired_w,
+                                     &layout);
     if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
         log_error("info_bar", "Invalid info-pane geometry (%dx%d); skipping content",
                   w, h);
@@ -470,8 +591,11 @@ void render_info_bar(void)
                                    layout.cover.w, layout.cover.h);
         if (!cover_grid) {
             /* 解码失败：本帧退化为无封面布局，把封面空间还给文字。 */
-            info_bar_layout_compute_rows(w, h, 0, metadata_count, audio_count,
-                                         &layout);
+            info_bar_layout_compute_adaptive(w, h, 0, cover_priority,
+                                             metadata_count, audio_count,
+                                             metadata_priority, audio_priority,
+                                             metadata_desired_w, audio_desired_w,
+                                             &layout);
             if (!layout.valid || !info_bar_layout_validate(w, h, &layout)) {
                 ui_refresh_window(win_info);
                 return;
@@ -479,12 +603,12 @@ void render_info_bar(void)
         }
     }
 
-    for (int i = 0; i < layout.metadata_rows && i < metadata_count; i++) {
-        info_draw_line(&layout.metadata, i, metadata_lines[i]);
-    }
-    for (int i = 0; i < layout.audio_rows && i < audio_count; i++) {
-        info_draw_line(&layout.audio, i, audio_lines[i]);
-    }
+    info_draw_text_block(&layout.metadata, layout.metadata_cols,
+                         (int)layout.metadata_keep_mask, metadata_count,
+                         layout.metadata_rows, metadata_lines);
+    info_draw_text_block(&layout.audio, layout.audio_cols,
+                         (int)layout.audio_keep_mask, audio_count,
+                         layout.audio_rows, audio_lines);
 
     // 专辑封面（彩色半块）：逐单元设置前景/背景颜色，绘制范围严格限制
     // 在模型给出的封面矩形内，随后由边框重绘兜底。
@@ -494,9 +618,12 @@ void render_info_bar(void)
     }
 
     log_debug("info_bar",
-              "mask=0x%04x metadata=%d audio=%d cover_requested=%d cover_drawn=%d",
+              "mask=0x%04x metadata=%d/%d audio=%d/%d cover_requested=%d "
+              "cover_drawn=%d cover_priority=%d stacked=%d cols=%d/%d",
               g_app_config.info_fields_mask, layout.metadata_rows,
-              layout.audio_rows, cover_requested, cover_grid ? 1 : 0);
+              metadata_count, layout.audio_rows, audio_count,
+              cover_requested, cover_grid ? 1 : 0, cover_priority,
+              layout.stacked, layout.metadata_cols, layout.audio_cols);
 
     /* 内容画完后最后补一遍边框，防止任何字形溢出盖住边框。 */
     ui_pane_repaint_border(LAYOUT_PANE_INFO, win_info);

@@ -356,6 +356,7 @@ typedef struct {
     int info_cover_cols;         /* CLI 封面列数 4..40 */
     int info_cover_rows;         /* CLI 封面行数 2..20 */
     int info_cover_charset;      /* CLI 封面字符集 0=盲文 1=ASCII 2=半块 */
+    int info_cover_priority;     /* 信息窗格封面/文字优先级 0=auto 1=text-first 2=cover-first */
     int info_show_progress;      /* 0/1 CLI 进度行 */
     int info_progress_style;     /* CLI 0=bar 1=time 2=percent 3=time+percent */
     int info_lyrics_lines;       /* CLI 0=关 1=当前句 2=当前句+下一句 */

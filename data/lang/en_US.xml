@@ -187,6 +187,7 @@
   <string key="settings.opt.info_cover">Show Cover (pane/CLI)</string>
   <string key="settings.opt.info_cover_size">Cover Size (CLI/D-Bus only)</string>
   <string key="settings.opt.info_cover_charset">Cover Charset (CLI/D-Bus only)</string>
+  <string key="settings.opt.info_cover_priority">Cover / text priority</string>
   <string key="settings.opt.info_progress">Show Progress (CLI/D-Bus only)</string>
   <string key="settings.opt.info_progress_style">Progress Style (CLI/D-Bus only)</string>
   <string key="settings.opt.info_lyrics">Lyric Lines (CLI/D-Bus only)</string>
@@ -205,6 +206,9 @@
   <string key="settings.info.charset.braille">Braille</string>
   <string key="settings.info.charset.ascii">ASCII</string>
   <string key="settings.info.charset.half">Half-block</string>
+  <string key="settings.info.priority.auto">Auto (default)</string>
+  <string key="settings.info.priority.text_first">Text first</string>
+  <string key="settings.info.priority.cover_first">Cover first</string>
   <string key="settings.info.lyrics.none">Off</string>
   <string key="settings.info.lyrics.current">Current Only</string>
   <string key="settings.info.lyrics.current_next">Current + Next</string>

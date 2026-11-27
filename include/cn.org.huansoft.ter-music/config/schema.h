@@ -89,6 +89,7 @@ extern "C" {
 #define XML_PREF_INFO_COVER_COLS     "info_cover_cols"
 #define XML_PREF_INFO_COVER_ROWS     "info_cover_rows"
 #define XML_PREF_INFO_COVER_CHARSET  "info_cover_charset"
+#define XML_PREF_INFO_COVER_PRIORITY "info_cover_priority"
 #define XML_PREF_INFO_SHOW_PROGRESS  "info_show_progress"
 #define XML_PREF_INFO_PROGRESS_STYLE "info_progress_style"
 #define XML_PREF_INFO_LYRICS_LINES   "info_lyrics_lines"

@@ -33,6 +33,7 @@
 #include "config/appearance.h"
 #include "logger/logger.h"
 #include "info/info.h"
+#include "ui/info_bar_layout.h"
 #include "playlist/playlist.h"
 #include "playlist/encoding.h"
 #include "i18n/i18n.h"
@@ -178,7 +179,9 @@ static const char *settings_options[] = {
     /* ── 终端亮/暗外观（config v10）：尾部追加，不重排既有下标 ── */
     "settings.opt.appearance_mode",
     "settings.opt.detect_background",
-    "settings.opt.terminal_mode"
+    "settings.opt.terminal_mode",
+    /* 信息窗格封面/文字优先级：尾部追加，不重排既有下标。 */
+    "settings.opt.info_cover_priority"
     /* config v12：删除了 v11 尾部那行「启用卡拉OK（选择模型）」（模型随包
      * 内置、固定 uvr-mdxnet-3-9662），设置页只保留三档行。 */
 };
@@ -187,7 +190,7 @@ static const char *settings_options[] = {
  * 另含尾部追加的 stop_core_on_exit、layout_reload、layout_edit/layout_new，
  * 54..59 的窗格颜色项，60 的卡拉OK（消人声）档位，61..63 的终端外观）。
  * config v12 删除了 64 号"启用/更换模型"功能行（模型随包内置）。 */
-#define SETTINGS_OPTION_COUNT 64
+#define SETTINGS_OPTION_COUNT 65
 
 /* 编译期护栏：文案表必须与枚举/段数组使用同一数量。 */
 typedef char settings_option_arrays_must_match_count[
@@ -271,7 +274,9 @@ enum {
     /* ── 终端亮/暗外观（config v10）：尾部追加，不重排既有下标 ── */
     SETTINGS_IDX_APPEARANCE_MODE     = 61,
     SETTINGS_IDX_DETECT_BACKGROUND   = 62,
-    SETTINGS_IDX_TERMINAL_MODE       = 63
+    SETTINGS_IDX_TERMINAL_MODE       = 63,
+    /* ── 信息窗格封面/文字优先级：尾部追加，不重排既有下标 ── */
+    SETTINGS_IDX_INFO_COVER_PRIORITY = 64
     /* config v12：v11 尾部的 SETTINGS_IDX_KARAOKE_FEATURE(64) 已删除 ——
      * 模型随包内置，设置页不再有"启用/更换/关闭模型"行。 */
 };
@@ -366,6 +371,7 @@ static const int settings_info_option_indices[] = {
     SETTINGS_IDX_INFO_PRESET,
     SETTINGS_IDX_INFO_FIELDS,
     SETTINGS_IDX_INFO_COVER,
+    SETTINGS_IDX_INFO_COVER_PRIORITY,
     SETTINGS_IDX_INFO_COVER_SIZE,
     SETTINGS_IDX_INFO_COVER_CHARSET,
     SETTINGS_IDX_INFO_PROGRESS,
@@ -526,6 +532,19 @@ static const char *info_charset_label(int charset)
     }
 }
 
+static const char *info_cover_priority_label(int priority)
+{
+    switch (priority) {
+        case INFO_COVER_PRIORITY_TEXT_FIRST:
+            return i18n_get("settings.info.priority.text_first");
+        case INFO_COVER_PRIORITY_COVER_FIRST:
+            return i18n_get("settings.info.priority.cover_first");
+        case INFO_COVER_PRIORITY_AUTO:
+        default:
+            return i18n_get("settings.info.priority.auto");
+    }
+}
+
 static const char *info_lyrics_label(int lines)
 {
     switch (lines) {
@@ -623,6 +642,10 @@ static void info_sel_option_text(int src, int index, char *out, size_t out_size)
         case SETTINGS_IDX_INFO_COVER_CHARSET:
             if (index >= 0 && index < INFO_COVER_CHARSET_COUNT)
                 snprintf(out, out_size, "%s", info_charset_label(index));
+            break;
+        case SETTINGS_IDX_INFO_COVER_PRIORITY:
+            if (index >= 0 && index < INFO_COVER_PRIORITY_COUNT)
+                snprintf(out, out_size, "%s", info_cover_priority_label(index));
             break;
         case SETTINGS_IDX_INFO_PROGRESS_STYLE:
             if (index >= 0 && index < INFO_PROGRESS_STYLE_COUNT)
@@ -1224,6 +1247,10 @@ static void format_settings_option_line(int option_index, char *line, size_t lin
         snprintf(line, line_size, "%s%s%s",
                  i18n_get(current_settings_options[option_index]), separator,
                  menu_bool_text(g_app_config.info_show_cover));
+    } else if (option_index == SETTINGS_IDX_INFO_COVER_PRIORITY) {
+        snprintf(line, line_size, "%s%s%s",
+                 i18n_get(current_settings_options[option_index]), separator,
+                 info_cover_priority_label(g_app_config.info_cover_priority));
     } else if (option_index == SETTINGS_IDX_INFO_COVER_SIZE) {
         snprintf(line, line_size, "%s%s%dx%d",
                  i18n_get(current_settings_options[option_index]), separator,
@@ -1780,6 +1807,13 @@ static void close_sel_menu(int apply, int animate)
                 show_status_message(i18n_get("settings.info.saved"));
                 break;
 
+            case SETTINGS_IDX_INFO_COVER_PRIORITY:
+                g_app_config.info_cover_priority = g_sel_idx;
+                info_mark_custom();
+                player_config_persist();
+                show_status_message(i18n_get("settings.info.saved"));
+                break;
+
             case SETTINGS_IDX_INFO_PROGRESS_STYLE:
                 g_app_config.info_progress_style = g_sel_idx;
                 info_mark_custom();
@@ -2037,6 +2071,10 @@ static void open_sel_menu(int option_index)
             count = INFO_COVER_CHARSET_COUNT;
             cur   = g_app_config.info_cover_charset;
             break;
+        case SETTINGS_IDX_INFO_COVER_PRIORITY:
+            count = INFO_COVER_PRIORITY_COUNT;
+            cur   = g_app_config.info_cover_priority;
+            break;
         case SETTINGS_IDX_INFO_PROGRESS_STYLE:
             count = INFO_PROGRESS_STYLE_COUNT;
             cur   = g_app_config.info_progress_style;
@@ -2286,6 +2324,7 @@ static void create_sel_window(void)
             case SETTINGS_IDX_INFO_FIELDS:
             case SETTINGS_IDX_INFO_COVER_SIZE:
             case SETTINGS_IDX_INFO_COVER_CHARSET:
+            case SETTINGS_IDX_INFO_COVER_PRIORITY:
             case SETTINGS_IDX_INFO_PROGRESS_STYLE:
             case SETTINGS_IDX_INFO_LYRICS:
                 info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
@@ -2522,6 +2561,7 @@ static void draw_sel_menu(void)
             case SETTINGS_IDX_INFO_FIELDS:
             case SETTINGS_IDX_INFO_COVER_SIZE:
             case SETTINGS_IDX_INFO_COVER_CHARSET:
+            case SETTINGS_IDX_INFO_COVER_PRIORITY:
             case SETTINGS_IDX_INFO_PROGRESS_STYLE:
             case SETTINGS_IDX_INFO_LYRICS:
                 info_sel_option_text(src, i, opts[i], sizeof(opts[i]));
@@ -2562,6 +2602,7 @@ static void draw_sel_menu(void)
         case SETTINGS_IDX_INFO_FIELDS:
         case SETTINGS_IDX_INFO_COVER_SIZE:
         case SETTINGS_IDX_INFO_COVER_CHARSET:
+        case SETTINGS_IDX_INFO_COVER_PRIORITY:
         case SETTINGS_IDX_INFO_PROGRESS_STYLE:
         case SETTINGS_IDX_INFO_LYRICS:
             if (src >= 0 && src < SETTINGS_OPTION_COUNT)
@@ -2834,6 +2875,7 @@ static void activate_settings_current_option(void)
         g_settings_current_option == SETTINGS_IDX_INFO_FIELDS ||
         g_settings_current_option == SETTINGS_IDX_INFO_COVER_SIZE ||
         g_settings_current_option == SETTINGS_IDX_INFO_COVER_CHARSET ||
+        g_settings_current_option == SETTINGS_IDX_INFO_COVER_PRIORITY ||
         g_settings_current_option == SETTINGS_IDX_INFO_PROGRESS_STYLE ||
         g_settings_current_option == SETTINGS_IDX_INFO_LYRICS) {
         open_sel_menu(g_settings_current_option);

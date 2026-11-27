@@ -167,6 +167,7 @@
   <string key="settings.opt.info_cover">顯面（格/CLI）</string>
   <string key="settings.opt.info_cover_size">面之修廣（惟 CLI/D-Bus）</string>
   <string key="settings.opt.info_cover_charset">面之字集（惟 CLI/D-Bus）</string>
+  <string key="settings.opt.info_cover_priority">封面與文之先後</string>
   <string key="settings.opt.info_progress">顯音程（惟 CLI/D-Bus）</string>
   <string key="settings.opt.info_progress_style">音程之式（惟 CLI/D-Bus）</string>
   <string key="settings.opt.info_lyrics">歌辭行數（惟 CLI/D-Bus）</string>
@@ -185,6 +186,9 @@
   <string key="settings.info.charset.braille">點陣</string>
   <string key="settings.info.charset.ascii">ASCII</string>
   <string key="settings.info.charset.half">半塊</string>
+  <string key="settings.info.priority.auto">自定（此為常）</string>
+  <string key="settings.info.priority.text_first">文先</string>
+  <string key="settings.info.priority.cover_first">封先</string>
   <string key="settings.info.lyrics.none">閉</string>
   <string key="settings.info.lyrics.current">惟今句</string>
   <string key="settings.info.lyrics.current_next">今句＋次句</string>

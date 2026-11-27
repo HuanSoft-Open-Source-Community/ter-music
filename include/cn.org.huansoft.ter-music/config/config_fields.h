@@ -96,6 +96,7 @@ static const ConfigFieldEntry k_fields[] = {
     {"info_cover_cols",     CFG_INT, OFF(info_cover_cols), 0, 4, 40, "preferences"},
     {"info_cover_rows",     CFG_INT, OFF(info_cover_rows), 0, 2, 20, "preferences"},
     {"info_cover_charset",  CFG_INT, OFF(info_cover_charset), 0, 0, 2, "preferences"},
+    {"info_cover_priority", CFG_INT, OFF(info_cover_priority), 0, 0, 2, "preferences"},
     {"info_show_progress",  CFG_INT, OFF(info_show_progress), 0, 0, 1, "preferences"},
     {"info_progress_style", CFG_INT, OFF(info_progress_style), 0, 0, 3, "preferences"},
     {"info_lyrics_lines",   CFG_INT, OFF(info_lyrics_lines), 0, 0, 2, "preferences"},

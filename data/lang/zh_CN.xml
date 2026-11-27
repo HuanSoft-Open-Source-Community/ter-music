@@ -187,6 +187,7 @@
   <string key="settings.opt.info_cover">显示封面（窗格/CLI）</string>
   <string key="settings.opt.info_cover_size">封面尺寸（仅 CLI/D-Bus）</string>
   <string key="settings.opt.info_cover_charset">封面字符集（仅 CLI/D-Bus）</string>
+  <string key="settings.opt.info_cover_priority">封面/文字优先级</string>
   <string key="settings.opt.info_progress">显示进度（仅 CLI/D-Bus）</string>
   <string key="settings.opt.info_progress_style">进度样式（仅 CLI/D-Bus）</string>
   <string key="settings.opt.info_lyrics">歌词行数（仅 CLI/D-Bus）</string>
@@ -205,6 +206,9 @@
   <string key="settings.info.charset.braille">盲文</string>
   <string key="settings.info.charset.ascii">ASCII</string>
   <string key="settings.info.charset.half">半块</string>
+  <string key="settings.info.priority.auto">自动（默认）</string>
+  <string key="settings.info.priority.text_first">文字优先</string>
+  <string key="settings.info.priority.cover_first">封面优先</string>
   <string key="settings.info.lyrics.none">关闭</string>
   <string key="settings.info.lyrics.current">仅当前句</string>
   <string key="settings.info.lyrics.current_next">当前句+下一句</string>

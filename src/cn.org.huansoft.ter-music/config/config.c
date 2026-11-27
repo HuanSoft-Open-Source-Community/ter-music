@@ -266,6 +266,7 @@ void init_default_config(void)
     g_app_config.info_cover_cols       = 16;
     g_app_config.info_cover_rows       = 8;
     g_app_config.info_cover_charset    = 0;       /* 盲文 */
+    g_app_config.info_cover_priority   = 0;       /* auto */
     g_app_config.info_show_progress    = 1;
     g_app_config.info_progress_style   = 0;       /* 进度条+时间 */
     g_app_config.info_lyrics_lines     = 2;       /* 当前句+下一句 */
@@ -612,6 +613,7 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_INFO_COVER_COLS,     cfg->info_cover_cols);
         SAVE_INT(XML_PREF_INFO_COVER_ROWS,     cfg->info_cover_rows);
         SAVE_INT(XML_PREF_INFO_COVER_CHARSET,  cfg->info_cover_charset);
+        SAVE_INT(XML_PREF_INFO_COVER_PRIORITY, cfg->info_cover_priority);
         SAVE_INT(XML_PREF_INFO_SHOW_PROGRESS,  cfg->info_show_progress);
         SAVE_INT(XML_PREF_INFO_PROGRESS_STYLE, cfg->info_progress_style);
         SAVE_INT(XML_PREF_INFO_LYRICS_LINES,   cfg->info_lyrics_lines);
@@ -937,6 +939,10 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->info_cover_cols          = xml_get_int(prefs, XML_PREF_INFO_COVER_COLS, 16);
         cfg->info_cover_rows          = xml_get_int(prefs, XML_PREF_INFO_COVER_ROWS, 8);
         cfg->info_cover_charset       = xml_get_int(prefs, XML_PREF_INFO_COVER_CHARSET, 0);
+        cfg->info_cover_priority      = xml_get_int(prefs, XML_PREF_INFO_COVER_PRIORITY, 0);
+        if (cfg->info_cover_priority < 0 || cfg->info_cover_priority > 2) {
+            cfg->info_cover_priority = 0;   /* 旧/手改文件：缺省 auto */
+        }
         cfg->info_show_progress       = xml_get_int(prefs, XML_PREF_INFO_SHOW_PROGRESS, 1);
         cfg->info_progress_style      = xml_get_int(prefs, XML_PREF_INFO_PROGRESS_STYLE, 0);
         cfg->info_lyrics_lines        = xml_get_int(prefs, XML_PREF_INFO_LYRICS_LINES, 2);
