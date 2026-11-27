@@ -5,7 +5,8 @@
  * 结构（自上而下）：
  *   1. 受支持模型表（静态只读，唯一事实来源）
  *   2. SHA-256（自带实现，避免为 30MiB 校验引入新依赖）
- *   3. ONNX Runtime dlopen 装载（编译期零链接）
+ *   3. ONNX Runtime 装载：静态构建直接调用 OrtGetApiBase()（官方包内置），
+ *      动态构建运行期 dlopen（编译期零链接，缺库时功能不可用）
  *   4. 会话：CPU EP + DisableCpuMemArena + 线程钳制 + I/O 形状校验
  *   5. DSP：周期 Hann STFT → 逐 chunk 推理 → iSTFT(Σw² 归一) → 对称 Hann
  *      交叉淡化（逐字复刻 UVR 5.6 的 MDX-Net 语义，见团队研究 REPORT §2.3）
@@ -383,8 +384,64 @@ int karaoke_model_sha256_file(const char *path, char out_hex[65],
 }
 
 /* ================================================================
- * 4. ONNX Runtime 动态装载（编译期零链接）
+ * 4. ONNX Runtime 装载
+ *
+ * 两种构建方式，行为对调用方完全一致（只有"运行库名"文案不同）：
+ *   静态（-DTER_MUSIC_ONNXRUNTIME_STATIC=ON，官方 deb/rpm/AppImage）：
+ *     ORT 静态链接进 ter-music，直接调用 OrtGetApiBase()，不碰 dlopen。
+ *     发布矩阵里的 Debian 10/11/12 与 EL7–10 都没有系统 libonnxruntime，
+ *     内置模型只有配合静态运行库才真正"装得上就能消音"。
+ *   动态（默认，源码构建/开发机）：编译期零链接，运行期 dlopen
+ *     libonnxruntime.so.1.21 -> .so.1 -> .so；缺库时本功能不可用但不影响
+ *     原声播放（可读提示见 karaoke_model_runtime_available 的 err）。
  * ================================================================ */
+
+#ifdef TER_MUSIC_ONNXRUNTIME_STATIC
+/* 静态链接：ORT C API 的入口在 onnxruntime_c_api.h 里已声明（ORT_EXPORT 在
+ * Linux 为空、NO_EXCEPTION 在 C 下为空）。这里再显式 extern 一次，配合注释
+ * 让"静态构建直接调用、不进 dlopen"这件事在代码里一眼可见。 */
+extern const OrtApiBase *ORT_API_CALL OrtGetApiBase(void);
+
+static pthread_once_t g_ort_once = PTHREAD_ONCE_INIT;
+static int g_ort_state = -1;              /* 1=可用，-1=不可用（pthread_once 后只读） */
+static const OrtApi *g_ort = NULL;
+static char g_ort_lib[64];
+static char g_ort_version[64];
+static char g_ort_err[KARAOKE_MODEL_ERR_CAP];
+
+static void ort_load_once(void)
+{
+    const OrtApiBase *base = OrtGetApiBase();
+    if (!base || !base->GetApi || !base->GetVersionString) {
+        g_ort_state = -1;
+        snprintf(g_ort_err, sizeof(g_ort_err),
+                 "内置 ONNX Runtime 静态库异常：OrtGetApiBase() 返回的 API 表无效"
+                 "（二进制可能链接到了不完整的 libonnxruntime.a）");
+        return;
+    }
+    /* 头部按 ORT_API_VERSION(21) 编译；静态库更旧时向下索取，只用到 1.16 之前
+     * 早已存在的稳定函数，结构体是追加式扩展。 */
+    const OrtApi *api = NULL;
+    for (int v = ORT_API_VERSION; v >= 16; v--) {
+        api = base->GetApi((uint32_t)v);
+        if (api)
+            break;
+    }
+    if (!api) {
+        g_ort_state = -1;
+        snprintf(g_ort_err, sizeof(g_ort_err),
+                 "内置 ONNX Runtime 静态库版本不兼容：GetApi(%d..16) 全部不可用",
+                 ORT_API_VERSION);
+        return;
+    }
+    const char *ver = base->GetVersionString();
+    snprintf(g_ort_lib, sizeof(g_ort_lib), "%s", "static (linked into ter-music)");
+    snprintf(g_ort_version, sizeof(g_ort_version), "%s", ver ? ver : "unknown");
+    g_ort = api;
+    g_ort_state = 1;
+}
+
+#else /* !TER_MUSIC_ONNXRUNTIME_STATIC — 运行期 dlopen，编译期零链接 */
 
 typedef const OrtApiBase *(ORT_API_CALL *OrtGetApiBaseFn)(void);
 
@@ -454,6 +511,8 @@ static void ort_load_once(void)
              "ONNX Runtime 运行库不可用（尝试 libonnxruntime.so.1.21 / .so.1 / .so）：%s",
              detail[0] ? detail : "dlopen 失败且无错误信息");
 }
+
+#endif /* TER_MUSIC_ONNXRUNTIME_STATIC */
 
 static void ensure_ort_loaded(void)
 {

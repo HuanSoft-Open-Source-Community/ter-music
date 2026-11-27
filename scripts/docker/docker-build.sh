@@ -86,12 +86,14 @@ fi
 DOCKER_PREFIX=(env "DOCKER_CONFIG=${DOCKER_CONFIG_DIR}" docker)
 context="$(cd "$(dirname "$DOCKERFILE")" && pwd)"
 
-# 需要 FFmpeg 源码、appimagetool、squashfs-tools 或 AppImage runtime 的镜像
-# 从宿主缓存取同一份文件，避免每个镜像重复下载，并统一使用同一个构建上下文。
+# 需要 FFmpeg 源码、appimagetool、squashfs-tools、AppImage runtime 或 ONNX
+# Runtime 静态库的镜像从宿主缓存取同一份文件，避免每个镜像重复下载/构建，
+# 并统一使用同一个构建上下文。
 NEED_FFMPEG=false
 NEED_APPIMAGETOOL=false
 NEED_SQUASHFS_TOOLS=false
 NEED_APPIMAGE_RUNTIME=false
+NEED_ONNXRUNTIME=false
 if grep -q '^COPY ffmpeg-' "$DOCKERFILE"; then
     NEED_FFMPEG=true
 fi
@@ -104,10 +106,17 @@ fi
 if grep -q '^COPY runtime-' "$DOCKERFILE"; then
     NEED_APPIMAGE_RUNTIME=true
 fi
+# ONNX Runtime 静态库：官方 deb/rpm/AppImage 要"装得上就能消音"，而 Debian
+# 10/11/12 与 EL7–10 都没有系统 libonnxruntime。镜像里的 COPY 由这里保证：
+# 缺产物就先跑 scripts/build/build-onnxruntime-static.sh（幂等，有缓存就秒回）。
+if grep -q '^COPY onnxruntime-static/' "$DOCKERFILE"; then
+    NEED_ONNXRUNTIME=true
+fi
 
 CONTEXT_BUILD_ARGS=()
 if [ "$NEED_FFMPEG" = true ] || [ "$NEED_APPIMAGETOOL" = true ] ||
-   [ "$NEED_SQUASHFS_TOOLS" = true ] || [ "$NEED_APPIMAGE_RUNTIME" = true ]; then
+   [ "$NEED_SQUASHFS_TOOLS" = true ] || [ "$NEED_APPIMAGE_RUNTIME" = true ] ||
+   [ "$NEED_ONNXRUNTIME" = true ]; then
     context="${TM_REPO_ROOT}/.cache/docker-context"
     mkdir -p "$context"
 fi
@@ -128,6 +137,17 @@ fi
 if [ "$NEED_APPIMAGE_RUNTIME" = true ]; then
     tm_ensure_appimage_runtime || exit 1
     cp -f "$TM_APPIMAGE_RUNTIME_SOURCE" "$context/runtime-x86_64"
+fi
+if [ "$NEED_ONNXRUNTIME" = true ]; then
+    # 静态库构建较重（首次数十分钟），因此只有在产物缺失/无效时才构建；
+    # 默认路径与 Dockerfile 的 COPY 目标一致，约定见
+    # scripts/build/build-onnxruntime-static.sh。
+    "${TM_REPO_ROOT}/scripts/build/build-onnxruntime-static.sh" --ensure || exit 1
+    mkdir -p "$context/onnxruntime-static/cxx"
+    cp -f "${TM_REPO_ROOT}/.cache/tools/onnxruntime-static/libonnxruntime.a" \
+        "$context/onnxruntime-static/libonnxruntime.a"
+    cp -f "${TM_REPO_ROOT}/.cache/tools/onnxruntime-static/cxx/libstdc++.a" \
+        "$context/onnxruntime-static/cxx/libstdc++.a"
 fi
 
 if [ "$REBUILD" = true ] || ! "${DOCKER_PREFIX[@]}" image inspect "$IMAGE_NAME" >/dev/null 2>&1; then

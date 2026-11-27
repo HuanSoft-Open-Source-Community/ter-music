@@ -30,7 +30,8 @@
  * 线程与生命周期约束（实现必须遵守，调用方也按此用）：
  *
  * - `karaoke_model_runtime_available()` / `runtime_library()` /
- *   `runtime_version()`：任意线程可调，内部 `pthread_once` 缓存探测结果。
+ *   `runtime_version()`：任意线程可调，内部 `pthread_once` 缓存探测结果；
+ *   静态构建命中即返回 0（运行库名固定为 `static (linked into ter-music)`）。
  * - `KaraokeModelSession` **非线程安全**：同一会话同一时刻只允许一个线程
  *   调用 `karaoke_model_infer_patch` / `karaoke_model_separate`；不同会话
  *   互不影响。建议全进程只保留一个会话（ORT CPU 会话常驻约 76MB）。
@@ -45,6 +46,15 @@
  *   `Schema error: ...` 警告（实测约 116KB/567 行）。本模块不劫持全局 fd；
  *   调用方（例如分离 worker 子进程）必须把 stderr 重定向到 /dev/null 或
  *   日志文件，否则 TUI 会被刷屏、pipe 未排空还会死锁。
+ *
+ * ONNX Runtime 的两种接入方式（对调用方透明，只有 `runtime_library()` 文案不同）：
+ * - **静态链接**（官方 deb/rpm/AppImage：`-DTER_MUSIC_ONNXRUNTIME_STATIC=ON`，
+ *   静态库由 `scripts/build/build-onnxruntime-static.sh` 产出）：ORT 编进
+ *   ter-music，`ORT_API_VERSION 21` 直接可用，不再依赖系统
+ *   `libonnxruntime.so`（Debian 10/11/12 与 EL7–10 根本没有这个包）。
+ * - **运行期 dlopen**（默认/源码构建）：编译期零链接，按
+ *   `libonnxruntime.so.1.21` → `.so.1` → `.so` 顺序加载；缺库时本功能不可用，
+ *   原声播放不受影响，错误原因由 `karaoke_model_runtime_available()` 给出。
  *
  * @author ter-music team
  * @date 2026-11-25
@@ -145,8 +155,8 @@ const KaraokeModelSpec *karaoke_model_by_sha256(const char *sha256_hex);
 /* ── ONNX Runtime（dlopen，可选） ───────────────────────────────── */
 
 /**
- * 探测 ONNX Runtime 是否可用（dlopen + API 表版本校验，不建会话）。
- * 结果内部缓存；可被任意线程调用。
+ * 探测 ONNX Runtime 是否可用（静态链接时直接校验内置 API 表；动态构建时
+ * dlopen + API 表版本校验；都不建会话）。结果内部缓存；可被任意线程调用。
  *
  * @param err     可空；失败时写入可读原因（含尝试过的库名/dlerror）。
  * @param err_cap err 容量。
@@ -154,7 +164,8 @@ const KaraokeModelSpec *karaoke_model_by_sha256(const char *sha256_hex);
  */
 int karaoke_model_runtime_available(char *err, size_t err_cap);
 
-/** 已加载的运行库名（如 "libonnxruntime.so.1.21"）；不可用/未加载返回 NULL。 */
+/** 运行库名：动态构建如 "libonnxruntime.so.1.21"，静态构建为
+ *  "static (linked into ter-music)"；不可用/未加载返回 NULL。 */
 const char *karaoke_model_runtime_library(void);
 
 /** 运行库版本字符串（如 "1.21.0"）；不可用/未加载返回 NULL。 */

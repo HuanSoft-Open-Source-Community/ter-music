@@ -65,6 +65,63 @@ if(NOT PKG_CONFIG_FOUND)
     message(FATAL_ERROR "pkg-config is required but not found.")
 endif()
 
+# ── 内置 ONNX Runtime（静态链接，可选）────────────────────────────────
+# 发布矩阵里的 Debian 10/11/12 与 EL7–10 都**没有**系统 libonnxruntime
+# （Debian 只有 trixie 13+ 才提供 libonnxruntime1.21），但模型是随包内置的。
+# 因此官方包把 ONNX Runtime 静态链接进二进制：装得上就能消音。
+#
+# 静态库由 scripts/build/build-onnxruntime-static.sh 从 Debian pool 的
+# onnxruntime 1.21.0+dfsg 源码构建（PIC，glibc 2.17 符号上限），构建镜像把它
+# 放到 /usr/local/lib/onnxruntime-static/：
+#   libonnxruntime.a          合并后的 ORT 静态库（含第三方依赖）
+#   cxx/libstdc++.a           ORT 是 C++，链接期需要它（不进 DT_NEEDED）
+#
+# 取值：
+#   AUTO（默认）—— 静态库存在就静态链接，否则与 OFF 完全一致（源码构建、
+#                  开发机、没有静态库的发行版构建都不受影响）
+#   ON          —— 必须静态链接；缺库直接失败（官方出包时显式钉住）
+#   OFF         —— 永不静态链接，保持运行期 dlopen 行为
+set(TER_MUSIC_ONNXRUNTIME_STATIC "AUTO" CACHE STRING
+    "Link ONNX Runtime statically for built-in karaoke (AUTO/ON/OFF)")
+set_property(CACHE TER_MUSIC_ONNXRUNTIME_STATIC PROPERTY STRINGS AUTO ON OFF)
+set(TER_MUSIC_ONNXRUNTIME_STATIC_DIR "/usr/local/lib/onnxruntime-static" CACHE PATH
+    "Directory containing libonnxruntime.a and cxx/libstdc++.a")
+
+string(TOUPPER "${TER_MUSIC_ONNXRUNTIME_STATIC}" TER_MUSIC_ORT_MODE)
+set(TER_MUSIC_ORT_STATIC_LIB "${TER_MUSIC_ONNXRUNTIME_STATIC_DIR}/libonnxruntime.a")
+set(TER_MUSIC_ORT_CXX_LIB "${TER_MUSIC_ONNXRUNTIME_STATIC_DIR}/cxx/libstdc++.a")
+set(TER_MUSIC_ORT_STATIC_ENABLED FALSE)
+
+if(TER_MUSIC_ORT_MODE STREQUAL "ON")
+    set(TER_MUSIC_ORT_STATIC_ENABLED TRUE)
+elseif(TER_MUSIC_ORT_MODE STREQUAL "AUTO")
+    if(EXISTS "${TER_MUSIC_ORT_STATIC_LIB}")
+        set(TER_MUSIC_ORT_STATIC_ENABLED TRUE)
+    endif()
+elseif(NOT TER_MUSIC_ORT_MODE STREQUAL "OFF")
+    message(FATAL_ERROR
+        "TER_MUSIC_ONNXRUNTIME_STATIC 只接受 AUTO/ON/OFF，当前值：${TER_MUSIC_ONNXRUNTIME_STATIC}")
+endif()
+
+if(TER_MUSIC_ORT_STATIC_ENABLED)
+    if(NOT EXISTS "${TER_MUSIC_ORT_STATIC_LIB}")
+        message(FATAL_ERROR
+            "TER_MUSIC_ONNXRUNTIME_STATIC=${TER_MUSIC_ORT_MODE}，但静态库不存在："
+            "${TER_MUSIC_ORT_STATIC_LIB}\n"
+            "请先运行 scripts/build/build-onnxruntime-static.sh（产物在 "
+            ".cache/tools/onnxruntime-static/），或用 -DTER_MUSIC_ONNXRUNTIME_STATIC=OFF "
+            "保留运行期 dlopen 模式。")
+    endif()
+    if(NOT EXISTS "${TER_MUSIC_ORT_CXX_LIB}")
+        message(FATAL_ERROR
+            "静态 ONNX Runtime 缺少链接期 C++ 运行时归档：${TER_MUSIC_ORT_CXX_LIB}\n"
+            "由 scripts/build/build-onnxruntime-static.sh 一起产出（cxx/libstdc++.a）。")
+    endif()
+    message(STATUS "ONNX Runtime: 静态链接 ${TER_MUSIC_ORT_STATIC_LIB}（内置消音，无需系统 libonnxruntime）")
+else()
+    message(STATUS "ONNX Runtime: 运行期 dlopen（未启用静态库；无系统 libonnxruntime 时卡拉OK不可用）")
+endif()
+
 # FFmpeg 库（静态链接时使用 --static 获取所有传递依赖，并优先查找 .a 文件）
 if(STATIC_LINKING)
     set(ENV{PKG_CONFIG_ARGN} "--static")
@@ -312,6 +369,20 @@ endif()
 # 链接库
 # libxml2 由 util/xml_compat.c 在运行期 dlopen（libxml2.so.2 / libxml2.so.16），
 # 这里刻意不链接 ${LIBXML2_LIBRARIES}，避免 DT_NEEDED 写死某个 soname。
+
+# 静态 ONNX Runtime（可选）：归档必须排在它依赖的系统库之前——ORT 静态库
+# 引用 zlib/-lm/-ldl/-lpthread 的符号，靠后面的 -lz/-lm/-lpthread/-ldl 解析；
+# cxx/libstdc++.a 是 ORT（C++）目标文件需要的链接期运行时归档（静态链接
+# libstdc++，否则 Debian 10 的 GLIBCXX_3.4.25 满足不了 GCC 11 的 3.4.29）。
+# 这一段必须在下面主 target_link_libraries 之前，才能保证顺序。
+if(TER_MUSIC_ORT_STATIC_ENABLED)
+    target_link_libraries(${PROJECT_NAME}
+        "${TER_MUSIC_ORT_STATIC_LIB}"
+        "${TER_MUSIC_ORT_CXX_LIB}"
+    )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TER_MUSIC_ONNXRUNTIME_STATIC=1)
+endif()
+
 target_link_libraries(${PROJECT_NAME}
     ${AVCODEC_LIBRARIES}
     ${AVFORMAT_LIBRARIES}
