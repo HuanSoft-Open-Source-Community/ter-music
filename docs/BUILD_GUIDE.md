@@ -364,7 +364,10 @@ D-Bus 在 CMake 里由 `pkg_check_modules(DBUS dbus-1)` 探测，找不到时 `H
 
 1. 把系统 pkg-config 目录（`/usr/lib/x86_64-linux-gnu/pkgconfig`、`/usr/share/pkgconfig`）里除 `dbus-1.pc` 外的 `.pc` 全部软链到 `/tmp/pc-nodbus`；
 2. 用 `PKG_CONFIG_LIBDIR=/tmp/pc-nodbus`（并清空 `PKG_CONFIG_PATH`）配置构建，让 `pkg_check_modules` 找不到 `dbus-1`；
-3. 用 `compile_commands.json` 断言没有 `-DHAVE_DBUS`，再完整构建 + `--help` 冒烟。
+3. 用 `compile_commands.json` 断言没有 `-DHAVE_DBUS`，再完整构建 + `--help` 冒烟；
+   configure 额外加 `-DCMAKE_C_FLAGS="-Werror=implicit-function-declaration"`，
+   这样 GCC 13（Ubuntu 24.04）也会和 GCC 14（Debian 13）一样，把“原型落在
+   `HAVE_DBUS` guard 内、无 D-Bus 分支却在调用”的隐式声明直接判红。
 
 本机复现：
 
@@ -376,7 +379,10 @@ for d in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/share/pkgconfig; do
         ln -sf "$f" /tmp/pc-nodbus/
     done
 done
-env -u PKG_CONFIG_PATH PKG_CONFIG_LIBDIR=/tmp/pc-nodbus     cmake -B build-no-dbus -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+env -u PKG_CONFIG_PATH PKG_CONFIG_LIBDIR=/tmp/pc-nodbus \
+    cmake -B build-no-dbus -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          -DCMAKE_C_FLAGS="-Werror=implicit-function-declaration"
 cmake --build build-no-dbus -j2
 ```
 

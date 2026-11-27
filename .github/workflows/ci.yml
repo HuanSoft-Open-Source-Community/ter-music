@@ -203,9 +203,13 @@ jobs:
               ln -sf "$f" "/tmp/pc-nodbus/$(basename "$f")"
             done
           done
+          # -Werror=implicit-function-declaration：GCC 14（debian:13 等）默认已
+          # 把它当 error，GCC 13 只是警告；显式提为 error 让所有 runner 一致地
+          # 抓住“声明在 HAVE_DBUS guard 内、无 D-Bus 分支调用”这类缺陷。
           env -u PKG_CONFIG_PATH PKG_CONFIG_LIBDIR=/tmp/pc-nodbus \
             cmake -B build-no-dbus -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+                  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                  -DCMAKE_C_FLAGS="-Werror=implicit-function-declaration"
           if grep -q -- '-DHAVE_DBUS' build-no-dbus/compile_commands.json; then
             echo "::error::dbus-1 was still found; this build does not cover !HAVE_DBUS"
             exit 1
