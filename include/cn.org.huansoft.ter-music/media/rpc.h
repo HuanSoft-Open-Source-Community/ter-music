@@ -132,6 +132,9 @@ const char *rpc_method_at(int index);
 const char *rpc_methods_json(void);
 const char *rpc_core_json(void);   /* Info.GetInfo 的 core 字段 */
 
+/* 会话状态查询（定义于 session.c；无 D-Bus 构建返回 0/""）。
+ * rpc_common.c 的 Info 快照与 cli/daemon.c 的看门狗在两种构建里都会调用。 */
+
 #ifdef HAVE_DBUS
 
 /* ── 核心侧播放快照 ─────────────────────────────────────────────────

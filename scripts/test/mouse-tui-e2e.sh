@@ -153,8 +153,9 @@ python3 "$DRIVER" drive "$TM_BIN" "$MUSIC" "$WORK_DIR/tui.log" \
 DRIVER_PID=$!
 
 mlog() {   # 前端自己的调试日志：同目录里还有核心的日志，必须挑"有 [mouse] 行"的那份
-    local f
-    for f in $(ls -t "$LOG_DIR"/*.log 2>/dev/null); do
+    local f files
+    mapfile -t files < <(ls -t "$LOG_DIR"/*.log 2>/dev/null)
+    for f in "${files[@]}"; do
         grep -q "\[mouse\]" "$f" 2>/dev/null && { printf '%s' "$f"; return; }
     done
     printf ''; }
@@ -541,10 +542,10 @@ for _ in 1 2 3 4 5 6; do
     case "$sel" in *"sel menu open"*) break ;; esac
     sleep 0.5
 done
-set -- $(printf '%s' "$sel" | sed -nE \
-    's/.*anchor=([0-9]+),([0-9]+) rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3 \4 \5 \6/p')
-if [ "$#" -eq 6 ]; then
-    ay=$1; ax=$2; mt=$3; ml=$4; mh=$5; mw=$6
+sel_parsed="$(printf '%s' "$sel" | sed -nE \
+    's/.*anchor=([0-9]+),([0-9]+) rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3 \4 \5 \6/p')"
+if [ -n "$sel_parsed" ]; then
+    read -r ay ax mt ml mh mw <<<"$sel_parsed"
     if [ "$mt" = "$ay" ] && [ "$ml" = "$ax" ]; then
         ok "选择弹层在选项所在位置展开（anchor=$ay,$ax rect=$mt,$ml,$mh,$mw）"
     else
@@ -586,10 +587,10 @@ for _ in 1 2 3 4 5 6; do
     case "$sel" in *"sel menu open"*) break ;; esac
     sleep 0.5
 done
-set -- $(printf '%s' "$sel" | sed -nE \
-    's/.*anchor=([0-9]+),([0-9]+) rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3 \4 \5 \6/p')
-if [ "$#" -eq 6 ]; then
-    ay=$1; ax=$2; mt=$3; ml=$4; mh=$5; mw=$6
+sel_parsed="$(printf '%s' "$sel" | sed -nE \
+    's/.*anchor=([0-9]+),([0-9]+) rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3 \4 \5 \6/p')"
+if [ -n "$sel_parsed" ]; then
+    read -r ay ax mt ml mh mw <<<"$sel_parsed"
     if [ "$mt" -lt "$ay" ] && [ $((mt + mh)) -le 27 ] &&
        [ $((ml + mw)) -le 98 ]; then
         ok "靠底部的选项触发上翻且不越界（anchor=$ay rect=$mt,$mh）"

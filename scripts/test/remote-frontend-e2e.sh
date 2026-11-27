@@ -658,13 +658,18 @@ R="$WORK_DIR/results/smb.json"
 # put 会写 marker；若运行后才 rm 再检查，会让注入断言假绿）。
 SMB_PUT_MARKER="$WORK_DIR/results/smb-put-executed"
 rm -f "$SMB_PUT_MARKER"
-if SMB_ROOT="$SMB_ROOT" SMB_ARGV_LOG="$SMB_ARGV_LOG" SMB_EXPECT_PASS="e2e-pass" \
-   PATH="$WORK_DIR/bin:$PATH" \
+# 用独立变量保存“要传给子进程的值”：同一 if 里先赋值再展开同名变量，
+# 展开读到的是旧值（SC2097/SC2098），独立变量语义明确、不会误传。
+SMB_ROOT_CHILD="$SMB_ROOT"
+SMB_ARGV_LOG_CHILD="$SMB_ARGV_LOG"
+PATH_CHILD="$WORK_DIR/bin:$PATH"
+if SMB_ROOT="$SMB_ROOT_CHILD" SMB_ARGV_LOG="$SMB_ARGV_LOG_CHILD" SMB_EXPECT_PASS="e2e-pass" \
+   PATH="$PATH_CHILD" \
    "$PY" "$CLIENT" pty-session --bin "$TM_BIN" \
         --url "smb://e2e-user:e2e-pass@127.0.0.1/share" \
         --home "$F_HOME" --cache "$F_HOME/.cache" --wait 6 --action quit \
-        --env "PATH=$WORK_DIR/bin:$PATH" \
-        --env "SMB_ROOT=$SMB_ROOT" --env "SMB_ARGV_LOG=$SMB_ARGV_LOG" \
+        --env "PATH=$PATH_CHILD" \
+        --env "SMB_ROOT=$SMB_ROOT_CHILD" --env "SMB_ARGV_LOG=$SMB_ARGV_LOG_CHILD" \
         --env "SMB_EXPECT_PASS=e2e-pass" \
         --env "SMB_FAKE_PUT_MARKER=$WORK_DIR/results/smb-put-executed" \
         --result "$R" >/dev/null; then

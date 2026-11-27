@@ -78,6 +78,10 @@ const char *rpc_playback_status_name(PlayState state) {
     }
 }
 
+/* 以下为 D-Bus 传输层实现（发送/回复/快照采集）；无 D-Bus 构建时调用方
+ * （session.c / rpc_*.c）同样不编译，这里保持整体不参与编译。 */
+#ifdef HAVE_DBUS
+
 void rpc_send(DBusMessage *message) {
     if (!message) {
         return;
@@ -152,6 +156,8 @@ DBusMessage *rpc_error(DBusMessage *message,
     return reply;
 }
 
+#endif /* HAVE_DBUS */
+
 int rpc_track_available(void) {
     char current_path[MAX_PATH_LEN];
     if (audio_current_track_path(current_path, sizeof(current_path))) {
@@ -164,6 +170,8 @@ int rpc_track_available(void) {
  * 触发场景就是 Queue.Set 的契约（只替换未来曲目、当前播放不中断）：新表比
  * 正在播放的下标短时，g_current_play_index 越界，若不回退就会变成“正在出声却
  * 报无曲目”。见 queue/backend_queue.h 的 bq_pinned_entry()。 */
+#ifdef HAVE_DBUS
+
 static int rpc_playing_entry(BackendQueueEntry *entry) {
     if (g_play_state != PLAY_STATE_PLAYING && g_play_state != PLAY_STATE_PAUSED) {
         return -1;
@@ -227,6 +235,8 @@ void rpc_capture_snapshot(RpcPlaybackSnapshot *snapshot) {
         info_build_file_uri(cover_path, snapshot->art_url, sizeof(snapshot->art_url));
     }
 }
+
+#endif /* HAVE_DBUS */
 
 /* “播放”：续播当前条目；没有当前条目时从队首开始。
  * 「选中行」是前端的私有状态，核心不认识——空队列就是没有可播内容。 */
@@ -355,6 +365,8 @@ InfoInstance rpc_instance_info(void) {
     return instance;
 }
 
+#ifdef HAVE_DBUS
+
 DBusMessage *rpc_reply_bool(DBusMessage *message, int ok) {
     DBusMessage *reply = dbus_message_new_method_return(message);
     if (!reply) {
@@ -384,6 +396,8 @@ DBusMessage *rpc_reply_string(DBusMessage *message, const char *value) {
     rpc_append_string(reply, safe);
     return reply;
 }
+
+#endif /* HAVE_DBUS */
 
 /* ── core 对象（Info.GetInfo 的 "core" 字段） ───────────────────────
  * 前端接入时用它判断核心是否兼容：api_version 不满足即拒绝接入。 */

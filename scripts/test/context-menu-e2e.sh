@@ -145,8 +145,9 @@ send() { printf 'key:%s\n' "$1" >> "$CTL_FILE"; sleep "${2:-0.6}"; }
 right_at() { send "<right:$1:$2>" "${3:-0.9}"; }   # $1=列 $2=行（SGR 1 基）
 
 mlog() {   # 前端调试日志（同目录里还有核心日志）
-    local f
-    for f in $(ls -t "$LOG_DIR"/*.log 2>/dev/null); do
+    local f files
+    mapfile -t files < <(ls -t "$LOG_DIR"/*.log 2>/dev/null)
+    for f in "${files[@]}"; do
         grep -q "\[layout\] Selected layout" "$f" 2>/dev/null && { printf '%s' "$f"; return; }
     done
     printf ''

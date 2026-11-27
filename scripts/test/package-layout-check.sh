@@ -727,6 +727,7 @@ appimage_layout_checks() {
     if ! (
         set -e
         export APPDIR APP_ID PROJECT_NAME VERSION REPO_ROOT
+        # shellcheck source=/dev/null
         . "$block"
     ) >"${WORK}/appdir-layout.log" 2>&1; then
         bad "执行 AppDir 布局段失败（日志 ${WORK}/appdir-layout.log）"
@@ -843,7 +844,7 @@ build_checks() {
         -DTER_MUSIC_BUNDLED_MODEL="$TM_MODEL_PATH"
         -DINSTALL_LINYAPS_INTEGRATION=OFF
         -DPKG_CONFIG_EXECUTABLE="$pkg_config_bin"
-        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined"
     )
     if [ -n "${CC:-}" ]; then
         cmake_args+=(-DCMAKE_C_COMPILER="$CC")

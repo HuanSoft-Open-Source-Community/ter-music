@@ -2651,5 +2651,6 @@ int player_remote_config_set_string(const char *key, const char *value)
 int player_remote_config_set_float(const char *key, float value) { (void)key; (void)value; return -1; }
 int player_remote_config_reload(void) { return -1; }
 int player_remote_config_reset(void) { return -1; }
+int player_remote_config_persist(void) { return -1; }
 
 #endif /* HAVE_DBUS */

@@ -187,8 +187,9 @@ TUI_LOG="$WORK_DIR/tui.bin"
 send() { printf 'key:%s\n' "$1" >> "$CTL_FILE"; sleep "${2:-0.4}"; }
 
 mlog() {   # 前端自己的调试日志（同目录里还有核心日志，挑含 [layout] Selected layout 的那份）
-    local f
-    for f in $(ls -t "$LOG_DIR"/*.log 2>/dev/null); do
+    local f files
+    mapfile -t files < <(ls -t "$LOG_DIR"/*.log 2>/dev/null)
+    for f in "${files[@]}"; do
         grep -q "\[layout\] Selected layout" "$f" 2>/dev/null && { printf '%s' "$f"; return; }
     done
     printf ''

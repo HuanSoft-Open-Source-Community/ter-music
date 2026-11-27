@@ -595,9 +595,16 @@ int appearance_portal_is_active(void)
 
 #else /* !HAVE_DBUS */
 
+/*
+ * 无 D-Bus 构建：整个 XDG portal 探测链不可用，语义与运行时“无会话总线/
+ * 无 portal”一致——所有查询都回退 UNKNOWN，由 ui/appearance.c 的统一优先级
+ * 链继续走 COLORFGBG → TERM 提示 → 暗色，绝不阻塞、不退出。
+ * 各入口保持与真实实现相同的可调用契约，UI 侧无需条件编译。
+ */
+
 int appearance_portal_init(void)
 {
-    return 0;
+    return 0;   /* 无 D-Bus：没有可建立的会话总线连接 */
 }
 
 int appearance_portal_read(int timeout_ms, int *bg_out)
@@ -606,52 +613,34 @@ int appearance_portal_read(int timeout_ms, int *bg_out)
     if (bg_out) {
         *bg_out = APPEARANCE_BG_UNKNOWN;
     }
-    return 0;
+    return 0;   /* 不可用/超时语义（调用方按 unknown 回退） */
 }
 
 void appearance_portal_poll(void)
 {
+    /* 无连接可泵，无重连可安排。 */
 }
 
 int appearance_portal_request_async_read(void)
 {
-    /* 只复用已建立的连接：tick 属输入路径，绝不在这里做可能阻塞的连接/Hallo。 */
-    if (!g_conn) {
-        return 0;
-    }
-    g_async_result_requested = 1;
-    g_async_result_ready = 0;
-    g_async_result_bg = APPEARANCE_BG_UNKNOWN;
-    if (!g_read_in_flight) {
-        if (portal_send_async_read("ReadOne", 0) != 0) {
-            portal_finish_async_request(APPEARANCE_BG_UNKNOWN, 1);
-            return 0;
-        }
-    }
-    return 1;
+    return 0;   /* 连接不可用：调用方按 unknown 回退 */
 }
 
 int appearance_portal_take_async_result(int *bg_out)
 {
-    if (!g_async_result_ready) {
-        return 0;
-    }
-    g_async_result_ready = 0;
-    g_async_result_requested = 0;
-    if (bg_out) {
-        *bg_out = g_async_result_bg;
-    }
-    return 1;
+    (void)bg_out;
+    return 0;   /* 从未发起异步读取，永远没有结果可取 */
 }
 
 int appearance_portal_take_changed(int *bg_out)
 {
     (void)bg_out;
-    return 0;
+    return 0;   /* 无 SettingChanged 订阅，不会出现新值 */
 }
 
 void appearance_portal_shutdown(void)
 {
+    /* 无状态可清理。 */
 }
 
 int appearance_portal_is_active(void)

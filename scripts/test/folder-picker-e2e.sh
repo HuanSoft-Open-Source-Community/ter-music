@@ -406,7 +406,8 @@ start_session() {   # $1=标签
     DRIVER_PID=$!
     local i f name
     for i in $(seq 1 80); do
-        for f in $(ls -t "$TER_MUSIC_LOG_DIR"/*.log 2>/dev/null); do
+        for f in "$TER_MUSIC_LOG_DIR"/*.log; do
+            [ -e "$f" ] || continue
             name="$(basename "$f")"
             grep -qxF -- "$name" "$before_logs" && continue
             if grep -q '\[layout\] Selected layout\|\[file_picker\]' "$f" 2>/dev/null; then
@@ -775,6 +776,8 @@ if start_session tty; then
     # T1a 手输 ~/ 展开 + 空格/UTF-8 原样：o → "~/午休 音乐" → Enter。
     p_before="$(flog_count 'via tty')"
     send o 1.0
+    # 故意发送字面量 ~/ 前缀：验证 TUI 路径输入的 ~ 展开，不是 shell 展开。
+    # shellcheck disable=SC2088
     send '~/午休 音乐' 0.3
     send '<Enter>' 2.0
     if flog_has 'backend=tty mode=folder'; then

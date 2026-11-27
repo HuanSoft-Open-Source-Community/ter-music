@@ -109,7 +109,7 @@ daemon_up() { "$TM_BIN" daemon status 2>/dev/null | grep -q "pid"; }
 # 拒绝 fork 脱离进程（沙箱判定/权限），此时回退为前台核心 + 后台作业。
 # 迁移语义与进程归属无关，两条路径等价。
 start_core() {
-    "$TM_BIN" daemon start "$@" >/dev/null 2>&1
+    "$TM_BIN" daemon start >/dev/null 2>&1
     for _ in $(seq 1 40); do daemon_up && return 0; sleep 0.25; done
     "$TM_BIN" daemon foreground >"$WORK_DIR/core-foreground.log" 2>&1 &
     CORE_FG_PID=$!

@@ -33,6 +33,10 @@ from vt_grid import Screen  # noqa: E402
 
 SGR = re.compile(rb"\x1b\[([0-9;]*)m")
 
+# 当前配置契约版本（schema.h/types.h 的 CONFIG_CURRENT_VERSION）。
+# 夹具默认写当前版本；迁移场景显式传入旧版本号。
+CONFIG_CURRENT_VERSION = 12
+
 # 亮色变体专属值（暗色表与旧版一致，绝不出现这些值）
 LIGHT_ONLY = {236, 94, 28, 24, 90, 25, 126}
 # 暗色预设专属值（亮色变体不会产生）
@@ -59,7 +63,7 @@ def _write_config(root, mode, theme_extra, prefs_extra, config_version):
     if mode is not None:
         inner += f"<appearance_mode>{mode}</appearance_mode>"
     inner += prefs_extra
-    version = config_version or 10
+    version = config_version or CONFIG_CURRENT_VERSION
     with open(os.path.join(cfg_dir, "config.xml"), "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write(f'<ter-music-config version="{version}">\n')
@@ -550,7 +554,16 @@ def run_suite(binary, only=None):
     def literal_search_input():
         # O1：查询窗口内，搜索框输入/粘贴 `]11;hello` 与无终止符的
         # `]11;rgb:...` 文本都必须逐字上屏，不吞字、不取消模态。
-        r = run_case(binary, "literal-search", mode=0, duration=7.2,
+        # v12 起主列表搜索要求文件浏览模式已有曲目（空队列按 / 只提示先打开目录），
+        # 所以先建一个最小内容库再启动。
+        extra = []
+
+        def prep(binary, env, cfg_dir, root):
+            music = prepare_library(root, binary, env, cfg_dir)
+            extra.extend(["-o", music])
+
+        r = run_case(binary, "literal-search", mode=0, prep=prep,
+                     extra_args=extra, duration=7.2,
                      snapshots=[(3.6, "typed_literal"), (5.5, "typed_reply_like")],
                      key_steps=[(2.6, b"/"),
                                 (2.9, b"]11;hello"),
@@ -590,15 +603,23 @@ def run_suite(binary, only=None):
     @case
     def literal_language_input():
         # O1：语言包路径框（窄字节输入）同样不吞字面量。
-        r = run_case(binary, "literal-language", mode=0, duration=5.8,
-                     snapshots=[(4.0, "typed")],
+        # v12 起“添加语言包”走统一文件选择器，提示为 file_picker 的
+        # “文件路径（…）”；提示串比旧版长，字面量本身在 100 列屏上不一定可见，
+        # 故用“把字面量作为路径提交 → 添加失败”证明它确实进入了输入缓冲。
+        r = run_case(binary, "literal-language", mode=0, duration=7.8,
+                     snapshots=[(4.0, "typed"), (5.4, "after_enter")],
                      key_steps=[(2.6, b"\x1b[18~"), (3.0, b"a"),
                                 (3.3, b"]11;hello"),
-                                (4.4, b"\x1b"), (4.8, b"q")])
+                                (4.6, b"\n"),
+                                (6.2, b"\x1b"),
+                                (7.0, b"q")])
         typed = screen_text(r, "typed")
+        after = screen_text(r, "after_enter")
         checks = [
-            ("输入语言包" in typed and "]11;hello" in typed,
-             "字面量 ]11;hello 逐字送达语言包路径框"),
+            ("文件路径（" in typed, "语言包路径框已打开（统一文件选择器）"),
+            ("rgb:" not in typed and "]11;" not in typed, "应答文本未注入路径框/屏幕"),
+            ("添加失败" in after,
+             "字面量 ]11;hello 作为路径提交（未被当作终端应答吞掉）"),
             (r.status == 0, "语言包路径字面量后正常退出"),
         ]
         return r, checks
@@ -677,17 +698,19 @@ def run_suite(binary, only=None):
     @case
     def modal_language_anchorless_st():
         # t11 F1：语言包路径框打开期间到达 ST 终止的 anchorless 应答。
-        r = run_case(binary, "modal-language-st", mode=0, duration=6.0,
+        # v12 起添加语言包走统一文件选择器（提示“文件路径（…”）：选择器用
+        # ENTER(空输入)取消，ESC 只被当作转义序列前缀消费，不是取消键。
+        r = run_case(binary, "modal-language-st", mode=0, duration=7.0,
                      snapshots=[(4.4, "modal_open")],
                      key_steps=[(2.5, b"\x1b[I"),          # fresh query window
                                 (2.7, b"\x1b[18~"),
                                 (3.0, b"a"),
                                 (3.5, b"]11;rgb:ffff/ffff/ffff\x1b\\"),
-                                (5.0, b"\x1b"),
-                                (5.5, b"q")])
+                                (5.0, b"\n"),          # 空输入 = 取消选择器
+                                (6.1, b"q")])
         modal = screen_text(r, "modal_open")
         checks = [
-            ("输入语言包" in modal, "ST anchorless 应答到达后语言包路径框仍在"),
+            ("文件路径（" in modal, "ST anchorless 应答到达后语言包路径框仍在"),
             ("rgb:" not in modal and "]11;" not in modal, "应答文本未注入路径框/屏幕"),
             (r.status == 0, "进程正常退出"),
         ]
@@ -1281,25 +1304,25 @@ def run_suite(binary, only=None):
     @case
     def language_path_reply():
         # F1 残留：语言包路径输入框也必须接入 appearance 过滤器。
-        r = run_case(binary, "language-path-reply", mode=2, duration=7.9,
-                     snapshots=[(4.4, "modal_open"), (6.1, "modal_reopen"),
-                                (6.6, "main_after")],
+        r = run_case(binary, "language-path-reply", mode=2, duration=9.6,
+                     snapshots=[(4.4, "modal_open"), (6.2, "modal_reopen"),
+                                (8.4, "main_after")],
                      key_steps=[(2.6, b"\x1b[18~"),                     # F7 -> Language
                                 (3.0, b"a"),                            # add language pack prompt
                                 (3.5, b"\x1b]11;rgb:1234/5678/9abc\x1b\\"),
-                                (4.0, b"/tmp/x"),                       # typing still works
-                                (4.8, b"\x1b"),
-                                (5.4, b"a"),                            # reopen (keys alive)
-                                (6.2, b"\x1b"),
-                                (6.3, b"\x1bOP"),                      # F1 -> main
-                                (7.2, b"q")])
+                                (4.1, b"/tmp/x"),                       # typing still works
+                                (4.9, b"\n"),                          # submit path (add fails)
+                                (5.8, b"a"),                            # reopen (keys alive)
+                                (6.9, b"\n"),                          # empty = cancel picker
+                                (7.7, b"\x1b"),                        # ESC -> 主界面
+                                (8.9, b"q")])
         opened = screen_text(r, "modal_open")
         reopened = screen_text(r, "modal_reopen")
         main_text = screen_text(r, "main_after")
         checks = [
-            ("输入语言包" in opened, "应答到达后语言包路径框仍在（未被取消）"),
+            ("文件路径（" in opened, "应答到达后语言包路径框仍在（未被取消）"),
             ("rgb:" not in opened and "]11;" not in opened, "应答文本未注入路径框/屏幕"),
-            ("输入语言包" in reopened, "关闭后可再次打开路径框（按键未丢失）"),
+            ("文件路径（" in reopened, "关闭后可再次打开路径框（按键未丢失）"),
             ("顺序播放" in main_text, "播放模式未被应答余字节改变"),
             (favorites_count(r.cfg_dir) == 0, "收藏未被应答余字节改变"),
             (r.status == 0, "进程正常退出"),
@@ -1313,7 +1336,8 @@ def run_suite(binary, only=None):
                                  "<controls_fg>15</controls_fg>"
                                  "<highlight_bg>4</highlight_bg>")
         checks = [
-            ('<ter-music-config version="10">' in r.saved, "v9 首启迁移到契约 10"),
+            (f'<ter-music-config version="{CONFIG_CURRENT_VERSION}">' in r.saved,
+             f"v9 首启迁移到契约 {CONFIG_CURRENT_VERSION}"),
             (saved_value(r.saved, "appearance_mode") == 0, "补写默认 appearance_mode=0"),
             (saved_value(r.saved, "playlist_fg") == 7, "出厂值原样（playlist_fg=7）"),
             (saved_value(r.saved, "controls_fg") == 15, "显式值不被改写（controls_fg=15）"),
