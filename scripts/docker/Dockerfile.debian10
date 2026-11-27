@@ -68,15 +68,15 @@ RUN tar -xzf /tmp/ffmpeg.tar.gz -C /tmp && \
         --enable-static --disable-shared \
         --disable-programs --disable-doc \
         --disable-everything \
-        --enable-decoder="mp3*,aac*,flac,vorbis*,opus,wavpack*,wmav*,ape,alac,pcm*,libopus" \
-        --enable-demuxer="mp3,aac,flac,ogg,opus,wav,wv,wma*,ape,alac,mov,m4a,rm,aiff" \
-        --enable-encoder="flac,pcm_s16le" \
+        --enable-decoder="mp3*,aac*,flac,vorbis*,opus,wavpack*,wmav*,ape,alac,pcm*,libopus,png,mjpeg,bmp,gif,webp" \
+        --enable-demuxer="mp3,aac,flac,ogg,opus,wav,wv,wma*,ape,alac,mov,m4a,rm,aiff,image2,png_pipe,webp_pipe,bmp_pipe,gif" \
+        --enable-encoder="flac,pcm_s16le,mjpeg" \
         --enable-muxer="flac,wav" \
         --enable-parser="mpegaudio,aac,flac,vorbis,opus" \
         --enable-protocol="file" \
         --enable-filter="aresample" \
         --disable-network --disable-iconv \
-        --disable-libxcb --disable-xlib --disable-zlib --disable-bzlib \
+        --disable-libxcb --disable-xlib --enable-zlib --disable-bzlib \
         --disable-vaapi --disable-vdpau --disable-cuda \
         --disable-x86asm \
         --disable-ffplay --disable-ffprobe --disable-ffmpeg && \
