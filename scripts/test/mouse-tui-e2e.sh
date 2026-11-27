@@ -214,13 +214,21 @@ ensure_track() {   # $1 = 期望文件名, $2 = 该文件的 SGR 行
         grep -h "\[mouse\]" "$(mlog)" 2>/dev/null | tail -3 | sed 's/^/         /'
         return 1
     fi
-    local i
-    for i in 1 2 3 4 5 6; do
-        [ "$(play_state)" = "playing" ] && return 0
-        sleep 0.4
+    # 仅看到 state=playing 还不够：切曲时新曲目路径会先出现、上一首的
+    # playing 状态还会短暂残留，此时滚轮 seek 会被随后真正开始的播放重置。
+    # 以“播放位置在两次读数之间确实前进”作为新曲目时钟已启动的判据。
+    local i a b
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        if [ "$(play_state)" = "playing" ]; then
+            a="$(play_pos)"; sleep 0.4; b="$(play_pos)"
+            case "$a" in ''|*[!0-9]*) a=-1 ;; esac
+            case "$b" in ''|*[!0-9]*) b=-1 ;; esac
+            [ "$a" -ge 0 ] && [ "$b" -gt "$a" ] && return 0
+        fi
+        sleep 0.3
     done
-    printf '         前置失败现场：state=%s name=%s 路由=%s\n' \
-        "$(play_state)" "$(play_name)" "$(last_route)"
+    printf '         前置失败现场：state=%s name=%s 位置=%s 路由=%s\n' \
+        "$(play_state)" "$(play_name)" "$(play_pos)" "$(last_route)"
     grep -h "\[mouse\]" "$(mlog)" 2>/dev/null | tail -4 | sed 's/^/         /'
     return 1; }
 
@@ -374,8 +382,11 @@ resync_cell() { send "<wheel-down:30:28>" 0.5; cell "$1"; }
 
 # ── S3 进度滚轮 ±5 秒 ─────────────────────────────────────────────
 info "S3 控制区进度行：滚轮 ±5 秒"
-send "<click:6:5>" 1.2                       # 回到 03-charlie（进度从 0 起）
-wait_name 03-charlie.wav 10 || true
+# 必须先等到 state=playing（v12 核心/前端分离后，队列里的 track 路径会先出现、
+# 播放状态稍后才变 playing）；seek_relative_seconds() 在 STOPPED 或时长未知时
+# 是有意 no-op，太早发滚轮会被吞掉，看起来像“只前进了自然播放的 1 秒”。
+ensure_track 03-charlie.wav 5 || bad "前置：03-charlie 未进入 playing（滚轮 seek 无法验证）"
+sleep 0.3
 p0="$(play_pos)"
 send "<wheel-down:30:25>" 0.7; p1="$(play_pos)"
 send "<wheel-up:30:25>"   0.7; p2="$(play_pos)"
