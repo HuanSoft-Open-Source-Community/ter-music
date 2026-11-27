@@ -6,6 +6,9 @@
 
 FROM debian:10
 
+# 构建期下载内置消音模型（scripts/build/common.sh tm_ensure_model）：
+# aria2c 优先，宿主/镜像缺失时构建脚本回退 curl/wget。
+
 ARG FFMPEG_VERSION=8.1.2
 ARG SQUASHFS_TOOLS_VERSION=4.7.5
 ARG DEBIAN_FRONTEND=noninteractive
@@ -27,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         rsync \
         git \
         curl \
+        aria2 \
         ca-certificates \
         xz-utils \
         libncurses-dev \

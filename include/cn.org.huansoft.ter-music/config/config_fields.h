@@ -84,6 +84,8 @@ static const ConfigFieldEntry k_fields[] = {
     {"sort_mode",                CFG_INT, OFF(sort_mode), 0, 0, 4, "preferences"},
     {"cue_encoding",             CFG_INT, OFF(cue_encoding), 0, 0, 0, "preferences"},
     {"karaoke_mode",             CFG_INT, OFF(karaoke_mode), 0, 0, KARAOKE_MODE_COUNT - 1, "preferences"},
+    /* config v12：模型随包内置，karaoke_feature / karaoke_model 两个键已删除
+     * （旧文件由 v11→v12 迁移清除元素；未知键不再出现在 Config.GetAll/Set）。 */
     /* 外观模式（config v10）：0=auto、1=light、2=dark */
     {"appearance_mode",          CFG_INT, OFF(appearance_mode), 0, 0, 2, "preferences"},
 

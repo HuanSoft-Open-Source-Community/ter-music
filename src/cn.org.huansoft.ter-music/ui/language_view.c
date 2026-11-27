@@ -13,6 +13,7 @@
 #include "ui/menu_internal.h"
 #include "ui/menu_anim.h"
 #include "ui/appearance.h"
+#include "ui/file_picker.h"
 #include "ui/keymap.h"
 #include "ui/scrollbar.h"
 #include "config/config.h"
@@ -46,94 +47,32 @@ void reset_language_view(void)
     lang_refresh_list();
 }
 
-/* ── Prompt for file path (inline input) ─────────────────────── */
+/* ── Pick a language pack file (desktop dialog → TTY fallback) ── */
 
-/* 仅在内容区内重绘提示行：清行 + 按显示宽度截断，避免换行与残影。 */
-static void lang_prompt_redraw(const MenuContentArea *area, int row,
-                               const char *prompt, const char *input)
+/* 语言包是 .tar.gz（内含 lang.xml）。这里只负责把路径选回来：格式/内容是否
+ * 合法仍由 i18n_add_language() 原有的校验/安装路径判断。取消返回 0（不改
+ * 任何状态），选择器失败把可读原因放到状态行后返回 0。 */
+static int lang_pick_pack(char *buf, size_t size)
 {
-    char line[MAX_PATH_LEN + 512];
-    snprintf(line, sizeof(line), "%s%s", prompt, input);
-    menu_content_clear_row(area, row);
-    menu_content_puts(area, row, line);
-
-    int prompt_width = (int)utf8_str_width(prompt);
-    if (prompt_width > area->content_width) prompt_width = area->content_width;
-    int avail = area->content_width - prompt_width;
-    if (avail < 1) avail = 1;
-
-    char view[MAX_PATH_LEN];
-    utf8_str_truncate(view, input, avail);
-
-    int cx = area->content_x + prompt_width + (int)utf8_str_width(view);
-    int max_cx = area->content_x + area->content_width - 1;
-    if (cx > max_cx) cx = max_cx;
-    if (cx < area->content_x) cx = area->content_x;
-    move(row, cx);
-    refresh();
-}
-
-static int lang_prompt_path(char *buf, size_t size)
-{
-    MenuContentArea area;
-    menu_content_area(&area);
-
-    int y = area.max_y - 4;
-    const char *prompt = i18n_get("lang_mgr.add_prompt");
-
-    /* 模态输入接管屏幕：先收掉右键菜单退场 ghost，避免它压在提示行上。 */
-    ui_menu_anim_cancel_all(1);
-    appearance_drop_dangling_reply();
-    curs_set(1);
-    lang_prompt_redraw(&area, y, prompt, "");
-
-    buf[0] = '\0';
-    size_t pos = 0;
-    int ch;
+    const char *initial_dir = getenv("HOME");
+    char picker_err[256];
+    int rc = file_picker_pick_file(i18n_get("lang_mgr.add_title"),
+                                   i18n_get("lang_mgr.add_filter_name"),
+                                   "*.tar.gz;*.tgz",
+                                   initial_dir, buf, size,
+                                   picker_err, sizeof(picker_err));
+    /* 外部对话框前后由选择器暂停/恢复 curses；TTY 回退本身在 curses 里跑，
+     * 两者都把光标收回去，随后 handle_language_action 会整体重绘内容区。 */
+    curs_set(0);
+    noecho();
     flushinp();
 
-    /* 与主循环共用 appearance 输入过滤器：OSC 11 应答绝不取消模态框
-     * 或作为路径文本注入。ERR 分支每 10 次补一次非阻塞悬挂应答清理。 */
-    int err_ticks = 0;
-    while ((ch = appearance_getch()) != '\n' && ch != KEY_ENTER && ch != 27 &&
-           pos < size - 1) {
-        if (ch == ERR) {
-            if (++err_ticks % 10 == 0) {
-                appearance_drop_dangling_reply();
-            }
-            continue;
-        }
-        if (ch == KEY_MOUSE || ch == KEY_RESIZE) {
-            /* 鼠标事件与终端尺寸变化都不是可输入字符：这两类键码都 >255，
-             * 截断成 char 会直接写坏正在输入的语言包路径。路径输入框是模态的，
-             * 滚轮与点击在这里没有定义，整个忽略，退出输入框后由主循环正常处理。 */
-            continue;
-        }
-        if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-            if (pos > 0) {
-                size_t back = 1;
-                while (pos > back && ((unsigned char)buf[pos - back] & 0xC0) == 0x80)
-                    back++;
-                pos -= back;
-                buf[pos] = '\0';
-                lang_prompt_redraw(&area, y, prompt, buf);
-            }
-        } else if (ch >= 32 && ch < 256) {
-            /* 只接受单字节可打印字符（UTF-8 输入按字节逐个落到这里）：
-             * 功能键等 >255 的键码不再落入追加字节那条路径。 */
-            buf[pos++] = (char)ch;
-            buf[pos] = '\0';
-            lang_prompt_redraw(&area, y, prompt, buf);
-        }
+    if (rc == FILE_PICKER_CANCEL) {
+        return 0;
     }
-
-    curs_set(0);
-
-    /* Clean up prompt line (content area only) */
-    menu_content_clear_row(&area, y);
-
-    if (ch == 27) {
-        buf[0] = '\0';
+    if (rc != FILE_PICKER_OK) {
+        show_status_message(picker_err[0] ? picker_err
+                                          : i18n_get("lang_mgr.add_failed"));
         return 0;
     }
     return 1;
@@ -318,7 +257,7 @@ int handle_language_action(ActionId action)
 
         case ACTION_LANGUAGE_ADD: {
             char path[MAX_PATH_LEN];
-            if (lang_prompt_path(path, sizeof(path)) && path[0]) {
+            if (lang_pick_pack(path, sizeof(path)) && path[0]) {
                 log_debug("lang_view", "Add language request: path=%s", path);
                 if (i18n_add_language(path) == 0) {
                     lang_refresh_list();

@@ -30,6 +30,8 @@
 - RPM 每个 EL 一个：EL7 的 ncursesw/libpng soname 与 EL8+ 不同，单包无法在仅 FFmpeg 静态下可靠覆盖。
 - AppImage 自带 `libxml2.so.2` 及其依赖。
 - Linyaps 的 UAB 与 layer 必须同时成功。
+- 所有包统一安装到 `/opt/apps/cn.org.huansoft.ter-music/files`，`/usr` 下只有符号链接（`/usr/bin/ter-music`、desktop 与 4 个图标）；AppImage 内部同布局，`AppDir/usr` 全为相对链接。
+- 所有包都内置消音模型 `share/ter-music/models/uvr-mdxnet-3-9662.onnx`（29,704,436 B，SHA-256 `e02220e8…aadc`）与 `models/NOTICE.md`；构建期由 `tm_ensure_model` 下载/校验后注入，缺模型或坏模型直接失败。源码包同样自包含（体积约 +28 MB）。
 
 ## 三、可选源码包 / 调试包
 
@@ -74,6 +76,10 @@ ter-music version
 ```bash
 dpkg-deb -f /pkg/*.deb Depends | grep 'libxml2 | libxml2-16'
 readelf -d /usr/bin/ter-music | grep NEEDED      # 不应有 libxml2/libav*
+dpkg-deb -c /pkg/*.deb | grep 'opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music'  # opt 实体
+dpkg-deb -c /pkg/*.deb | grep 'usr/bin/ter-music ->'                                    # /usr 仅链接
+sha256sum /opt/apps/cn.org.huansoft.ter-music/files/share/ter-music/models/uvr-mdxnet-3-9662.onnx
+# 期望 e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc
 ```
 
 Ubuntu 26.04 上再执行：
@@ -94,6 +100,8 @@ ter-music --help
 ter-music version
 rpm -qpR /pkg/*.rpm | grep libxml2
 rpm -qpR /pkg/*.rpm | grep libav || true    # 不应有 libav*
+rpm -qpl /pkg/*.rpm | grep 'opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music'
+rpm -qpl /pkg/*.rpm | grep 'usr/bin/ter-music'   # 必须是符号链接
 ```
 
 ### 3. AppImage
@@ -103,6 +111,9 @@ rpm -qpR /pkg/*.rpm | grep libav || true    # 不应有 libav*
 ```bash
 ./ter-music-*.AppImage --appimage-extract-and-run --version
 ./ter-music-*.AppImage --appimage-extract-and-run help >/dev/null
+./ter-music-*.AppImage --appimage-extract
+# 解包树断言：opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music 为实体，
+# usr/bin/ter-music 等为相对链接，files/share/ter-music/models/ 有模型与 NOTICE
 ```
 
 ### 4. Linyaps
@@ -116,7 +127,7 @@ ll-cli install build/linyaps/x86_64/*.layer
 ll-cli run cn.org.huansoft.ter-music -- ter-music version
 ```
 
-两者都应成功；UAB 的 `.note.uab.sig` 校验已经在构建阶段完成。
+两者都应成功；UAB 的 `.note.uab.sig` 校验已经在构建阶段完成。模型与 NOTICE 应出现在包的 `share/ter-music/models/` 下（构建日志中的安装后自检标记）。
 
 ### 5. AUR
 
@@ -138,13 +149,14 @@ ll-cli run cn.org.huansoft.ter-music -- ter-music version
 1. [ ] 确认 `-v` 与准备发布的版本一致。
 2. [ ] `./scripts/build/launch-auto-build.sh -v <V>` 全部类型成功。
 3. [ ] `scripts/test/check-package-identity.sh` 通过。
-4. [ ] DEB 在 8 个目标发行版完成安装/启动验收；Ubuntu 26.04 显示 `libxml2.so.16`。
-5. [ ] RPM 在 EL7/8/9/10 完成安装/启动验收。
-6. [ ] AppImage 在 Debian 10 与 Ubuntu 24.04/26.04 可运行。
-7. [ ] Linyaps UAB 与 layer 分别 `ll-cli install` 成功。
-8. [ ] AUR 本地验收通过，但未推送。
-9. [ ] 如需源码/调试包，确认 `--with-source` / `--with-debuginfo` 产物存在。
-10. [ ] 以上全部通过后，是否打 tag、是否投递 AUR 由人工另行决定；构建系统本身不依赖 tag。
+4. [ ] `scripts/test/package-layout-check.sh` 通过（无构建工具的机器可用 `TM_LAYOUT_STATIC_ONLY=1` 只跑静态断言，不能替代真实包验收）。
+5. [ ] DEB 在 8 个目标发行版完成安装/启动验收；Ubuntu 26.04 显示 `libxml2.so.16`。
+6. [ ] RPM 在 EL7/8/9/10 完成安装/启动验收。
+7. [ ] AppImage 在 Debian 10 与 Ubuntu 24.04/26.04 可运行，解包后 `/opt` 为实体、`/usr` 全为链接、模型与 NOTICE 在位。
+8. [ ] Linyaps UAB 与 layer 分别 `ll-cli install` 成功，模型与 NOTICE 在位。
+9. [ ] AUR 本地验收通过，但未推送。
+10. [ ] 如需源码/调试包，确认 `--with-source` / `--with-debuginfo` 产物存在。
+11. [ ] 以上全部通过后，是否打 tag、是否投递 AUR 由人工另行决定；构建系统本身不依赖 tag。
 
 ## 六、未来投递 AUR（本轮不执行）
 

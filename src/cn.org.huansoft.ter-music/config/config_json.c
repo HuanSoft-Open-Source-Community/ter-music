@@ -543,6 +543,10 @@ static int apply_json_impl(const char *patch_json, char *error_out,
         return -1;
     }
 
+    /* config v12：模型随包内置，"功能开关/模型 id"两个键已删除，因此这里
+     * 不再有"未启用 ⇒ 档位强制 off"的整体不变量；karaoke_mode 只在
+     * field_clamp() 里做取值域收敛（0..2），与其它数值键同一条路径。 */
+
     memcpy(&g_app_config, draft, sizeof(AppConfig));
     free(draft);
     return 0;

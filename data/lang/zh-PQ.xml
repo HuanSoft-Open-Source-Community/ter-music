@@ -110,6 +110,7 @@
   <string key="settings.eq_disabled">均音已禁</string>
   <string key="settings.saved">節度已存</string>
   <string key="settings.path.prompt">入默途：</string>
+  <string key="settings.path.picker_title">擇默樂目錄</string>
   <string key="settings.path.invalid">途徑無效</string>
   <string key="settings.path.saved">默途已存</string>
   <string key="settings.opt.latency_hint">輸出時延於次播而效</string>
@@ -120,6 +121,11 @@
   <string key="settings.cue.saved">CUE編已存</string>
   <string key="settings.karaoke.saved">汰聲之等已存</string>
   <string key="settings.karaoke.unsupported">汰聲不可行：中樞過舊，未具此能</string>
+  <string key="settings.karaoke.model_credit">型之署名：%s</string>
+  <string key="settings.karaoke.model_url">型之出處：%s</string>
+  <string key="settings.karaoke.model_sha256">SHA256：%s</string>
+  <string key="settings.karaoke.model_sha256_short">SHA256：%s…%s（全文見 models/NOTICE.md）</string>
+  <string key="settings.karaoke.model_license">型之許：%s</string>
   <string key="settings.color.prompt">入色值 (0-255)：</string>
   <string key="settings.color.same_error">前景與背景之色不可同</string>
   <string key="settings.hotkeys.volume">+ / -：調聲量</string>
@@ -296,7 +302,19 @@
   <string key="karaoke.level.off">勿汰</string>
   <string key="karaoke.level.soft">微汰</string>
   <string key="karaoke.level.full">盡汰</string>
-  <string key="karaoke.hint">汰聲：惟兩聲並列者有效，樂聲如故</string>
+  <string key="karaoke.hint">汰聲：用隨包內置之 UVR-MDX-NET 3 型（勿汰、微汰、盡汰）；無待啟其能、無待置型。每曲一析，首播候首段伴奏既就（約七至十息，至多三十息），未就或型亡/型損則還原聲</string>
+  <string key="karaoke.status.running">正於後臺析其聲，以備伴奏（分段）</string>
+  <string key="karaoke.status.ready">伴奏之段已備，可即起播</string>
+  <string key="karaoke.status.failed_fmt">析聲未成（%s），仍用原聲</string>
+  <string key="karaoke.status.cancelled">析聲已罷</string>
+  <string key="karaoke.status.preparing">方備伴奏，請少候……</string>
+  <string key="karaoke.status.preparing_fmt">方備伴奏（%d%%），請少候……</string>
+  <string key="karaoke.status.segment_wait">伴奏之段未就，且待須臾……</string>
+  <string key="karaoke.status.fallback_original">伴奏未就，已還原聲</string>
+  <string key="karaoke.status.switch_pending">候今段伴奏既就，即自易其源……</string>
+  <string key="karaoke.status.switch_done_fmt">已易為%s（候 %d 息），自今位續奏</string>
+  <string key="karaoke.status.switch_timeout">候伴奏而逾時，仍用原聲（可再易其等以重試）</string>
+  <string key="karaoke.status.model_unavailable_fmt">汰聲內置之型不可用（%s），仍用原聲</string>
   <string key="popup.play_mode"> 播弄之制 </string>
   <string key="popup.speed"> 播弄之疾 </string>
   <string key="popup.volume"> 聲量 </string>
@@ -410,9 +428,24 @@
   <string key="search.playlist_empty">播弄列空，不能求索</string>
   <string key="dialog.append_folder">入欲續之目錄：</string>
   <string key="dialog.folder_path">入目錄之途：</string>
+  <string key="dialog.open_folder_title">啟樂目錄</string>
+  <string key="dialog.append_folder_title">續樂目錄</string>
   <string key="dialog.path_invalid">途徑無效</string>
   <string key="dialog.no_audio_found">未得音聲之卷</string>
   <string key="dialog.no_new_audio">目錄中無新音聲之卷</string>
+  <string key="file_picker.title">擇文</string>
+  <string key="file_picker.folder_title">擇目錄</string>
+  <string key="file_picker.filter_name">文</string>
+  <string key="file_picker.tty_prompt_fmt">文之路（%s；直按回車則罷）：</string>
+  <string key="file_picker.tty_prompt_dir">文之路（%s；起於 %s；直按回車則罷）：</string>
+  <string key="file_picker.tty_folder_prompt_fmt">目錄之路（%s；直按回車則罷）：</string>
+  <string key="file_picker.tty_folder_prompt_dir">目錄之路（%s；起於 %s；直按回車則罷）：</string>
+  <string key="file_picker.err.no_backend">擇文之器不可用：%s</string>
+  <string key="file_picker.err.spawn">擇文之器不能起：%s</string>
+  <string key="file_picker.err.exit">擇文之器異常而退（第 %d）</string>
+  <string key="file_picker.err.path_too_long">路太長</string>
+  <string key="file_picker.err.not_dir">所擇之路非現存之目錄：%s</string>
+  <string key="file_picker.err.no_curses">擇文之器須於終端之界面</string>
   <string key="remote.list_failed">不能列遠方之目錄</string>
   <string key="remote.refresh_failed">更之敗：</string>
   <string key="remote.connection_ok">聯成，共</string>
@@ -654,6 +687,8 @@
   <string key="lang_mgr.hint">↑/↓: 擇  ENTER: 易  A: 增  D: 刪  ESC: 返</string>
   <string key="lang_mgr.actions">[ENTER]=定為今語  [A]=增語包  [D]=刪  [ESC]=返</string>
   <string key="lang_mgr.add_prompt">入語包 .tar.gz 文卷之途：</string>
+  <string key="lang_mgr.add_title">擇語包（.tar.gz）</string>
+  <string key="lang_mgr.add_filter_name">語包</string>
   <string key="lang_mgr.switched">語已易</string>
   <string key="lang_mgr.added">語包已增</string>
   <string key="lang_mgr.add_failed">增之不得：文卷無效或制式誤</string>
@@ -910,7 +945,7 @@
   <string key="cli.help.cmd.mode.detail">不帶參數時出今制（名、編號與顯名）；帶參數時按穩定名或編號節度制，如 list_repeat、folder_shuffle_repeat。</string>
   <string key="cli.help.cmd.karaoke.summary">詢或節度汰聲之等</string>
   <string key="cli.help.cmd.karaoke.usage">用法：{prog} karaoke [off|soft|full|0-2|cycle]</string>
-  <string key="cli.help.cmd.karaoke.detail">不帶參數時出今等（名、編號與顯名）；帶參數時按穩定名或編號節度等；cycle 則自 0 歷 1、2 而復歸於 0。惟兩聲並列者有效（單聲之曲一如其故）。此等入 preferences.karaoke_mode，即行於方播之曲。</string>
+  <string key="cli.help.cmd.karaoke.detail">不帶參數時出今等（名、編號與顯名）；帶參數時按穩定名或編號節度等；cycle 則自 0 歷 1、2 而復歸於 0。三等皆本於型：後臺每曲至多一析；勿汰則出原聲，微汰乃四分原聲、六分型之樂，盡汰則惟型之樂。每曲首播候首段伴奏既就（約七至十息，至多三十息）而後起；若逾時或析之不成，則先出原聲。舊版所遺整曲之緩，惟讀而相容，且優先用之。播至未就之段、或 seek 至未析之位，至多待八息；猶不可用，則自此位還原聲而續。seamless_preload=1 者，今曲既就，乃於後臺預取隊列次曲。不賴歌辭；型隨包內置（uvr-mdxnet-3-9662，MIT，見 models/NOTICE.md），無待啟其能、無待置型；型亡或損則狀態行具陳其故，仍用原聲。此等入 preferences.karaoke_mode。單聲之曲與逾三十分之曲不析，仍出原聲。</string>
   <string key="cli.help.cmd.show.summary">出今播弄信息之塊</string>
   <string key="cli.help.cmd.show.usage">用法：{prog} show [選項]</string>
   <string key="cli.help.cmd.show.detail">出中樞提供的今曲信息，含基本信息、字面、音程和歌辭行；諸選項惟對本次調用生效，不改已存的節度。</string>

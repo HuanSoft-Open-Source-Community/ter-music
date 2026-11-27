@@ -252,7 +252,9 @@ void init_default_config(void)
     g_app_config.show_album_cover      = 1;
     g_app_config.lyrics_alignment      = 0;
     g_app_config.sort_mode             = SORT_DEFAULT;
-    /* 卡拉OK（消人声）默认不启用：升级既有配置不改变任何听感 */
+    /* 卡拉OK（消人声）默认不启用：模型随包内置（config v12 起固定
+     * uvr-mdxnet-3-9662），按钮与三档始终可见，但默认档位仍为 Off
+     * ——升级既有配置不改变任何听感。 */
     g_app_config.karaoke_mode          = KARAOKE_MODE_OFF;
     /* 外观模式（config v10）：默认自动跟随终端亮/暗背景 */
     g_app_config.appearance_mode       = APPEARANCE_MODE_AUTO;
@@ -403,6 +405,24 @@ int config_run_migrations(void)
             g_app_config.appearance_mode >= APPEARANCE_MODE_COUNT) {
             g_app_config.appearance_mode = APPEARANCE_MODE_AUTO;
         }
+        g_app_config.config_version = CONFIG_CURRENT_VERSION;
+        save_config();
+    }
+
+    /* v11 → v12：**删除** preferences.karaoke_feature 与
+     * preferences.karaoke_model 两个键（模型随包内置，固定
+     * uvr-mdxnet-3-9662，不再有"功能开关/模型选择"）。
+     *
+     * config_save_to_xml() 是按当前契约字段表整份重写的，两个旧元素因此
+     * 在这一次落盘里自然消失（不需要、也不应该手工改 XML）；其余键
+     * （theme/paths/keybindings/EQ/远程迁移结果/karaoke_mode/volume/…）
+     * 原样保留。v10 及更早的文件也走这一块：v11 曾"新增"的这两个键在
+     * v12 已删除，先加后删与直接删等价，故不再保留单独的 v10→v11 块。
+     * karaoke_mode 取值域不变（0/1/2），手写值原样保留；默认仍是 Off。 */
+    if (loaded && file_version < 12) {
+        log_info("menu_views",
+                 "Migrating config v%d → v12: drop karaoke_feature/karaoke_model "
+                 "(bundled model)", file_version);
         g_app_config.config_version = CONFIG_CURRENT_VERSION;
         save_config();
     }
@@ -581,6 +601,8 @@ int config_save_to_xml(const char *path, const AppConfig *cfg)
         SAVE_INT(XML_PREF_SORT_MODE,       cfg->sort_mode);
         SAVE_INT(XML_PREF_CUE_ENCODING,    cfg->cue_encoding);
         SAVE_INT(XML_PREF_KARAOKE_MODE,    cfg->karaoke_mode);
+        /* config v12：模型随包内置，不再写 karaoke_feature / karaoke_model
+         * （旧文件里的这两个元素由 v11→v12 迁移在整份重写时删除）。 */
         SAVE_INT(XML_PREF_APPEARANCE_MODE, cfg->appearance_mode);
 
         /* ── Info display (CLI `ter-music show` / D-Bus) ────────── */
@@ -899,7 +921,9 @@ int config_load_from_xml(const char *path, AppConfig *cfg)
         cfg->audio_backend            = xml_get_int(prefs, XML_PREF_AUDIO_BACKEND, AUDIO_BACKEND_AUTO);
         cfg->sort_mode                = xml_get_int(prefs, XML_PREF_SORT_MODE, SORT_DEFAULT);
         cfg->cue_encoding             = xml_get_int(prefs, XML_PREF_CUE_ENCODING, CUE_ENCODING_AUTO);
-        /* 旧配置里没有这个元素时取默认值 0（不启用） */
+        /* 旧配置里没有这个元素时取默认值 0（不启用）。
+         * config v11 的 karaoke_feature / karaoke_model 不再读取：v12 已删除
+         * 这两个键，旧文件由迁移清除元素（不报未知元素、不影响其它键）。 */
         cfg->karaoke_mode             = xml_get_int(prefs, XML_PREF_KARAOKE_MODE, KARAOKE_MODE_OFF);
         /* 外观模式（config v10）：缺省 = 自动跟随终端 */
         cfg->appearance_mode          = xml_get_int(prefs, XML_PREF_APPEARANCE_MODE,
@@ -1270,6 +1294,9 @@ static void clamp_config_values(AppConfig *cfg)
     /* ── 卡拉OK（消人声）：越界一律退回不启用 ── */
     if (cfg->karaoke_mode < KARAOKE_MODE_OFF || cfg->karaoke_mode >= KARAOKE_MODE_COUNT)
         cfg->karaoke_mode = KARAOKE_MODE_OFF;
+
+    /* config v12：模型固定为内置的 uvr-mdxnet-3-9662，没有"功能开关/模型
+     * id"可钳制；档位只做上面的取值域收敛（越界一律 Off）。 */
 
     /* ── 外观模式（config v10）：越界一律退回自动 ── */
     if (cfg->appearance_mode < APPEARANCE_MODE_AUTO ||

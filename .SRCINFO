@@ -5,6 +5,7 @@ pkgbase = cn.org.huansoft.ter-music
 	url = https://github.com/HuanSoft-Open-Source-Community/ter-music
 	arch = x86_64
 	license = GPL-3.0-only
+	license = MIT
 	makedepends = cmake
 	makedepends = make
 	makedepends = gcc
@@ -25,6 +26,8 @@ pkgbase = cn.org.huansoft.ter-music
 	optdepends = smbclient: SMB/CIFS remote music sources
 	replaces = ter-music-cn
 	source = ter-music::git+https://github.com/HuanSoft-Open-Source-Community/ter-music.git#commit=675bbb4172fc5f7b26d4488953256ee401c2f9f6
+	source = UVR_MDXNET_3_9662.onnx::https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx
 	sha256sums = SKIP
+	sha256sums = e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc
 
 pkgname = cn.org.huansoft.ter-music

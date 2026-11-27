@@ -97,11 +97,16 @@ if [ "$WITH_SOURCE" = true ] || [ "$WITH_DEBUGINFO" = true ]; then
     fi
 fi
 
+# 内置消音模型是包内数据：先下载/校验一次到 .tmp/models，后续各类型构建
+# 复用同一缓存（容器内 tm_ensure_model 优先 aria2c，宿主回退 curl/wget）。
+tm_ensure_model || exit 1
+
 mkdir -p "${REPO_ROOT}/.tmp/logs"
 LOG_FILE="${REPO_ROOT}/.tmp/logs/launch-auto-build-$(date +%Y%m%d-%H%M%S).log"
 {
     echo "ter-music auto build"
     echo "version: ${VERSION}"
+    echo "model: ${TM_MODEL_PATH}"
     echo "arch: ${ARCH}"
     echo "types: ${TYPES[*]}"
     echo "rpm-el: ${RPM_EL}"

@@ -6,6 +6,7 @@
 #include <ncursesw/ncurses.h>
 #include "player/player.h"
 #include "ui/dialog.h"
+#include "ui/file_picker.h"
 #include "ui/ui.h"
 #include "ui/menu_anim.h"
 #include "ui/appearance.h"
@@ -294,92 +295,101 @@ static void prompt_folder_input(int append_mode) {
     if (!win_controls) {
         return;
     }
-    noecho();
-    curs_set(1);
 
-    const char *folder_prompt = append_mode
-        ? i18n_get("dialog.append_folder")
-        : i18n_get("dialog.folder_path");
-    char input_path[MAX_PATH_LEN];
-    prompt_text_input(win_controls, 4, 2, folder_prompt,
-                      input_path, sizeof(input_path), 1, 0, 0);
+    /* 统一路径选择器：桌面对话框优先，纯 TTY 时回退 curses 里的手输。
+     * 初始目录优先用"默认音乐目录"，没有就用上次打开过的目录。 */
+    const char *initial_dir = NULL;
+    if (g_app_config.default_startup_path[0]) {
+        initial_dir = g_app_config.default_startup_path;
+    } else if (g_app_config.last_opened_path[0]) {
+        initial_dir = g_app_config.last_opened_path;
+    }
+
+    const char *title = i18n_get(append_mode ? "dialog.append_folder_title"
+                                             : "dialog.open_folder_title");
+    char selected_path[MAX_PATH_LEN];
+    char picker_err[256];
+    int rc = file_picker_pick_folder(title, initial_dir,
+                                     selected_path, sizeof(selected_path),
+                                     picker_err, sizeof(picker_err));
+    /* 外部对话框前后由选择器自己暂停/恢复 curses；这里只把输入状态收回，
+     * 并丢掉对话框期间排队的多余按键（与旧的模态输入一致）。 */
     flushinp();
-    
     noecho();
     curs_set(0);
-    
-    mvwprintw(win_controls, 4, 2, "                    "); 
-    wclrtoeol(win_controls);
-    ui_refresh_window(win_controls);
 
-    if (strlen(input_path) > 0) {
-        char expanded_path[MAX_PATH_LEN];
-        if (input_path[0] == '~') {
-            const char *home = getenv("HOME");
-            if (home) {
-                snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, input_path + 1);
-            } else {
-                snprintf(expanded_path, sizeof(expanded_path), "%s", input_path);
-            }
-        } else {
-            snprintf(expanded_path, sizeof(expanded_path), "%s", input_path);
+    if (rc != FILE_PICKER_OK) {
+        /* 取消：什么都不做（不写配置、不动播放列表）。
+         * 失败：把选择器给出的可读原因放到状态行；已有播放列表/配置保持不动。 */
+        if (rc == FILE_PICKER_ERROR) {
+            update_controls_status(picker_err[0] ? picker_err
+                                                 : i18n_get("dialog.path_invalid"));
+            render_playlist_content();
         }
-        
-        struct stat s;
-        if (stat(expanded_path, &s) == 0 && S_ISDIR(s.st_mode)) {
-            int had_existing_playlist = playlist_is_loaded() && playlist_count() > 0;
-            if (!append_mode) {
-                player_stop();
+        return;
+    }
+
+    char expanded_path[MAX_PATH_LEN];
+    if (file_picker_expand_tilde(selected_path, getenv("HOME"), expanded_path,
+                                 sizeof(expanded_path)) != 0) {
+        update_controls_status(i18n_get("dialog.path_invalid"));
+        return;
+    }
+
+    struct stat s;
+    if (stat(expanded_path, &s) == 0 && S_ISDIR(s.st_mode)) {
+        int had_existing_playlist = playlist_is_loaded() && playlist_count() > 0;
+        if (!append_mode) {
+            player_stop();
+        }
+        int count = append_mode ? append_playlist(expanded_path) : load_playlist(expanded_path);
+        if (count > 0) {
+            add_dir_history_entry(expanded_path);
+
+            /* 内容变了：把路径队列整表重推给核心（remote 下核心只认门面下发，
+             * 不重推则列表与核心队列脱节，播放/下一首会对不上）。 */
+            player_queue_push();
+
+            if (g_app_config.remember_last_path) {
+                snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", expanded_path);
+                player_config_persist();
             }
-            int count = append_mode ? append_playlist(expanded_path) : load_playlist(expanded_path);
-            if (count > 0) {
-                add_dir_history_entry(expanded_path);
 
-                /* 内容变了：把路径队列整表重推给核心（remote 下核心只认门面下发，
-                 * 不重推则列表与核心队列脱节，播放/下一首会对不上）。 */
-                player_queue_push();
+            if (!append_mode || !had_existing_playlist) {
+                g_selected_index = 0;
+            }
 
-                if (g_app_config.remember_last_path) {
-                    snprintf(g_app_config.last_opened_path, sizeof(g_app_config.last_opened_path), "%s", expanded_path);
-                    player_config_persist();
-                }
-
-                if (!append_mode || !had_existing_playlist) {
-                    g_selected_index = 0;
-                }
-
-                if (append_mode && had_existing_playlist) {
-                    char msg[64];
-                    snprintf(msg, sizeof(msg), "%s %d %s",
-                             i18n_get("status.appended"),
-                             count,
-                             i18n_get("status.tracks_unit"));
-                    update_controls_status(msg);
-                } else {
-                    update_controls_status(i18n_get("status.folder_loaded"));
-                }
-                render_playlist_content();
+            if (append_mode && had_existing_playlist) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "%s %d %s",
+                         i18n_get("status.appended"),
+                         count,
+                         i18n_get("status.tracks_unit"));
+                update_controls_status(msg);
             } else {
-                if (append_mode) {
-                    update_controls_status(i18n_get("dialog.no_new_audio"));
-                } else {
-                    update_controls_status(i18n_get("dialog.no_audio_found"));
-                    playlist_clear_content();
-                    /* 内容清空必须同步到核心：remote 下本地 mirror 清空并不
-                     * 等于核心队列清空，否则旧队列仍可被 CLI/下一首使用。 */
-                    player_queue_push();
-                }
-                render_playlist_content();
+                update_controls_status(i18n_get("status.folder_loaded"));
             }
+            render_playlist_content();
         } else {
-            update_controls_status(i18n_get("dialog.path_invalid"));
-            if (!append_mode) {
-                player_stop();
+            if (append_mode) {
+                update_controls_status(i18n_get("dialog.no_new_audio"));
+            } else {
+                update_controls_status(i18n_get("dialog.no_audio_found"));
                 playlist_clear_content();
+                /* 内容清空必须同步到核心：remote 下本地 mirror 清空并不
+                 * 等于核心队列清空，否则旧队列仍可被 CLI/下一首使用。 */
                 player_queue_push();
             }
             render_playlist_content();
         }
+    } else {
+        update_controls_status(i18n_get("dialog.path_invalid"));
+        if (!append_mode) {
+            player_stop();
+            playlist_clear_content();
+            player_queue_push();
+        }
+        render_playlist_content();
     }
 }
 

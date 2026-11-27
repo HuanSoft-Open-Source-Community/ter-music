@@ -1035,7 +1035,7 @@ int cli_client_mode(const char *bus, const char *argument) {
 
 /* ── karaoke（卡拉OK／消人声） ───────────────────────────────────── */
 
-/* 稳定 id 与 audio/karaoke.h 的取值域一一对应；与播放模式同一套口径：
+/* 稳定 id 与 audio/karaoke_mode.h 的取值域一一对应；与播放模式同一套口径：
  * 只认小写 id 或纯数字，不做大小写魔术。 */
 static const char *const k_karaoke_mode_ids[KARAOKE_MODE_COUNT] = {
     "off", "soft", "full"

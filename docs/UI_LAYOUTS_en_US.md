@@ -20,7 +20,7 @@ The bottom row (`LINES - 1`) is reserved for the `F1:... F9:...` hint bar.
 | --- | --- |
 | `playlist` | Song list / play queue |
 | `info` | Playback state, track metadata, audio parameters, colored half-block character cover (256/8/mono fallback) |
-| `controls` | Progress bar and transport buttons; the loop-mode, speed, volume and karaoke (vocal removal) buttons open a pop-up list |
+| `controls` | Progress bar and transport buttons; the loop-mode, speed and volume buttons open a pop-up list. The karaoke (vocal removal) button is always shown and clickable: there is no feature switch and no model picker, its pop-up offers Off / Faint vocals / No vocals, and Settings → Playback exposes the same three levels plus the bundled model's attribution |
 | `spectrum` | Audio-reactive bar spectrum |
 | `lyrics` | Current lyric lines |
 | `vinyl` | Colored half-block vinyl disc with a rotating album-cover center label and colored spectrum bars (falls back to the glyph animation when colors are unavailable; split out of the lyrics pane) |

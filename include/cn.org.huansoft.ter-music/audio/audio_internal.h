@@ -140,9 +140,31 @@ int  atempo_get_input_sample_rate(void);
 #include "audio/equalizer.h"
 void init_equalizer_from_config(void);
 
-/* ---- 卡拉OK（消人声）（定义在 karaoke.c） ---- */
-#include "audio/karaoke.h"
+/* ---- 卡拉OK（消人声）档位（定义在 audio.c；旧 DSP 已删除，仅纯模式状态） ---- */
+#include "audio/karaoke_mode.h"
+#include "audio/karaoke_cache.h"
 void init_karaoke_from_config(void);
+
+/* 当前播放源（KARAOKE_SOURCE_ORIGINAL/SOFT/FULL），由播放线程在起播时决定、
+ * g_play_mutex 保护；供切档时的"是否需要换源"判定使用。 */
+extern int g_karaoke_playback_source;
+
+/**
+ * @brief 播放中切档的"待切换"低频检查（定义在 audio.c，由 core_tick() 每轮调用）。
+ *
+ * Off→Soft/Full（或 Soft↔Full）时目标段往往还没分离出来，不能像旧实现那样
+ * 只试一次就永远停在原声。本钩子内部限频（250ms）检查当前段是否就绪：
+ *   - 就绪 → 复用"重启播放线程并在当前位置恢复"机制换源，状态行提示"已切换"；
+ *   - worker FAILED/CANCELLED → 停止等待（失败原因由 worker 状态回调给出）；
+ *   - 30s 超时 → 保持原声并给出可读提示（可再次切档重试）。
+ * 不做每轮 manifest 读取；无待切换时只做常数级状态读取。
+ */
+void karaoke_tick(void);
+
+/* 由 g_app_config + 模型表构造缓存配置；1=功能已启用且模型有效。
+ * root_buf/model_path 由调用方提供缓冲（避免共享静态缓冲的线程竞争）。 */
+int audio_karaoke_cache_config(KaraokeCacheConfig *cfg, char *root_buf,
+                               size_t root_cap, char *model_path, size_t model_cap);
 
 /* ---- Audio backend stream ops（定义在 backend_ops.c） ---- */
 int  audio_backend_prepare_stream(int sample_rate, int channels);

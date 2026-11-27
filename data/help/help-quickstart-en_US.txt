@@ -137,6 +137,16 @@ ter-music Quick Start Guide
   4                 Shuffle Repeat
   5                 Folder Sequential
 
+  Folder chooser: Open folder (O), Append folder (I), adding a language pack in
+  F7 (A) and Settings -> Default Path all use one chooser. With a graphical
+  session it runs zenity or kdialog (portal is a preference for the desktop
+  dialog; ter-music does not implement its own D-Bus FileChooser client); in a
+  pure TTY it asks for a path instead - an empty line cancels and ~/ is
+  expanded. TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty forces a backend
+  (an unknown value falls back to auto, and auto uses the typed path when there
+  is no DISPLAY/WAYLAND_DISPLAY). Cancelling, or picking something that is not
+  an existing directory, changes neither the queue nor the configuration.
+
   The main view and every sub-view take the mouse (left button and wheel). One
   event has exactly one owner — the popup that is open, or the pane the pointer
   sits in — never two:
@@ -153,8 +163,8 @@ ter-music Quick Start Guide
       button and the progress row only take the focus, like the keyboard); the
       wheel on the progress row seeks ∓5 s, on the Volume button adjusts ±5 %,
       on the Speed button steps through the speed presets (wrapping at both
-      ends); other buttons do nothing — the Karaoke one included, its level is
-      picked from the popup only.
+      ends); other buttons do nothing on the wheel; the Karaoke button's level is
+      picked from its popup only.
     · Lyrics pane: a click jumps to the line under the cursor; the wheel seeks to
       the next / previous lyric line (it does not toggle lyric seek mode).
     · Info, spectrum and vinyl panes: nothing is defined there, and the event is
@@ -238,9 +248,12 @@ ter-music Quick Start Guide
   [Mode]     Play mode (the popup lists the modes currently available)
   [Speed]    Playback speed (popup: 0.75x / 1.00x / 1.25x / 1.50x / 2.00x / 3.00x)
   [Vol]      Volume popup (0-100, 5% steps)
-  [Karaoke]  Vocal-removal popup (Off / Faint vocals / No vocals; stereo only;
-             per-bin centre removal in 200 Hz-5 kHz keeps pan-spread and
-             hard-panned transient content; level changes ramp smoothly)
+  [Karaoke]  Vocal-removal popup (Off / Faint vocals / No vocals). Always shown
+             and clickable: there is no feature switch and no model picker. The
+             bundled model runs in the background and the levels play the
+             original, a 0.4/0.6 original+accompaniment mix, or the
+             accompaniment alone. See section 20 for the bundled model and the
+             cache.
   [Progress] Current playback progress
 
 6. Play Modes (17 in total)
@@ -273,8 +286,8 @@ ter-music Quick Start Guide
   F4  Playlists (manage and create playlists)
   F5  Favorites (view and manage favorite tracks)
   F6  About (version and project info)
-  F7  Language (language manager: ENTER switches, A adds a pack, D deletes;
-      built-ins: zh_CN, en_US, zh-PQ)
+  F7  Language (language manager: ENTER switches, A adds a pack through the
+      file chooser - .tar.gz only - D deletes; built-ins: zh_CN, en_US, zh-PQ)
   F8  Help (this page; / searches, ↑/↓ scroll)
   F9  Quit the front end (stop_core_on_exit = 1 is the default, so the core
       stops too; only with 0 does playback continue in the background — see
@@ -528,12 +541,27 @@ ter-music Quick Start Guide
             when ui-layout does not exist.
   Config:   ~/.config/ter-music/config.xml, written only by the core (the XML
             root version attribute carries the config contract number,
-            currently 10; legacy "2.2" files still load and are rewritten with
+            currently 12; legacy "2.2" files still load and are rewritten with
             the number by the migration on the first upgrade run).
             appearance_mode lives under <preferences> (0 auto, 1 light, 2 dark);
             the detected light/dark variant is per front end and is never saved.
             A front end changes its own mirror and sends the difference via
             Config.Set.
+  Karaoke:  karaoke_mode (0 off, 1 soft, 2 full; default 0) is the only karaoke
+            key - the level is the switch. Contract 12 removed karaoke_feature
+            and karaoke_model; a v10/v11 config.xml is migrated on the first
+            start of the new core (rewritten as version="12", both elements
+            dropped, every other key kept; a second start is byte-identical),
+            and a patch that still contains them is rejected as unknown keys.
+            The model ships in the package at <prefix>/share/ter-music/models/
+            uvr-mdxnet-3-9662.onnx; $XDG_DATA_HOME/ter-music/models/ is only a
+            read-only fallback for models installed by earlier builds.
+            Accompaniment segments are written only to
+            /tmp/ter-music-karaoke-<uid>-<pid>/ while the player runs (mode
+            0700, removed on exit); a complete legacy whole-track pair under
+            $XDG_CACHE_HOME/ter-music/karaoke/ (~/.cache/ter-music/karaoke/),
+            if present, is read-only and takes priority, and the 2048 MB LRU
+            limit covers those whole-track caches only. See section 20.
   Content:  ~/.config/ter-music/library.db, the front-end SQLite library: track
             metadata, scan roots, play history, favorites, playlists and their
             tracks, folder history and the temporary playlist.
@@ -606,13 +634,42 @@ ter-music Quick Start Guide
     speed  [0.5-3.0]              Read or set the playback rate
     mode   [name|0-16]            Read or set the play mode
     karaoke [off|soft|full|0-2|cycle]
-                                  Read or set the vocal-removal level (cycle
-                                  steps one level; echoed immediately, applied
-                                  along a 30 ms time constant; stereo only; per-bin
-                                  centre removal in 200 Hz-5 kHz, soft leaves
-                                  it about -8 dB, full removes it — not the
+                                  Read or set the karaoke level. The level is
+                                  the switch: every level is accepted, with no
+                                  feature gate (an out-of-range value fails).
+                                  off = original, soft = 0.4x original + 0.6x
+                                  model accompaniment, full = accompaniment
+                                  only. At a level other than off the first
+                                  play of a track without a cache waits for the
+                                  first accompaniment segment (about 7-10 s, at
+                                  most 30 s; 8 s when starting at a non-zero
+                                  position) and falls back to the original on
+                                  timeout or failure. At off nothing is
+                                  separated; choosing a level while a track
+                                  plays requests separation for the current
+                                  track and switches the source automatically
+                                  at the current position once the target
+                                  segment is ready (about 9-15 s for the first
+                                  switch, about 9 s at a late position; a
+                                  brief pause is expected). A complete legacy
+                                  whole-track cache is read-only and takes
+                                  priority. An unready segment, or a seek to an
+                                  unprocessed position, waits at most 8 s and
+                                  then continues as the original. With
+                                  seamless_preload=1 the next queued track is
+                                  separated in the background once the current
+                                  one is ready. Mono tracks and tracks over 30
+                                  minutes are not separated. Soft <-> Full on
+                                  already-ready segments switches immediately
+                                  without running the model again; if
+                                  separation fails or nothing is ready within
+                                  30 s the original keeps playing with a
+                                  readable reason and switching again retries;
+                                  CUE sub-tracks keep the original without
+                                  restarting playback and without a false
+                                  "switched" message. Not the
                                   "karaoke" layout preset, not per-character
-                                  lyric highlighting)
+                                  lyric highlighting.
 
   Queue editing (acts on the core's play queue):
     queue list [--offset N] [--count N]  Paged listing (count 0 = default 200,
@@ -661,24 +718,102 @@ ter-music Quick Start Guide
 20. Tips & Tricks
 ------------------
   Press F8 for this help page (/ searches, ↑/↓ scroll three lines).
-  Karaoke (vocal removal) has three levels: Off, Faint vocals and No vocals. It
-  only attenuates what is centred in a stereo signal, frequency bin by frequency
-  bin inside 200 Hz-5 kHz; the accompaniment, the bass and the top end stay put
-  (at 100 Hz and 10 kHz the measured loss is at most 0.25 dB), as do pan-spread
-  or hard-panned transients, so a hard-panned hi-hat or snare does not release
-  the cancellation of the centred vocal. The Faint vocals level leaves the
-  centred content about 8 dB down; No vocals removes it. Mono tracks play
-  untouched. While enabled it adds the window length minus one sample of
-  algorithmic latency (383 samples at 44.1/48 kHz, about 8.7 ms at 44.1 kHz, at
-  most 10 ms at every supported rate); turning it on (or seeking while it is on)
-  repeats the first few milliseconds once while the analysis window fills, while
-  switching between Faint and No vocals does not. Turning it off fades the
-  cancellation out over about 0.35 s before the stream is bit-exact passthrough
-  again. Three ways to change the level: the [Karaoke] button popup in the
-  control bar, Settings -> Playback, or `ter-music karaoke`. Note that "karaoke"
-  names two unrelated things here as well - per-character lyric highlighting,
-  and the `karaoke` layout preset. The level persists as karaoke_mode (0/1/2)
-  in config.xml and returns on restart.
+  Karaoke (vocal removal) uses the ONNX model that every package installs:
+  there is no feature switch, no "enable karaoke" step and no model picker.
+  The [Karaoke] button is always in the control bar, and Settings -> Playback
+  shows the three levels (Off / Faint vocals / No vocals) plus the model's
+  attribution. The old built-in centre-cancellation DSP has been removed: the
+  model is the only vocal-removal path.
+  The bundled model is <prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx
+  (UVR-MDX-NET 3), 29,704,436 bytes, SHA-256
+  e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc, from
+  https://github.com/TRvlvr/model_repo/releases/download/
+  all_public_uvr_models/UVR_MDXNET_3_9662.onnx
+  with the full notice in models/NOTICE.md. The UVR README's MIT notice asks
+  for credit, and the repository has no separate LICENSE file; the required
+  credit is reproduced there and in Settings -> Playback:
+  "Vocal separation model: UVR-MDX-NET 3, from Ultimate Vocal Remover GUI (UVR)
+  by Anjok07, TRvlvr and contributors - MIT, used with credit."
+  A source build contains the model only when built with
+  -DTER_MUSIC_BUNDLED_MODEL; without it the player reports "built-in model
+  missing" and plays the original.
+  At run time the bundled file is used first; $XDG_DATA_HOME/ter-music/models/
+  (~/.local/share/ter-music/models/) is only a read-only fallback for models
+  installed by earlier builds (never copied or written). The file is verified
+  on first use (size + SHA-256, cached per process): missing -> "built-in model
+  missing", damaged -> "built-in model verification failed", and the original
+  keeps playing (the detailed reason is a technical diagnostic and can be in
+  Chinese). Restart the player after fixing the file. The ONNX Runtime library
+  (libonnxruntime, loaded with dlopen; only the CPU execution provider) is
+  still required; without it separation fails and the original keeps playing.
+  Levels: Off plays the original; Faint vocals plays 0.4x original + 0.6x model
+  accompaniment; No vocals plays the accompaniment only. Mono tracks and
+  tracks over 30 minutes are not separated and play the original; CUE
+  sub-tracks never use the session segments (original or a legacy
+  whole-track cache); a level change on a CUE sub-track keeps the original and
+  does not restart playback when no legacy cache matches, a matching legacy
+  cache still switches immediately, and neither case reports a switch.
+  At a level other than Off, accompaniment is prepared per session:
+  · At a level other than Off a track without a cache waits for the first
+    accompaniment segment (about 7-10 s, at most 30 s; 8 s when playback starts
+    at a non-zero position) while the status line shows preparation progress;
+    on timeout or failure the original starts instead.
+  · At Off nothing is separated: the level is the switch. Choosing a level
+    while a track plays requests separation for the current track and switches
+    automatically when the current segment is ready; the status line first
+    shows a waiting hint, then the switch with the wait time.
+  · Segments are written only to /tmp/ter-music-karaoke-<uid>-<pid>/ (mode
+    0700): 15-second segNNN.inst.flac (full) and segNNN.soft.flac (soft), each
+    with a segNNN.ready marker written last, plus manifest.txt. A normal exit
+    deletes the whole session directory after the worker stops; when the core
+    starts, leftovers of dead processes are removed. Nothing survives a
+    restart, so a later session separates the track again.
+  · A complete whole-track pair (inst.flac + soft.flac + meta.txt) written by
+    an earlier build under
+    $XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/ (default
+    ~/.cache/ter-music/karaoke/) is read-only, takes priority and is used
+    immediately; the 2048 MB LRU limit covers those caches only, never the
+    session segments.
+  · When the next segment is not ready, playback waits at most 8 s at the
+    segment boundary and then continues as the original for the rest of the
+    track. A seek to an unprocessed position asks the worker to prioritise the
+    target segment and waits at most 8 s; the worker backfills segments skipped
+    by a seek after the end of the track (the manifest is complete only when
+    every segment is ready).
+  · Changing the level requests separation for the current track and switches
+    the source automatically at the current position when the target segment
+    is ready: about 9-15 s for the first switch, about 9 s when enabling at a
+    late position (the worker prioritises the current segment); a brief pause
+    at the switch is expected and the position stays continuous. Soft <-> Full
+    on already-ready segments switches immediately without running the model
+    again, and the switch also completes while playback is paused (same
+    position, still paused). If separation fails or nothing is ready within
+    30 s, the original keeps playing with a readable reason and switching
+    again retries; after a fallback the core re-acquires at most 3 times per
+    level change and, when it stays on the original, the status line says so
+    instead of claiming a switch.
+  · With seamless_preload=1 the next queued track is separated in the
+    background once the current one is ready; 0 disables that prefetch.
+  Fixed 0.25 overlap; tracks longer than 30 minutes are refused. There is no
+  lyric dependency: timed LRC, plain-text lyrics or no lyrics take the same
+  path. The bundled model is part of the installation; a legacy whole-track
+  cache left by an earlier build is kept - delete ~/.cache/ter-music/karaoke/
+  to reclaim that space (the /tmp session directory is already gone after
+  exit). Limits: this is a mid/low-size model, so vocals may remain and some
+  instruments may be attenuated; separation costs CPU (it depends on the
+  machine and track length: about a minute per 3-minute track on a 6-core
+  Ryzen 5 4500U), the core peaks around 0.8 GiB of RSS, and the session
+  segments cost about 15.5 MB per minute of audio. A
+  failed separation reports its reason in the status line (that reason text is
+  a technical diagnostic and is not localized) and the original keeps playing.
+  If the runtime or the model becomes unavailable while the level is not Off,
+  separation fails and the original keeps playing. The level persists as
+  karaoke_mode (0/1/2); change it from the [Karaoke] button popup,
+  Settings -> Playback, `ter-music karaoke` or Control.SetKaraoke. There is no
+  feature gate: every level 0-2 is accepted (out-of-range values reply false)
+  and Control.GetKaraoke returns the current level. Note that
+  "karaoke" also names a layout preset and per-character lyric highlighting;
+  neither is related to this feature.
   Press h for the play-history popup; F3 is the folder-history view — they are
   not the same thing.
   Every settings entry opens its option menu with ENTER (no +/- keys needed).

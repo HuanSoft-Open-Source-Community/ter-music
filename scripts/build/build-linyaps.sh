@@ -167,8 +167,16 @@ mkdir -p "$TEMP_DIR"
 PROJECT_ROOT="${TEMP_DIR}/${APP_ID}"
 mkdir -p "$PROJECT_ROOT"
 
+# 内置消音模型：下载/校验到 .tmp/models 缓存并复用。ll-builder 只把
+# sources 里的源码目录拷进构建容器，因此模型必须放进这次 staging 的源码树
+# （.tmp/linyaps-temp 下，构建后随 staging 清理），不能引用 .tmp/models 绝对路径。
+tm_ensure_model || exit 1
+
 tm_stage_source "$PROJECT_ROOT/${PROJECT_NAME}" \
     "debian" "rpm" "linglong" "PKGBUILD" ".SRCINFO" "docs" "tools" "scripts" ".github"
+mkdir -p "${PROJECT_ROOT}/${PROJECT_NAME}/bundled-model"
+cp -f -- "$TM_MODEL_PATH" "${PROJECT_ROOT}/${PROJECT_NAME}/bundled-model/${TM_MODEL_NAME}"
+tm_log_info "bundled karaoke model staged: ${PROJECT_ROOT}/${PROJECT_NAME}/bundled-model/${TM_MODEL_NAME}"
 
 sed -e "s/@VERSION@/${VERSION}/g" -e "s/@ARCH@/${ARCH}/g" \
     "${REPO_ROOT}/linglong/linglong.yaml.in" > "${PROJECT_ROOT}/linglong.yaml"
@@ -195,6 +203,17 @@ build_rc=${PIPESTATUS[0]}
 set -e
 if [ "$build_rc" -ne 0 ]; then
     tm_log_error "ll-builder build failed (see ${build_log})"
+    exit 1
+fi
+
+# 容器内构建期自检（linglong.yaml.in 的 build 段）必须真的跑过：
+# 1) CMake 确认注入了内置模型；2) 安装后模型 + NOTICE 大小/SHA256 自检通过。
+if ! grep -q "Bundled karaoke model:" "$build_log"; then
+    tm_log_error "ll-builder log is missing CMake bundled-model injection message"
+    exit 1
+fi
+if ! grep -q "bundled karaoke model verified:" "$build_log"; then
+    tm_log_error "ll-builder log is missing post-install model/NOTICE self-check"
     exit 1
 fi
 

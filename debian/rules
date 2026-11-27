@@ -7,15 +7,35 @@ export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
 # 包版本来自 changelog（构建脚本会在临时副本里按 -v 重写），去掉 Debian 修订号。
 VERSION := $(shell dpkg-parsechangelog -SVersion | sed -E 's/-[^-]+$$//')
 
+# Linyaps 目录规范：实体文件全部装在 /opt/apps/<appid>/files 下；
+# /usr/bin、/usr/share/applications 与 /usr/share/icons/hicolor 下的
+# 符号链接由 debian/links（dh_link）生成，不再出现 /usr 实体文件。
+APP_ID := cn.org.huansoft.ter-music
+PREFIX := /opt/apps/$(APP_ID)/files
+
+# 内置消音模型（UVR-MDX-NET 3 / 9662）是随包数据文件，不进入 git。
+# scripts/build/build-deb.sh 用 tm_ensure_model 下载/校验后把模型放到源码树
+# 的 .tm-bundled-model/（staging，构建后清理），并额外用环境变量
+# TER_MUSIC_BUNDLED_MODEL 传入绝对路径。环境变量优先；未设置时回退到源码树
+# 内路径，使 --with-source 产出的源码包自包含。缺模型时直接失败，避免产出
+# 没有内置模型的坏包。
+ifeq ($(strip $(TER_MUSIC_BUNDLED_MODEL)),)
+TER_MUSIC_BUNDLED_MODEL = $(CURDIR)/.tm-bundled-model/UVR_MDXNET_3_9662.onnx
+endif
+ifeq ($(wildcard $(TER_MUSIC_BUNDLED_MODEL)),)
+$(error 内置模型文件不存在：$(TER_MUSIC_BUNDLED_MODEL)（请用 scripts/build/build-deb.sh 构建，或指定校验过的 UVR_MDXNET_3_9662.onnx 路径）)
+endif
+
 %:
 	dh $@ --buildsystem=cmake --builddirectory=build
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_INSTALL_PREFIX=$(PREFIX) \
 		-DSTATIC_LINKING=ON \
-		-DTER_MUSIC_VERSION=$(VERSION)
+		-DTER_MUSIC_VERSION=$(VERSION) \
+		-DTER_MUSIC_BUNDLED_MODEL=$(TER_MUSIC_BUNDLED_MODEL)
 
 override_dh_auto_test:
 	@:

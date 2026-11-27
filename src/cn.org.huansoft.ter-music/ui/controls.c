@@ -70,6 +70,88 @@ static const char *karaoke_level_text(int mode)
     return i18n_get(k_karaoke_level_keys[mode]);
 }
 
+/* ── 控制按钮的运行时可见性（config v12）────────────────────────────
+ *
+ * 自 config v12 起模型随包内置、没有"功能开关/模型选择"，所有控制按钮
+ * **无条件可见**：卡拉OK按钮与其他按钮一样参与布局/渲染/键盘/鼠标命中。
+ * 可见性判断仍然保留在这唯一几何来源里（controls_compute_layout() 读取；
+ * 渲染与鼠标命中都读这份布局），这样"暂时隐藏某个按钮"的机制不会散落到
+ * 三处；当前实现恒为可见（只有合法的按钮格返回 1）。 */
+static int control_button_visible(int index)
+{
+    return index >= 0 && index < CONTROL_COUNT - 1;
+}
+
+/* 从 from（含，允许等于 CONTROL_COUNT-1 以表示回绕到 0）起找下一个可见按钮；
+ * 全部不可见时返回 -1。 */
+static int control_next_visible(int from)
+{
+    const int count = CONTROL_COUNT - 1;
+    if (count <= 0) {
+        return -1;
+    }
+    for (int step = 0; step < count; step++) {
+        int idx = ((from % count) + count) % count;
+        if (control_button_visible(idx)) {
+            return idx;
+        }
+        from++;
+    }
+    return -1;
+}
+
+/* 从 from（含）起**反向**找上一个可见按钮；全不可见时返回 -1。 */
+static int control_prev_visible(int from)
+{
+    const int count = CONTROL_COUNT - 1;
+    if (count <= 0) {
+        return -1;
+    }
+    for (int step = 0; step < count; step++) {
+        int idx = ((from % count) + count) % count;
+        if (control_button_visible(idx)) {
+            return idx;
+        }
+        from--;
+    }
+    return -1;
+}
+
+/* 上一次归一后的可见焦点：只用于判断本次移动方向（隐藏槽位两侧的体感）。
+ * -1 = 尚未记录（首帧/界面重建后按"向右"处理）。 */
+static int g_last_visible_focus = -1;
+
+/* 当前焦点落在隐藏按钮上时，收下一个可见按钮：
+ *   前进（Right）→ 下一个；后退（Left）→ 上一个。
+ * ui/ui.c 的左右移动按 CONTROL_COUNT 回绕，隐藏槽位仍会被走到：
+ *   Right: cur = hint+1（hint=6 时得 7）
+ *   Left : cur = hint-1（hint=0 时回绕成 7）
+ * 两者在 cur==7 时重叠，因此用"上一格的可见下标"消歧：
+ *   hint==0 且 cur==槽尾 ⇒ 是 Left 回绕，取前一个可见（6）；
+ *   hint==槽尾-1 且 cur==槽尾 ⇒ 是 Right，取下一个可见（0）。 */
+static void controls_normalize_focus(void)
+{
+    const int slots = CONTROL_COUNT - 1;
+    int cur = g_current_control_idx;
+
+    if (!control_button_visible(cur)) {
+        int forward = 1;
+        if (g_last_visible_focus >= 0 && slots > 1) {
+            if (cur == g_last_visible_focus + 1) {
+                forward = 1;
+            } else if (cur == g_last_visible_focus - 1 ||
+                       (g_last_visible_focus == 0 && cur == slots - 1)) {
+                forward = 0;
+            }
+        }
+        int next = forward ? control_next_visible(cur + 1)
+                           : control_prev_visible(cur - 1);
+        cur = (next >= 0) ? next : 0;
+        g_current_control_idx = cur;
+    }
+    g_last_visible_focus = cur;
+}
+
 /* ── Playlist tab mode (defined in playlist_render.c) ── */
 extern int g_playlist_tab_mode;
 
@@ -152,6 +234,9 @@ void controls_compute_layout(int height, int width, ControlsLayout *out)
     int row_count = 0;
 
     for (int i = 0; i < button_count; i++) {
+        if (!control_button_visible(i)) {
+            continue;   /* 隐藏按钮不占宽度、不进换行计算、不分配行列 */
+        }
         char raw_label[256];
         char display_label[256];
         build_control_label(i, raw_label, sizeof(raw_label));
@@ -216,6 +301,9 @@ void controls_compute_layout(int height, int width, ControlsLayout *out)
 
     int row_cursor[CONTROL_COUNT + 1] = {0};
     for (int i = 0; i < button_count; i++) {
+        if (!control_button_visible(i)) {
+            continue;   /* 隐藏按钮保持 button_row = -1（不渲染也不命中） */
+        }
         int row_index = button_row_index[i];
         if (row_index >= visible_button_rows) continue;
 
@@ -507,6 +595,10 @@ int handle_popup_action(ActionId action)
 
 void activate_current_control(void)
 {
+    /* 焦点可能停在运行期隐藏的按钮上（键盘左右移动按 CONTROL_COUNT 回绕）；
+     * 先归一到可见按钮，隐藏项绝不响应激活。 */
+    controls_normalize_focus();
+
     switch (g_current_control_idx) {
         case CONTROL_IDX_PREV:
             player_prev();
@@ -590,6 +682,7 @@ void activate_current_control(void)
             }
             break;
         case CONTROL_IDX_KARAOKE:
+            /* config v12：按钮无条件存在（模型随包内置），直接开三档弹层。 */
             if (g_popup.active) {
                 popup_dismiss();
             } else {
@@ -864,6 +957,9 @@ int controls_handle_wheel_control(int control_index, int delta)
 void render_controls(void)
 {
     if (!win_controls) return;
+
+    /* 隐藏按钮不参与渲染：先把焦点从隐藏项上挪开（见 control_button_visible）。 */
+    controls_normalize_focus();
 
     int h, w;
     getmaxyx(win_controls, h, w);

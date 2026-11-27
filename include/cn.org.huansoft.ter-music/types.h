@@ -8,7 +8,7 @@
 #include <time.h>
 
 #include "audio/equalizer.h"
-#include "audio/karaoke.h"   /* KARAOKE_MODE_* 是配置键 karaoke_mode 的取值域 */
+#include "audio/karaoke_mode.h"   /* KARAOKE_MODE_* 是配置键 karaoke_mode 的取值域 */
 
 #define APP_NAME "ter-music"
 /* 版本号走滚动发行方案 <yy>.<q>.x.y（年前两位 + 季度 + 主线 + 修订），
@@ -179,7 +179,7 @@ typedef struct {
 #define AUDIO_BACKEND_ALSA      2
 #define AUDIO_BACKEND_PIPEWIRE  3
 
-#define CONFIG_CURRENT_VERSION 10  /* 与 config/schema.h 保持同步 */
+#define CONFIG_CURRENT_VERSION 12  /* 与 config/schema.h 保持同步 */
 
 /* ── 可配置键位覆盖（config v9）────────────────────────────────────
  * 只保存相对默认键位的覆盖项；action 为稳定动作 ID（见 keymap/actions.h），
@@ -344,7 +344,9 @@ typedef struct {
     int eq_band_gains[EQ_BAND_COUNT]; /* per-band gain in dB, -12..12 */
 
     /* 卡拉OK（消人声）档位：KARAOKE_MODE_*（0=不启用 1=较弱人声 2=完全消除）。
-     * 只对立体声生效，单声道直通；实现见 audio/karaoke.c。 */
+     * 自 config v12 起模型随包内置（固定 uvr-mdxnet-3-9662，见
+     * audio/karaoke_model.h），不再有"功能开关/模型选择"两个配置键：
+     * 控制栏按钮与设置页三档始终可见；off=原声，soft/full=对应伴奏缓存。 */
     int karaoke_mode;
 
     /* ── 信息显示（主页信息窗格 + CLI/D-Bus，config v5，常量见 info/info.h） ── */

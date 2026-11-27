@@ -125,6 +125,7 @@
   <string key="settings.eq_disabled">均衡器已禁用</string>
   <string key="settings.saved">设置已保存</string>
   <string key="settings.path.prompt">输入默认路径：</string>
+  <string key="settings.path.picker_title">选择默认音乐目录</string>
   <string key="settings.path.invalid">路径无效</string>
   <string key="settings.path.saved">默认路径已保存</string>
   <string key="settings.opt.latency_hint">输出时延将在下次播放生效</string>
@@ -135,6 +136,11 @@
   <string key="settings.cue.saved">CUE编码设置已保存</string>
   <string key="settings.karaoke.saved">卡拉OK设置已保存</string>
   <string key="settings.karaoke.unsupported">当前播放核心不支持卡拉OK（核心版本过旧）</string>
+  <string key="settings.karaoke.model_credit">模型署名：%s</string>
+  <string key="settings.karaoke.model_url">模型来源：%s</string>
+  <string key="settings.karaoke.model_sha256">SHA256：%s</string>
+  <string key="settings.karaoke.model_sha256_short">SHA256：%s…%s（完整值见 models/NOTICE.md）</string>
+  <string key="settings.karaoke.model_license">模型许可：%s</string>
   <string key="settings.color.prompt">输入颜色值 (0-255)：</string>
   <string key="settings.color.same_error">前景色和背景色不能相同</string>
   <string key="settings.hotkeys.volume">+ / -：调整音量</string>
@@ -324,7 +330,19 @@
   <string key="karaoke.level.off">不启用</string>
   <string key="karaoke.level.soft">人声较弱</string>
   <string key="karaoke.level.full">消除人声</string>
-  <string key="karaoke.hint">消人声：仅立体声生效，伴奏保持不变</string>
+  <string key="karaoke.hint">消人声：使用随包内置的 UVR-MDX-NET 3 模型（不启用/人声较弱/消除人声）；无需启用或安装模型。每曲分离一次，首播等首段伴奏就绪（约 7–10 秒，最多 30 秒），未就绪或模型缺失/损坏则回退原声</string>
+  <string key="karaoke.status.running">正在后台分离伴奏（分段）</string>
+  <string key="karaoke.status.ready">伴奏分段已就绪，可立即起播</string>
+  <string key="karaoke.status.failed_fmt">伴奏分离失败（%s），继续原声</string>
+  <string key="karaoke.status.cancelled">伴奏分离已取消</string>
+  <string key="karaoke.status.preparing">正在准备伴奏，请稍候…</string>
+  <string key="karaoke.status.preparing_fmt">正在准备伴奏（%d%%），请稍候…</string>
+  <string key="karaoke.status.segment_wait">伴奏段尚未就绪，请稍候…</string>
+  <string key="karaoke.status.fallback_original">伴奏未就绪，已回退原声</string>
+  <string key="karaoke.status.switch_pending">等待当前段伴奏就绪，就绪后自动切换音源…</string>
+  <string key="karaoke.status.switch_done_fmt">已切换到%s（等待 %d 秒），从当前位置继续播放</string>
+  <string key="karaoke.status.switch_timeout">等待伴奏就绪超时，继续原声（可再次切档重试）</string>
+  <string key="karaoke.status.model_unavailable_fmt">卡拉OK内置模型不可用（%s），继续原声</string>
 
   <!-- ===== Popup titles ===== -->
   <string key="popup.play_mode"> 播放模式 </string>
@@ -456,9 +474,24 @@
   <!-- ===== Dialog ===== -->
   <string key="dialog.append_folder">输入要追加的目录：</string>
   <string key="dialog.folder_path">输入目录路径：</string>
+  <string key="dialog.open_folder_title">打开音乐文件夹</string>
+  <string key="dialog.append_folder_title">追加音乐文件夹</string>
   <string key="dialog.path_invalid">路径无效</string>
   <string key="dialog.no_audio_found">未找到音频文件</string>
   <string key="dialog.no_new_audio">目录中没有新的音频文件</string>
+  <string key="file_picker.title">选择文件</string>
+  <string key="file_picker.folder_title">选择文件夹</string>
+  <string key="file_picker.filter_name">文件</string>
+  <string key="file_picker.tty_prompt_fmt">文件路径（%s；直接回车取消）：</string>
+  <string key="file_picker.tty_prompt_dir">文件路径（%s；初始目录 %s；直接回车取消）：</string>
+  <string key="file_picker.tty_folder_prompt_fmt">目录路径（%s；直接回车取消）：</string>
+  <string key="file_picker.tty_folder_prompt_dir">目录路径（%s；初始目录 %s；直接回车取消）：</string>
+  <string key="file_picker.err.no_backend">文件选择后端不可用：%s</string>
+  <string key="file_picker.err.spawn">无法启动文件选择框：%s</string>
+  <string key="file_picker.err.exit">文件选择框异常退出（代码 %d）</string>
+  <string key="file_picker.err.path_too_long">路径过长</string>
+  <string key="file_picker.err.not_dir">所选路径不是已存在的目录：%s</string>
+  <string key="file_picker.err.no_curses">文件选择框需要终端界面</string>
 
   <!-- ===== Remote ===== -->
   <string key="remote.list_failed">无法列出远程目录</string>
@@ -729,6 +762,8 @@
   <string key="lang_mgr.hint">↑/↓: 选择  ENTER: 切换  A: 添加  D: 删除  ESC: 返回</string>
   <string key="lang_mgr.actions">[ENTER]=设为当前  [A]=添加语言包  [D]=删除  [ESC]=返回</string>
   <string key="lang_mgr.add_prompt">输入语言包 .tar.gz 文件路径：</string>
+  <string key="lang_mgr.add_title">选择语言包（.tar.gz）</string>
+  <string key="lang_mgr.add_filter_name">语言包</string>
   <string key="lang_mgr.switched">语言已切换</string>
   <string key="lang_mgr.added">语言包已添加</string>
   <string key="lang_mgr.add_failed">添加失败：文件无效或格式错误</string>
@@ -998,7 +1033,7 @@
   <string key="cli.help.cmd.mode.detail">不带参数时输出当前模式（名称、编号与显示名）；带参数时按稳定名称或编号设置模式，例如 list_repeat、folder_shuffle_repeat。</string>
   <string key="cli.help.cmd.karaoke.summary">查询或设置卡拉OK（消人声）档位</string>
   <string key="cli.help.cmd.karaoke.usage">用法：{prog} karaoke [off|soft|full|0-2|cycle]</string>
-  <string key="cli.help.cmd.karaoke.detail">不带参数时输出当前档位（名称、编号与显示名）；带参数时按稳定名称或编号设置档位；cycle 在 0→1→2→0 之间循环一步。仅立体声生效（单声道曲目保持原样），档位写入 preferences.karaoke_mode 并即时作用于正在播放的曲目。</string>
+  <string key="cli.help.cmd.karaoke.detail">不带参数时输出当前档位（名称、编号与显示名）；带参数时按稳定名称或编号设置档位；cycle 在 0→1→2→0 之间循环一步。三档都基于模型：后台每曲最多分离一次；不启用播放原声，人声较弱为 40% 原声 + 60% 模型伴奏，消除人声为仅模型伴奏。每曲首次播放会等首段伴奏就绪（约 7–10 秒，最多 30 秒）后再起播；超时或分离失败则先播原声。旧版本留下的整曲缓存只读兼容且优先使用。播放到未就绪的伴奏段、或 seek 到未处理段时，最多等待 8 秒，仍不可用则从该位置起回退原声继续播放。seamless_preload=1 时当前曲目就绪后会在后台预取队列下一曲。不依赖歌词；模型随包内置（uvr-mdxnet-3-9662，MIT，见 models/NOTICE.md），无需安装或启用，模型缺失/损坏时状态行给出原因并回退原声。档位写入 preferences.karaoke_mode。单声道与超过 30 分钟的曲目不分离，继续播放原声。</string>
   <string key="cli.help.cmd.show.summary">输出当前播放信息块</string>
   <string key="cli.help.cmd.show.usage">用法：{prog} show [选项]</string>
   <string key="cli.help.cmd.show.detail">输出核心提供的当前曲目信息，包括基本信息、字符封面、进度和歌词行；所有选项仅对本次调用生效，不修改已保存的设置。</string>

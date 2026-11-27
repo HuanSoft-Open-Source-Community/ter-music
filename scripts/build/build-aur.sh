@@ -100,6 +100,13 @@ SRC_STAGE="${WORK}/build/${PACKAGE_NAME}/src"
 mkdir -p "$SRC_STAGE"
 tm_stage_source "${SRC_STAGE}/ter-music"
 
+# 内置消音模型：下载/校验到 .tmp/models 缓存并复用。PKGBUILD 的 source 数组
+# 里有同名模型（正式 makepkg 会下载并用 sha256sums 校验）；本地验收用
+# --noextract，这里把缓存文件预置到 $srcdir，省掉一次 29MiB 下载。
+tm_ensure_model || exit 1
+cp -f -- "$TM_MODEL_PATH" "${SRC_STAGE}/${TM_MODEL_NAME}"
+tm_log_info "bundled karaoke model staged: ${SRC_STAGE}/${TM_MODEL_NAME}"
+
 # 本地验收用 --noextract，makepkg 不会执行 PKGBUILD 的 prepare()；
 # 这里手工做同一条头文件改写（Arch 的 ncurses 头文件直接在 /usr/include）。
 find "${SRC_STAGE}/ter-music" \( -name '*.c' -o -name '*.h' \) \
@@ -126,15 +133,88 @@ if [ "$makepkg_rc" -ne 0 ]; then
     exit 1
 fi
 
-pkg_file="$(find "$PKG_DIR" -maxdepth 1 -name '*.pkg.tar.zst' -type f | head -n 1)"
+pkg_file="$(find "$PKG_DIR" -maxdepth 1 -name '*.pkg.tar.zst' -type f -print -quit)"
 if [ -z "$pkg_file" ]; then
     tm_log_error "makepkg produced no .pkg.tar.zst"
+    exit 1
+fi
+
+# 包内布局（Linyaps 目录规范）：实体在 /opt/apps/<appid>/files，
+# /usr 下只有符号链接；模型与 NOTICE 必须随包分发。
+pkg_listing="$(pacman -Qlp "$pkg_file" | awk '{print $2}')"
+for required in \
+    "opt/apps/${PACKAGE_NAME}/files/bin/ter-music" \
+    "opt/apps/${PACKAGE_NAME}/files/share/ter-music/models/uvr-mdxnet-3-9662.onnx" \
+    "opt/apps/${PACKAGE_NAME}/files/share/ter-music/models/NOTICE.md" \
+    "opt/apps/${PACKAGE_NAME}/files/share/ter-music/lang/zh_CN.xml" \
+    "opt/apps/${PACKAGE_NAME}/files/share/ter-music/layouts/layouts.json" \
+    "opt/apps/${PACKAGE_NAME}/files/share/applications/ter-music.desktop" \
+    "usr/bin/ter-music" \
+    "usr/share/applications/ter-music.desktop" \
+    "usr/share/icons/hicolor/32x32/apps/ter-music.png"; do
+    if ! grep -qx "$required" <<< "$pkg_listing"; then
+        tm_log_error "AUR package is missing required path: ${required}"
+        exit 1
+    fi
+done
+# pacman -Qlp 不显示链接类型，解包后用 -L 断言 /usr 下不是实体文件。
+pkg_extract="${WORK}/pkg-extract"
+mkdir -p "$pkg_extract"
+tar --zstd -xf "$pkg_file" -C "$pkg_extract"
+opt_root="${pkg_extract}/opt/apps/${PACKAGE_NAME}/files"
+model_path="${opt_root}/share/ter-music/models/uvr-mdxnet-3-9662.onnx"
+if [ "$(wc -c < "$model_path" | tr -d ' \n')" != "$TM_MODEL_SIZE" ]; then
+    tm_log_error "AUR package bundled model size mismatch"
+    exit 1
+fi
+if [ "$(tm_sha256_of "$model_path")" != "$TM_MODEL_SHA256" ]; then
+    tm_log_error "AUR package bundled model sha256 mismatch"
+    exit 1
+fi
+for link in \
+    "${pkg_extract}/usr/bin/ter-music" \
+    "${pkg_extract}/usr/share/applications/ter-music.desktop" \
+    "${pkg_extract}/usr/share/icons/hicolor/32x32/apps/ter-music.png" \
+    "${pkg_extract}/usr/share/icons/hicolor/48x48/apps/ter-music.png" \
+    "${pkg_extract}/usr/share/icons/hicolor/128x128/apps/ter-music.png" \
+    "${pkg_extract}/usr/share/icons/hicolor/scalable/apps/ter-music.svg"; do
+    if [ ! -L "$link" ]; then
+        tm_log_error "AUR package path is not a symlink: ${link#${pkg_extract}}"
+        exit 1
+    fi
+done
+if [ -e "${pkg_extract}/usr/bin/ter-music" ] && [ ! -L "${pkg_extract}/usr/bin/ter-music" ]; then
+    tm_log_error "AUR package still ships a real /usr/bin/ter-music file"
     exit 1
 fi
 
 if [ "$INSTALL_TEST" = true ]; then
     tm_log_info "install and smoke test (as root)"
     pacman -U --noconfirm "$pkg_file"
+    installed_root="/opt/apps/${PACKAGE_NAME}/files"
+    installed_model="${installed_root}/share/ter-music/models/uvr-mdxnet-3-9662.onnx"
+    if [ ! -x "${installed_root}/bin/ter-music" ]; then
+        tm_log_error "installed layout: ${installed_root}/bin/ter-music missing"
+        exit 1
+    fi
+    if [ ! -f "${installed_model}" ] || [ "$(wc -c < "$installed_model" | tr -d ' \n')" != "$TM_MODEL_SIZE" ]; then
+        tm_log_error "installed layout: bundled model missing or wrong size: ${installed_model}"
+        exit 1
+    fi
+    if [ ! -f "${installed_root}/share/ter-music/models/NOTICE.md" ]; then
+        tm_log_error "installed layout: models/NOTICE.md missing"
+        exit 1
+    fi
+    if [ ! -L /usr/bin/ter-music ] ||
+       [ "$(readlink -f /usr/bin/ter-music)" != "${installed_root}/bin/ter-music" ]; then
+        tm_log_error "/usr/bin/ter-music is not a symlink to ${installed_root}/bin/ter-music"
+        exit 1
+    fi
+    if [ ! -L /usr/share/applications/ter-music.desktop ] ||
+       [ ! -L /usr/share/icons/hicolor/128x128/apps/ter-music.png ]; then
+        tm_log_error "installed /usr/share symlinks are missing"
+        exit 1
+    fi
     if ! ter-music --help >/dev/null; then
         tm_log_error "installed package: ter-music --help failed"
         exit 1
@@ -144,6 +224,13 @@ if [ "$INSTALL_TEST" = true ]; then
         tm_log_error "installed version '${installed_version}' != v${VERSION}"
         exit 1
     fi
+    # 卸载安全性：链接与 /opt 实体都由本包拥有，卸载后应一并消失。
+    pacman -R --noconfirm "$PACKAGE_NAME"
+    if [ -e /usr/bin/ter-music ] || [ -e "${installed_root}/bin/ter-music" ]; then
+        tm_log_error "uninstall left files behind: /usr/bin/ter-music or ${installed_root}"
+        exit 1
+    fi
+    tm_log_info "install/uninstall smoke test passed (symlinks + /opt entity)"
 fi
 
 # .SRCINFO 漂移检查：用原始 PKGBUILD 生成，和仓库里的文件比较。

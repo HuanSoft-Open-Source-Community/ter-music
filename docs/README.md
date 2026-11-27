@@ -29,7 +29,7 @@ The player has two planes: a **core** that owns the audio device, transport and 
 - MP3, WAV, FLAC, OGG, M4A, AAC, WMA, APE, OPUS and WavPack, plus CUE sheets for FLAC/APE/WV (GBK, BIG5 and Shift-JIS auto-detected).
 - 17 play modes (sequential, repeat, shuffle; folder, album and artist scopes), six speeds (0.75x-3x) and gapless preload at 1.0x.
 - 10-band ISO equalizer (31 Hz-16 kHz, ±12 dB) with presets and soft clipping.
-- Karaoke vocal removal: off, soft or full per-bin centre cancellation inside 200 Hz–5 kHz; stereo only, with about 9 ms of algorithmic latency while enabled.
+- Karaoke vocal removal with the bundled ONNX model (UVR-MDX-NET 3): Off, Faint vocals or No vocals. The `[Karaoke]` button and the three levels are always available — there is no feature switch and no model picker; at a level other than Off the first play of an uncached track waits for the first accompaniment segment (see [Karaoke](#karaoke)).
 - Embedded or external LRC lyrics, with per-character highlighting when timings allow.
 
 **Content**
@@ -43,6 +43,7 @@ The player has two planes: a **core** that owns the audio device, transport and 
 - Terminal light/dark adaptation: detects the terminal background (OSC 11, deepin-terminal theme, XDG portal, COLORFGBG, TERM hint) and switches the factory colours and the seven layout presets; choose Auto, Light or Dark in Settings → Appearance.
 - Album art as colored half-blocks; a vinyl pane with a rotating cover label.
 - Keyboard and mouse operation; built-in languages `zh_CN`, `en_US` and `zh-PQ`.
+- One chooser for files and folders: a desktop dialog (`zenity`/`kdialog`, with the XDG portal as the preferred route) when a graphical session is available, otherwise a typed path in a pure TTY. It is used by Open folder, Append folder, language-pack install and the default music directory.
 
 **Integration**
 - CLI and a detached playback daemon; control the player from any terminal.
@@ -59,7 +60,7 @@ The AUR recipe is prepared as `cn.org.huansoft.ter-music` but is **not published
 
 Required: CMake 3.10+, a C99 compiler, pkg-config, ncursesw, FFmpeg libraries (avcodec, avformat, avutil, avfilter, swresample, swscale), libpng, libjpeg, libxml2, SQLite3, zlib and libcurl. libcurl is not optional: the build stops with a clear error when it is missing.
 
-Optional: PipeWire, PulseAudio and ALSA output; D-Bus (MPRIS/API). SMB sources additionally need the external `smbclient` program (Samba client) at run time; without it the build still works and SMB connections report that it is missing.
+Optional: PipeWire, PulseAudio and ALSA output; D-Bus (MPRIS/API). SMB sources additionally need the external `smbclient` program (Samba client) at run time; without it the build still works and SMB connections report that it is missing. Karaoke needs the system ONNX Runtime shared library (`libonnxruntime`, loaded with `dlopen` at run time); the vocal-separation model is bundled by the package builds (see [Build from source](#build-from-source) and [Karaoke](#karaoke)).
 
 **Fedora / RHEL**
 
@@ -111,6 +112,17 @@ sudo make install   # optional
 
 The binary is `build/ter-music` (or `./ter-music` from the build directory). Locally built packages: one DEB (Debian 10–13 / Ubuntu 20.04–26.04), four RPMs (EL7–10), one AppImage (glibc 2.28), and one Linyaps UAB + layer; DEB/RPM source and debug packages are optional. See [BUILD_GUIDE.md](BUILD_GUIDE.md).
 
+When `-DCMAKE_INSTALL_PREFIX` is not given, the default prefix is the Linyaps layout `/opt/apps/cn.org.huansoft.ter-music/files`, so `sudo make install` installs the application under `/opt` (an explicit prefix, such as `/usr`, is respected). The release packages all use that layout; the deb, rpm, AUR and AppImage packages add only symbolic links under `/usr` (Linyaps installs inside its container). See [BUILD_GUIDE.md](BUILD_GUIDE.md).
+
+The vocal-separation model is not built from source: it is a data file injected at build time. The packaging scripts download it into `.tmp/models/` (`aria2c` first, falling back to `curl`/`wget`), verify its size and SHA-256 and reject a damaged file. For a plain source build pass the downloaded file explicitly:
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release \
+  -DTER_MUSIC_BUNDLED_MODEL=/path/to/UVR_MDXNET_3_9662.onnx ..
+```
+
+CMake checks the file (29,704,436 bytes, SHA-256 `e02220e8…aadc`) and installs it as `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx` together with `models/NOTICE.md`. Without that option no model is installed: the player still starts, reports "built-in model missing" when karaoke is at a level other than Off, and plays the original audio. The model is never fetched at run time and is never written to the user's data directory.
+
 ## Quick start
 
 ```bash
@@ -120,6 +132,8 @@ ter-music -o ftp://host/music/   # open a remote folder in the TUI
 ```
 
 The TUI needs a real terminal; do not pipe its output. Press `O` to open a folder, `↑`/`↓` to select, `Enter` or `Space` to play, and `q` to quit.
+
+Open folder (`O`), Append folder (`I`), adding a language pack in `F7` and the default music directory in Settings → Default Path all use the same chooser. On a graphical session it opens `zenity` or `kdialog` (`portal` is a preference for the desktop dialog; ter-music does not implement its own D-Bus `FileChooser` client); in a pure TTY it asks for a path instead — an empty line cancels and `~/` is expanded. `TERM_MUSIC_FILE_CHOOSER=portal|zenity|kdialog|tty` forces a backend (an unknown value falls back to auto), and auto falls back to the typed path when there is no `DISPLAY`/`WAYLAND_DISPLAY`. Cancelling, or choosing a path that is not an existing directory, changes neither the queue nor the configuration.
 
 A remote URL opened this way uses only the credentials embedded in the URL. For a server that needs a password, add a connection in `F2` → Remote Devices and open the folder there instead of writing `user:password@` into the URL: the URL stays visible in the shell history and process list. `ter-music play` and `ter-music daemon start --open` reject remote URLs because the core plays local paths only.
 
@@ -163,7 +177,7 @@ Every subcommand is a D-Bus client of the running core; `play` also scans the gi
 | `volume` | Query or set volume (0-100, +N, -N) |
 | `speed` | Query or set speed (0.5-3.0) |
 | `mode` | Query or set play mode (name or 0-16) |
-| `karaoke` | Vocal-removal level (off, soft, full, 0-2, cycle) |
+| `karaoke` | Karaoke level (off, soft, full, 0-2, cycle); the level is the switch, so any level is accepted |
 | `queue` | Edit the queue (list, clear, shuffle, remove, append, insert) |
 | `config` | Read or change configuration (get, set, reload, reset) |
 | `show` | Print the info block |
@@ -216,7 +230,80 @@ Shortcuts `1`-`5` select Sequential, Single Repeat, List Repeat, Shuffle Repeat 
 
 Speed: 0.75x, 1.0x, 1.25x, 1.5x, 2x and 3x, pitch preserved (FFmpeg atempo). Equalizer: 10 bands from 31 Hz to 16 kHz, presets in Settings → Equalizer.
 
-Karaoke: off, soft or full, stereo only. It cancels centred coherent content per frequency bin inside 200 Hz–5 kHz — soft leaves it about 8 dB down, full removes it — while pan-spread accompaniment and hard-panned transients are kept, so a hard-panned hi-hat or snare does not release the cancellation of the centred vocal. Mono tracks pass through untouched. While enabled, the processed stream is delayed by the window length minus one sample — 383 samples at 44.1 kHz (about 8.7 ms), at most 10 ms at every supported rate; turning the level off fades the cancellation out over about 0.35 s before bit-exact pass-through resumes. Change it from the controls popup, Settings → Playback, `ter-music karaoke` or `Control.SetKaraoke`.
+Karaoke is model-based: Off, Faint vocals or No vocals, with the bundled model running in a background thread. There is no feature switch and no model picker; see [Karaoke](#karaoke) for the bundled model, the session segment cache and the limits.
+
+## Karaoke
+
+Karaoke vocal removal uses the ONNX model that every package installs. There is no feature switch, no "enable karaoke" step and no model picker: the `[Karaoke]` button is always in the control pane, and Settings → Playback offers the three levels (Off, Faint vocals, No vocals). The old built-in centre-cancellation DSP has been removed — the ONNX model is the only vocal-removal path.
+
+### The bundled model
+
+Every package installs the model as `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx` together with `<prefix>/share/ter-music/models/NOTICE.md` (the full MIT notice). The core uses it in place: nothing is downloaded at run time, nothing is copied into the user's data directory, and no configuration key selects it.
+
+Resolution order at run time:
+
+1. `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx` — installed with the package, used first;
+2. `$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx` (default `~/.local/share/ter-music/models/…`) — read-only compatibility with models installed by earlier builds; it is never copied or written.
+
+The file is verified on first use (size 29,704,436 bytes and whole-file SHA-256; the result is cached for the process). A missing file reports "built-in model missing"; a damaged file (wrong size or SHA-256) reports "built-in model verification failed" and does not silently fall back to the other location. In both cases the level can still be set and changed, playback continues as the original, and the status line names the reason — the detailed reason is a technical diagnostic and can be in Chinese. Restart the player after fixing the file, because the check result is cached per process.
+
+The ONNX Runtime shared library is still external: `libonnxruntime.so.1.21`, `.so.1` or `.so`, loaded with `dlopen`; only the CPU execution provider is used. Without the library separation fails and the original keeps playing; nothing switches to an older algorithm.
+
+A source build contains the model only when it is built with `-DTER_MUSIC_BUNDLED_MODEL=<file>`; without that option no model is installed and the runtime reports it as missing (see [Build from source](#build-from-source)). The release packages always include it.
+
+### Supported model
+
+Only one model is supported: **UVR-MDX-NET 3**.
+
+| | |
+| --- | --- |
+| Display name | UVR-MDX-NET 3 |
+| Installed file | `uvr-mdxnet-3-9662.onnx` (upstream file name `UVR_MDXNET_3_9662.onnx`) |
+| Official URL | <https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx> |
+| Size | 29,704,436 bytes |
+| SHA-256 | `e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc` |
+| License basis | MIT, per the Ultimate Vocal Remover GUI (UVR) project README, which asks third-party users of its models to credit UVR and its developers; the `TRvlvr/model_repo` repository itself has no separate LICENSE file |
+
+The attribution required by the model is: "Vocal separation model: UVR-MDX-NET 3, from Ultimate Vocal Remover GUI (UVR) by Anjok07, TRvlvr and contributors — MIT, used with credit." ter-music ships the model unmodified as a data file together with this GPL application and the full notice in `models/NOTICE.md`; the file itself stays under the MIT terms stated by the UVR project.
+
+### Levels and playback
+
+| Level | Playback source |
+| --- | --- |
+| Off | the original track |
+| Faint vocals (soft) | 0.4 × original mix + 0.6 × model accompaniment |
+| No vocals (full) | the model accompaniment only |
+
+Mono tracks are not separated and keep playing as the original. The level persists as `karaoke_mode` and is changed from the control-bar popup, Settings → Playback, `ter-music karaoke` or `Control.SetKaraoke`; D-Bus and CLI have no "feature off" precondition — every level in 0–2 is accepted (an out-of-range value replies `false`), and `GetKaraoke` returns the current level.
+
+### Cache and background separation
+
+Separation runs on the player core in a low-priority background thread (nice 10); it never runs on the UI or playback thread. At a level other than Off, a stereo track of 30 minutes or less started without a complete legacy cache is separated in the session; once all its segments are ready, replaying it in the same session reuses the result without running the model again. A failed separation is retried the next time the track starts. At Off nothing is separated — the level is the switch. Switching to another level while a track plays requests separation for the current track and switches the source automatically at the current position once the target segment is ready; the position stays continuous and a brief pause at the switch is expected.
+
+- **Session segment cache:** the accompaniment is written under `/tmp/ter-music-karaoke-<uid>-<pid>/<model-id>/<track-hash>/` (directories mode 0700) as 15-second segments — `segNNN.inst.flac` (full) and `segNNN.soft.flac` (soft), each with a `segNNN.ready` marker written last — plus a `manifest.txt` index. One separation produces both stems, so the two levels share a single model run.
+- **Lifetime:** the session directory exists only while the player process runs. A normal exit stops the worker and then deletes the whole directory; when a player core starts it removes leftover `/tmp/ter-music-karaoke-<uid>-*` directories whose process no longer exists (crash leftovers). Nothing there survives a restart, so a later session separates the track again unless a legacy whole-track cache is present.
+- **Key:** the track's real path, size and modification time plus the model id, model SHA-256, format version, stem version, overlap and soft mix. Moving or re-encoding a file gives it a new key.
+- **Legacy whole-track cache (read-only, takes priority):** a complete `inst.flac` + `soft.flac` + `meta.txt` pair written by an earlier build under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` (default `~/.cache/ter-music/karaoke/…`) is still read. When it matches, the track starts from it immediately and no session segments are written. The key includes the current stem version, so whole-track caches written by a build with a different stem derivation do not match; they are left untouched and the track is separated into the session cache instead. Stale `.part` leftovers under that directory are cleaned at startup, and the 2048 MB LRU setting covers those whole-track caches only — session segments are never counted against it.
+- **First play of an uncached track at a level other than Off:** playback waits for the first accompaniment segment before it starts — about 7–10 s on the test machine, with a hard cap of 30 s — and the status line shows a preparation percentage. If the segment does not arrive (timeout or a worker failure such as an unavailable model or cache), the original starts instead; mono tracks and tracks over 30 minutes skip the wait and start as the original immediately, and CUE sub-tracks skip the wait too (original or a matching legacy cache). When playback starts at a non-zero position (resume or speed change), the wait is limited to 8 s.
+- **At Off** the original plays and nothing is separated. Choosing a level while a track plays starts separation for the current track and switches automatically when the current segment is ready; the status line first shows a waiting hint and then the switch with the wait time.
+- **During playback:** when the next segment is not ready, playback waits up to 8 s at the segment boundary and then continues as the original from that point for the rest of the track (a single switch, not a mid-track hop). A seek to an unprocessed position asks the worker to prioritise that segment and waits up to 8 s; if it is still not ready, playback continues as the original from the seek position. After reaching the end of the track the worker backfills segments skipped by a seek, and the manifest reports completion only when every segment is ready.
+- **Changing the level** while a track plays requests separation for the current track and switches the playback source automatically at the current position when the target segment is ready — about 9–15 s for the first switch on the test machine, and about 9 s when the level is enabled at a late position (for example 120 s into the track) because the worker is told to prioritise the current segment. Soft ↔ Full on segments that are already ready switches immediately (under a second) without running the model again. A brief pause at the switch is expected and the position is continuous; this also works while playback is paused (the source switches at the paused position and playback stays paused). If separation fails or nothing becomes ready within 30 s, the original keeps playing and the status line reports the reason, and switching again retries. Recovery is bounded: after the segment boundary falls back to the original, the core re-acquires the accompaniment at most 3 times per level change, so an extremely slow machine can stay on the original — the status line then says it is still the original and can be retried, and never reports a switch that did not happen.
+- **Prefetch:** only with `seamless_preload=1`, once the current track's accompaniment is ready (and the level is not Off), the next queue entry is separated in the background; `seamless_preload=0` does not prefetch. CUE sub-tracks are never prefetched.
+- Separation uses a fixed overlap of 0.25 and is refused for tracks longer than 30 minutes (the status line reports the failure and the original continues). CUE sub-tracks never use the session segment source: they play the original, or a legacy whole-track cache when one matches the physical file; a level change on a CUE sub-track therefore keeps the original and does not restart playback when no legacy cache matches, while a matching legacy whole-track pair switches immediately — neither case reports a switch. The bundled model file is part of the installation; a legacy whole-track cache left by an earlier build is kept, and to reclaim that space quit the player and delete `~/.cache/ter-music/karaoke/` (or one model's subdirectory) — the `/tmp` session directory is already removed on exit.
+
+### No lyric dependency
+
+There is no lyric dependency and no lyric gate: tracks with timed LRC, plain-text lyrics, embedded lyrics or no lyrics at all take exactly the same model path.
+
+### Limits
+
+- UVR-MDX-NET 3 is a mid/low-size model, not perfect separation: vocals can remain in the accompaniment, and instruments or backing vocals that resemble them can be attenuated. `soft` deliberately keeps 40 % of the original, so it is a compromise, not a clean instrumental.
+- Separation is CPU-heavy and, when it succeeds, runs once per track per session; the cost depends on the model, the machine and the track length. On a 6-core Ryzen 5 4500U a 30-second track took about 11 seconds end to end (roughly 1.1–1.5 s per 6-second block) and a 3-minute track roughly a minute; weaker machines are slower. Driven by the worker's ONNX session, the core peaks around 0.8 GiB of RSS (795 MiB measured) and drops back after separation.
+- The session segments cost about 15.5 MB per minute of audio (measured on a 44.1 kHz stereo track; a 3-minute track is about 46 MB). That is roughly 30 % more than a legacy whole-track pair (about 12 MB/min measured), because every 15-second segment carries its own FLAC headers plus ready and manifest files. The directory is deleted when the player exits.
+- Mono tracks and tracks longer than 30 minutes are not separated and play as the original; CUE sub-tracks never use the session segment source. A separation failure never stops playback and the status line reports the reason. That reason text is a technical diagnostic from the separator and is not localized, so in the English UI it can appear in Chinese.
+- Only ONNX Runtime 1.21 with the CPU execution provider was verified; other versions may load but are not guaranteed. DNNL and other execution providers are deliberately not used.
+- If the ONNX Runtime library or the installed model becomes unavailable while the level is not Off, separation fails and the original keeps playing; nothing silently switches back to an older algorithm.
+- "karaoke" is also the name of a layout preset and of per-character lyric highlighting; neither is related to this feature.
 
 ## Remote music sources
 
@@ -298,6 +385,8 @@ help/          user quick-start text
 
 Downloaded remote tracks are cached under `$XDG_CACHE_HOME/ter-music/remote/` (default `~/.cache/ter-music/remote/`), mirroring the connection and remote path; a sibling `.lrc` is cached with the track. The cache limit and the clean action are in Settings → Remote Devices. Extracted covers are temporary files under `/tmp/ter-music-cover-*.jpg`.
 
+The karaoke model ships with the package under `<prefix>/share/ter-music/models/` (`uvr-mdxnet-3-9662.onnx` plus `NOTICE.md`) and is used in place. `$XDG_DATA_HOME/ter-music/models/uvr-mdxnet-3-9662.onnx` (default `~/.local/share/ter-music/models/…`) is only a read-only fallback for models installed by earlier builds and is never written. Legacy whole-track accompaniment caches, when present, live under `$XDG_CACHE_HOME/ter-music/karaoke/<model-id>/<track-hash>/` (default `~/.cache/ter-music/karaoke/`) and are read-only; the 2048 MB LRU setting covers them only. Session segments are written only to `/tmp/ter-music-karaoke-<uid>-<pid>/` and are deleted when the process exits; see [Karaoke](#karaoke).
+
 Common `config.xml` keys:
 
 | Key | Value |
@@ -308,11 +397,13 @@ Common `config.xml` keys:
 | `default_playback_speed` | 0.75-3.0 |
 | `default_play_mode` | 0-16 |
 | `ui_language` | `zh_CN`, `en_US`, `zh-PQ` or an installed pack id |
-| `karaoke_mode` | 0 off, 1 soft, 2 full |
+| `karaoke_mode` | 0 off, 1 soft, 2 full; default 0; the level is the switch |
 | `appearance_mode` | 0 auto (follow terminal), 1 light, 2 dark |
 | `resume_last_playback` | resume the last track and position |
 | `stop_core_on_exit` | 1 stop the core on exit, 0 keep playing |
 | `core_exit_when_no_frontend` | exit 10 s after the last front end leaves |
+
+The configuration contract is version **12**. Version 12 **removed** `preferences.karaoke_feature` and `preferences.karaoke_model`: the model is bundled and there is no feature switch or model selection. A v10 or v11 `config.xml` is migrated on the first start of the new core: the file is rewritten with `version="12"` (a v11 file also loses the two elements), and every other key (including `karaoke_mode`, theme, paths, equalizer and key bindings) is kept; a second start leaves the file byte-identical. `config get karaoke_feature` and `config set karaoke_feature …` now fail as unknown keys, and `Config.Set` rejects a patch that still contains them. A downgrade is not supported: a v11 build reads a v12 file (the version attribute parses as an integer and its own migrations stay inactive), sees the two keys as absent — karaoke off — and writes the attribute back to 11 on its next save. During an upgrade, a new front end that meets a still-running v11 core has its configuration mirror rejected as a whole; restart the core (`ter-music daemon restart`) or log in again and it heals.
 
 Only changed key bindings are written to `config.xml`:
 
@@ -339,7 +430,7 @@ When built with D-Bus, MPRIS is published as `org.mpris.MediaPlayer2.ter_music` 
 | `cn.org.huansoft.ter_music.Config` | Configuration read and write |
 | `cn.org.huansoft.ter_music.Lyrics` | Lyric lines and per-character timing |
 
-`Info.GetInfo` reports `core.api_version` (currently 7). See [API_DBUS_en_US.md](API_DBUS_en_US.md) and [API_LYRICS_en_US.md](API_LYRICS_en_US.md).
+`Info.GetInfo` reports `core.api_version` (currently 7). See [API_DBUS_en_US.md](API_DBUS_en_US.md) and [API_LYRICS_en_US.md](API_LYRICS_en_US.md). `Control.SetKaraoke` accepts every level 0–2 unconditionally (the level is the switch; an out-of-range value replies `false`), `Control.GetKaraoke` returns the current level, and `ter-music karaoke` reads or changes it — see [Karaoke](#karaoke).
 
 ## Development
 
@@ -381,6 +472,9 @@ Four gates run in CI:
 - **A remote URL pasted from the folder history fails to authenticate:** stored URLs are redacted (no password by design); open the saved connection in Remote Devices instead.
 - **CUE tracks missing:** the `.cue` file must share the audio file basename; change CUE Encoding in Settings if the text is garbled.
 - **Library is empty:** open the library browser (`M`) and scan or rescan; the database is `library.db` in the config directory.
+- **The status line says the built-in model is unavailable:** the package should have installed `<prefix>/share/ter-music/models/uvr-mdxnet-3-9662.onnx`. A source build without `-DTER_MUSIC_BUNDLED_MODEL` installs no model; a damaged file fails the size/SHA-256 check. The ONNX Runtime library (`libonnxruntime.so.1.21`, `.so.1` or `.so`) must also be installed. The status line names the reason (missing, verification failed, runtime unavailable), the level can still be set, and playback continues as the original. Fix the file or the library and restart the player — the check result is cached per process. There is no fallback to an older built-in algorithm.
+- **The first play waits, or falls back to the original:** at a level other than Off a track without a cache waits for the first accompaniment segment (about 7–10 s, at most 30 s in total; 8 s when playback starts at a non-zero position) while the status line shows preparation progress. If the wait times out or the separation fails because the model or cache is unavailable, the track plays as the original; mono tracks, tracks over 30 minutes and CUE sub-tracks skip the wait and start as the original immediately (a matching legacy whole-track cache is still used).
+- **Karaoke separation always fails:** tracks longer than 30 minutes are refused, mono tracks and CUE sub-tracks are not separated, and a missing or damaged bundled model or a missing ONNX Runtime fails; the status line names the reason. See [Karaoke](#karaoke).
 
 ## License
 
@@ -396,3 +490,4 @@ HuanSoft (浣软科技) · <yxzl666xx@outlook.com>
 
 - **@guanzi008** — Debian packaging, MPRIS, UTF-8 input, mouse and UI fixes.
 - **@Zeta** — Arch Linux packaging.
+- **Ultimate Vocal Remover GUI (UVR)** by Anjok07, TRvlvr and contributors — ter-music ships the unmodified UVR-MDX-NET 3 vocal-separation model as a data file, used with credit under the MIT terms described in [Karaoke](#karaoke).

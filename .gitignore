@@ -57,6 +57,11 @@ AppDir/
 squashfs-root/
 dist/
 
+# Bundled karaoke model (UVR-MDX-NET 3 / 9662): downloaded at build time into
+# .tmp/models and injected into packages; it must never enter the repository.
+*.onnx
+/.tmp/models/
+
 # Coverage / profiler output
 *.gcda
 *.gcno

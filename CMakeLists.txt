@@ -4,6 +4,17 @@ project(ter-music LANGUAGES C VERSION 26.4.1.0)
 # Linyaps（如意玲珑）应用 ID：与 scripts/build/build-linyaps.sh 的 APP_ID 保持一致
 set(TER_MUSIC_APP_ID "cn.org.huansoft.ter-music")
 
+# 安装前缀：默认遵循 Linyaps 目录规范
+#   /opt/apps/cn.org.huansoft.ter-music/files/{bin,share,...}
+# 只有用户/打包脚本**没有显式** -DCMAKE_INSTALL_PREFIX 时才改写默认值
+# （CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT 由 CMake 在 project() 后设置）：
+# 显式 -DCMAKE_INSTALL_PREFIX=/usr 或打包脚本传入的前缀一律尊重。
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/opt/apps/${TER_MUSIC_APP_ID}/files" CACHE PATH
+        "Install prefix (Linyaps layout default)" FORCE)
+endif()
+message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
+
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -13,6 +24,22 @@ set(TER_MUSIC_VERSION "" CACHE STRING "Package version override for APP_VERSION"
 if(NOT TER_MUSIC_VERSION)
     set(TER_MUSIC_VERSION "${PROJECT_VERSION}")
 endif()
+
+# ── 内置消音模型（随包数据文件，不提交进 git）────────────────────────
+# 9662 模型是 MIT 许可的第三方资产（见 resources/models/NOTICE.md）：
+#   - 打包脚本/构建时用 -DTER_MUSIC_BUNDLED_MODEL=<path> 注入下载好的 .onnx；
+#   - 安装为数据文件 ${CMAKE_INSTALL_PREFIX}/share/ter-music/models/
+#     uvr-mdxnet-3-9662.onnx，运行期只校验大小 + SHA256 后直接使用；
+#   - 未提供时给出明确 WARNING 且**不安装占位/坏文件**（不产生坏包），
+#     运行期卡拉OK会提示"内置模型缺失"并回退原声；
+#   - 构建期校验大小 + SHA256，注入错文件时直接 FAILED（不会静默出包）。
+set(TER_MUSIC_BUNDLED_MODEL "" CACHE FILEPATH
+    "Path to the bundled ONNX vocal-removal model (uvr-mdxnet-3-9662.onnx)")
+set(TER_MUSIC_BUNDLED_MODEL_ID "uvr-mdxnet-3-9662")
+set(TER_MUSIC_BUNDLED_MODEL_FILE "uvr-mdxnet-3-9662.onnx")
+set(TER_MUSIC_BUNDLED_MODEL_SIZE 29704436)
+set(TER_MUSIC_BUNDLED_MODEL_SHA256
+    "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc")
 
 # 静态链接选项（仅将 FFmpeg 库静态链接，其他库动态链接）
 # FFmpeg 的 soname 在不同 EL 版本间不同，是跨版本兼容的主要障碍。
@@ -131,7 +158,9 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/audio/audio.c
     src/cn.org.huansoft.ter-music/audio/atempo.c
     src/cn.org.huansoft.ter-music/audio/equalizer.c
-    src/cn.org.huansoft.ter-music/audio/karaoke.c
+    src/cn.org.huansoft.ter-music/audio/karaoke_model.c
+    src/cn.org.huansoft.ter-music/audio/karaoke_cache.c
+    src/cn.org.huansoft.ter-music/audio/karaoke_worker.c
     src/cn.org.huansoft.ter-music/audio/audio_visualizer.c
     src/cn.org.huansoft.ter-music/audio/segment_buffer.c
     src/cn.org.huansoft.ter-music/audio/playback_thread.c
@@ -166,6 +195,7 @@ add_executable(${PROJECT_NAME}
     src/cn.org.huansoft.ter-music/util/utf8.c
     src/cn.org.huansoft.ter-music/util/utf8_safe.c
     src/cn.org.huansoft.ter-music/ui/dialog.c
+    src/cn.org.huansoft.ter-music/ui/file_picker.c
     src/cn.org.huansoft.ter-music/ui/layout.c
     src/cn.org.huansoft.ter-music/ui/layout_spec.c
     src/cn.org.huansoft.ter-music/ui/layout_geometry.c
@@ -372,6 +402,50 @@ install(FILES data/help/help-quickstart-zh_CN.txt data/help/help-quickstart-en_U
 # 安装 JSON 布局预设
 install(FILES data/layouts/layouts.json
         DESTINATION share/ter-music/layouts
+)
+
+# ── 内置消音模型 + 第三方声明（config v12）──────────────────────────
+# 模型：可选注入；未提供时只告警，不安装任何占位文件。
+if(TER_MUSIC_BUNDLED_MODEL)
+    if(NOT EXISTS "${TER_MUSIC_BUNDLED_MODEL}")
+        message(FATAL_ERROR
+            "TER_MUSIC_BUNDLED_MODEL 指向的文件不存在：${TER_MUSIC_BUNDLED_MODEL}")
+    endif()
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.14")
+        file(SIZE "${TER_MUSIC_BUNDLED_MODEL}" TER_MUSIC_BUNDLED_MODEL_ACTUAL_SIZE)
+        if(NOT TER_MUSIC_BUNDLED_MODEL_ACTUAL_SIZE EQUAL TER_MUSIC_BUNDLED_MODEL_SIZE)
+            message(FATAL_ERROR
+                "内置模型大小不符：${TER_MUSIC_BUNDLED_MODEL} 是 "
+                "${TER_MUSIC_BUNDLED_MODEL_ACTUAL_SIZE} 字节，期望 "
+                "${TER_MUSIC_BUNDLED_MODEL_SIZE} 字节（模型 id "
+                "${TER_MUSIC_BUNDLED_MODEL_ID}）。请重新下载官方 "
+                "UVR_MDXNET_3_9662.onnx。")
+        endif()
+    endif()
+    file(SHA256 "${TER_MUSIC_BUNDLED_MODEL}" TER_MUSIC_BUNDLED_MODEL_ACTUAL_SHA256)
+    if(NOT TER_MUSIC_BUNDLED_MODEL_ACTUAL_SHA256 STREQUAL TER_MUSIC_BUNDLED_MODEL_SHA256)
+        message(FATAL_ERROR
+            "内置模型 SHA256 不符：${TER_MUSIC_BUNDLED_MODEL} 的 SHA256 是 "
+            "${TER_MUSIC_BUNDLED_MODEL_ACTUAL_SHA256}，期望 "
+            "${TER_MUSIC_BUNDLED_MODEL_SHA256}。拒绝把错误/损坏的模型打进包里。")
+    endif()
+    install(FILES "${TER_MUSIC_BUNDLED_MODEL}"
+            DESTINATION share/ter-music/models
+            RENAME "${TER_MUSIC_BUNDLED_MODEL_FILE}")
+    message(STATUS
+        "Bundled karaoke model: ${TER_MUSIC_BUNDLED_MODEL} -> "
+        "share/ter-music/models/${TER_MUSIC_BUNDLED_MODEL_FILE} "
+        "(size=${TER_MUSIC_BUNDLED_MODEL_SIZE}, sha256=${TER_MUSIC_BUNDLED_MODEL_SHA256})")
+else()
+    message(WARNING
+        "TER_MUSIC_BUNDLED_MODEL 未设置：安装包将**不含**内置消音模型 "
+        "(share/ter-music/models/${TER_MUSIC_BUNDLED_MODEL_FILE})。不会产生坏包"
+        "（不安装占位/坏文件），但运行期卡拉OK会提示\"内置模型缺失\"并回退原声。"
+        "打包时请用 -DTER_MUSIC_BUNDLED_MODEL=<下载好的 UVR_MDXNET_3_9662.onnx> 注入。")
+endif()
+# 第三方声明（MIT 义务）：无论是否带模型都安装，说明来源/署名/许可与运行期行为。
+install(FILES resources/models/NOTICE.md
+        DESTINATION share/ter-music/models
 )
 
 # Linyaps 集成（可选）：systemd 用户单元与 D-Bus 激活服务

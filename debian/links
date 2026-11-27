@@ -1,0 +1,15 @@
+# debian/links — /usr 只放指向 /opt 实体的符号链接（dh_link）
+#
+# 实体文件按 Linyaps 目录规范全部安装在
+#   /opt/apps/cn.org.huansoft.ter-music/files/{bin,share/...}
+# 这里为 /usr/bin、/usr/share/applications 与 /usr/share/icons/hicolor 建立
+# 兼容链接，保证 PATH、桌面启动器与图标主题照常工作；dpkg 卸载时按链接
+# 独立删除，不会动到 /opt 下的实体文件。
+#
+# 格式：<源（绝对路径）> <目标（包内路径）>；dh_link 会写成相对链接。
+/opt/apps/cn.org.huansoft.ter-music/files/bin/ter-music usr/bin/ter-music
+/opt/apps/cn.org.huansoft.ter-music/files/share/applications/ter-music.desktop usr/share/applications/ter-music.desktop
+/opt/apps/cn.org.huansoft.ter-music/files/share/icons/hicolor/32x32/apps/ter-music.png usr/share/icons/hicolor/32x32/apps/ter-music.png
+/opt/apps/cn.org.huansoft.ter-music/files/share/icons/hicolor/48x48/apps/ter-music.png usr/share/icons/hicolor/48x48/apps/ter-music.png
+/opt/apps/cn.org.huansoft.ter-music/files/share/icons/hicolor/128x128/apps/ter-music.png usr/share/icons/hicolor/128x128/apps/ter-music.png
+/opt/apps/cn.org.huansoft.ter-music/files/share/icons/hicolor/scalable/apps/ter-music.svg usr/share/icons/hicolor/scalable/apps/ter-music.svg
